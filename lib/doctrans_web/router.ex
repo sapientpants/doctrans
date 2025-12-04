@@ -17,7 +17,8 @@ defmodule DoctransWeb.Router do
   scope "/", DoctransWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live "/", BookLive.Index, :index
+    live "/books/:id", BookLive.Show, :show
   end
 
   # Other scopes may use custom stacks.

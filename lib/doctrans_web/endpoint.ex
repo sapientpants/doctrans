@@ -26,6 +26,12 @@ defmodule DoctransWeb.Endpoint do
     gzip: not code_reloading?,
     only: DoctransWeb.static_paths()
 
+  # Serve uploaded files from priv/static/uploads
+  plug Plug.Static,
+    at: "/uploads",
+    from: {:doctrans, "priv/static/uploads"},
+    gzip: false
+
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
   if code_reloading? do

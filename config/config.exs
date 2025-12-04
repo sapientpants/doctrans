@@ -11,6 +11,23 @@ config :doctrans,
   ecto_repos: [Doctrans.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Ollama configuration for AI models
+config :doctrans, :ollama,
+  base_url: "http://localhost:11434",
+  vision_model: "qwen3-vl:32b",
+  text_model: "qwen3:30b",
+  timeout: 300_000
+
+# File upload configuration
+config :doctrans, :uploads,
+  upload_dir: Path.expand("../priv/static/uploads", __DIR__),
+  max_file_size: 100_000_000
+
+# Default language settings
+config :doctrans, :defaults,
+  source_language: "de",
+  target_language: "en"
+
 # Configures the endpoint
 config :doctrans, DoctransWeb.Endpoint,
   url: [host: "localhost"],

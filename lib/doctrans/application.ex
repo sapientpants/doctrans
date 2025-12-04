@@ -12,8 +12,10 @@ defmodule Doctrans.Application do
       Doctrans.Repo,
       {DNSCluster, query: Application.get_env(:doctrans, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Doctrans.PubSub},
-      # Start a worker by calling: Doctrans.Worker.start_link(arg)
-      # {Doctrans.Worker, arg},
+      # Task supervisor for background processing
+      {Task.Supervisor, name: Doctrans.TaskSupervisor},
+      # Background worker for processing books
+      Doctrans.Processing.Worker,
       # Start to serve requests, typically the last entry
       DoctransWeb.Endpoint
     ]
