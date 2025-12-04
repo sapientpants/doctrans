@@ -45,7 +45,7 @@ defmodule DoctransWeb.BookLive.Index do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash}>
-      <div class="container mx-auto px-4 py-8">
+      <div class="w-full px-6 py-8">
         <div class="flex justify-between items-center mb-8">
           <div>
             <h1 class="text-3xl font-bold text-base-content">Doctrans</h1>
@@ -69,7 +69,7 @@ defmodule DoctransWeb.BookLive.Index do
 
         <div
           :if={@books != []}
-          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+          class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6"
         >
           <.book_card :for={book <- @books} book={book} />
         </div>

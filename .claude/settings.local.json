@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(mix deps.get:*)",
+      "Bash(mix ecto.gen.migration:*)",
+      "Bash(mix compile:*)",
+      "Bash(mix precommit:*)",
+      "Bash(mix deps.unlock:*)",
+      "Bash(mix format:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
