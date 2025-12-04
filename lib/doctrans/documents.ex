@@ -5,6 +5,7 @@ defmodule Doctrans.Documents do
   Provides CRUD operations for documents and pages, including file cleanup
   when documents are deleted.
   """
+  require Logger
 
   import Ecto.Query
   alias Doctrans.Repo
@@ -301,6 +302,8 @@ defmodule Doctrans.Documents do
   Broadcasts a document update event.
   """
   def broadcast_document_update(%Document{} = document) do
+    Logger.debug("Broadcasting document_updated for #{document.id} to documents topic")
+
     # Broadcast to specific document topic (for document viewer)
     Phoenix.PubSub.broadcast(
       Doctrans.PubSub,
@@ -316,6 +319,10 @@ defmodule Doctrans.Documents do
   Broadcasts a page update event.
   """
   def broadcast_page_update(%Page{} = page) do
+    Logger.debug(
+      "Broadcasting page_updated for page #{page.page_number} of document #{page.document_id}"
+    )
+
     # Broadcast to specific document topic (for document viewer)
     Phoenix.PubSub.broadcast(
       Doctrans.PubSub,

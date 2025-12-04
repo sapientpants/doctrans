@@ -6,6 +6,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   uploading new PDFs for translation.
   """
   use DoctransWeb, :live_view
+  require Logger
 
   alias Doctrans.Documents
   alias Doctrans.Processing.Worker
@@ -14,6 +15,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   def mount(_params, _session, socket) do
     if connected?(socket) do
       # Subscribe to all document updates
+      Logger.debug("Dashboard subscribing to documents topic")
       Phoenix.PubSub.subscribe(Doctrans.PubSub, "documents")
     end
 
@@ -471,13 +473,18 @@ defmodule DoctransWeb.DocumentLive.Index do
   # PubSub Handlers
 
   @impl true
-  def handle_info({:document_updated, _document}, socket) do
+  def handle_info({:document_updated, document}, socket) do
+    Logger.debug("Dashboard received document_updated for #{document.id}")
     # Refresh the document list to get updated statuses
     {:noreply, assign(socket, :documents, Documents.list_documents())}
   end
 
   @impl true
-  def handle_info({:page_updated, _page}, socket) do
+  def handle_info({:page_updated, page}, socket) do
+    Logger.debug(
+      "Dashboard received page_updated for page #{page.page_number} of document #{page.document_id}"
+    )
+
     # Refresh to update progress
     {:noreply, assign(socket, :documents, Documents.list_documents())}
   end

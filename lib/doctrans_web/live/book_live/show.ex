@@ -55,9 +55,7 @@ defmodule DoctransWeb.DocumentLive.Show do
                   {status_text(@document.status)}
                 </span>
                 <span :if={@document.total_pages}>
-                  {language_name(@document.source_language)} to {language_name(
-                    @document.target_language
-                  )}
+                  {language_name(@document.target_language)}
                 </span>
               </div>
             </div>

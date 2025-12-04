@@ -31,8 +31,13 @@ defmodule Doctrans.Processing.Ollama do
 
         prompt = """
         Extract all text from this image as Markdown.
-        Preserve the original formatting including headings, lists, tables, and structure.
-        Only output the markdown content, no explanations or commentary.
+
+        CRITICAL INSTRUCTIONS:
+        - Output ONLY the extracted text in Markdown format, nothing else
+        - Do NOT include any introduction like "Here is the extracted text"
+        - Do NOT include any explanation or commentary
+        - Preserve the original formatting including headings, lists, tables, and structure
+        - Extract ALL visible text from the image
         """
 
         body = %{
@@ -68,10 +73,17 @@ defmodule Doctrans.Processing.Ollama do
     Logger.info("Translating from #{source_name} to #{target_name} using #{model}")
 
     prompt = """
-    Translate the following #{source_name} text to #{target_name}.
-    Preserve all Markdown formatting exactly as it appears.
-    Only output the translated text, no explanations or commentary.
+    Translate the following text to #{target_name}.
 
+    CRITICAL INSTRUCTIONS:
+    - Output ONLY the translated text, nothing else
+    - Do NOT include any introduction like "Here is the translation"
+    - Do NOT include any explanation or commentary
+    - Do NOT include the original text
+    - Preserve all Markdown formatting exactly
+    - Translate EVERY word - do not leave any text in the original language
+
+    TEXT TO TRANSLATE:
     #{markdown}
     """
 
