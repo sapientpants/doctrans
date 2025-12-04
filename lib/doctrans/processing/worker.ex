@@ -343,11 +343,7 @@ defmodule Doctrans.Processing.Worker do
     # Get document for language info
     document = Documents.get_document!(page.document_id)
 
-    case Ollama.translate(
-           page.original_markdown,
-           document.source_language,
-           document.target_language
-         ) do
+    case Ollama.translate(page.original_markdown, document.target_language) do
       {:ok, translated} ->
         {:ok, page} =
           Documents.update_page_translation(page, %{

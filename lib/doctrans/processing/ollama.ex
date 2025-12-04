@@ -55,22 +55,23 @@ defmodule Doctrans.Processing.Ollama do
   end
 
   @doc """
-  Translates markdown text from one language to another.
+  Translates markdown text to the target language.
+
+  The source language is automatically detected by the model.
 
   ## Options
 
   - `:model` - Override the default text model
   - `:timeout` - Override the default timeout
   """
-  def translate(markdown, source_language, target_language, opts \\ []) do
+  def translate(markdown, target_language, opts \\ []) do
     config = ollama_config()
     model = Keyword.get(opts, :model, config[:text_model])
     timeout = Keyword.get(opts, :timeout, config[:timeout])
 
-    source_name = language_name(source_language)
     target_name = language_name(target_language)
 
-    Logger.info("Translating from #{source_name} to #{target_name} using #{model}")
+    Logger.info("Translating to #{target_name} using #{model}")
 
     prompt = """
     Translate the following text to #{target_name}.

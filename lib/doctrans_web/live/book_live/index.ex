@@ -32,7 +32,6 @@ defmodule DoctransWeb.DocumentLive.Index do
       socket
       |> assign(:documents, documents)
       |> assign(:show_upload_modal, false)
-      |> assign(:source_language, defaults[:source_language] || "de")
       |> assign(:target_language, defaults[:target_language] || "en")
       |> assign(:document_title, "")
       |> allow_upload(:pdf,
@@ -235,32 +234,17 @@ defmodule DoctransWeb.DocumentLive.Index do
             />
           </div>
 
-          <div class="grid grid-cols-2 gap-4 mb-6">
-            <div class="form-control">
-              <label class="label">
-                <span class="label-text">Source Language</span>
-              </label>
-              <select
-                name="source_language"
-                class="select select-bordered w-full"
-                id="source-lang-select"
-              >
-                <.language_options selected={@source_language} />
-              </select>
-            </div>
-
-            <div class="form-control">
-              <label class="label">
-                <span class="label-text">Target Language</span>
-              </label>
-              <select
-                name="target_language"
-                class="select select-bordered w-full"
-                id="target-lang-select"
-              >
-                <.language_options selected={@target_language} />
-              </select>
-            </div>
+          <div class="form-control mb-6">
+            <label class="label">
+              <span class="label-text">Target Language</span>
+            </label>
+            <select
+              name="target_language"
+              class="select select-bordered w-full"
+              id="target-lang-select"
+            >
+              <.language_options selected={@target_language} />
+            </select>
           </div>
 
           <div class="modal-action">
@@ -350,7 +334,6 @@ defmodule DoctransWeb.DocumentLive.Index do
   @impl true
   def handle_event("validate_upload", params, socket) do
     title = params["title"] || ""
-    source_language = params["source_language"] || socket.assigns.source_language
     target_language = params["target_language"] || socket.assigns.target_language
 
     # Auto-fill title from filename if empty
@@ -372,7 +355,6 @@ defmodule DoctransWeb.DocumentLive.Index do
     socket =
       socket
       |> assign(:document_title, title)
-      |> assign(:source_language, source_language)
       |> assign(:target_language, target_language)
 
     {:noreply, socket}
@@ -386,7 +368,6 @@ defmodule DoctransWeb.DocumentLive.Index do
   @impl true
   def handle_event("upload_document", params, socket) do
     title = params["title"] || socket.assigns.document_title
-    source_language = params["source_language"] || socket.assigns.source_language
     target_language = params["target_language"] || socket.assigns.target_language
 
     # Consume the uploaded file
@@ -421,7 +402,6 @@ defmodule DoctransWeb.DocumentLive.Index do
                id: document_id,
                title: title,
                original_filename: original_filename,
-               source_language: source_language,
                target_language: target_language,
                status: "uploading"
              }) do

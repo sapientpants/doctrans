@@ -20,7 +20,6 @@ defmodule Doctrans.Documents.Document do
     field :original_filename, :string
     field :total_pages, :integer
     field :status, :string, default: "uploading"
-    field :source_language, :string
     field :target_language, :string
     field :error_message, :string
 
@@ -37,11 +36,10 @@ defmodule Doctrans.Documents.Document do
       :original_filename,
       :total_pages,
       :status,
-      :source_language,
       :target_language,
       :error_message
     ])
-    |> validate_required([:title, :original_filename, :source_language, :target_language])
+    |> validate_required([:title, :original_filename, :target_language])
     |> validate_inclusion(:status, @statuses)
   end
 
