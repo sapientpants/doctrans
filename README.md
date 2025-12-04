@@ -14,47 +14,62 @@ A Phoenix LiveView application for translating PDF documents using local AI mode
 
 ### System Dependencies
 
-- **Erlang** 27.0 or later
-- **Elixir** 1.18 or later
-- **PostgreSQL** 14 or later
-- **poppler-utils** - For PDF page extraction
+1. **Erlang** 27.0 or later
+2. **Elixir** 1.18 or later
+3. **Node.js** 18 or later (for asset compilation)
+4. **PostgreSQL** 14 or later
 
-  ```bash
-  # macOS
-  brew install poppler
+5. **poppler-utils** - Required for PDF page extraction (`pdftoppm` command)
 
-  # Ubuntu/Debian
-  sudo apt-get install poppler-utils
+   ```bash
+   # macOS
+   brew install poppler
 
-  # Fedora
-  sudo dnf install poppler-utils
-  ```
+   # Ubuntu/Debian
+   sudo apt-get install poppler-utils
 
-- **Ollama** - Local AI model server
+   # Fedora
+   sudo dnf install poppler-utils
+   ```
 
-  ```bash
-  # macOS
-  brew install ollama
+   Verify installation:
+   ```bash
+   pdftoppm -v
+   ```
 
-  # Or download from https://ollama.ai
-  ```
+6. **Ollama** - Local AI model server for running LLMs
+
+   ```bash
+   # macOS
+   brew install ollama
+
+   # Linux
+   curl -fsSL https://ollama.com/install.sh | sh
+
+   # Or download from https://ollama.ai
+   ```
 
 ### Ollama Models
 
 Pull the required models before starting:
 
 ```bash
-# Vision model for OCR/text extraction
+# Vision model for OCR/text extraction from page images
 ollama pull qwen3-vl:8b
 
 # Text model for translation
 ollama pull ministral-3:14b
 ```
 
-Make sure Ollama is running:
+**Important:** Make sure Ollama is running before starting Doctrans:
 
 ```bash
 ollama serve
+```
+
+You can verify the models are available:
+```bash
+ollama list
 ```
 
 ## Getting Started
@@ -104,11 +119,10 @@ config :doctrans, :uploads,
   max_file_size: 100_000_000  # 100MB
 ```
 
-### Default Languages
+### Default Language
 
 ```elixir
 config :doctrans, :defaults,
-  source_language: "de",  # German
   target_language: "en"   # English
 ```
 
@@ -117,7 +131,7 @@ config :doctrans, :defaults,
 1. Click **Upload Document** on the dashboard
 2. Drag and drop a PDF or click to browse
 3. Enter a title (auto-filled from filename)
-4. Select source and target languages
+4. Select target language (source language is auto-detected)
 5. Click **Start Translation**
 
 The document will appear on the dashboard with a progress indicator. Click on it to view completed pages in the split-screen viewer while processing continues in the background.
