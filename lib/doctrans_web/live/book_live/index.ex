@@ -85,7 +85,6 @@ defmodule DoctransWeb.DocumentLive.Index do
       <.upload_modal
         :if={@show_upload_modal}
         uploads={@uploads}
-        source_language={@source_language}
         target_language={@target_language}
         document_title={@document_title}
       />
