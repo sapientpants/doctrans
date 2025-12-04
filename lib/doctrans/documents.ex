@@ -284,6 +284,13 @@ defmodule Doctrans.Documents do
   # ============================================================================
 
   @doc """
+  Subscribes to updates for all books (for dashboard).
+  """
+  def subscribe_books do
+    Phoenix.PubSub.subscribe(Doctrans.PubSub, "books")
+  end
+
+  @doc """
   Subscribes to updates for a specific book.
   """
   def subscribe_book(book_id) do
@@ -294,17 +301,24 @@ defmodule Doctrans.Documents do
   Broadcasts a book update event.
   """
   def broadcast_book_update(%Book{} = book) do
+    # Broadcast to specific book topic (for book viewer)
     Phoenix.PubSub.broadcast(Doctrans.PubSub, "book:#{book.id}", {:book_updated, book})
+    # Also broadcast to general books topic (for dashboard)
+    Phoenix.PubSub.broadcast(Doctrans.PubSub, "books", {:book_updated, book})
   end
 
   @doc """
   Broadcasts a page update event.
   """
   def broadcast_page_update(%Page{} = page) do
+    # Broadcast to specific book topic (for book viewer)
     Phoenix.PubSub.broadcast(
       Doctrans.PubSub,
       "book:#{page.book_id}",
       {:page_updated, page}
     )
+
+    # Also broadcast to general books topic (for dashboard progress)
+    Phoenix.PubSub.broadcast(Doctrans.PubSub, "books", {:page_updated, page})
   end
 end
