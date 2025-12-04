@@ -14,8 +14,8 @@ config :doctrans,
 # Ollama configuration for AI models
 config :doctrans, :ollama,
   base_url: "http://localhost:11434",
-  vision_model: "qwen3-vl:32b",
-  text_model: "qwen3:30b",
+  vision_model: "qwen3-vl:8b",
+  text_model: "ministral-3:14b",
   timeout: 300_000
 
 # File upload configuration
