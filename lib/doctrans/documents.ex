@@ -85,6 +85,7 @@ defmodule Doctrans.Documents do
     document_dir = document_upload_dir(document.id)
 
     if File.exists?(document_dir) do
+      Logger.info("Deleting document files at #{document_dir}")
       File.rm_rf!(document_dir)
     end
 
