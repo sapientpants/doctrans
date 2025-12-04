@@ -13,14 +13,20 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket) do
-      # Subscribe to all document updates
-      Logger.debug("Dashboard subscribing to documents topic")
-      Phoenix.PubSub.subscribe(Doctrans.PubSub, "documents")
-    end
-
     documents = Documents.list_documents()
     defaults = Application.get_env(:doctrans, :defaults, [])
+
+    if connected?(socket) do
+      # Subscribe to the general documents topic
+      Logger.info("Dashboard subscribing to documents topic")
+      Phoenix.PubSub.subscribe(Doctrans.PubSub, "documents")
+
+      # Also subscribe to each individual document's topic for progress updates
+      for doc <- documents do
+        Logger.info("Dashboard subscribing to document:#{doc.id}")
+        Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{doc.id}")
+      end
+    end
 
     socket =
       socket
@@ -420,6 +426,10 @@ defmodule DoctransWeb.DocumentLive.Index do
                status: "uploading"
              }) do
           {:ok, document} ->
+            # Subscribe to updates for this new document
+            Logger.info("Subscribing to new document:#{document.id}")
+            Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document.id}")
+
             # Start background processing
             Worker.process_document(document.id, pdf_path)
 
@@ -474,18 +484,24 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def handle_info({:document_updated, document}, socket) do
-    Logger.debug("Dashboard received document_updated for #{document.id}")
+    Logger.info("Dashboard received document_updated for #{document.id}")
     # Refresh the document list to get updated statuses
     {:noreply, assign(socket, :documents, Documents.list_documents())}
   end
 
   @impl true
   def handle_info({:page_updated, page}, socket) do
-    Logger.debug(
+    Logger.info(
       "Dashboard received page_updated for page #{page.page_number} of document #{page.document_id}"
     )
 
     # Refresh to update progress
     {:noreply, assign(socket, :documents, Documents.list_documents())}
+  end
+
+  @impl true
+  def handle_info(msg, socket) do
+    Logger.warning("Dashboard received unknown message: #{inspect(msg)}")
+    {:noreply, socket}
   end
 end

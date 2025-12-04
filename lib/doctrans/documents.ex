@@ -319,18 +319,23 @@ defmodule Doctrans.Documents do
   Broadcasts a page update event.
   """
   def broadcast_page_update(%Page{} = page) do
-    Logger.debug(
+    Logger.info(
       "Broadcasting page_updated for page #{page.page_number} of document #{page.document_id}"
     )
 
     # Broadcast to specific document topic (for document viewer)
-    Phoenix.PubSub.broadcast(
-      Doctrans.PubSub,
-      "document:#{page.document_id}",
-      {:page_updated, page}
-    )
+    result1 =
+      Phoenix.PubSub.broadcast(
+        Doctrans.PubSub,
+        "document:#{page.document_id}",
+        {:page_updated, page}
+      )
 
     # Also broadcast to general documents topic (for dashboard progress)
-    Phoenix.PubSub.broadcast(Doctrans.PubSub, "documents", {:page_updated, page})
+    result2 = Phoenix.PubSub.broadcast(Doctrans.PubSub, "documents", {:page_updated, page})
+
+    Logger.info(
+      "Broadcast results: document topic=#{inspect(result1)}, documents topic=#{inspect(result2)}"
+    )
   end
 end
