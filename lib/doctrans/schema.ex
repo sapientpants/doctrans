@@ -7,10 +7,10 @@ defmodule Doctrans.Schema do
 
   ## Usage
 
-      defmodule Doctrans.Documents.Book do
+      defmodule Doctrans.Documents.Document do
         use Doctrans.Schema
 
-        schema "books" do
+        schema "documents" do
           field :title, :string
           timestamps()
         end

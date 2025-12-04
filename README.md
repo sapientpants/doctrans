@@ -1,12 +1,12 @@
 # Doctrans
 
-A Phoenix LiveView application for translating PDF books using local AI models via Ollama. Upload a PDF, and Doctrans will extract each page as an image, use a vision model to extract text as Markdown, and then translate it to your target language.
+A Phoenix LiveView application for translating PDF documents using local AI models via Ollama. Upload a PDF, and Doctrans will extract each page as an image, use a vision model to extract text as Markdown, and then translate it to your target language.
 
 ## Features
 
 - PDF upload with automatic page extraction
 - Background processing pipeline (image extraction → OCR → translation)
-- Split-screen book viewer (original page image | translated markdown)
+- Split-screen document viewer (original page image | translated markdown)
 - Real-time progress updates via WebSocket
 - Progressive loading - view completed pages while processing continues
 
@@ -114,13 +114,13 @@ config :doctrans, :defaults,
 
 ## Usage
 
-1. Click **Upload Book** on the dashboard
+1. Click **Upload Document** on the dashboard
 2. Drag and drop a PDF or click to browse
 3. Enter a title (auto-filled from filename)
 4. Select source and target languages
 5. Click **Start Translation**
 
-The book will appear on the dashboard with a progress indicator. Click on it to view completed pages in the split-screen viewer while processing continues in the background.
+The document will appear on the dashboard with a progress indicator. Click on it to view completed pages in the split-screen viewer while processing continues in the background.
 
 ## Development
 

@@ -1,8 +1,8 @@
-defmodule Doctrans.Repo.Migrations.CreateBooks do
+defmodule Doctrans.Repo.Migrations.CreateDocuments do
   use Ecto.Migration
 
   def change do
-    create table(:books, primary_key: false) do
+    create table(:documents, primary_key: false) do
       add :id, :uuid, primary_key: true
       add :title, :string, null: false
       add :original_filename, :string, null: false
@@ -15,7 +15,7 @@ defmodule Doctrans.Repo.Migrations.CreateBooks do
       timestamps()
     end
 
-    create index(:books, [:status])
-    create index(:books, [:inserted_at])
+    create index(:documents, [:status])
+    create index(:documents, [:inserted_at])
   end
 end

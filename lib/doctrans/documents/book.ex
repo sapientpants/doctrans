@@ -1,6 +1,6 @@
-defmodule Doctrans.Documents.Book do
+defmodule Doctrans.Documents.Document do
   @moduledoc """
-  Schema for a book (uploaded PDF) being translated.
+  Schema for a document (uploaded PDF) being translated.
 
   ## Statuses
 
@@ -15,7 +15,7 @@ defmodule Doctrans.Documents.Book do
 
   @statuses ~w(uploading extracting processing completed error)
 
-  schema "books" do
+  schema "documents" do
     field :title, :string
     field :original_filename, :string
     field :total_pages, :integer
@@ -30,8 +30,8 @@ defmodule Doctrans.Documents.Book do
   end
 
   @doc false
-  def changeset(book, attrs) do
-    book
+  def changeset(document, attrs) do
+    document
     |> cast(attrs, [
       :title,
       :original_filename,
@@ -46,10 +46,10 @@ defmodule Doctrans.Documents.Book do
   end
 
   @doc """
-  Changeset for updating book status.
+  Changeset for updating document status.
   """
-  def status_changeset(book, status, error_message \\ nil) do
-    book
+  def status_changeset(document, status, error_message \\ nil) do
+    document
     |> cast(%{status: status, error_message: error_message}, [:status, :error_message])
     |> validate_inclusion(:status, @statuses)
   end

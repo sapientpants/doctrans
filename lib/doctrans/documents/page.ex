@@ -1,6 +1,6 @@
 defmodule Doctrans.Documents.Page do
   @moduledoc """
-  Schema for a single page within a book.
+  Schema for a single page within a document.
 
   Each page goes through two processing stages:
   1. Extraction - Using Qwen3-VL to extract markdown from the page image
@@ -27,7 +27,7 @@ defmodule Doctrans.Documents.Page do
     field :extraction_status, :string, default: "pending"
     field :translation_status, :string, default: "pending"
 
-    belongs_to :book, Doctrans.Documents.Book
+    belongs_to :document, Doctrans.Documents.Document
 
     timestamps()
   end

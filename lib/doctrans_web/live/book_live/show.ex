@@ -1,6 +1,6 @@
-defmodule DoctransWeb.BookLive.Show do
+defmodule DoctransWeb.DocumentLive.Show do
   @moduledoc """
-  Book Viewer LiveView with split-screen layout.
+  Document Viewer LiveView with split-screen layout.
 
   Shows the original page image on the left and the translated
   markdown on the right. Supports progressive loading while
@@ -12,18 +12,18 @@ defmodule DoctransWeb.BookLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    book = Documents.get_book_with_pages!(id)
+    document = Documents.get_document_with_pages!(id)
 
     if connected?(socket) do
-      Documents.subscribe_book(book.id)
+      Documents.subscribe_document(document.id)
     end
 
     current_page_number = 1
-    current_page = Documents.get_page_by_number(book.id, current_page_number)
+    current_page = Documents.get_page_by_number(document.id, current_page_number)
 
     socket =
       socket
-      |> assign(:book, book)
+      |> assign(:document, document)
       |> assign(:current_page_number, current_page_number)
       |> assign(:current_page, current_page)
       |> assign(:show_original, false)
@@ -49,13 +49,15 @@ defmodule DoctransWeb.BookLive.Show do
               <.icon name="hero-arrow-left" class="w-5 h-5" /> Back
             </.link>
             <div>
-              <h1 class="font-semibold text-lg">{@book.title}</h1>
+              <h1 class="font-semibold text-lg">{@document.title}</h1>
               <div class="flex items-center gap-2 text-sm text-base-content/70">
-                <span class={"badge badge-sm #{status_color(@book.status)}"}>
-                  {status_text(@book.status)}
+                <span class={"badge badge-sm #{status_color(@document.status)}"}>
+                  {status_text(@document.status)}
                 </span>
-                <span :if={@book.total_pages}>
-                  {language_name(@book.source_language)} to {language_name(@book.target_language)}
+                <span :if={@document.total_pages}>
+                  {language_name(@document.source_language)} to {language_name(
+                    @document.target_language
+                  )}
                 </span>
               </div>
             </div>
@@ -64,8 +66,8 @@ defmodule DoctransWeb.BookLive.Show do
           <div class="flex items-center gap-2">
             <.page_selector
               current_page={@current_page_number}
-              total_pages={@book.total_pages || 0}
-              book={@book}
+              total_pages={@document.total_pages || 0}
+              document={@document}
             />
           </div>
         </header>
@@ -135,14 +137,14 @@ defmodule DoctransWeb.BookLive.Show do
           </button>
 
           <span class="text-sm text-base-content/70">
-            Page {@current_page_number} of {@book.total_pages || "?"}
+            Page {@current_page_number} of {@document.total_pages || "?"}
           </span>
 
           <button
             type="button"
             phx-click="next_page"
             class="btn btn-ghost"
-            disabled={@current_page_number >= (@book.total_pages || 0)}
+            disabled={@current_page_number >= (@document.total_pages || 0)}
           >
             Next <.icon name="hero-chevron-right" class="w-5 h-5" />
           </button>
@@ -385,7 +387,7 @@ defmodule DoctransWeb.BookLive.Show do
 
   @impl true
   def handle_event("next_page", _params, socket) do
-    max_page = socket.assigns.book.total_pages || 1
+    max_page = socket.assigns.document.total_pages || 1
     new_page_number = min(max_page, socket.assigns.current_page_number + 1)
     {:noreply, goto_page(socket, new_page_number)}
   end
@@ -416,8 +418,8 @@ defmodule DoctransWeb.BookLive.Show do
   end
 
   defp goto_page(socket, page_number) do
-    book = socket.assigns.book
-    page = Documents.get_page_by_number(book.id, page_number)
+    document = socket.assigns.document
+    page = Documents.get_page_by_number(document.id, page_number)
 
     socket
     |> assign(:current_page_number, page_number)
@@ -427,8 +429,8 @@ defmodule DoctransWeb.BookLive.Show do
   # PubSub Handlers
 
   @impl true
-  def handle_info({:book_updated, book}, socket) do
-    {:noreply, assign(socket, :book, book)}
+  def handle_info({:document_updated, document}, socket) do
+    {:noreply, assign(socket, :document, document)}
   end
 
   @impl true
@@ -441,8 +443,8 @@ defmodule DoctransWeb.BookLive.Show do
         socket
       end
 
-    # Also refresh the book to update progress
-    book = Documents.get_book_with_pages!(socket.assigns.book.id)
-    {:noreply, assign(socket, :book, book)}
+    # Also refresh the document to update progress
+    document = Documents.get_document_with_pages!(socket.assigns.document.id)
+    {:noreply, assign(socket, :document, document)}
   end
 end

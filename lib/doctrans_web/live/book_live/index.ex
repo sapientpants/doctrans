@@ -1,8 +1,8 @@
-defmodule DoctransWeb.BookLive.Index do
+defmodule DoctransWeb.DocumentLive.Index do
   @moduledoc """
-  Dashboard LiveView for managing books.
+  Dashboard LiveView for managing documents.
 
-  Shows all books with their processing status and allows
+  Shows all documents with their processing status and allows
   uploading new PDFs for translation.
   """
   use DoctransWeb, :live_view
@@ -13,20 +13,20 @@ defmodule DoctransWeb.BookLive.Index do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
-      # Subscribe to all book updates
-      Phoenix.PubSub.subscribe(Doctrans.PubSub, "books")
+      # Subscribe to all document updates
+      Phoenix.PubSub.subscribe(Doctrans.PubSub, "documents")
     end
 
-    books = Documents.list_books()
+    documents = Documents.list_documents()
     defaults = Application.get_env(:doctrans, :defaults, [])
 
     socket =
       socket
-      |> assign(:books, books)
+      |> assign(:documents, documents)
       |> assign(:show_upload_modal, false)
       |> assign(:source_language, defaults[:source_language] || "de")
       |> assign(:target_language, defaults[:target_language] || "en")
-      |> assign(:book_title, "")
+      |> assign(:document_title, "")
       |> allow_upload(:pdf,
         accept: ~w(.pdf),
         max_entries: 1,
@@ -49,29 +49,29 @@ defmodule DoctransWeb.BookLive.Index do
         <div class="flex justify-between items-center mb-8">
           <div>
             <h1 class="text-3xl font-bold text-base-content">Doctrans</h1>
-            <p class="text-base-content/70 mt-1">PDF Book Translator</p>
+            <p class="text-base-content/70 mt-1">PDF Document Translator</p>
           </div>
           <button
             type="button"
             phx-click="show_upload_modal"
             class="btn btn-primary"
-            id="upload-book-btn"
+            id="upload-document-btn"
           >
-            <.icon name="hero-plus" class="w-5 h-5 mr-2" /> Upload Book
+            <.icon name="hero-plus" class="w-5 h-5 mr-2" /> Upload Document
           </button>
         </div>
 
-        <div :if={@books == []} class="text-center py-16">
+        <div :if={@documents == []} class="text-center py-16">
           <.icon name="hero-document-text" class="w-16 h-16 mx-auto text-base-content/30" />
-          <h3 class="mt-4 text-lg font-medium text-base-content">No books yet</h3>
+          <h3 class="mt-4 text-lg font-medium text-base-content">No documents yet</h3>
           <p class="mt-2 text-base-content/70">Upload a PDF to get started with translation.</p>
         </div>
 
         <div
-          :if={@books != []}
+          :if={@documents != []}
           class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6"
         >
-          <.book_card :for={book <- @books} book={book} />
+          <.document_card :for={document <- @documents} document={document} />
         </div>
       </div>
 
@@ -80,43 +80,43 @@ defmodule DoctransWeb.BookLive.Index do
         uploads={@uploads}
         source_language={@source_language}
         target_language={@target_language}
-        book_title={@book_title}
+        document_title={@document_title}
       />
     </Layouts.app>
     """
   end
 
-  defp book_card(assigns) do
-    progress = Documents.calculate_progress(assigns.book)
+  defp document_card(assigns) do
+    progress = Documents.calculate_progress(assigns.document)
 
     assigns =
       assigns
       |> assign(:progress, progress)
-      |> assign(:status_color, status_color(assigns.book.status))
-      |> assign(:status_text, status_text(assigns.book.status))
+      |> assign(:status_color, status_color(assigns.document.status))
+      |> assign(:status_text, status_text(assigns.document.status))
 
     ~H"""
     <div class="card bg-base-200 shadow-lg hover:shadow-xl transition-shadow">
-      <.link navigate={~p"/books/#{@book.id}"} class="block">
+      <.link navigate={~p"/documents/#{@document.id}"} class="block">
         <figure class="px-4 pt-4">
           <div class="aspect-[3/4] bg-base-300 rounded-lg flex items-center justify-center overflow-hidden">
-            <.book_thumbnail book={@book} />
+            <.document_thumbnail document={@document} />
           </div>
         </figure>
       </.link>
       <div class="card-body p-4">
-        <h2 class="card-title text-base truncate" title={@book.title}>
-          {@book.title}
+        <h2 class="card-title text-base truncate" title={@document.title}>
+          {@document.title}
         </h2>
         <div class="flex items-center gap-2 mt-2">
           <span class={"badge badge-sm #{@status_color}"}>
             {@status_text}
           </span>
-          <span :if={@book.total_pages} class="text-xs text-base-content/70">
-            {@book.total_pages} pages
+          <span :if={@document.total_pages} class="text-xs text-base-content/70">
+            {@document.total_pages} pages
           </span>
         </div>
-        <div :if={@book.status in ["extracting", "processing"]} class="mt-2">
+        <div :if={@document.status in ["extracting", "processing"]} class="mt-2">
           <div class="flex justify-between text-xs mb-1">
             <span>Progress</span>
             <span>{Float.round(@progress, 1)}%</span>
@@ -126,9 +126,9 @@ defmodule DoctransWeb.BookLive.Index do
         <div class="card-actions justify-end mt-2">
           <button
             type="button"
-            phx-click="delete_book"
-            phx-value-id={@book.id}
-            data-confirm="Are you sure you want to delete this book? This cannot be undone."
+            phx-click="delete_document"
+            phx-value-id={@document.id}
+            data-confirm="Are you sure you want to delete this document? This cannot be undone."
             class="btn btn-ghost btn-xs text-error"
           >
             <.icon name="hero-trash" class="w-4 h-4" />
@@ -139,9 +139,9 @@ defmodule DoctransWeb.BookLive.Index do
     """
   end
 
-  defp book_thumbnail(assigns) do
-    book = assigns.book
-    pages = Documents.list_pages(book.id)
+  defp document_thumbnail(assigns) do
+    document = assigns.document
+    pages = Documents.list_pages(document.id)
     first_page = List.first(pages)
 
     assigns = assign(assigns, :first_page, first_page)
@@ -173,9 +173,9 @@ defmodule DoctransWeb.BookLive.Index do
           <.icon name="hero-x-mark" class="w-5 h-5" />
         </button>
 
-        <h3 class="font-bold text-lg mb-4">Upload New Book</h3>
+        <h3 class="font-bold text-lg mb-4">Upload New Document</h3>
 
-        <form phx-submit="upload_book" phx-change="validate_upload" id="upload-form">
+        <form phx-submit="upload_document" phx-change="validate_upload" id="upload-form">
           <div class="form-control mb-4">
             <label class="label">
               <span class="label-text">PDF File</span>
@@ -215,15 +215,15 @@ defmodule DoctransWeb.BookLive.Index do
 
           <div class="form-control mb-4">
             <label class="label">
-              <span class="label-text">Book Title</span>
+              <span class="label-text">Document Title</span>
             </label>
             <input
               type="text"
               name="title"
-              value={@book_title}
-              placeholder="Enter book title"
+              value={@document_title}
+              placeholder="Enter document title"
               class="input input-bordered w-full"
-              id="book-title-input"
+              id="document-title-input"
             />
           </div>
 
@@ -363,7 +363,7 @@ defmodule DoctransWeb.BookLive.Index do
 
     socket =
       socket
-      |> assign(:book_title, title)
+      |> assign(:document_title, title)
       |> assign(:source_language, source_language)
       |> assign(:target_language, target_language)
 
@@ -376,8 +376,8 @@ defmodule DoctransWeb.BookLive.Index do
   end
 
   @impl true
-  def handle_event("upload_book", params, socket) do
-    title = params["title"] || socket.assigns.book_title
+  def handle_event("upload_document", params, socket) do
+    title = params["title"] || socket.assigns.document_title
     source_language = params["source_language"] || socket.assigns.source_language
     target_language = params["target_language"] || socket.assigns.target_language
 
@@ -385,19 +385,19 @@ defmodule DoctransWeb.BookLive.Index do
     uploaded_files =
       consume_uploaded_entries(socket, :pdf, fn %{path: path}, entry ->
         # Create a unique filename for the PDF
-        book_id = Uniq.UUID.uuid7()
-        dest_dir = Documents.book_upload_dir(book_id)
+        document_id = Uniq.UUID.uuid7()
+        dest_dir = Documents.document_upload_dir(document_id)
         File.mkdir_p!(dest_dir)
         dest_path = Path.join(dest_dir, "original.pdf")
 
         # Copy the file to our uploads directory
         File.cp!(path, dest_path)
 
-        {:ok, {book_id, entry.client_name, dest_path}}
+        {:ok, {document_id, entry.client_name, dest_path}}
       end)
 
     case uploaded_files do
-      [{book_id, original_filename, pdf_path}] ->
+      [{document_id, original_filename, pdf_path}] ->
         # Use provided title or filename
         title =
           if title == "" do
@@ -408,26 +408,26 @@ defmodule DoctransWeb.BookLive.Index do
             title
           end
 
-        # Create the book record
-        case Documents.create_book(%{
-               id: book_id,
+        # Create the document record
+        case Documents.create_document(%{
+               id: document_id,
                title: title,
                original_filename: original_filename,
                source_language: source_language,
                target_language: target_language,
                status: "uploading"
              }) do
-          {:ok, book} ->
+          {:ok, document} ->
             # Start background processing
-            Worker.process_book(book.id, pdf_path)
+            Worker.process_document(document.id, pdf_path)
 
-            # Refresh book list and close modal
+            # Refresh document list and close modal
             socket =
               socket
-              |> assign(:books, Documents.list_books())
+              |> assign(:documents, Documents.list_documents())
               |> assign(:show_upload_modal, false)
-              |> assign(:book_title, "")
-              |> put_flash(:info, "Book uploaded! Processing will begin shortly.")
+              |> assign(:document_title, "")
+              |> put_flash(:info, "Document uploaded! Processing will begin shortly.")
 
             {:noreply, socket}
 
@@ -437,7 +437,7 @@ defmodule DoctransWeb.BookLive.Index do
 
             socket =
               socket
-              |> put_flash(:error, "Failed to create book: #{inspect(changeset.errors)}")
+              |> put_flash(:error, "Failed to create document: #{inspect(changeset.errors)}")
 
             {:noreply, socket}
         end
@@ -448,37 +448,37 @@ defmodule DoctransWeb.BookLive.Index do
   end
 
   @impl true
-  def handle_event("delete_book", %{"id" => id}, socket) do
-    book = Documents.get_book!(id)
+  def handle_event("delete_document", %{"id" => id}, socket) do
+    document = Documents.get_document!(id)
 
     # Cancel any in-progress processing
-    Worker.cancel_book(book.id)
+    Worker.cancel_document(document.id)
 
-    case Documents.delete_book(book) do
+    case Documents.delete_document(document) do
       {:ok, _} ->
         socket =
           socket
-          |> assign(:books, Documents.list_books())
-          |> put_flash(:info, "Book deleted successfully")
+          |> assign(:documents, Documents.list_documents())
+          |> put_flash(:info, "Document deleted successfully")
 
         {:noreply, socket}
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to delete book")}
+        {:noreply, put_flash(socket, :error, "Failed to delete document")}
     end
   end
 
   # PubSub Handlers
 
   @impl true
-  def handle_info({:book_updated, _book}, socket) do
-    # Refresh the book list to get updated statuses
-    {:noreply, assign(socket, :books, Documents.list_books())}
+  def handle_info({:document_updated, _document}, socket) do
+    # Refresh the document list to get updated statuses
+    {:noreply, assign(socket, :documents, Documents.list_documents())}
   end
 
   @impl true
   def handle_info({:page_updated, _page}, socket) do
     # Refresh to update progress
-    {:noreply, assign(socket, :books, Documents.list_books())}
+    {:noreply, assign(socket, :documents, Documents.list_documents())}
   end
 end
