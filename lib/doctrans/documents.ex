@@ -22,6 +22,7 @@ defmodule Doctrans.Documents do
     Document
     |> order_by(desc: :inserted_at)
     |> Repo.all()
+    |> Repo.preload(pages: from(p in Page, order_by: p.page_number))
   end
 
   @doc """
@@ -132,6 +133,20 @@ defmodule Doctrans.Documents do
   def calculate_progress(%Document{} = document) do
     document = Repo.preload(document, :pages)
     calculate_progress_from_pages(document.pages, document.total_pages)
+  end
+
+  @doc """
+  Calculates progress from already-loaded pages (no DB query).
+  Use this when pages are already preloaded to avoid N+1 queries.
+  """
+  def calculate_progress_preloaded(%Document{pages: pages, total_pages: total_pages})
+      when is_list(pages) do
+    calculate_progress_from_pages(pages, total_pages)
+  end
+
+  def calculate_progress_preloaded(%Document{} = document) do
+    # Fallback if pages not preloaded
+    calculate_progress(document)
   end
 
   defp calculate_progress_from_pages([], _total), do: 0.0

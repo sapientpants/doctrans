@@ -13,7 +13,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    documents = Documents.list_documents()
+    documents = Documents.list_documents() |> add_progress_to_documents()
     defaults = Application.get_env(:doctrans, :defaults, [])
 
     if connected?(socket) do
@@ -93,7 +93,8 @@ defmodule DoctransWeb.DocumentLive.Index do
   end
 
   defp document_card(assigns) do
-    progress = Documents.calculate_progress(assigns.document)
+    # Use pre-calculated progress from document map (set in mount/handle_info)
+    progress = Map.get(assigns.document, :progress, 0.0)
 
     assigns =
       assigns
@@ -147,8 +148,9 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   defp document_thumbnail(assigns) do
     document = assigns.document
-    pages = Documents.list_pages(document.id)
-    first_page = List.first(pages)
+    # Use preloaded pages to avoid extra DB query
+    pages = Map.get(document, :pages, [])
+    first_page = Enum.find(pages, &(&1.page_number == 1))
 
     assigns = assign(assigns, :first_page, first_page)
 
@@ -459,13 +461,21 @@ defmodule DoctransWeb.DocumentLive.Index do
     end
   end
 
+  # Helper to pre-calculate progress for documents
+  defp add_progress_to_documents(documents) do
+    Enum.map(documents, fn doc ->
+      progress = Documents.calculate_progress_preloaded(doc)
+      Map.put(doc, :progress, progress)
+    end)
+  end
+
   # PubSub Handlers
 
   @impl true
   def handle_info({:document_updated, document}, socket) do
     Logger.info("Dashboard received document_updated for #{document.id}")
-    # Refresh the document list to get updated statuses
-    {:noreply, assign(socket, :documents, Documents.list_documents())}
+    documents = Documents.list_documents() |> add_progress_to_documents()
+    {:noreply, assign(socket, :documents, documents)}
   end
 
   @impl true
@@ -474,8 +484,8 @@ defmodule DoctransWeb.DocumentLive.Index do
       "Dashboard received page_updated for page #{page.page_number} of document #{page.document_id}"
     )
 
-    # Refresh to update progress
-    {:noreply, assign(socket, :documents, Documents.list_documents())}
+    documents = Documents.list_documents() |> add_progress_to_documents()
+    {:noreply, assign(socket, :documents, documents)}
   end
 
   @impl true
