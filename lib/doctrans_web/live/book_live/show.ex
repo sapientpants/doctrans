@@ -155,20 +155,18 @@ defmodule DoctransWeb.DocumentLive.Show do
   defp page_selector(assigns) do
     ~H"""
     <div class="flex items-center gap-2">
-      <select
-        id="page-selector"
-        phx-change="goto_page"
-        name="page"
-        class="select select-bordered select-sm w-24"
-      >
-        <option
-          :for={page_num <- 1..max(@total_pages, 1)}
-          value={page_num}
-          selected={page_num == @current_page}
+      <form phx-change="goto_page" id="page-selector-form">
+        <select
+          id="page-selector"
+          name="page"
+          value={to_string(@current_page)}
+          class="select select-bordered select-sm w-24"
         >
-          {page_num}
-        </option>
-      </select>
+          <option :for={page_num <- 1..max(@total_pages, 1)} value={page_num}>
+            {page_num}
+          </option>
+        </select>
+      </form>
       <span class="text-sm text-base-content/70">/ {@total_pages}</span>
     </div>
     """
