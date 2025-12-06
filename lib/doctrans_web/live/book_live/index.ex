@@ -85,7 +85,6 @@ defmodule DoctransWeb.DocumentLive.Index do
         :if={@show_upload_modal}
         uploads={@uploads}
         target_language={@target_language}
-        document_title={@document_title}
       />
     </Layouts.app>
     """
