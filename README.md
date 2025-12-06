@@ -70,6 +70,29 @@ mix phx.server
 
 Visit [http://localhost:4000](http://localhost:4000) in your browser.
 
+## Docker Setup
+
+Run the app with Docker Compose while using Ollama on your host machine:
+
+```bash
+# Ensure Ollama is running on your host
+ollama serve
+
+# Start PostgreSQL and the app (migrations run automatically)
+docker compose up
+```
+
+Visit [http://localhost:4000](http://localhost:4000) in your browser.
+
+The app connects to Ollama via `host.docker.internal:11434`. For Linux, the `extra_hosts`
+directive in `docker-compose.yml` maps this automatically.
+
+To customize environment variables, copy `.env.example` to `.env`:
+
+```bash
+cp .env.example .env
+```
+
 ## Usage
 
 1. Click **Upload** on the dashboard
@@ -110,6 +133,14 @@ config :doctrans, :uploads,
 config :doctrans, :defaults,
   target_language: "en"
 ```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API URL |
+| `DATABASE_HOST` | `localhost` | PostgreSQL hostname |
+| `PORT` | `4000` | Phoenix server port |
 
 ## Development
 

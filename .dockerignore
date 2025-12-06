@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+_build/
+deps/
+.elixir_ls/
+
+# Node
+assets/node_modules/
+
+# Generated files
+priv/static/assets/
+
+# User uploads
+priv/static/uploads/
+
+# Test and coverage
+cover/
+*.coverdata
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+*.md
+
+# Local env files
+.env
+.env.local
+
+# Dialyzer
+priv/plts/

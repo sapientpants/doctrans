@@ -12,8 +12,9 @@ config :doctrans,
   generators: [timestamp_type: :utc_datetime]
 
 # Ollama configuration for AI models
+# OLLAMA_HOST env var allows overriding for Docker (e.g., http://host.docker.internal:11434)
 config :doctrans, :ollama,
-  base_url: "http://localhost:11434",
+  base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
   vision_model: "qwen3-vl:8b",
   text_model: "ministral-3:14b",
   timeout: 300_000
@@ -30,7 +31,7 @@ config :doctrans, :defaults,
 
 # Embedding configuration for semantic search
 config :doctrans, :embedding,
-  base_url: "http://localhost:11434",
+  base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
   model: "qwen3-embedding:0.6b",
   timeout: 60_000
 
