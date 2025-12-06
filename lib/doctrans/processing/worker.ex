@@ -73,14 +73,24 @@ defmodule Doctrans.Processing.Worker do
     # PDF extraction runs immediately (not queued)
     Logger.info("Starting PDF extraction for document #{document_id}")
 
-    task =
-      Task.Supervisor.async_nolink(
-        Doctrans.TaskSupervisor,
-        fn -> do_extract_pdf(document_id, pdf_path) end
-      )
+    # Update status to extracting immediately so UI shows progress
+    case Documents.get_document(document_id) do
+      nil ->
+        {:noreply, state}
 
-    extraction_tasks = Map.put(state.extraction_tasks, task.ref, document_id)
-    {:noreply, %{state | extraction_tasks: extraction_tasks}}
+      document ->
+        {:ok, document} = Documents.update_document_status(document, "extracting")
+        Documents.broadcast_document_update(document)
+
+        task =
+          Task.Supervisor.async_nolink(
+            Doctrans.TaskSupervisor,
+            fn -> do_extract_pdf(document_id, pdf_path, state.cancelled_documents) end
+          )
+
+        extraction_tasks = Map.put(state.extraction_tasks, task.ref, document_id)
+        {:noreply, %{state | extraction_tasks: extraction_tasks}}
+    end
   end
 
   @impl true
@@ -136,6 +146,9 @@ defmodule Doctrans.Processing.Worker do
         Logger.info("PDF extraction completed for document #{document_id}, queueing for LLM")
         # Queue for LLM processing
         GenServer.cast(self(), {:queue_for_llm, document_id})
+
+      :cancelled ->
+        Logger.info("PDF extraction was cancelled for document #{document_id}")
 
       {:error, reason} ->
         Logger.error("PDF extraction failed for document #{document_id}: #{reason}")
@@ -201,29 +214,32 @@ defmodule Doctrans.Processing.Worker do
   # PDF Extraction (runs immediately, not queued)
   # ============================================================================
 
-  defp do_extract_pdf(document_id, pdf_path) do
-    with {:ok, document} <- fetch_document(document_id),
-         :ok <- extract_pdf_pages(document, pdf_path) do
-      :ok
+  defp do_extract_pdf(document_id, pdf_path, cancelled_documents) do
+    if MapSet.member?(cancelled_documents, document_id) do
+      Logger.info("Document #{document_id} was cancelled, skipping PDF extraction")
+      # Clean up the PDF file
+      File.rm(pdf_path)
+      :cancelled
     else
-      {:error, reason} ->
-        Logger.error("Failed to extract PDF for document #{document_id}: #{reason}")
+      with {:ok, document} <- fetch_document(document_id),
+           :ok <- extract_pdf_pages(document, pdf_path) do
+        :ok
+      else
+        {:error, reason} ->
+          Logger.error("Failed to extract PDF for document #{document_id}: #{reason}")
 
-        case Documents.get_document(document_id) do
-          nil -> :ok
-          document -> Documents.update_document_status(document, "error", reason)
-        end
+          case Documents.get_document(document_id) do
+            nil -> :ok
+            document -> Documents.update_document_status(document, "error", reason)
+          end
 
-        {:error, reason}
+          {:error, reason}
+      end
     end
   end
 
   defp extract_pdf_pages(document, pdf_path) do
     Logger.info("Extracting pages from PDF for document #{document.id}")
-
-    # Update status to extracting
-    {:ok, document} = Documents.update_document_status(document, "extracting")
-    Documents.broadcast_document_update(document)
 
     # Ensure directories exist
     pages_dir = Documents.ensure_document_dirs!(document.id)
