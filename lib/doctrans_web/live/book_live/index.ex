@@ -54,7 +54,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash}>
-      <div class="w-full px-6 py-8">
+      <div class="w-full px-8 py-8">
         <div class="flex justify-between items-center mb-6">
           <div>
             <h1 class="text-3xl font-bold text-base-content">Doctrans</h1>

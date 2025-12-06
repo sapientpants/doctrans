@@ -71,9 +71,9 @@ defmodule DoctransWeb.DocumentLive.Show do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash}>
-      <div class="h-screen flex flex-col bg-base-100">
+      <div class="h-screen flex flex-col bg-base-100 max-w-full">
         <%!-- Header --%>
-        <header class="flex items-center justify-between px-4 py-3 border-b border-base-300 bg-base-200">
+        <header class="flex items-center justify-between px-4 pr-8 py-3 border-b border-base-300 bg-base-200">
           <div class="flex items-center gap-4">
             <.link navigate={back_url(@from, @search_query)} class="btn btn-ghost btn-sm">
               <.icon name="hero-arrow-left" class="w-5 h-5" /> Back
