@@ -159,10 +159,13 @@ defmodule DoctransWeb.DocumentLive.Show do
         <select
           id="page-selector"
           name="page"
-          value={to_string(@current_page)}
           class="select select-bordered select-sm w-24"
         >
-          <option :for={page_num <- 1..max(@total_pages, 1)} value={page_num}>
+          <option
+            :for={page_num <- 1..max(@total_pages, 1)}
+            value={page_num}
+            selected={page_num == @current_page}
+          >
             {page_num}
           </option>
         </select>
@@ -245,12 +248,11 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   defp markdown_content(assigns) do
-    # Simple markdown rendering - convert basic markdown to HTML
     html = render_markdown(assigns.content || "")
     assigns = assign(assigns, :html, html)
 
     ~H"""
-    <div class="whitespace-pre-wrap">{raw(@html)}</div>
+    <div>{raw(@html)}</div>
     """
   end
 
@@ -258,80 +260,10 @@ defmodule DoctransWeb.DocumentLive.Show do
   defp render_markdown(""), do: ""
 
   defp render_markdown(text) do
-    text
-    |> String.trim()
-    |> escape_html()
-    |> convert_headers()
-    |> convert_bold()
-    |> convert_italic()
-    |> convert_code()
-    |> convert_lists()
-    |> convert_blockquotes()
-    |> convert_paragraphs()
-  end
-
-  defp escape_html(text) do
-    text
-    |> String.replace("&", "&amp;")
-    |> String.replace("<", "&lt;")
-    |> String.replace(">", "&gt;")
-  end
-
-  defp convert_headers(text) do
-    text
-    |> String.replace(~r/^### (.+)$/m, "<h3 class=\"text-lg font-semibold mt-4 mb-2\">\\1</h3>")
-    |> String.replace(~r/^## (.+)$/m, "<h2 class=\"text-xl font-semibold mt-6 mb-3\">\\1</h2>")
-    |> String.replace(~r/^# (.+)$/m, "<h1 class=\"text-2xl font-bold mt-8 mb-4\">\\1</h1>")
-  end
-
-  defp convert_bold(text) do
-    String.replace(text, ~r/\*\*(.+?)\*\*/, "<strong>\\1</strong>")
-  end
-
-  defp convert_italic(text) do
-    String.replace(text, ~r/\*(.+?)\*/, "<em>\\1</em>")
-  end
-
-  defp convert_code(text) do
-    text
-    |> String.replace(
-      ~r/```(\w*)\n([\s\S]*?)```/m,
-      "<pre class=\"bg-base-300 p-3 rounded my-2 overflow-x-auto\"><code>\\2</code></pre>"
-    )
-    |> String.replace(~r/`(.+?)`/, "<code class=\"bg-base-300 px-1 rounded\">\\1</code>")
-  end
-
-  defp convert_lists(text) do
-    text
-    |> String.replace(~r/^- (.+)$/m, "<li class=\"ml-4\">\\1</li>")
-    |> String.replace(~r/^\* (.+)$/m, "<li class=\"ml-4\">\\1</li>")
-    |> String.replace(~r/^\d+\. (.+)$/m, "<li class=\"ml-4\">\\1</li>")
-  end
-
-  defp convert_blockquotes(text) do
-    String.replace(
-      text,
-      ~r/^&gt; (.+)$/m,
-      "<blockquote class=\"border-l-4 border-primary pl-4 my-2 italic\">\\1</blockquote>"
-    )
-  end
-
-  defp convert_paragraphs(text) do
-    text
-    |> String.split(~r/\n\n+/)
-    |> Enum.map(fn para ->
-      para = String.trim(para)
-
-      cond do
-        String.starts_with?(para, "<h") -> para
-        String.starts_with?(para, "<pre") -> para
-        String.starts_with?(para, "<blockquote") -> para
-        String.starts_with?(para, "<li") -> "<ul class=\"list-disc my-2\">#{para}</ul>"
-        para == "" -> ""
-        true -> "<p class=\"my-2\">#{String.replace(para, "\n", "<br>")}</p>"
-      end
-    end)
-    |> Enum.join("\n")
+    case Earmark.as_html(text) do
+      {:ok, html, _} -> html
+      {:error, html, _} -> html
+    end
   end
 
   defp show_content?(page, show_original) do

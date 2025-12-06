@@ -103,3 +103,32 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+/* Markdown table styling within prose containers */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.prose th {
+  background-color: var(--color-base-200);
+  border: 1px solid var(--color-base-300);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+}
+
+.prose td {
+  border: 1px solid var(--color-base-300);
+  padding: 0.5rem 0.75rem;
+}
+
+.prose tr:nth-child(even) {
+  background-color: var(--color-base-100);
+}
+
+.prose tr:nth-child(odd) td {
+  background-color: var(--color-base-200);
+}
