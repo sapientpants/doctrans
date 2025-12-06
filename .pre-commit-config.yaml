@@ -6,6 +6,16 @@ default_language_version:
   python: python3
 
 repos:
+  # GPG signing verification (runs first)
+  - repo: local
+    hooks:
+      - id: verify-gpg-signing
+        name: Verify GPG commit signing is configured
+        entry: bash -c 'if [ "$(git config --get commit.gpgsign)" != "true" ]; then echo "ERROR: commit.gpgsign is not enabled"; exit 1; fi && gpg --list-secret-keys > /dev/null 2>&1 || { echo "ERROR: GPG is not available or has no secret keys"; exit 1; }'
+        language: system
+        pass_filenames: false
+        always_run: true
+
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
