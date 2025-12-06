@@ -32,8 +32,8 @@ jobs:
 
     strategy:
       matrix:
-        elixir: ['1.18']
-        otp: ['27']
+        elixir: ['1.18.2']
+        otp: ['27.2']
 
     steps:
       - name: Checkout repository
