@@ -1,19 +1,16 @@
 defmodule DoctransWeb.DocumentLive.Index do
-  @moduledoc """
-  Dashboard LiveView for managing documents.
-
-  Shows all documents with their processing status and allows
-  uploading new PDFs for translation.
-  """
+  @moduledoc "Dashboard LiveView for managing documents."
   use DoctransWeb, :live_view
   require Logger
 
   alias Doctrans.Documents
   alias Doctrans.Processing.Worker
 
+  import DoctransWeb.DocumentLive.Components
+
   @impl true
   def mount(_params, _session, socket) do
-    documents = Documents.list_documents() |> add_progress_to_documents()
+    documents = Documents.list_documents_with_progress()
     defaults = Application.get_env(:doctrans, :defaults, [])
 
     if connected?(socket) do
@@ -46,9 +43,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   end
 
   @impl true
-  def handle_params(_params, _uri, socket) do
-    {:noreply, socket}
-  end
+  def handle_params(_params, _uri, socket), do: {:noreply, socket}
 
   @impl true
   def render(assigns) do
@@ -164,255 +159,13 @@ defmodule DoctransWeb.DocumentLive.Index do
     """
   end
 
-  defp sort_label(:inserted_at, :desc), do: "Newest"
-  defp sort_label(:inserted_at, :asc), do: "Oldest"
-  defp sort_label(:title, :asc), do: "A-Z"
-  defp sort_label(:title, :desc), do: "Z-A"
-  defp sort_label(_, _), do: "Sort"
-
-  defp document_card(assigns) do
-    # Use pre-calculated progress from document map (set in mount/handle_info)
-    progress = Map.get(assigns.document, :progress, 0.0)
-
-    assigns =
-      assigns
-      |> assign(:progress, progress)
-      |> assign(:status_color, status_color(assigns.document.status))
-      |> assign(:status_text, status_text(assigns.document.status))
-
-    ~H"""
-    <div class="card bg-base-200 shadow-lg hover:shadow-xl transition-shadow">
-      <.link navigate={~p"/documents/#{@document.id}"} class="block">
-        <figure class="px-4 pt-4">
-          <div class="aspect-[3/4] bg-base-300 rounded-lg flex items-center justify-center overflow-hidden">
-            <.document_thumbnail document={@document} />
-          </div>
-        </figure>
-      </.link>
-      <div class="card-body p-4">
-        <h2 class="card-title text-base truncate" title={@document.title}>
-          {@document.title}
-        </h2>
-        <div class="flex items-center gap-2 mt-2">
-          <span class={"badge badge-sm #{@status_color}"}>
-            {@status_text}
-          </span>
-          <span :if={@document.total_pages} class="text-xs text-base-content/70">
-            {@document.total_pages} pages
-          </span>
-        </div>
-        <div :if={@document.status in ["extracting", "processing"]} class="mt-2">
-          <div class="flex justify-between text-xs mb-1">
-            <span>Progress</span>
-            <span>{Float.round(@progress, 1)}%</span>
-          </div>
-          <progress class="progress progress-primary w-full" value={@progress} max="100" />
-        </div>
-        <div class="card-actions justify-end mt-2">
-          <button
-            type="button"
-            phx-click="delete_document"
-            phx-value-id={@document.id}
-            data-confirm="Are you sure you want to delete this document? This cannot be undone."
-            class="btn btn-ghost btn-xs text-error"
-          >
-            <.icon name="hero-trash" class="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    </div>
-    """
-  end
-
-  defp document_thumbnail(assigns) do
-    document = assigns.document
-    # Use preloaded pages to avoid extra DB query
-    pages = Map.get(document, :pages, [])
-    first_page = Enum.find(pages, &(&1.page_number == 1))
-
-    assigns = assign(assigns, :first_page, first_page)
-
-    ~H"""
-    <img
-      :if={@first_page && @first_page.image_path}
-      src={"/uploads/#{@first_page.image_path}"}
-      alt="First page"
-      class="w-full h-full object-cover"
-    />
-    <.icon
-      :if={!@first_page || !@first_page.image_path}
-      name="hero-document-text"
-      class="w-16 h-16 text-base-content/30"
-    />
-    """
-  end
-
-  defp upload_modal(assigns) do
-    ~H"""
-    <div class="modal modal-open" id="upload-modal">
-      <div class="modal-box max-w-lg">
-        <button
-          type="button"
-          phx-click="hide_upload_modal"
-          class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2"
-        >
-          <.icon name="hero-x-mark" class="w-5 h-5" />
-        </button>
-
-        <h3 class="font-bold text-lg mb-4">Upload New Document</h3>
-
-        <form phx-submit="upload_document" phx-change="validate_upload" id="upload-form">
-          <div class="form-control mb-4">
-            <label class="label">
-              <span class="label-text">PDF Files</span>
-            </label>
-            <div
-              class="border-2 border-dashed border-base-300 rounded-lg p-4 text-center hover:border-primary transition-colors"
-              phx-drop-target={@uploads.pdf.ref}
-            >
-              <.live_file_input upload={@uploads.pdf} class="hidden" />
-              <div :if={@uploads.pdf.entries == []} class="py-4">
-                <.icon name="hero-cloud-arrow-up" class="w-12 h-12 mx-auto text-base-content/50" />
-                <p class="mt-2 text-sm text-base-content/70">
-                  Drag and drop PDF files here, or
-                  <label for={@uploads.pdf.ref} class="link link-primary cursor-pointer">
-                    browse
-                  </label>
-                </p>
-                <p class="mt-1 text-xs text-base-content/50">Up to 10 files at once</p>
-              </div>
-              <div :if={@uploads.pdf.entries != []} class="space-y-2">
-                <div
-                  :for={entry <- @uploads.pdf.entries}
-                  class="flex items-center gap-2 bg-base-200 rounded-lg p-2"
-                >
-                  <.icon name="hero-document" class="w-6 h-6 text-primary shrink-0" />
-                  <div class="flex-1 text-left min-w-0">
-                    <p class="text-sm font-medium truncate">{entry.client_name}</p>
-                    <progress
-                      class="progress progress-primary w-full h-1"
-                      value={entry.progress}
-                      max="100"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    phx-click="cancel_upload"
-                    phx-value-ref={entry.ref}
-                    class="btn btn-ghost btn-xs"
-                  >
-                    <.icon name="hero-x-mark" class="w-4 h-4" />
-                  </button>
-                </div>
-                <label
-                  for={@uploads.pdf.ref}
-                  class="block text-xs text-base-content/50 cursor-pointer hover:text-primary mt-2"
-                >
-                  + Add more files
-                </label>
-              </div>
-              <.upload_error :for={err <- upload_errors(@uploads.pdf)} error={err} />
-            </div>
-          </div>
-
-          <div class="form-control mb-6">
-            <label class="label">
-              <span class="label-text">Target Language</span>
-            </label>
-            <select
-              name="target_language"
-              class="select select-bordered w-full"
-              id="target-lang-select"
-            >
-              <.language_options selected={@target_language} />
-            </select>
-          </div>
-
-          <div class="modal-action">
-            <button type="button" phx-click="hide_upload_modal" class="btn btn-ghost">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              class="btn btn-primary"
-              disabled={@uploads.pdf.entries == []}
-              id="start-translation-btn"
-            >
-              Start Translation
-            </button>
-          </div>
-        </form>
-      </div>
-      <div class="modal-backdrop bg-black/50" phx-click="hide_upload_modal"></div>
-    </div>
-    """
-  end
-
-  defp language_options(assigns) do
-    languages = [
-      {"de", "German"},
-      {"en", "English"},
-      {"fr", "French"},
-      {"es", "Spanish"},
-      {"it", "Italian"},
-      {"pt", "Portuguese"},
-      {"nl", "Dutch"},
-      {"pl", "Polish"},
-      {"ru", "Russian"},
-      {"zh", "Chinese"},
-      {"ja", "Japanese"},
-      {"ko", "Korean"}
-    ]
-
-    assigns = assign(assigns, :languages, languages)
-
-    ~H"""
-    <option :for={{code, name} <- @languages} value={code} selected={code == @selected}>
-      {name}
-    </option>
-    """
-  end
-
-  defp upload_error(assigns) do
-    ~H"""
-    <p class="text-error text-sm mt-2">
-      {error_to_string(@error)}
-    </p>
-    """
-  end
-
-  defp error_to_string(:too_large), do: "File is too large (max 100MB)"
-  defp error_to_string(:too_many_files), do: "Maximum 10 files can be uploaded at once"
-  defp error_to_string(:not_accepted), do: "Only PDF files are accepted"
-  defp error_to_string(err), do: "Error: #{inspect(err)}"
-
-  defp status_color("uploading"), do: "badge-info"
-  defp status_color("extracting"), do: "badge-info"
-  defp status_color("queued"), do: "badge-info"
-  defp status_color("processing"), do: "badge-warning"
-  defp status_color("completed"), do: "badge-success"
-  defp status_color("error"), do: "badge-error"
-  defp status_color(_), do: "badge-ghost"
-
-  defp status_text("uploading"), do: "Uploading"
-  defp status_text("extracting"), do: "Processing"
-  defp status_text("queued"), do: "Queued"
-  defp status_text("processing"), do: "Processing"
-  defp status_text("completed"), do: "Completed"
-  defp status_text("error"), do: "Error"
-  defp status_text(_), do: "Unknown"
-
-  # Event Handlers
+  @impl true
+  def handle_event("show_upload_modal", _params, socket),
+    do: {:noreply, assign(socket, :show_upload_modal, true)}
 
   @impl true
-  def handle_event("show_upload_modal", _params, socket) do
-    {:noreply, assign(socket, :show_upload_modal, true)}
-  end
-
-  @impl true
-  def handle_event("hide_upload_modal", _params, socket) do
-    {:noreply, assign(socket, :show_upload_modal, false)}
-  end
+  def handle_event("hide_upload_modal", _params, socket),
+    do: {:noreply, assign(socket, :show_upload_modal, false)}
 
   @impl true
   def handle_event("validate_upload", params, socket) do
@@ -421,18 +174,14 @@ defmodule DoctransWeb.DocumentLive.Index do
   end
 
   @impl true
-  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
-    {:noreply, cancel_upload(socket, :pdf, ref)}
-  end
+  def handle_event("cancel_upload", %{"ref" => ref}, socket),
+    do: {:noreply, cancel_upload(socket, :pdf, ref)}
 
   @impl true
   def handle_event("sort", %{"field" => field, "dir" => dir}, socket) do
     sort_by = String.to_existing_atom(field)
     sort_dir = String.to_existing_atom(dir)
-
-    documents =
-      Documents.list_documents(sort_by: sort_by, sort_dir: sort_dir)
-      |> add_progress_to_documents()
+    documents = Documents.list_documents_with_progress(sort_by: sort_by, sort_dir: sort_dir)
 
     {:noreply,
      socket
@@ -473,7 +222,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
         socket =
           socket
-          |> assign(:documents, Documents.list_documents())
+          |> assign(:documents, Documents.list_documents_with_progress())
           |> assign(:show_upload_modal, false)
           |> put_flash(:info, "#{message} Processing will begin shortly.")
 
@@ -492,7 +241,7 @@ defmodule DoctransWeb.DocumentLive.Index do
       {:ok, _} ->
         socket =
           socket
-          |> assign(:documents, Documents.list_documents())
+          |> assign(:documents, Documents.list_documents_with_progress())
           |> put_flash(:info, "Document deleted successfully")
 
         {:noreply, socket}
@@ -526,21 +275,10 @@ defmodule DoctransWeb.DocumentLive.Index do
     end
   end
 
-  # Helper to pre-calculate progress for documents
-  defp add_progress_to_documents(documents) do
-    Enum.map(documents, fn doc ->
-      progress = Documents.calculate_progress_preloaded(doc)
-      Map.put(doc, :progress, progress)
-    end)
-  end
-
-  # PubSub Handlers
-
   @impl true
   def handle_info({:document_updated, document}, socket) do
     Logger.info("Dashboard received document_updated for #{document.id}")
-    documents = Documents.list_documents() |> add_progress_to_documents()
-    {:noreply, assign(socket, :documents, documents)}
+    {:noreply, assign(socket, :documents, Documents.list_documents_with_progress())}
   end
 
   @impl true
@@ -549,8 +287,7 @@ defmodule DoctransWeb.DocumentLive.Index do
       "Dashboard received page_updated for page #{page.page_number} of document #{page.document_id}"
     )
 
-    documents = Documents.list_documents() |> add_progress_to_documents()
-    {:noreply, assign(socket, :documents, documents)}
+    {:noreply, assign(socket, :documents, Documents.list_documents_with_progress())}
   end
 
   @impl true

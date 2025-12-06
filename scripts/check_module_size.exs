@@ -1,0 +1,120 @@
+#!/usr/bin/env elixir
+# Module Size Checker
+# Enforces maximum line count per module to encourage smaller, focused modules.
+#
+# Usage: elixir scripts/check_module_size.exs [--max-lines N] [paths...]
+#
+# Default max lines: 300
+# Exit code: 1 if any module exceeds the limit, 0 otherwise
+
+defmodule ModuleSizeChecker do
+  @default_max_lines 300
+  @excluded_patterns [
+    ~r"/_build/",
+    ~r"/deps/",
+    ~r"/node_modules/",
+    # Generated files
+    ~r"_web\.ex$",
+    ~r"/repo\.ex$"
+  ]
+
+  def run(args) do
+    {opts, paths} = parse_args(args)
+    max_lines = Keyword.get(opts, :max_lines, @default_max_lines)
+
+    paths = if paths == [], do: ["lib/"], else: paths
+
+    violations =
+      paths
+      |> Enum.flat_map(&find_elixir_files/1)
+      |> Enum.reject(&excluded?/1)
+      |> Enum.map(&check_file(&1, max_lines))
+      |> Enum.filter(& &1)
+
+    case violations do
+      [] ->
+        IO.puts(IO.ANSI.green() <> "All modules are within the #{max_lines} line limit." <> IO.ANSI.reset())
+        System.halt(0)
+
+      violations ->
+        IO.puts(IO.ANSI.red() <> "Module size violations found:" <> IO.ANSI.reset())
+        IO.puts("")
+
+        Enum.each(violations, fn {file, lines, over} ->
+          IO.puts("  #{file}")
+          IO.puts("    Lines: #{lines} (#{over} over limit)")
+          IO.puts("")
+        end)
+
+        IO.puts(IO.ANSI.yellow() <>
+          "Consider breaking these modules into smaller, focused modules." <>
+          IO.ANSI.reset())
+
+        System.halt(1)
+    end
+  end
+
+  defp parse_args(args) do
+    {opts, paths, _} =
+      OptionParser.parse(args,
+        strict: [max_lines: :integer, help: :boolean],
+        aliases: [m: :max_lines, h: :help]
+      )
+
+    if opts[:help] do
+      IO.puts("""
+      Module Size Checker
+
+      Usage: elixir scripts/check_module_size.exs [options] [paths...]
+
+      Options:
+        -m, --max-lines N    Maximum lines per module (default: #{@default_max_lines})
+        -h, --help           Show this help message
+
+      Examples:
+        elixir scripts/check_module_size.exs
+        elixir scripts/check_module_size.exs --max-lines 250
+        elixir scripts/check_module_size.exs lib/my_app/
+      """)
+
+      System.halt(0)
+    end
+
+    {opts, paths}
+  end
+
+  defp find_elixir_files(path) do
+    path = Path.expand(path)
+
+    cond do
+      File.regular?(path) and String.ends_with?(path, ".ex") ->
+        [path]
+
+      File.dir?(path) ->
+        Path.wildcard(Path.join(path, "**/*.ex"))
+
+      true ->
+        []
+    end
+  end
+
+  defp excluded?(file) do
+    Enum.any?(@excluded_patterns, &Regex.match?(&1, file))
+  end
+
+  defp check_file(file, max_lines) do
+    lines =
+      file
+      |> File.read!()
+      |> String.split("\n")
+      |> length()
+
+    if lines > max_lines do
+      {file, lines, lines - max_lines}
+    else
+      nil
+    end
+  end
+end
+
+ModuleSizeChecker.run(System.argv())

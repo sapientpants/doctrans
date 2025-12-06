@@ -86,6 +86,7 @@ defmodule DoctransWeb do
       import Phoenix.HTML
       # Core UI components
       import DoctransWeb.CoreComponents
+      import DoctransWeb.FormComponents
 
       # Common modules used in templates
       alias DoctransWeb.Layouts
