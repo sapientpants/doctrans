@@ -38,3 +38,10 @@ doctrans-*.tar
 npm-debug.log
 /assets/node_modules/
 
+# Dialyzer PLT files
+/priv/plts/*.plt
+/priv/plts/*.plt.hash
+
+# Excoveralls artifacts
+/coveralls.json
+
