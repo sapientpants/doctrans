@@ -33,10 +33,9 @@ defmodule DoctransWeb.DocumentLive.Index do
       |> assign(:documents, documents)
       |> assign(:show_upload_modal, false)
       |> assign(:target_language, defaults[:target_language] || "en")
-      |> assign(:document_title, "")
       |> allow_upload(:pdf,
         accept: ~w(.pdf),
-        max_entries: 1,
+        max_entries: 10,
         max_file_size: Application.get_env(:doctrans, :uploads)[:max_file_size] || 100_000_000
       )
 
@@ -196,11 +195,12 @@ defmodule DoctransWeb.DocumentLive.Index do
               <div :if={@uploads.pdf.entries == []}>
                 <.icon name="hero-cloud-arrow-up" class="w-12 h-12 mx-auto text-base-content/50" />
                 <p class="mt-2 text-sm text-base-content/70">
-                  Drag and drop a PDF file here, or
+                  Drag and drop PDF files here, or
                   <label for={@uploads.pdf.ref} class="link link-primary cursor-pointer">
                     browse
                   </label>
                 </p>
+                <p class="mt-1 text-xs text-base-content/50">Up to 10 files at once</p>
               </div>
               <div :for={entry <- @uploads.pdf.entries} class="flex items-center gap-2">
                 <.icon name="hero-document" class="w-8 h-8 text-primary" />
@@ -219,20 +219,6 @@ defmodule DoctransWeb.DocumentLive.Index do
               </div>
               <.upload_error :for={err <- upload_errors(@uploads.pdf)} error={err} />
             </div>
-          </div>
-
-          <div class="form-control mb-4">
-            <label class="label">
-              <span class="label-text">Document Title</span>
-            </label>
-            <input
-              type="text"
-              name="title"
-              value={@document_title}
-              placeholder="Enter document title"
-              class="input input-bordered w-full"
-              id="document-title-input"
-            />
           </div>
 
           <div class="form-control mb-6">
@@ -302,7 +288,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   end
 
   defp error_to_string(:too_large), do: "File is too large (max 100MB)"
-  defp error_to_string(:too_many_files), do: "Only one file can be uploaded at a time"
+  defp error_to_string(:too_many_files), do: "Maximum 10 files can be uploaded at once"
   defp error_to_string(:not_accepted), do: "Only PDF files are accepted"
   defp error_to_string(err), do: "Error: #{inspect(err)}"
 
@@ -334,31 +320,8 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def handle_event("validate_upload", params, socket) do
-    title = params["title"] || ""
     target_language = params["target_language"] || socket.assigns.target_language
-
-    # Auto-fill title from filename if empty
-    title =
-      if title == "" do
-        case socket.assigns.uploads.pdf.entries do
-          [entry | _] ->
-            entry.client_name
-            |> Path.basename(".pdf")
-            |> String.replace(~r/[_-]+/, " ")
-
-          [] ->
-            ""
-        end
-      else
-        title
-      end
-
-    socket =
-      socket
-      |> assign(:document_title, title)
-      |> assign(:target_language, target_language)
-
-    {:noreply, socket}
+    {:noreply, assign(socket, :target_language, target_language)}
   end
 
   @impl true
@@ -368,75 +331,60 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def handle_event("upload_document", params, socket) do
-    title = params["title"] || socket.assigns.document_title
     target_language = params["target_language"] || socket.assigns.target_language
 
-    # Consume the uploaded file
+    # Consume all uploaded files
     uploaded_files =
       consume_uploaded_entries(socket, :pdf, fn %{path: path}, entry ->
-        # Create a unique filename for the PDF
         document_id = Uniq.UUID.uuid7()
         dest_dir = Documents.document_upload_dir(document_id)
         File.mkdir_p!(dest_dir)
         dest_path = Path.join(dest_dir, "original.pdf")
-
-        # Copy the file to our uploads directory
         File.cp!(path, dest_path)
-
         {:ok, {document_id, entry.client_name, dest_path}}
       end)
 
     case uploaded_files do
-      [{document_id, original_filename, pdf_path}] ->
-        # Use provided title or filename
-        title =
-          if title == "" do
+      [] ->
+        {:noreply, put_flash(socket, :error, "No files were uploaded")}
+
+      files ->
+        # Create a document for each uploaded file
+        Enum.each(files, fn {document_id, original_filename, pdf_path} ->
+          title =
             original_filename
             |> Path.basename(".pdf")
             |> String.replace(~r/[_-]+/, " ")
-          else
-            title
+
+          case Documents.create_document(%{
+                 id: document_id,
+                 title: title,
+                 original_filename: original_filename,
+                 target_language: target_language,
+                 status: "uploading"
+               }) do
+            {:ok, document} ->
+              Logger.info("Subscribing to new document:#{document.id}")
+              Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document.id}")
+              Worker.process_document(document.id, pdf_path)
+
+            {:error, _changeset} ->
+              File.rm(pdf_path)
           end
+        end)
 
-        # Create the document record
-        case Documents.create_document(%{
-               id: document_id,
-               title: title,
-               original_filename: original_filename,
-               target_language: target_language,
-               status: "uploading"
-             }) do
-          {:ok, document} ->
-            # Subscribe to updates for this new document
-            Logger.info("Subscribing to new document:#{document.id}")
-            Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document.id}")
+        file_count = length(files)
 
-            # Start background processing
-            Worker.process_document(document.id, pdf_path)
+        message =
+          if file_count == 1, do: "Document uploaded!", else: "#{file_count} documents uploaded!"
 
-            # Refresh document list and close modal
-            socket =
-              socket
-              |> assign(:documents, Documents.list_documents())
-              |> assign(:show_upload_modal, false)
-              |> assign(:document_title, "")
-              |> put_flash(:info, "Document uploaded! Processing will begin shortly.")
+        socket =
+          socket
+          |> assign(:documents, Documents.list_documents())
+          |> assign(:show_upload_modal, false)
+          |> put_flash(:info, "#{message} Processing will begin shortly.")
 
-            {:noreply, socket}
-
-          {:error, changeset} ->
-            # Clean up the uploaded file
-            File.rm(pdf_path)
-
-            socket =
-              socket
-              |> put_flash(:error, "Failed to create document: #{inspect(changeset.errors)}")
-
-            {:noreply, socket}
-        end
-
-      [] ->
-        {:noreply, put_flash(socket, :error, "No file was uploaded")}
+        {:noreply, socket}
     end
   end
 
