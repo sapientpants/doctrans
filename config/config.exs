@@ -28,6 +28,12 @@ config :doctrans, :defaults,
   source_language: "de",
   target_language: "en"
 
+# Embedding configuration for semantic search
+config :doctrans, :embedding,
+  base_url: "http://localhost:11434",
+  model: "qwen3-embedding:0.6b",
+  timeout: 60_000
+
 # Configures the endpoint
 config :doctrans, DoctransWeb.Endpoint,
   url: [host: "localhost"],

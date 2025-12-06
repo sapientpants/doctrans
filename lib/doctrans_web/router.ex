@@ -18,6 +18,7 @@ defmodule DoctransWeb.Router do
     pipe_through :browser
 
     live "/", DocumentLive.Index, :index
+    live "/search", SearchLive, :index
     live "/documents/:id", DocumentLive.Show, :show
   end
 

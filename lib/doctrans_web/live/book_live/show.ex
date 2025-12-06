@@ -28,14 +28,44 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:current_page, current_page)
       |> assign(:show_original, false)
       |> assign(:zoom_level, 100)
+      |> assign(:from, nil)
+      |> assign(:search_query, nil)
 
     {:ok, socket}
   end
 
   @impl true
-  def handle_params(_params, _uri, socket) do
+  def handle_params(params, _uri, socket) do
+    socket =
+      socket
+      |> maybe_assign_from(params)
+      |> maybe_goto_page(params)
+
     {:noreply, socket}
   end
+
+  defp maybe_assign_from(socket, params) do
+    from = Map.get(params, "from")
+    search_query = Map.get(params, "q")
+
+    socket
+    |> assign(:from, from)
+    |> assign(:search_query, search_query)
+  end
+
+  defp maybe_goto_page(socket, %{"page" => page_str}) do
+    case Integer.parse(page_str) do
+      {page_number, _} ->
+        max_page = socket.assigns.document.total_pages || 1
+        page_number = max(1, min(page_number, max_page))
+        goto_page(socket, page_number)
+
+      :error ->
+        socket
+    end
+  end
+
+  defp maybe_goto_page(socket, _params), do: socket
 
   @impl true
   def render(assigns) do
@@ -45,7 +75,7 @@ defmodule DoctransWeb.DocumentLive.Show do
         <%!-- Header --%>
         <header class="flex items-center justify-between px-4 py-3 border-b border-base-300 bg-base-200">
           <div class="flex items-center gap-4">
-            <.link navigate={~p"/"} class="btn btn-ghost btn-sm">
+            <.link navigate={back_url(@from, @search_query)} class="btn btn-ghost btn-sm">
               <.icon name="hero-arrow-left" class="w-5 h-5" /> Back
             </.link>
             <div>
@@ -276,6 +306,12 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   defp get_content(page, true), do: page.original_markdown
   defp get_content(page, false), do: page.translated_markdown
+
+  defp back_url("search", query) when is_binary(query) and query != "" do
+    ~p"/search?q=#{query}"
+  end
+
+  defp back_url(_from, _query), do: ~p"/"
 
   defp status_color("uploading"), do: "badge-info"
   defp status_color("extracting"), do: "badge-info"

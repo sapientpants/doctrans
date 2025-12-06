@@ -67,7 +67,8 @@ defmodule Doctrans.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:uniq, "~> 0.6"},
-      {:earmark, "~> 1.4"}
+      {:earmark, "~> 1.4"},
+      {:pgvector, "~> 0.3"}
     ]
   end
 

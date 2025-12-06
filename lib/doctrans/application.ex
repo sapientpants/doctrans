@@ -16,6 +16,8 @@ defmodule Doctrans.Application do
       {Task.Supervisor, name: Doctrans.TaskSupervisor},
       # Background worker for processing books
       Doctrans.Processing.Worker,
+      # Background worker for generating embeddings
+      Doctrans.Search.EmbeddingWorker,
       # Start to serve requests, typically the last entry
       DoctransWeb.Endpoint
     ]

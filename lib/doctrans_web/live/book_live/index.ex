@@ -33,6 +33,9 @@ defmodule DoctransWeb.DocumentLive.Index do
       |> assign(:documents, documents)
       |> assign(:show_upload_modal, false)
       |> assign(:target_language, defaults[:target_language] || "en")
+      # Sort state
+      |> assign(:sort_by, :inserted_at)
+      |> assign(:sort_dir, :desc)
       |> allow_upload(:pdf,
         accept: ~w(.pdf),
         max_entries: 10,
@@ -52,19 +55,90 @@ defmodule DoctransWeb.DocumentLive.Index do
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="w-full px-6 py-8">
-        <div class="flex justify-between items-center mb-8">
+        <div class="flex justify-between items-center mb-6">
           <div>
             <h1 class="text-3xl font-bold text-base-content">Doctrans</h1>
             <p class="text-base-content/70 mt-1">PDF Document Translator</p>
           </div>
-          <button
-            type="button"
-            phx-click="show_upload_modal"
-            class="btn btn-primary"
-            id="upload-document-btn"
-          >
-            <.icon name="hero-plus" class="w-5 h-5 mr-2" /> Upload Document
-          </button>
+          <div class="flex items-center gap-3">
+            <%!-- Inline search form --%>
+            <form action="/search" method="get" class="relative" id="dashboard-search-form">
+              <.icon
+                name="hero-magnifying-glass"
+                class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 z-10 text-base-content/60 pointer-events-none"
+              />
+              <input
+                type="text"
+                name="q"
+                placeholder="Search..."
+                class="input input-bordered input-sm w-48 pl-9 pr-3"
+                id="dashboard-search-input"
+              />
+            </form>
+
+            <%!-- Sort dropdown --%>
+            <div class="dropdown dropdown-end">
+              <label tabindex="0" class="btn btn-sm btn-ghost gap-1.5 text-base-content/70">
+                <.icon name="hero-arrows-up-down" class="w-4 h-4" />
+                <span class="text-xs font-normal">{sort_label(@sort_by, @sort_dir)}</span>
+              </label>
+              <ul
+                tabindex="0"
+                class="dropdown-content z-10 menu menu-sm p-1 shadow-lg bg-base-200 rounded-lg w-40 mt-1"
+              >
+                <li>
+                  <button
+                    phx-click="sort"
+                    phx-value-field="inserted_at"
+                    phx-value-dir="desc"
+                    class={[@sort_by == :inserted_at && @sort_dir == :desc && "active"]}
+                  >
+                    Newest First
+                  </button>
+                </li>
+                <li>
+                  <button
+                    phx-click="sort"
+                    phx-value-field="inserted_at"
+                    phx-value-dir="asc"
+                    class={[@sort_by == :inserted_at && @sort_dir == :asc && "active"]}
+                  >
+                    Oldest First
+                  </button>
+                </li>
+                <li>
+                  <button
+                    phx-click="sort"
+                    phx-value-field="title"
+                    phx-value-dir="asc"
+                    class={[@sort_by == :title && @sort_dir == :asc && "active"]}
+                  >
+                    Name (A-Z)
+                  </button>
+                </li>
+                <li>
+                  <button
+                    phx-click="sort"
+                    phx-value-field="title"
+                    phx-value-dir="desc"
+                    class={[@sort_by == :title && @sort_dir == :desc && "active"]}
+                  >
+                    Name (Z-A)
+                  </button>
+                </li>
+              </ul>
+            </div>
+
+            <%!-- Upload button --%>
+            <button
+              type="button"
+              phx-click="show_upload_modal"
+              class="btn btn-primary btn-sm"
+              id="upload-document-btn"
+            >
+              <.icon name="hero-plus" class="w-4 h-4 mr-1" /> Upload
+            </button>
+          </div>
         </div>
 
         <div :if={@documents == []} class="text-center py-16">
@@ -89,6 +163,12 @@ defmodule DoctransWeb.DocumentLive.Index do
     </Layouts.app>
     """
   end
+
+  defp sort_label(:inserted_at, :desc), do: "Newest"
+  defp sort_label(:inserted_at, :asc), do: "Oldest"
+  defp sort_label(:title, :asc), do: "A-Z"
+  defp sort_label(:title, :desc), do: "Z-A"
+  defp sort_label(_, _), do: "Sort"
 
   defp document_card(assigns) do
     # Use pre-calculated progress from document map (set in mount/handle_info)
@@ -343,6 +423,22 @@ defmodule DoctransWeb.DocumentLive.Index do
   @impl true
   def handle_event("cancel_upload", %{"ref" => ref}, socket) do
     {:noreply, cancel_upload(socket, :pdf, ref)}
+  end
+
+  @impl true
+  def handle_event("sort", %{"field" => field, "dir" => dir}, socket) do
+    sort_by = String.to_existing_atom(field)
+    sort_dir = String.to_existing_atom(dir)
+
+    documents =
+      Documents.list_documents(sort_by: sort_by, sort_dir: sort_dir)
+      |> add_progress_to_documents()
+
+    {:noreply,
+     socket
+     |> assign(:sort_by, sort_by)
+     |> assign(:sort_dir, sort_dir)
+     |> assign(:documents, documents)}
   end
 
   @impl true

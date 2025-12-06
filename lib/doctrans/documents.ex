@@ -16,11 +16,21 @@ defmodule Doctrans.Documents do
   # ============================================================================
 
   @doc """
-  Returns the list of all documents, ordered by creation date (newest first).
+  Returns the list of all documents with optional sorting.
+
+  ## Options
+
+  - `:sort_by` - Field to sort by: `:inserted_at` (default) or `:title`
+  - `:sort_dir` - Sort direction: `:desc` (default) or `:asc`
   """
-  def list_documents do
+  def list_documents(opts \\ []) do
+    sort_by = Keyword.get(opts, :sort_by, :inserted_at)
+    sort_dir = Keyword.get(opts, :sort_dir, :desc)
+
+    order = [{sort_dir, sort_by}]
+
     Document
-    |> order_by(desc: :inserted_at)
+    |> order_by(^order)
     |> Repo.all()
     |> Repo.preload(pages: from(p in Page, order_by: p.page_number))
   end

@@ -27,6 +27,10 @@ defmodule Doctrans.Documents.Page do
     field :extraction_status, :string, default: "pending"
     field :translation_status, :string, default: "pending"
 
+    # Embedding field for semantic search (based on translated content)
+    field :embedding, Pgvector.Ecto.Vector
+    field :embedding_status, :string, default: "pending"
+
     belongs_to :document, Doctrans.Documents.Document
 
     timestamps()
@@ -64,5 +68,14 @@ defmodule Doctrans.Documents.Page do
     page
     |> cast(attrs, [:translated_markdown, :translation_status])
     |> validate_inclusion(:translation_status, @statuses)
+  end
+
+  @doc """
+  Changeset for updating embedding results.
+  """
+  def embedding_changeset(page, attrs) do
+    page
+    |> cast(attrs, [:embedding, :embedding_status])
+    |> validate_inclusion(:embedding_status, @statuses)
   end
 end

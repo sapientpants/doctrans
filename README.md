@@ -9,6 +9,8 @@ A Phoenix LiveView application for translating PDF documents using local AI mode
 - Split-screen document viewer (original page image | translated markdown)
 - Real-time progress updates via WebSocket
 - Progressive loading - view completed pages while processing continues
+- **Hybrid search** - semantic + keyword search across all pages
+- **Sorting** - sort documents by date or name
 
 ## Prerequisites
 
@@ -59,6 +61,9 @@ ollama pull qwen3-vl:8b
 
 # Text model for translation
 ollama pull ministral-3:14b
+
+# Embedding model for semantic search
+ollama pull qwen3-embedding:0.6b
 ```
 
 **Important:** Make sure Ollama is running before starting Doctrans:
@@ -124,6 +129,41 @@ config :doctrans, :uploads,
 ```elixir
 config :doctrans, :defaults,
   target_language: "en"   # English
+```
+
+### Embedding Settings
+
+```elixir
+config :doctrans, :embedding,
+  base_url: "http://localhost:11434",
+  model: "qwen3-embedding:0.6b",
+  timeout: 60_000
+```
+
+## Search and Sorting
+
+### Hybrid Search
+
+The dashboard includes a search feature that combines:
+- **Semantic search** - finds pages with similar meaning using AI embeddings
+- **Keyword search** - traditional text matching
+
+Search results link directly to the matching page within a document. Type in the search box and results will appear as you type.
+
+### Sorting
+
+Documents can be sorted by:
+- **Date uploaded** - newest or oldest first (default: newest)
+- **Name** - alphabetical A-Z or Z-A
+
+Use the Sort dropdown next to the search box to change the sort order.
+
+### Backfilling Embeddings
+
+If you have existing documents that were created before enabling search, you can generate embeddings for them:
+
+```bash
+mix backfill_embeddings
 ```
 
 ## Usage

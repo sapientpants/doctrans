@@ -16,6 +16,7 @@ defmodule Doctrans.Processing.Worker do
 
   alias Doctrans.Documents
   alias Doctrans.Processing.{PdfExtractor, Ollama}
+  alias Doctrans.Search.EmbeddingWorker
 
   @max_retries 3
 
@@ -429,6 +430,10 @@ defmodule Doctrans.Processing.Worker do
           })
 
         Documents.broadcast_page_update(page)
+
+        # Generate embedding for semantic search
+        EmbeddingWorker.generate_embedding(page.id)
+
         :ok
 
       {:error, reason} ->
