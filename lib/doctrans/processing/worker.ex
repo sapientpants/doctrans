@@ -15,10 +15,7 @@ defmodule Doctrans.Processing.Worker do
   require Logger
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.{Ollama, PdfExtractor}
-  alias Doctrans.Search.EmbeddingWorker
-
-  @max_retries 3
+  alias Doctrans.Processing.{LlmProcessor, PdfProcessor}
 
   # ============================================================================
   # Client API
@@ -107,7 +104,7 @@ defmodule Doctrans.Processing.Worker do
         # Busy, add to queue and update document status
         Logger.info("Document #{document_id} queued for LLM processing")
 
-        with document when not is_nil(document) <- Documents.get_document(document_id),
+        with %{} = document <- Documents.get_document(document_id),
              {:ok, document} <- Documents.update_document_status(document, "queued") do
           Documents.broadcast_document_update(document)
         end
@@ -212,71 +209,11 @@ defmodule Doctrans.Processing.Worker do
   end
 
   # ============================================================================
-  # PDF Extraction (runs immediately, not queued)
+  # PDF Extraction (delegated to PdfProcessor)
   # ============================================================================
 
   defp do_extract_pdf(document_id, pdf_path, cancelled_documents) do
-    if MapSet.member?(cancelled_documents, document_id) do
-      Logger.info("Document #{document_id} was cancelled, skipping PDF extraction")
-      # Clean up the PDF file
-      File.rm(pdf_path)
-      :cancelled
-    else
-      with {:ok, document} <- fetch_document(document_id),
-           :ok <- extract_pdf_pages(document, pdf_path) do
-        :ok
-      else
-        {:error, reason} ->
-          Logger.error("Failed to extract PDF for document #{document_id}: #{reason}")
-
-          case Documents.get_document(document_id) do
-            nil -> :ok
-            document -> Documents.update_document_status(document, "error", reason)
-          end
-
-          {:error, reason}
-      end
-    end
-  end
-
-  defp extract_pdf_pages(document, pdf_path) do
-    Logger.info("Extracting pages from PDF for document #{document.id}")
-
-    # Ensure directories exist
-    pages_dir = Documents.ensure_document_dirs!(document.id)
-
-    # Extract pages
-    case PdfExtractor.extract_pages(pdf_path, pages_dir) do
-      {:ok, page_count} ->
-        Logger.info("Extracted #{page_count} pages for document #{document.id}")
-
-        # Update document with page count
-        {:ok, document} = Documents.update_document(document, %{total_pages: page_count})
-
-        # Create page records
-        page_images = PdfExtractor.list_page_images(pages_dir)
-
-        page_attrs =
-          page_images
-          |> Enum.with_index(1)
-          |> Enum.map(fn {image_path, page_number} ->
-            relative_path = Path.relative_to(image_path, Documents.uploads_dir())
-            %{page_number: page_number, image_path: relative_path}
-          end)
-
-        Documents.create_pages(document, page_attrs)
-
-        # Delete the original PDF to save space
-        File.rm(pdf_path)
-
-        # Broadcast update with pages ready
-        Documents.broadcast_document_update(document)
-
-        :ok
-
-      {:error, reason} ->
-        {:error, "PDF extraction failed: #{reason}"}
-    end
+    PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents)
   end
 
   # ============================================================================
@@ -320,193 +257,10 @@ defmodule Doctrans.Processing.Worker do
   end
 
   # ============================================================================
-  # LLM Processing Logic
+  # LLM Processing Logic (delegated to LlmProcessor)
   # ============================================================================
 
   defp do_process_llm(document_id, cancelled_documents) do
-    if MapSet.member?(cancelled_documents, document_id) do
-      Logger.info("Document #{document_id} was cancelled, skipping LLM processing")
-      :ok
-    else
-      document_id
-      |> process_all_pages(cancelled_documents)
-      |> handle_llm_result(document_id)
-    end
-  end
-
-  defp handle_llm_result(:ok, document_id) do
-    document = Documents.get_document!(document_id)
-    Documents.update_document_status(document, "completed")
-    Documents.broadcast_document_update(document)
-    :ok
-  end
-
-  defp handle_llm_result({:cancelled, _}, document_id) do
-    Logger.info("Document #{document_id} LLM processing was cancelled")
-    :ok
-  end
-
-  defp handle_llm_result({:error, reason}, document_id) do
-    Logger.error("Failed to process LLM for document #{document_id}: #{reason}")
-    maybe_update_document_error(document_id, reason)
-    {:error, reason}
-  end
-
-  defp maybe_update_document_error(document_id, reason) do
-    case Documents.get_document(document_id) do
-      nil -> :ok
-      document -> Documents.update_document_status(document, "error", reason)
-    end
-  end
-
-  defp fetch_document(document_id) do
-    case Documents.get_document(document_id) do
-      nil -> {:error, "Document not found"}
-      document -> {:ok, document}
-    end
-  end
-
-  defp process_all_pages(document_id, cancelled_documents) do
-    process_next_page(document_id, cancelled_documents)
-  end
-
-  defp process_next_page(document_id, cancelled_documents) do
-    if MapSet.member?(cancelled_documents, document_id) do
-      {:cancelled, document_id}
-    else
-      find_and_process_next_page(document_id, cancelled_documents)
-    end
-  end
-
-  defp find_and_process_next_page(document_id, cancelled_documents) do
-    case Documents.get_next_page_for_extraction(document_id) do
-      nil -> find_translation_page(document_id, cancelled_documents)
-      page -> process_page_and_continue(page, document_id, cancelled_documents)
-    end
-  end
-
-  defp find_translation_page(document_id, cancelled_documents) do
-    if Documents.all_pages_completed?(document_id) do
-      :ok
-    else
-      case Documents.get_next_page_for_translation(document_id) do
-        nil -> :ok
-        page -> process_page_and_continue(page, document_id, cancelled_documents)
-      end
-    end
-  end
-
-  defp process_page_and_continue(page, document_id, cancelled_documents) do
-    case maybe_extract_page(page) do
-      {:error, reason} ->
-        {:error, reason}
-
-      updated_page ->
-        maybe_translate_and_continue(updated_page, document_id, cancelled_documents)
-    end
-  end
-
-  defp maybe_extract_page(%{extraction_status: "pending"} = page) do
-    case process_page_extraction(page) do
-      :ok -> Documents.get_page!(page.id)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp maybe_extract_page(page), do: page
-
-  defp maybe_translate_and_continue(page, document_id, cancelled_documents) do
-    if page.extraction_status == "completed" && page.translation_status == "pending" do
-      case process_page_translation(page) do
-        :ok -> process_next_page(document_id, cancelled_documents)
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      process_next_page(document_id, cancelled_documents)
-    end
-  end
-
-  defp process_page_extraction(page, retry_count \\ 0) do
-    Logger.info(
-      "Extracting markdown for page #{page.page_number} of document #{page.document_id}"
-    )
-
-    {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "processing"})
-    Documents.broadcast_page_update(page)
-
-    image_path = Path.join(Documents.uploads_dir(), page.image_path)
-
-    case Ollama.extract_markdown(image_path) do
-      {:ok, markdown} ->
-        {:ok, page} =
-          Documents.update_page_extraction(page, %{
-            original_markdown: markdown,
-            extraction_status: "completed"
-          })
-
-        Documents.broadcast_page_update(page)
-
-        # Generate embedding for semantic search
-        EmbeddingWorker.generate_embedding(page.id)
-
-        :ok
-
-      {:error, reason} ->
-        if retry_count < @max_retries do
-          Logger.warning(
-            "Extraction failed for page #{page.page_number}, retrying (#{retry_count + 1}/#{@max_retries})"
-          )
-
-          Process.sleep(1_000)
-          process_page_extraction(page, retry_count + 1)
-        else
-          Logger.error(
-            "Extraction failed for page #{page.page_number} after #{@max_retries} retries: #{reason}"
-          )
-
-          {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
-          Documents.broadcast_page_update(page)
-          {:error, "Page #{page.page_number} extraction failed: #{reason}"}
-        end
-    end
-  end
-
-  defp process_page_translation(page, retry_count \\ 0) do
-    Logger.info("Translating page #{page.page_number} of document #{page.document_id}")
-
-    {:ok, page} = Documents.update_page_translation(page, %{translation_status: "processing"})
-    Documents.broadcast_page_update(page)
-
-    document = Documents.get_document!(page.document_id)
-
-    case Ollama.translate(page.original_markdown, document.target_language) do
-      {:ok, translated} ->
-        {:ok, page} =
-          Documents.update_page_translation(page, %{
-            translated_markdown: translated,
-            translation_status: "completed"
-          })
-
-        Documents.broadcast_page_update(page)
-        :ok
-
-      {:error, reason} ->
-        if retry_count < @max_retries do
-          Logger.warning(
-            "Translation failed for page #{page.page_number}, retrying (#{retry_count + 1}/#{@max_retries})"
-          )
-
-          Process.sleep(1_000)
-          process_page_translation(page, retry_count + 1)
-        else
-          Logger.error(
-            "Translation failed for page #{page.page_number} after #{@max_retries} retries: #{reason}"
-          )
-
-          {:ok, page} = Documents.update_page_translation(page, %{translation_status: "error"})
-          Documents.broadcast_page_update(page)
-          {:error, "Page #{page.page_number} translation failed: #{reason}"}
-        end
-    end
+    LlmProcessor.process_document(document_id, cancelled_documents)
   end
 end

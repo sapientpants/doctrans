@@ -37,7 +37,7 @@ defmodule Doctrans.Processing.PdfExtractor do
 
     Logger.info("Extracting pages from #{pdf_path} to #{output_dir}")
 
-    case System.cmd("pdftoppm", args, stderr_to_stdout: true) do
+    case System.cmd("pdftoppm", args, stderr_to_stdout: true, env: []) do
       {_output, 0} ->
         # Count the generated files
         page_count = count_pages(output_dir)
@@ -54,7 +54,7 @@ defmodule Doctrans.Processing.PdfExtractor do
   Gets the number of pages in a PDF without extracting.
   """
   def get_page_count(pdf_path) do
-    case System.cmd("pdfinfo", [pdf_path], stderr_to_stdout: true) do
+    case System.cmd("pdfinfo", [pdf_path], stderr_to_stdout: true, env: []) do
       {output, 0} ->
         case Regex.run(~r/Pages:\s*(\d+)/, output) do
           [_, count] -> {:ok, String.to_integer(count)}

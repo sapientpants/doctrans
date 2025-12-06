@@ -1,14 +1,13 @@
 defmodule DoctransWeb.DocumentLive.Show do
-  @moduledoc """
-  Document Viewer LiveView with split-screen layout.
-
-  Shows the original page image on the left and the translated
-  markdown on the right. Supports progressive loading while
-  processing continues in the background.
-  """
+  @moduledoc "Document Viewer LiveView with split-screen layout."
   use DoctransWeb, :live_view
 
   alias Doctrans.Documents
+
+  import DoctransWeb.DocumentLive.Components,
+    only: [status_color: 1, status_text: 1, language_name: 1]
+
+  import DoctransWeb.DocumentLive.ViewerComponents
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -182,168 +181,11 @@ defmodule DoctransWeb.DocumentLive.Show do
     """
   end
 
-  defp page_selector(assigns) do
-    ~H"""
-    <div class="flex items-center gap-2">
-      <form phx-change="goto_page" id="page-selector-form">
-        <select
-          id="page-selector"
-          name="page"
-          class="select select-bordered select-sm w-24"
-        >
-          <option
-            :for={page_num <- 1..max(@total_pages, 1)}
-            value={page_num}
-            selected={page_num == @current_page}
-          >
-            {page_num}
-          </option>
-        </select>
-      </form>
-      <span class="text-sm text-base-content/70">/ {@total_pages}</span>
-    </div>
-    """
-  end
-
-  defp page_image(assigns) do
-    ~H"""
-    <div :if={@page && @page.image_path} class="transition-transform">
-      <img
-        src={"/uploads/#{@page.image_path}"}
-        alt="Page image"
-        class="shadow-lg rounded"
-        style={"transform: scale(#{@zoom_level / 100}); transform-origin: top center;"}
-      />
-    </div>
-    <div
-      :if={!@page || !@page.image_path}
-      class="flex flex-col items-center justify-center h-64 text-base-content/50"
-    >
-      <.icon name="hero-photo" class="w-16 h-16" />
-      <p class="mt-4">Page image not available</p>
-    </div>
-    """
-  end
-
-  defp page_content(assigns) do
-    ~H"""
-    <%!-- Processing state --%>
-    <div
-      :if={@page && @page.extraction_status == "processing"}
-      class="flex flex-col items-center justify-center h-64"
-    >
-      <span class="loading loading-spinner loading-lg text-primary"></span>
-      <p class="mt-4 text-base-content/70">Extracting text from page...</p>
-    </div>
-
-    <div
-      :if={
-        @page && @page.extraction_status == "completed" && @page.translation_status == "processing"
-      }
-      class="flex flex-col items-center justify-center h-64"
-    >
-      <span class="loading loading-spinner loading-lg text-primary"></span>
-      <p class="mt-4 text-base-content/70">Translating content...</p>
-    </div>
-
-    <%!-- Pending state --%>
-    <div
-      :if={@page && @page.extraction_status == "pending"}
-      class="flex flex-col items-center justify-center h-64 text-base-content/50"
-    >
-      <.icon name="hero-clock" class="w-16 h-16" />
-      <p class="mt-4">Waiting to process...</p>
-    </div>
-
-    <%!-- Error state --%>
-    <div
-      :if={@page && (@page.extraction_status == "error" || @page.translation_status == "error")}
-      class="flex flex-col items-center justify-center h-64 text-error"
-    >
-      <.icon name="hero-exclamation-triangle" class="w-16 h-16" />
-      <p class="mt-4">An error occurred processing this page</p>
-    </div>
-
-    <%!-- Content --%>
-    <div :if={@page && show_content?(@page, @show_original)} class="prose prose-sm max-w-none">
-      <.markdown_content content={get_content(@page, @show_original)} />
-    </div>
-
-    <%!-- No page --%>
-    <div :if={!@page} class="flex flex-col items-center justify-center h-64 text-base-content/50">
-      <.icon name="hero-document-text" class="w-16 h-16" />
-      <p class="mt-4">No page selected</p>
-    </div>
-    """
-  end
-
-  defp markdown_content(assigns) do
-    html = render_markdown(assigns.content || "")
-    assigns = assign(assigns, :html, html)
-
-    ~H"""
-    <div>{raw(@html)}</div>
-    """
-  end
-
-  defp render_markdown(nil), do: ""
-  defp render_markdown(""), do: ""
-
-  defp render_markdown(text) do
-    case Earmark.as_html(text) do
-      {:ok, html, _} -> html
-      {:error, html, _} -> html
-    end
-  end
-
-  defp show_content?(page, show_original) do
-    if show_original do
-      page.extraction_status == "completed" && page.original_markdown
-    else
-      page.translation_status == "completed" && page.translated_markdown
-    end
-  end
-
-  defp get_content(page, true), do: page.original_markdown
-  defp get_content(page, false), do: page.translated_markdown
-
   defp back_url("search", query) when is_binary(query) and query != "" do
     ~p"/search?q=#{query}"
   end
 
   defp back_url(_from, _query), do: ~p"/"
-
-  defp status_color("uploading"), do: "badge-info"
-  defp status_color("extracting"), do: "badge-info"
-  defp status_color("queued"), do: "badge-info"
-  defp status_color("processing"), do: "badge-warning"
-  defp status_color("completed"), do: "badge-success"
-  defp status_color("error"), do: "badge-error"
-  defp status_color(_), do: "badge-ghost"
-
-  defp status_text("uploading"), do: "Uploading"
-  defp status_text("extracting"), do: "Processing"
-  defp status_text("queued"), do: "Queued"
-  defp status_text("processing"), do: "Processing"
-  defp status_text("completed"), do: "Completed"
-  defp status_text("error"), do: "Error"
-  defp status_text(_), do: "Unknown"
-
-  defp language_name("de"), do: "German"
-  defp language_name("en"), do: "English"
-  defp language_name("fr"), do: "French"
-  defp language_name("es"), do: "Spanish"
-  defp language_name("it"), do: "Italian"
-  defp language_name("pt"), do: "Portuguese"
-  defp language_name("nl"), do: "Dutch"
-  defp language_name("pl"), do: "Polish"
-  defp language_name("ru"), do: "Russian"
-  defp language_name("zh"), do: "Chinese"
-  defp language_name("ja"), do: "Japanese"
-  defp language_name("ko"), do: "Korean"
-  defp language_name(code), do: code
-
-  # Event Handlers
 
   @impl true
   def handle_event("prev_page", _params, socket) do
