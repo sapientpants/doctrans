@@ -3,11 +3,12 @@ defmodule Doctrans.Processing.Worker do
   Background worker for processing documents.
 
   Handles the processing pipeline:
-  1. Extract page images from PDF
-  2. Extract markdown from each page using Qwen3-VL
-  3. Translate markdown using Qwen3
+  1. Extract page images from PDF (runs immediately, not queued)
+  2. Extract markdown from each page using Qwen3-VL (queued)
+  3. Translate markdown using Qwen3 (queued)
 
-  Processing is done sequentially to avoid overwhelming Ollama.
+  PDF extraction runs immediately for all documents to make thumbnails
+  available quickly. LLM processing is queued to avoid overwhelming Ollama.
   """
 
   use GenServer
@@ -29,11 +30,11 @@ defmodule Doctrans.Processing.Worker do
   @doc """
   Starts processing a document from an uploaded PDF.
 
-  The PDF will be extracted, then each page will be processed for
-  markdown extraction and translation.
+  PDF extraction happens immediately (not queued) to make thumbnails
+  available quickly. LLM processing is queued to run sequentially.
   """
   def process_document(document_id, pdf_path) do
-    GenServer.cast(__MODULE__, {:process_document, document_id, pdf_path})
+    GenServer.cast(__MODULE__, {:extract_pdf, document_id, pdf_path})
   end
 
   @doc """
@@ -59,7 +60,8 @@ defmodule Doctrans.Processing.Worker do
     state = %{
       current_document_id: nil,
       cancelled_documents: MapSet.new(),
-      task_ref: nil,
+      llm_task_ref: nil,
+      extraction_tasks: %{},
       queue: :queue.new()
     }
 
@@ -67,21 +69,41 @@ defmodule Doctrans.Processing.Worker do
   end
 
   @impl true
-  def handle_cast({:process_document, document_id, pdf_path}, state) do
-    if state.current_document_id == nil do
-      # Not busy, start processing immediately
-      {:noreply, start_processing(state, document_id, pdf_path)}
+  def handle_cast({:extract_pdf, document_id, pdf_path}, state) do
+    # PDF extraction runs immediately (not queued)
+    Logger.info("Starting PDF extraction for document #{document_id}")
+
+    task =
+      Task.Supervisor.async_nolink(
+        Doctrans.TaskSupervisor,
+        fn -> do_extract_pdf(document_id, pdf_path) end
+      )
+
+    extraction_tasks = Map.put(state.extraction_tasks, task.ref, document_id)
+    {:noreply, %{state | extraction_tasks: extraction_tasks}}
+  end
+
+  @impl true
+  def handle_cast({:queue_for_llm, document_id}, state) do
+    if MapSet.member?(state.cancelled_documents, document_id) do
+      Logger.info("Document #{document_id} was cancelled, not queueing for LLM")
+      {:noreply, state}
     else
-      # Busy, add to queue and update document status
-      Logger.info("Document #{document_id} queued for processing")
+      if state.current_document_id == nil do
+        # Not busy, start LLM processing immediately
+        {:noreply, start_llm_processing(state, document_id)}
+      else
+        # Busy, add to queue and update document status
+        Logger.info("Document #{document_id} queued for LLM processing")
 
-      with document when not is_nil(document) <- Documents.get_document(document_id),
-           {:ok, document} <- Documents.update_document_status(document, "queued") do
-        Documents.broadcast_document_update(document)
+        with document when not is_nil(document) <- Documents.get_document(document_id),
+             {:ok, document} <- Documents.update_document_status(document, "queued") do
+          Documents.broadcast_document_update(document)
+        end
+
+        queue = :queue.in(document_id, state.queue)
+        {:noreply, %{state | queue: queue}}
       end
-
-      queue = :queue.in({document_id, pdf_path}, state.queue)
-      {:noreply, %{state | queue: queue}}
     end
   end
 
@@ -96,51 +118,77 @@ defmodule Doctrans.Processing.Worker do
   def handle_call(:status, _from, state) do
     status = %{
       current_document_id: state.current_document_id,
-      queue_length: :queue.len(state.queue)
+      queue_length: :queue.len(state.queue),
+      extracting_count: map_size(state.extraction_tasks)
     }
 
     {:reply, status, state}
   end
 
+  # Handle PDF extraction task completion
   @impl true
-  def handle_info({ref, result}, %{task_ref: ref} = state) do
-    # Task completed, clean up the reference
+  def handle_info({ref, result}, state) when is_map_key(state.extraction_tasks, ref) do
+    Process.demonitor(ref, [:flush])
+    {document_id, extraction_tasks} = Map.pop(state.extraction_tasks, ref)
+
+    case result do
+      :ok ->
+        Logger.info("PDF extraction completed for document #{document_id}, queueing for LLM")
+        # Queue for LLM processing
+        GenServer.cast(self(), {:queue_for_llm, document_id})
+
+      {:error, reason} ->
+        Logger.error("PDF extraction failed for document #{document_id}: #{reason}")
+    end
+
+    {:noreply, %{state | extraction_tasks: extraction_tasks}}
+  end
+
+  # Handle LLM task completion
+  @impl true
+  def handle_info({ref, result}, %{llm_task_ref: ref} = state) do
     Process.demonitor(ref, [:flush])
 
     case result do
       :ok ->
-        Logger.info("Document #{state.current_document_id} processing completed successfully")
+        Logger.info("Document #{state.current_document_id} LLM processing completed")
 
       {:error, reason} ->
-        Logger.error("Document #{state.current_document_id} processing failed: #{reason}")
+        Logger.error("Document #{state.current_document_id} LLM processing failed: #{reason}")
     end
 
-    # Clear current and try next in queue
-    state = %{state | current_document_id: nil, task_ref: nil}
+    state = %{state | current_document_id: nil, llm_task_ref: nil}
     {:noreply, maybe_process_next(state)}
   end
 
+  # Handle extraction task crash
   @impl true
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{task_ref: ref} = state) do
-    Logger.error("Document processing task crashed: #{inspect(reason)}")
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state)
+      when is_map_key(state.extraction_tasks, ref) do
+    {document_id, extraction_tasks} = Map.pop(state.extraction_tasks, ref)
+    Logger.error("PDF extraction task crashed for document #{document_id}: #{inspect(reason)}")
 
-    # Mark the document as errored
+    case Documents.get_document(document_id) do
+      nil -> :ok
+      document -> Documents.update_document_status(document, "error", "Extraction crashed")
+    end
+
+    {:noreply, %{state | extraction_tasks: extraction_tasks}}
+  end
+
+  # Handle LLM task crash
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{llm_task_ref: ref} = state) do
+    Logger.error("LLM processing task crashed: #{inspect(reason)}")
+
     if state.current_document_id do
       case Documents.get_document(state.current_document_id) do
-        nil ->
-          :ok
-
-        document ->
-          Documents.update_document_status(
-            document,
-            "error",
-            "Processing crashed: #{inspect(reason)}"
-          )
+        nil -> :ok
+        document -> Documents.update_document_status(document, "error", "LLM processing crashed")
       end
     end
 
-    # Clear current and try next in queue
-    state = %{state | current_document_id: nil, task_ref: nil}
+    state = %{state | current_document_id: nil, llm_task_ref: nil}
     {:noreply, maybe_process_next(state)}
   end
 
@@ -150,19 +198,94 @@ defmodule Doctrans.Processing.Worker do
   end
 
   # ============================================================================
-  # Queue Management
+  # PDF Extraction (runs immediately, not queued)
   # ============================================================================
 
-  defp start_processing(state, document_id, pdf_path) do
-    Logger.info("Starting to process document #{document_id}")
+  defp do_extract_pdf(document_id, pdf_path) do
+    with {:ok, document} <- fetch_document(document_id),
+         :ok <- extract_pdf_pages(document, pdf_path) do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.error("Failed to extract PDF for document #{document_id}: #{reason}")
 
-    task =
-      Task.Supervisor.async_nolink(
-        Doctrans.TaskSupervisor,
-        fn -> do_process_document(document_id, pdf_path, state.cancelled_documents) end
-      )
+        case Documents.get_document(document_id) do
+          nil -> :ok
+          document -> Documents.update_document_status(document, "error", reason)
+        end
 
-    %{state | current_document_id: document_id, task_ref: task.ref}
+        {:error, reason}
+    end
+  end
+
+  defp extract_pdf_pages(document, pdf_path) do
+    Logger.info("Extracting pages from PDF for document #{document.id}")
+
+    # Update status to extracting
+    {:ok, document} = Documents.update_document_status(document, "extracting")
+    Documents.broadcast_document_update(document)
+
+    # Ensure directories exist
+    pages_dir = Documents.ensure_document_dirs!(document.id)
+
+    # Extract pages
+    case PdfExtractor.extract_pages(pdf_path, pages_dir) do
+      {:ok, page_count} ->
+        Logger.info("Extracted #{page_count} pages for document #{document.id}")
+
+        # Update document with page count
+        {:ok, document} = Documents.update_document(document, %{total_pages: page_count})
+
+        # Create page records
+        page_images = PdfExtractor.list_page_images(pages_dir)
+
+        page_attrs =
+          page_images
+          |> Enum.with_index(1)
+          |> Enum.map(fn {image_path, page_number} ->
+            relative_path = Path.relative_to(image_path, Documents.uploads_dir())
+            %{page_number: page_number, image_path: relative_path}
+          end)
+
+        Documents.create_pages(document, page_attrs)
+
+        # Delete the original PDF to save space
+        File.rm(pdf_path)
+
+        # Broadcast update with pages ready
+        Documents.broadcast_document_update(document)
+
+        :ok
+
+      {:error, reason} ->
+        {:error, "PDF extraction failed: #{reason}"}
+    end
+  end
+
+  # ============================================================================
+  # LLM Processing Queue
+  # ============================================================================
+
+  defp start_llm_processing(state, document_id) do
+    Logger.info("Starting LLM processing for document #{document_id}")
+
+    # Update status to processing
+    case Documents.get_document(document_id) do
+      nil ->
+        state
+
+      document ->
+        {:ok, document} = Documents.update_document_status(document, "processing")
+        Documents.broadcast_document_update(document)
+
+        task =
+          Task.Supervisor.async_nolink(
+            Doctrans.TaskSupervisor,
+            fn -> do_process_llm(document_id, state.cancelled_documents) end
+          )
+
+        %{state | current_document_id: document_id, llm_task_ref: task.ref}
+    end
   end
 
   defp maybe_process_next(state) do
@@ -170,28 +293,25 @@ defmodule Doctrans.Processing.Worker do
       {:empty, _queue} ->
         state
 
-      {{:value, {document_id, pdf_path}}, queue} ->
-        # Skip if cancelled
+      {{:value, document_id}, queue} ->
         if MapSet.member?(state.cancelled_documents, document_id) do
           maybe_process_next(%{state | queue: queue})
         else
-          start_processing(%{state | queue: queue}, document_id, pdf_path)
+          start_llm_processing(%{state | queue: queue}, document_id)
         end
     end
   end
 
   # ============================================================================
-  # Processing Logic
+  # LLM Processing Logic
   # ============================================================================
 
-  defp do_process_document(document_id, pdf_path, cancelled_documents) do
+  defp do_process_llm(document_id, cancelled_documents) do
     if MapSet.member?(cancelled_documents, document_id) do
-      Logger.info("Document #{document_id} was cancelled, skipping")
+      Logger.info("Document #{document_id} was cancelled, skipping LLM processing")
       :ok
     else
-      with {:ok, document} <- fetch_document(document_id),
-           :ok <- extract_pdf_pages(document, pdf_path, cancelled_documents),
-           :ok <- process_all_pages(document_id, cancelled_documents) do
+      with :ok <- process_all_pages(document_id, cancelled_documents) do
         # Mark document as completed
         document = Documents.get_document!(document_id)
         Documents.update_document_status(document, "completed")
@@ -199,11 +319,11 @@ defmodule Doctrans.Processing.Worker do
         :ok
       else
         {:cancelled, _} ->
-          Logger.info("Document #{document_id} processing was cancelled")
+          Logger.info("Document #{document_id} LLM processing was cancelled")
           :ok
 
         {:error, reason} ->
-          Logger.error("Failed to process document #{document_id}: #{reason}")
+          Logger.error("Failed to process LLM for document #{document_id}: #{reason}")
 
           case Documents.get_document(document_id) do
             nil -> :ok
@@ -222,60 +342,7 @@ defmodule Doctrans.Processing.Worker do
     end
   end
 
-  defp extract_pdf_pages(document, pdf_path, cancelled_documents) do
-    if MapSet.member?(cancelled_documents, document.id) do
-      {:cancelled, document.id}
-    else
-      Logger.info("Extracting pages from PDF for document #{document.id}")
-
-      # Update status to extracting
-      {:ok, document} = Documents.update_document_status(document, "extracting")
-      Documents.broadcast_document_update(document)
-
-      # Ensure directories exist
-      pages_dir = Documents.ensure_document_dirs!(document.id)
-
-      # Extract pages
-      case PdfExtractor.extract_pages(pdf_path, pages_dir) do
-        {:ok, page_count} ->
-          Logger.info("Extracted #{page_count} pages for document #{document.id}")
-
-          # Update document with page count
-          {:ok, document} = Documents.update_document(document, %{total_pages: page_count})
-
-          # Create page records
-          page_images = PdfExtractor.list_page_images(pages_dir)
-
-          page_attrs =
-            page_images
-            |> Enum.with_index(1)
-            |> Enum.map(fn {image_path, page_number} ->
-              # Store relative path from uploads dir
-              relative_path =
-                Path.relative_to(image_path, Documents.uploads_dir())
-
-              %{page_number: page_number, image_path: relative_path}
-            end)
-
-          Documents.create_pages(document, page_attrs)
-
-          # Delete the original PDF to save space
-          File.rm(pdf_path)
-
-          # Update status to processing
-          {:ok, document} = Documents.update_document_status(document, "processing")
-          Documents.broadcast_document_update(document)
-
-          :ok
-
-        {:error, reason} ->
-          {:error, "PDF extraction failed: #{reason}"}
-      end
-    end
-  end
-
   defp process_all_pages(document_id, cancelled_documents) do
-    # Process each page completely (extraction + translation) before moving to the next
     process_next_page(document_id, cancelled_documents)
   end
 
@@ -283,14 +350,11 @@ defmodule Doctrans.Processing.Worker do
     if MapSet.member?(cancelled_documents, document_id) do
       {:cancelled, document_id}
     else
-      # First check if there's a page that needs extraction
       case Documents.get_next_page_for_extraction(document_id) do
         nil ->
-          # No more pages to extract, check if all translations are done
           if Documents.all_pages_completed?(document_id) do
             :ok
           else
-            # There might be a page with completed extraction but pending translation
             case Documents.get_next_page_for_translation(document_id) do
               nil -> :ok
               page -> process_page_and_continue(page, document_id, cancelled_documents)
@@ -304,7 +368,6 @@ defmodule Doctrans.Processing.Worker do
   end
 
   defp process_page_and_continue(page, document_id, cancelled_documents) do
-    # Process extraction if needed
     page =
       if page.extraction_status == "pending" do
         case process_page_extraction(page) do
@@ -320,14 +383,12 @@ defmodule Doctrans.Processing.Worker do
         {:error, reason}
 
       page ->
-        # Process translation if extraction succeeded
         if page.extraction_status == "completed" && page.translation_status == "pending" do
           case process_page_translation(page) do
             :ok -> process_next_page(document_id, cancelled_documents)
             {:error, reason} -> {:error, reason}
           end
         else
-          # Move to next page
           process_next_page(document_id, cancelled_documents)
         end
     end
@@ -338,11 +399,9 @@ defmodule Doctrans.Processing.Worker do
       "Extracting markdown for page #{page.page_number} of document #{page.document_id}"
     )
 
-    # Mark as processing
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "processing"})
     Documents.broadcast_page_update(page)
 
-    # Get the full image path
     image_path = Path.join(Documents.uploads_dir(), page.image_path)
 
     case Ollama.extract_markdown(image_path) do
@@ -362,7 +421,6 @@ defmodule Doctrans.Processing.Worker do
             "Extraction failed for page #{page.page_number}, retrying (#{retry_count + 1}/#{@max_retries})"
           )
 
-          # Small delay before retry
           Process.sleep(1_000)
           process_page_extraction(page, retry_count + 1)
         else
@@ -370,9 +428,7 @@ defmodule Doctrans.Processing.Worker do
             "Extraction failed for page #{page.page_number} after #{@max_retries} retries: #{reason}"
           )
 
-          {:ok, page} =
-            Documents.update_page_extraction(page, %{extraction_status: "error"})
-
+          {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
           Documents.broadcast_page_update(page)
           {:error, "Page #{page.page_number} extraction failed: #{reason}"}
         end
@@ -382,11 +438,9 @@ defmodule Doctrans.Processing.Worker do
   defp process_page_translation(page, retry_count \\ 0) do
     Logger.info("Translating page #{page.page_number} of document #{page.document_id}")
 
-    # Mark as processing
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "processing"})
     Documents.broadcast_page_update(page)
 
-    # Get document for language info
     document = Documents.get_document!(page.document_id)
 
     case Ollama.translate(page.original_markdown, document.target_language) do
@@ -413,9 +467,7 @@ defmodule Doctrans.Processing.Worker do
             "Translation failed for page #{page.page_number} after #{@max_retries} retries: #{reason}"
           )
 
-          {:ok, page} =
-            Documents.update_page_translation(page, %{translation_status: "error"})
-
+          {:ok, page} = Documents.update_page_translation(page, %{translation_status: "error"})
           Documents.broadcast_page_update(page)
           {:error, "Page #{page.page_number} translation failed: #{reason}"}
         end
