@@ -9,184 +9,116 @@ A Phoenix LiveView application for translating PDF documents using local AI mode
 - Split-screen document viewer (original page image | translated markdown)
 - Real-time progress updates via WebSocket
 - Progressive loading - view completed pages while processing continues
-- **Hybrid search** - semantic + keyword search across all pages
-- **Sorting** - sort documents by date or name
+- Hybrid search - semantic + keyword search across all pages
+- Document sorting by date or name
 
 ## Prerequisites
 
-### System Dependencies
+- **Erlang** 27.0+
+- **Elixir** 1.18+
+- **PostgreSQL** 14+ with pgvector extension
+- **poppler-utils** - for PDF page extraction (`pdftoppm`)
+- **Ollama** - local AI model server
 
-1. **Erlang** 27.0 or later
-2. **Elixir** 1.18 or later
-3. **Node.js** 18 or later (for asset compilation)
-4. **PostgreSQL** 14 or later
-
-5. **poppler-utils** - Required for PDF page extraction (`pdftoppm` command)
-
-   ```bash
-   # macOS
-   brew install poppler
-
-   # Ubuntu/Debian
-   sudo apt-get install poppler-utils
-
-   # Fedora
-   sudo dnf install poppler-utils
-   ```
-
-   Verify installation:
-   ```bash
-   pdftoppm -v
-   ```
-
-6. **Ollama** - Local AI model server for running LLMs
-
-   ```bash
-   # macOS
-   brew install ollama
-
-   # Linux
-   curl -fsSL https://ollama.com/install.sh | sh
-
-   # Or download from https://ollama.ai
-   ```
-
-### Ollama Models
-
-Pull the required models before starting:
+### Installing poppler-utils
 
 ```bash
-# Vision model for OCR/text extraction from page images
-ollama pull qwen3-vl:8b
+# macOS
+brew install poppler
 
-# Text model for translation
-ollama pull ministral-3:14b
+# Ubuntu/Debian
+sudo apt-get install poppler-utils
 
-# Embedding model for semantic search
-ollama pull qwen3-embedding:0.6b
+# Fedora
+sudo dnf install poppler-utils
 ```
 
-**Important:** Make sure Ollama is running before starting Doctrans:
+### Installing Ollama
+
+```bash
+# macOS
+brew install ollama
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+### Required Ollama Models
+
+```bash
+ollama pull qwen3-vl:8b        # Vision model for OCR
+ollama pull ministral-3:14b     # Text model for translation
+ollama pull qwen3-embedding:0.6b # Embedding model for search
+```
+
+Ensure Ollama is running before starting Doctrans:
 
 ```bash
 ollama serve
 ```
 
-You can verify the models are available:
-```bash
-ollama list
-```
-
 ## Getting Started
 
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/sapientpants/doctrans.git
-   cd doctrans
-   ```
-
-2. **Install dependencies**
-
-   ```bash
-   mix setup
-   ```
-
-3. **Start the Phoenix server**
-
-   ```bash
-   mix phx.server
-   ```
-
-4. **Visit the application**
-
-   Open [http://localhost:4000](http://localhost:4000) in your browser.
-
-## Configuration
-
-Configuration options can be set in `config/config.exs` or via environment variables in `config/runtime.exs`:
-
-### Ollama Settings
-
-```elixir
-config :doctrans, :ollama,
-  base_url: "http://localhost:11434",
-  vision_model: "qwen3-vl:8b",
-  text_model: "ministral-3:14b",
-  timeout: 300_000  # 5 minutes
+```bash
+git clone https://github.com/sapientpants/doctrans.git
+cd doctrans
+mix setup
+mix phx.server
 ```
 
-### Upload Settings
+Visit [http://localhost:4000](http://localhost:4000) in your browser.
 
-```elixir
-config :doctrans, :uploads,
-  upload_dir: Path.expand("../priv/static/uploads", __DIR__),
-  max_file_size: 100_000_000  # 100MB
-```
+## Usage
 
-### Default Language
+1. Click **Upload** on the dashboard
+2. Drag and drop PDF files or click to browse
+3. Select target language
+4. Click **Start Translation**
 
-```elixir
-config :doctrans, :defaults,
-  target_language: "en"   # English
-```
+The document appears on the dashboard with a progress indicator. Click it to view completed pages while processing continues.
 
-### Embedding Settings
+### Search
 
-```elixir
-config :doctrans, :embedding,
-  base_url: "http://localhost:11434",
-  model: "qwen3-embedding:0.6b",
-  timeout: 60_000
-```
+Use the search input on the dashboard to find content across all documents. Search combines semantic similarity (AI embeddings) with keyword matching. Press Enter to see results, then click a result to jump directly to that page.
 
-## Search and Sorting
-
-### Hybrid Search
-
-The dashboard includes a search feature that combines:
-- **Semantic search** - finds pages with similar meaning using AI embeddings
-- **Keyword search** - traditional text matching
-
-Search results link directly to the matching page within a document. Type in the search box and results will appear as you type.
-
-### Sorting
-
-Documents can be sorted by:
-- **Date uploaded** - newest or oldest first (default: newest)
-- **Name** - alphabetical A-Z or Z-A
-
-Use the Sort dropdown next to the search box to change the sort order.
-
-### Backfilling Embeddings
-
-If you have existing documents that were created before enabling search, you can generate embeddings for them:
+For existing documents created before search was enabled:
 
 ```bash
 mix backfill_embeddings
 ```
 
-## Usage
+## Configuration
 
-1. Click **Upload Document** on the dashboard
-2. Drag and drop a PDF or click to browse
-3. Enter a title (auto-filled from filename)
-4. Select target language (source language is auto-detected)
-5. Click **Start Translation**
+Configuration in `config/config.exs`:
 
-The document will appear on the dashboard with a progress indicator. Click on it to view completed pages in the split-screen viewer while processing continues in the background.
+```elixir
+# Ollama settings
+config :doctrans, :ollama,
+  base_url: "http://localhost:11434",
+  vision_model: "qwen3-vl:8b",
+  text_model: "ministral-3:14b",
+  timeout: 300_000
+
+# Embedding settings
+config :doctrans, :embedding,
+  model: "qwen3-embedding:0.6b",
+  timeout: 60_000
+
+# Upload settings
+config :doctrans, :uploads,
+  max_file_size: 100_000_000  # 100MB
+
+# Default target language
+config :doctrans, :defaults,
+  target_language: "en"
+```
 
 ## Development
 
 ```bash
-# Run tests
-mix test
-
-# Run precommit checks (compile, format, test)
-mix precommit
-
-# Start interactive console
-iex -S mix phx.server
+mix test           # Run tests
+mix precommit      # Compile, format, test
+iex -S mix phx.server  # Interactive console
 ```
 
 ## License
