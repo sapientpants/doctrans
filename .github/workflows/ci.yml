@@ -72,7 +72,7 @@ jobs:
             ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: Restore Dialyzer PLT cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: priv/plts
           key: ${{ runner.os }}-plt-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
@@ -109,3 +109,10 @@ jobs:
             deps
             _build
           key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+
+      - name: Save Dialyzer PLT cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-plt-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
