@@ -5,7 +5,19 @@
 default_language_version:
   python: python3
 
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
 repos:
+  # Conventional commit message validation (scope required)
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [--force-scope, feat, fix, docs, style, refactor, test, chore, build, ci, perf, revert]
+
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
