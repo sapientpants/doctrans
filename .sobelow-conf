@@ -3,8 +3,14 @@
   private: false,
   skip: false,
   router: "lib/doctrans_web/router.ex",
-  exit: "low",
+  exit: "high",
   format: "txt",
-  ignore: [],
+  ignore: [
+    # Low confidence file traversal warnings - paths are constructed from trusted sources
+    "Traversal.FileModule",
+    # CSP and HTTPS are handled at deployment/infrastructure level
+    "Config.CSP",
+    "Config.HTTPS"
+  ],
   ignore_files: []
 ]

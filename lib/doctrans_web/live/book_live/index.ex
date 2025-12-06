@@ -462,27 +462,8 @@ defmodule DoctransWeb.DocumentLive.Index do
 
       files ->
         # Create a document for each uploaded file
-        Enum.each(files, fn {document_id, original_filename, pdf_path} ->
-          title =
-            original_filename
-            |> Path.basename(".pdf")
-            |> String.replace(~r/[_-]+/, " ")
-
-          case Documents.create_document(%{
-                 id: document_id,
-                 title: title,
-                 original_filename: original_filename,
-                 target_language: target_language,
-                 status: "uploading"
-               }) do
-            {:ok, document} ->
-              Logger.info("Subscribing to new document:#{document.id}")
-              Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document.id}")
-              Worker.process_document(document.id, pdf_path)
-
-            {:error, _changeset} ->
-              File.rm(pdf_path)
-          end
+        Enum.each(files, fn file_info ->
+          create_and_process_document(file_info, target_language)
         end)
 
         file_count = length(files)
@@ -518,6 +499,30 @@ defmodule DoctransWeb.DocumentLive.Index do
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to delete document")}
+    end
+  end
+
+  # Helper to create a document and start processing
+  defp create_and_process_document({document_id, original_filename, pdf_path}, target_language) do
+    title =
+      original_filename
+      |> Path.basename(".pdf")
+      |> String.replace(~r/[_-]+/, " ")
+
+    case Documents.create_document(%{
+           id: document_id,
+           title: title,
+           original_filename: original_filename,
+           target_language: target_language,
+           status: "uploading"
+         }) do
+      {:ok, document} ->
+        Logger.info("Subscribing to new document:#{document.id}")
+        Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document.id}")
+        Worker.process_document(document.id, pdf_path)
+
+      {:error, _changeset} ->
+        File.rm(pdf_path)
     end
   end
 
