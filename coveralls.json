@@ -8,6 +8,7 @@
     "lib/doctrans/repo.ex",
     "lib/doctrans/application.ex",
     "lib/doctrans/processing/",
+    "lib/doctrans/search.ex",
     "lib/doctrans/search/embedding.ex",
     "lib/doctrans/search/embedding_worker.ex",
     "lib/doctrans_web/components/form_components.ex",
