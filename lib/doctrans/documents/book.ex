@@ -5,6 +5,7 @@ defmodule Doctrans.Documents.Document do
   ## Statuses
 
   - `uploading` - PDF is being uploaded
+  - `queued` - Waiting for another document to finish processing
   - `extracting` - Extracting page images from PDF
   - `processing` - Extracting markdown and translating pages
   - `completed` - All pages have been translated
@@ -13,7 +14,7 @@ defmodule Doctrans.Documents.Document do
   use Doctrans.Schema
   import Ecto.Changeset
 
-  @statuses ~w(uploading extracting processing completed error)
+  @statuses ~w(uploading queued extracting processing completed error)
 
   schema "documents" do
     field :title, :string

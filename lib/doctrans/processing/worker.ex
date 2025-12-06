@@ -59,7 +59,8 @@ defmodule Doctrans.Processing.Worker do
     state = %{
       current_document_id: nil,
       cancelled_documents: MapSet.new(),
-      task_ref: nil
+      task_ref: nil,
+      queue: :queue.new()
     }
 
     {:ok, state}
@@ -67,16 +68,21 @@ defmodule Doctrans.Processing.Worker do
 
   @impl true
   def handle_cast({:process_document, document_id, pdf_path}, state) do
-    Logger.info("Starting to process document #{document_id}")
+    if state.current_document_id == nil do
+      # Not busy, start processing immediately
+      {:noreply, start_processing(state, document_id, pdf_path)}
+    else
+      # Busy, add to queue and update document status
+      Logger.info("Document #{document_id} queued for processing")
 
-    # Start the processing task
-    task =
-      Task.Supervisor.async_nolink(
-        Doctrans.TaskSupervisor,
-        fn -> do_process_document(document_id, pdf_path, state.cancelled_documents) end
-      )
+      with document when not is_nil(document) <- Documents.get_document(document_id),
+           {:ok, document} <- Documents.update_document_status(document, "queued") do
+        Documents.broadcast_document_update(document)
+      end
 
-    {:noreply, %{state | current_document_id: document_id, task_ref: task.ref}}
+      queue = :queue.in({document_id, pdf_path}, state.queue)
+      {:noreply, %{state | queue: queue}}
+    end
   end
 
   @impl true
@@ -88,7 +94,12 @@ defmodule Doctrans.Processing.Worker do
 
   @impl true
   def handle_call(:status, _from, state) do
-    {:reply, %{current_document_id: state.current_document_id}, state}
+    status = %{
+      current_document_id: state.current_document_id,
+      queue_length: :queue.len(state.queue)
+    }
+
+    {:reply, status, state}
   end
 
   @impl true
@@ -104,7 +115,9 @@ defmodule Doctrans.Processing.Worker do
         Logger.error("Document #{state.current_document_id} processing failed: #{reason}")
     end
 
-    {:noreply, %{state | current_document_id: nil, task_ref: nil}}
+    # Clear current and try next in queue
+    state = %{state | current_document_id: nil, task_ref: nil}
+    {:noreply, maybe_process_next(state)}
   end
 
   @impl true
@@ -126,12 +139,45 @@ defmodule Doctrans.Processing.Worker do
       end
     end
 
-    {:noreply, %{state | current_document_id: nil, task_ref: nil}}
+    # Clear current and try next in queue
+    state = %{state | current_document_id: nil, task_ref: nil}
+    {:noreply, maybe_process_next(state)}
   end
 
   @impl true
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  # ============================================================================
+  # Queue Management
+  # ============================================================================
+
+  defp start_processing(state, document_id, pdf_path) do
+    Logger.info("Starting to process document #{document_id}")
+
+    task =
+      Task.Supervisor.async_nolink(
+        Doctrans.TaskSupervisor,
+        fn -> do_process_document(document_id, pdf_path, state.cancelled_documents) end
+      )
+
+    %{state | current_document_id: document_id, task_ref: task.ref}
+  end
+
+  defp maybe_process_next(state) do
+    case :queue.out(state.queue) do
+      {:empty, _queue} ->
+        state
+
+      {{:value, {document_id, pdf_path}}, queue} ->
+        # Skip if cancelled
+        if MapSet.member?(state.cancelled_documents, document_id) do
+          maybe_process_next(%{state | queue: queue})
+        else
+          start_processing(%{state | queue: queue}, document_id, pdf_path)
+        end
+    end
   end
 
   # ============================================================================
