@@ -5,7 +5,7 @@
 
 version: 2
 updates:
-  - package-ecosystem: "hex" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "hex"
+    directory: "/"
     schedule:
       interval: "weekly"

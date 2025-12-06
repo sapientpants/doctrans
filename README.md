@@ -1,6 +1,8 @@
 # Doctrans
 
-A Phoenix LiveView application for translating PDF documents using local AI models via Ollama. Upload a PDF, and Doctrans will extract each page as an image, use a vision model to extract text as Markdown, and then translate it to your target language.
+A Phoenix LiveView application for translating PDF documents using local AI models via
+Ollama. Upload a PDF, and Doctrans will extract each page as an image, use a vision model
+to extract text as Markdown, and then translate it to your target language.
 
 ## Features
 
@@ -79,7 +81,9 @@ The document appears on the dashboard with a progress indicator. Click it to vie
 
 ### Search
 
-Use the search input on the dashboard to find content across all documents. Search combines semantic similarity (AI embeddings) with keyword matching. Press Enter to see results, then click a result to jump directly to that page.
+Use the search input on the dashboard to find content across all documents. Search combines
+semantic similarity (AI embeddings) with keyword matching. Press Enter to see results, then
+click a result to jump directly to that page.
 
 ## Configuration
 
