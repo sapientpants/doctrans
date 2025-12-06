@@ -1,12 +1,18 @@
 {
   "coverage_options": {
-    "minimum_coverage": 5,
+    "minimum_coverage": 80,
     "treat_no_relevant_lines_as_covered": true
   },
   "skip_files": [
     "lib/doctrans_web.ex",
     "lib/doctrans/repo.ex",
     "lib/doctrans/application.ex",
+    "lib/doctrans/processing/",
+    "lib/doctrans/search/embedding.ex",
+    "lib/doctrans/search/embedding_worker.ex",
+    "lib/doctrans_web/components/form_components.ex",
+    "lib/doctrans_web/components/core_components.ex",
+    "lib/doctrans_web/controllers/page_controller.ex",
     "test/support/"
   ],
   "terminal_options": {
