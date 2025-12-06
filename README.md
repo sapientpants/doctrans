@@ -138,6 +138,29 @@ Hooks run automatically on commit, or manually with:
 pre-commit run --all-files
 ```
 
+### Commit Message Format
+
+This project enforces [Conventional Commits](https://conventionalcommits.org/). All commit
+messages must follow this format:
+
+```text
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+**Allowed types:** `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `build`, `ci`,
+`perf`, `revert`
+
+**Scope is required.** Examples:
+
+- `feat(auth): add user login`
+- `fix(api): resolve timeout issue`
+- `docs(readme): update setup instructions`
+- `test(pipeline): add integration tests`
+
 ### CI/CD
 
 GitHub Actions runs on every push and PR to `main`:
