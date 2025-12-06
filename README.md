@@ -81,12 +81,6 @@ The document appears on the dashboard with a progress indicator. Click it to vie
 
 Use the search input on the dashboard to find content across all documents. Search combines semantic similarity (AI embeddings) with keyword matching. Press Enter to see results, then click a result to jump directly to that page.
 
-For existing documents created before search was enabled:
-
-```bash
-mix backfill_embeddings
-```
-
 ## Configuration
 
 Configuration in `config/config.exs`:
