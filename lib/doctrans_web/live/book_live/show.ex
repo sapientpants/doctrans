@@ -61,7 +61,7 @@ defmodule DoctransWeb.DocumentLive.Show do
             </div>
           </div>
 
-          <div class="flex items-center gap-2 mr-4">
+          <div class="flex items-center gap-2">
             <.page_selector
               current_page={@current_page_number}
               total_pages={@document.total_pages || 0}
@@ -102,7 +102,7 @@ defmodule DoctransWeb.DocumentLive.Show do
           </div>
 
           <%!-- Right panel - Translated content --%>
-          <div class="w-1/2 flex flex-col mr-4">
+          <div class="w-1/2 flex flex-col">
             <div class="flex items-center justify-between px-4 py-2 border-b border-base-300">
               <span class="text-sm font-medium">
                 {if @show_original, do: "Original Markdown", else: "Translated Content"}
