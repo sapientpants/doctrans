@@ -1,10 +1,11 @@
 import Config
 
 # Configure your database
+# DATABASE_HOST env var allows overriding for Docker (e.g., "db" for docker-compose)
 config :doctrans, Doctrans.Repo,
   username: "postgres",
   password: "postgres",
-  hostname: "localhost",
+  hostname: System.get_env("DATABASE_HOST", "localhost"),
   database: "doctrans_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
@@ -19,8 +20,11 @@ config :doctrans, Doctrans.Repo,
 # to bundle .js and .css sources.
 config :doctrans, DoctransWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
-  # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
-  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4000")],
+  # When DATABASE_HOST is set (Docker), bind to all interfaces to allow access from host.
+  http: [
+    ip: if(System.get_env("DATABASE_HOST"), do: {0, 0, 0, 0}, else: {127, 0, 0, 1}),
+    port: String.to_integer(System.get_env("PORT") || "4000")
+  ],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,

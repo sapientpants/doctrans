@@ -1,0 +1,52 @@
+# Development Dockerfile for Phoenix LiveView with hot reload
+FROM elixir:1.18-otp-27
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    inotify-tools \
+    git \
+    curl \
+    postgresql-client \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js (required for esbuild and tailwind)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up working directory
+WORKDIR /app
+
+# Install hex and rebar
+RUN mix local.hex --force && \
+    mix local.rebar --force
+
+# Set development environment
+ENV MIX_ENV=dev
+
+# Copy mix files first for better caching
+COPY mix.exs mix.lock ./
+
+# Install dependencies
+RUN mix deps.get
+
+# Copy config files
+COPY config config
+
+# Copy the rest of the application
+COPY . .
+
+# Compile the project
+RUN mix compile
+
+# Copy and set up entrypoint
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Expose the Phoenix port
+EXPOSE 4000
+
+# Run entrypoint script
+ENTRYPOINT ["docker-entrypoint.sh"]
