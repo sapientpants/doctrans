@@ -76,19 +76,9 @@ defmodule Doctrans.Processing.PdfExtractor do
     # The number of digits depends on the total page count
     pattern = Path.join(output_dir, "page-*.png")
 
-    case Path.wildcard(pattern) do
-      [] ->
-        nil
-
-      files ->
-        # Find the file matching the page number
-        Enum.find(files, fn file ->
-          case extract_page_number(file) do
-            ^page_number -> true
-            _ -> false
-          end
-        end)
-    end
+    pattern
+    |> Path.wildcard()
+    |> Enum.find(&(extract_page_number(&1) == page_number))
   end
 
   @doc """

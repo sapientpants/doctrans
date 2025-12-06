@@ -9,8 +9,8 @@ defmodule Doctrans.Search.EmbeddingWorker do
   use GenServer
   require Logger
 
-  alias Doctrans.Repo
   alias Doctrans.Documents.Page
+  alias Doctrans.Repo
   alias Doctrans.Search.Embedding
 
   def start_link(opts) do

@@ -1,0 +1,142 @@
+# Pre-commit configuration for comprehensive code quality checks
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+
+default_language_version:
+  python: python3
+
+repos:
+  # General pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Security and safety checks (fast)
+      - id: detect-private-key
+        name: Detect private keys
+      - id: check-added-large-files
+        name: Check for large files
+        args: ['--maxkb=500']
+
+      # File format validation (fast)
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+        exclude: ^lib/doctrans_web/live/.*\.ex$  # Exclude LiveView files (contain HEEx, formatter handles them)
+      - id: end-of-file-fixer
+        name: Fix end of files
+        exclude: \.(ex|exs|heex)$  # Exclude Elixir files (formatter handles them)
+      - id: check-yaml
+        name: Validate YAML files
+        exclude: ^\.github/workflows/  # GitHub Actions YAML can have template syntax
+      - id: check-json
+        name: Validate JSON files
+        exclude: tsconfig\.json$  # TypeScript config allows comments
+      - id: check-toml
+        name: Validate TOML files
+      - id: check-xml
+        name: Validate XML files
+
+      # Merge conflict markers
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+
+      # Git checks
+      - id: check-case-conflict
+        name: Check for case conflicts in filenames
+      - id: mixed-line-ending
+        name: Check for mixed line endings
+
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        name: Lint YAML files
+        args: [--strict, --config-data, '{extends: default, rules: {line-length: {max: 120}, document-start: disable}}']
+        exclude: ^\.github/workflows/  # Skip GitHub Actions workflows
+
+  # Markdown linting
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.15.0
+    hooks:
+      - id: markdownlint-cli2
+        name: Lint Markdown files
+
+  # GitHub Actions workflow validation
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.29.4
+    hooks:
+      - id: check-github-workflows
+        name: Validate GitHub Actions workflows
+        args: ["--verbose"]
+
+  # Elixir hooks
+  - repo: local
+    hooks:
+      # 1. Security audit (fast - runs first for quick feedback on vulnerabilities)
+      - id: hex-audit
+        name: Hex security audit
+        entry: mix hex.audit
+        language: system
+        pass_filenames: false
+        files: ^(mix\.exs|mix\.lock)$
+
+      # 2. Code formatting check (fast - easy to fix)
+      - id: mix-format
+        name: Mix format check
+        entry: mix format --check-formatted
+        language: system
+        types: [elixir]
+        pass_filenames: false
+
+      # 3. Compilation with warnings as errors (medium speed)
+      - id: mix-compile
+        name: Mix compile with warnings as errors
+        entry: mix compile --warning-as-errors --all-warnings
+        language: system
+        pass_filenames: false
+        files: ^(lib/|test/|config/|mix\.exs)
+
+      # 4. Static code analysis with Credo (medium speed)
+      - id: credo
+        name: Credo strict mode
+        entry: mix credo --strict
+        language: system
+        pass_filenames: false
+        files: ^(lib/|test/).*\.ex$
+
+      # 5. Security-focused static analysis (medium speed)
+      - id: sobelow
+        name: Sobelow security analysis
+        entry: mix sobelow --config
+        language: system
+        pass_filenames: false
+        files: ^(lib/|config/)
+
+      # 6. Test suite with coverage (slow - runs last)
+      - id: mix-test-coverage
+        name: Mix test with 80% coverage
+        entry: bash -c 'MIX_ENV=test mix coveralls'
+        language: system
+        pass_filenames: false
+        files: ^(lib/|test/).*\.ex[s]?$
+
+      # 7. Clean up unused dependencies (fast cleanup task)
+      - id: mix-deps-unlock
+        name: Unlock unused dependencies
+        entry: mix deps.unlock --unused
+        language: system
+        pass_filenames: false
+        files: ^mix\.lock$
+
+# Configuration for pre-commit.ci (if using the service)
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false

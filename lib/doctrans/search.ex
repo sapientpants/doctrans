@@ -7,8 +7,9 @@ defmodule Doctrans.Search do
   """
 
   import Ecto.Query
-  alias Doctrans.Repo
+
   alias Doctrans.Documents.{Document, Page}
+  alias Doctrans.Repo
   alias Doctrans.Search.Embedding
 
   @doc """

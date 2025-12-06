@@ -110,10 +110,38 @@ config :doctrans, :defaults,
 ## Development
 
 ```bash
-mix test           # Run tests
-mix precommit      # Compile, format, test
-iex -S mix phx.server  # Interactive console
+mix test              # Run tests
+mix precommit         # Run all checks (compile, format, credo, sobelow, test)
+mix credo --strict    # Static code analysis
+mix sobelow --config  # Security analysis
+mix dialyzer          # Type checking (first run builds PLT)
+mix coveralls.html    # Test coverage report
+iex -S mix phx.server # Interactive console
 ```
+
+### Pre-commit Hooks
+
+This project uses [pre-commit](https://pre-commit.com/) for automated git hooks:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Hooks run automatically on commit, or manually with:
+
+```bash
+pre-commit run --all-files
+```
+
+### CI/CD
+
+GitHub Actions runs on every push and PR to `main`:
+
+- Pre-commit hooks (formatting, linting, security checks)
+- Full test suite with 80% coverage requirement
+- Dialyzer type checking
+- Uncommitted changes detection
 
 ## License
 

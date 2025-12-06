@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  verify:
+    name: Run Pre-commit Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: doctrans_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      MIX_ENV: test
+
+    strategy:
+      matrix:
+        elixir: ['1.18.2']
+        otp: ['27.2']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - name: Set up Python for pre-commit
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Restore pre-commit cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-
+
+      - name: Restore dependencies cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - name: Restore Dialyzer PLT cache
+        uses: actions/cache/restore@v4
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-plt-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-plt-v2-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile dependencies
+        run: mix deps.compile
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
+
+      - name: Run Dialyzer
+        run: mix dialyzer --format github
+
+      - name: Check for uncommitted changes
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "Uncommitted changes detected after precommit:"
+            git diff
+            echo ""
+            echo "Please run 'mix precommit' locally and commit any changes."
+            exit 1
+          fi
+
+      - name: Save dependencies cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+
+      - name: Save Dialyzer PLT cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-plt-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}

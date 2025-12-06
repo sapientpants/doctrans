@@ -8,8 +8,9 @@ defmodule Doctrans.Documents do
   require Logger
 
   import Ecto.Query
-  alias Doctrans.Repo
+
   alias Doctrans.Documents.{Document, Page}
+  alias Doctrans.Repo
 
   # ============================================================================
   # Documents
