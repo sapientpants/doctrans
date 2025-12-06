@@ -184,14 +184,14 @@ defmodule DoctransWeb.DocumentLive.Index do
         <form phx-submit="upload_document" phx-change="validate_upload" id="upload-form">
           <div class="form-control mb-4">
             <label class="label">
-              <span class="label-text">PDF File</span>
+              <span class="label-text">PDF Files</span>
             </label>
             <div
-              class="border-2 border-dashed border-base-300 rounded-lg p-8 text-center hover:border-primary transition-colors"
+              class="border-2 border-dashed border-base-300 rounded-lg p-4 text-center hover:border-primary transition-colors"
               phx-drop-target={@uploads.pdf.ref}
             >
               <.live_file_input upload={@uploads.pdf} class="hidden" />
-              <div :if={@uploads.pdf.entries == []}>
+              <div :if={@uploads.pdf.entries == []} class="py-4">
                 <.icon name="hero-cloud-arrow-up" class="w-12 h-12 mx-auto text-base-content/50" />
                 <p class="mt-2 text-sm text-base-content/70">
                   Drag and drop PDF files here, or
@@ -201,20 +201,35 @@ defmodule DoctransWeb.DocumentLive.Index do
                 </p>
                 <p class="mt-1 text-xs text-base-content/50">Up to 10 files at once</p>
               </div>
-              <div :for={entry <- @uploads.pdf.entries} class="flex items-center gap-2">
-                <.icon name="hero-document" class="w-8 h-8 text-primary" />
-                <div class="flex-1 text-left">
-                  <p class="font-medium truncate">{entry.client_name}</p>
-                  <progress class="progress progress-primary w-full" value={entry.progress} max="100" />
-                </div>
-                <button
-                  type="button"
-                  phx-click="cancel_upload"
-                  phx-value-ref={entry.ref}
-                  class="btn btn-ghost btn-sm"
+              <div :if={@uploads.pdf.entries != []} class="space-y-2">
+                <div
+                  :for={entry <- @uploads.pdf.entries}
+                  class="flex items-center gap-2 bg-base-200 rounded-lg p-2"
                 >
-                  <.icon name="hero-x-mark" class="w-4 h-4" />
-                </button>
+                  <.icon name="hero-document" class="w-6 h-6 text-primary shrink-0" />
+                  <div class="flex-1 text-left min-w-0">
+                    <p class="text-sm font-medium truncate">{entry.client_name}</p>
+                    <progress
+                      class="progress progress-primary w-full h-1"
+                      value={entry.progress}
+                      max="100"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    phx-click="cancel_upload"
+                    phx-value-ref={entry.ref}
+                    class="btn btn-ghost btn-xs"
+                  >
+                    <.icon name="hero-x-mark" class="w-4 h-4" />
+                  </button>
+                </div>
+                <label
+                  for={@uploads.pdf.ref}
+                  class="block text-xs text-base-content/50 cursor-pointer hover:text-primary mt-2"
+                >
+                  + Add more files
+                </label>
               </div>
               <.upload_error :for={err <- upload_errors(@uploads.pdf)} error={err} />
             </div>
