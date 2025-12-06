@@ -45,3 +45,6 @@ npm-debug.log
 # Excoveralls artifacts
 /coveralls.json
 
+# Claude Code local settings (user-specific)
+.claude/settings.local.json
+
