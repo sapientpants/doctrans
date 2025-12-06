@@ -12,7 +12,7 @@ defmodule Doctrans.MixProject do
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
-      test_coverage: [tool: ExCoveralls],
+      test_coverage: [tool: ExCoveralls, minimum_coverage: 80],
       preferred_cli_env: [
         coveralls: :test,
         "coveralls.detail": :test,
