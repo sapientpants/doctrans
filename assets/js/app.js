@@ -35,7 +35,7 @@ const Hooks = {
         setTimeout(() => {
           this.el.remove()
         }, 300)
-      }, 2000)
+      }, 5000)
     }
   }
 }
