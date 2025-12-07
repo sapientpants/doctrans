@@ -347,11 +347,16 @@ defmodule Doctrans.Processing.Worker do
     if state.current_document_id do
       document_id = state.current_document_id
 
+      Logger.debug(
+        "Checking document completion for #{document_id}, page_queue_len=#{:queue.len(state.page_queue)}"
+      )
+
       if Documents.all_pages_completed?(document_id) do
         Logger.info("Document #{document_id} fully processed")
         mark_document_completed(document_id)
         start_next_document(%{state | current_document_id: nil})
       else
+        Logger.debug("Document #{document_id} not yet complete, waiting for more pages")
         # More pages might come from extraction, wait
         state
       end
