@@ -77,7 +77,12 @@ defmodule Doctrans.Processing.Ollama do
           model: model,
           prompt: prompt,
           images: [image_base64],
-          stream: false
+          stream: false,
+          options: %{
+            # Allow up to 16K tokens for extraction - tables of contents and dense
+            # pages can have a lot of text. Default limits may truncate output.
+            num_predict: 16_384
+          }
         }
 
         make_request("/api/generate", body, timeout)
@@ -140,7 +145,11 @@ defmodule Doctrans.Processing.Ollama do
     body = %{
       model: model,
       prompt: prompt,
-      stream: false
+      stream: false,
+      options: %{
+        # Allow up to 16K tokens for translation - must handle full page content
+        num_predict: 16_384
+      }
     }
 
     make_request("/api/generate", body, timeout)
