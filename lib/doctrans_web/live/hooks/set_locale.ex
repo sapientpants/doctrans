@@ -14,7 +14,7 @@ defmodule DoctransWeb.Live.Hooks.SetLocale do
 
   def on_mount(:default, _params, session, socket) do
     locale = get_locale(session)
-    Gettext.put_locale(DoctransWeb.Gettext, locale)
+    _previous_locale = Gettext.put_locale(DoctransWeb.Gettext, locale)
     {:cont, assign(socket, locale: locale)}
   end
 

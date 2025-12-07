@@ -24,7 +24,7 @@ defmodule DoctransWeb.Plugs.SetLocale do
   def call(conn, _opts) do
     {locale, conn} = determine_locale(conn)
 
-    Gettext.put_locale(DoctransWeb.Gettext, locale)
+    _previous_locale = Gettext.put_locale(DoctransWeb.Gettext, locale)
     conn
   end
 
