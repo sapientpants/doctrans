@@ -156,21 +156,40 @@ defmodule Doctrans.SearchTest do
     end
 
     test "RRF boosts results appearing in both semantic and FTS rankings" do
-      # Results that match both semantically and lexically should have higher RRF scores
+      # Create two pages: one with FTS match, one without
+      # The page with the FTS match should rank higher due to RRF boosting
       doc = document_fixture(%{status: "completed", title: "RRF Test Doc"})
-      page = page_fixture(doc, %{page_number: 1})
 
-      {:ok, _page} =
-        Pages.update_page_extraction(page, %{
+      # Page with text that matches FTS query
+      page_with_fts = page_fixture(doc, %{page_number: 1})
+
+      {:ok, page_with_fts} =
+        Pages.update_page_extraction(page_with_fts, %{
           extraction_status: "completed",
           original_markdown: "Important information about machine learning algorithms"
         })
 
-      # Search for a term that should match FTS
+      # Page without FTS match (different content)
+      page_without_fts = page_fixture(doc, %{page_number: 2})
+
+      {:ok, _page_without_fts} =
+        Pages.update_page_extraction(page_without_fts, %{
+          extraction_status: "completed",
+          original_markdown: "Completely unrelated content about cooking recipes"
+        })
+
+      # Search for a term that should match FTS for page 1 only
       {:ok, results} = Search.search("machine learning")
 
-      # Verify the page is found in results
-      assert Enum.any?(results, fn r -> r.page_id == page.id end)
+      # Verify at least one result is returned
+      refute Enum.empty?(results)
+
+      # Verify the FTS-matching page is found
+      assert Enum.any?(results, fn r -> r.page_id == page_with_fts.id end)
+
+      # Note: Full RRF score comparison would require controlling the embedding
+      # mock to return different similarity scores. The current test verifies
+      # that FTS-matching pages are included in results.
     end
   end
 end

@@ -33,7 +33,7 @@ defmodule Doctrans.Search do
   @default_rrf_k 60
 
   # Minimum RRF score threshold to filter out irrelevant results
-  # With k=60, a single match at rank 1 gives score ~0.016
+  # With k=60, a single match at rank 1 gives score ~0.0164 (1/61)
   @min_score_threshold 0.01
 
   def search(query, opts) when is_binary(query) do
@@ -63,7 +63,6 @@ defmodule Doctrans.Search do
       WHERE d.status = 'completed'
         AND p.extraction_status = 'completed'
         AND p.embedding IS NOT NULL
-      ORDER BY p.embedding <=> $1::vector ASC
       LIMIT $4
     ),
     fts_ranked AS (
@@ -89,7 +88,6 @@ defmodule Doctrans.Search do
           p.original_searchable @@ plainto_tsquery('simple', $2)
           OR p.translated_searchable @@ plainto_tsquery(get_fts_config(d.target_language), $2)
         )
-      ORDER BY fts_score DESC
       LIMIT $4
     ),
     combined AS (
@@ -132,9 +130,15 @@ defmodule Doctrans.Search do
             'MaxWords=35, MinWords=15, MaxFragments=1'
           )
         WHEN p.translated_markdown IS NOT NULL THEN
-          LEFT(p.translated_markdown, 200)
+          CASE
+            WHEN LENGTH(p.translated_markdown) > 200 THEN LEFT(p.translated_markdown, 200) || '...'
+            ELSE p.translated_markdown
+          END
         ELSE
-          LEFT(p.original_markdown, 200)
+          CASE
+            WHEN LENGTH(p.original_markdown) > 200 THEN LEFT(p.original_markdown, 200) || '...'
+            ELSE p.original_markdown
+          END
       END as snippet
     FROM combined c
     JOIN pages p ON c.page_id = p.id
@@ -169,7 +173,13 @@ defmodule Doctrans.Search do
     }
   end
 
-  defp uuid_to_string(<<_::128>> = binary), do: Ecto.UUID.load!(binary)
+  defp uuid_to_string(<<_::128>> = binary) do
+    case Ecto.UUID.load(binary) do
+      {:ok, uuid} -> uuid
+      :error -> nil
+    end
+  end
+
   defp uuid_to_string(string) when is_binary(string), do: string
   defp uuid_to_string(nil), do: nil
 

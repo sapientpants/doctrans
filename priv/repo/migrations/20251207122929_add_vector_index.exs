@@ -20,6 +20,6 @@ defmodule Doctrans.Repo.Migrations.AddVectorIndex do
   end
 
   def down do
-    execute "DROP INDEX IF EXISTS pages_embedding_idx;"
+    execute "DROP INDEX CONCURRENTLY IF EXISTS pages_embedding_idx;"
   end
 end

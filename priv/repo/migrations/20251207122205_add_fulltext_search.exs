@@ -9,6 +9,9 @@ defmodule Doctrans.Repo.Migrations.AddFulltextSearch do
     end
 
     # Create GIN indexes for fast full-text search
+    # Note: For large production databases, consider creating these indexes
+    # CONCURRENTLY in a separate migration to avoid blocking writes.
+    # This requires @disable_ddl_transaction and @disable_migration_lock.
     create index(:pages, [:original_searchable],
              using: :gin,
              name: :pages_original_searchable_idx
