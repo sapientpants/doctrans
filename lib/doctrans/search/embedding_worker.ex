@@ -11,7 +11,11 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
   alias Doctrans.Documents.Page
   alias Doctrans.Repo
-  alias Doctrans.Search.Embedding
+
+  # Allow embedding module to be configured for testing
+  defp embedding_module do
+    Application.get_env(:doctrans, :embedding_module, Doctrans.Search.Embedding)
+  end
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -65,7 +69,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
         |> Repo.update()
 
       # Use original markdown for embedding - it's language-agnostic
-      case Embedding.generate(page.original_markdown) do
+      case embedding_module().generate(page.original_markdown, []) do
         {:ok, embedding} ->
           page
           |> Page.embedding_changeset(%{
