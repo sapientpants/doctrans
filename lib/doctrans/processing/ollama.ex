@@ -45,6 +45,7 @@ defmodule Doctrans.Processing.Ollama do
 
         CRITICAL INSTRUCTIONS:
         - Output ONLY the extracted text in Markdown format, nothing else
+        - Do NOT wrap output in code fences (```)
         - Do NOT include any introduction like "Here is the extracted text"
         - Do NOT include any explanation or commentary
         - Preserve the original formatting including headings, lists, tables, and structure
@@ -89,6 +90,7 @@ defmodule Doctrans.Processing.Ollama do
 
     CRITICAL INSTRUCTIONS:
     - Output ONLY the translated text, nothing else
+    - Do NOT wrap output in code fences (```)
     - Do NOT include any introduction like "Here is the translation"
     - Do NOT include any explanation or commentary
     - Do NOT include the original text
@@ -159,7 +161,7 @@ defmodule Doctrans.Processing.Ollama do
         # Extract the response text from Ollama's response
         case response_body do
           %{"response" => response} ->
-            {:ok, String.trim(response)}
+            {:ok, response |> String.trim() |> strip_code_fences()}
 
           other ->
             Logger.warning("Unexpected response format: #{inspect(other)}")
@@ -188,6 +190,14 @@ defmodule Doctrans.Processing.Ollama do
 
   defp ollama_config do
     Application.get_env(:doctrans, :ollama, [])
+  end
+
+  # Strip markdown code fences that LLMs sometimes wrap their output in
+  defp strip_code_fences(text) do
+    text
+    |> String.replace(~r/\A```(?:markdown|md)?\n/, "")
+    |> String.replace(~r/\n```\z/, "")
+    |> String.trim()
   end
 
   defp language_name(code) do
