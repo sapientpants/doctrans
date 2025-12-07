@@ -33,7 +33,11 @@ defmodule Doctrans.Documents.SweeperWorker do
   end
 
   @doc """
-  Triggers an immediate sweep. Useful for testing or manual intervention.
+  Triggers an immediate sweep asynchronously.
+
+  Returns immediately without waiting for completion. Use `status/0` to check
+  when the last sweep occurred. Works even when the worker is disabled
+  (enabled: false only disables the scheduled sweeps).
   """
   def sweep_now do
     GenServer.cast(__MODULE__, :sweep_now)

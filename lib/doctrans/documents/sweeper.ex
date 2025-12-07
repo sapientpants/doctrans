@@ -112,9 +112,8 @@ defmodule Doctrans.Documents.Sweeper do
   end
 
   defp orphaned?(dir_name, valid_ids, documents_dir, cutoff) do
-    # Not in database
-    # And old enough
-    dir_name not in valid_ids &&
+    # Not in database and old enough
+    !MapSet.member?(valid_ids, dir_name) &&
       directory_older_than?(documents_dir, dir_name, cutoff)
   end
 
