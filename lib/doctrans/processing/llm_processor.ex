@@ -7,6 +7,8 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   require Logger
 
+  use Gettext, backend: DoctransWeb.Gettext
+
   alias Doctrans.Documents
   alias Doctrans.Search.EmbeddingWorker
 
@@ -161,7 +163,12 @@ defmodule Doctrans.Processing.LlmProcessor do
 
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
     Documents.broadcast_page_update(page)
-    {:error, "Page #{page.page_number} extraction failed: #{reason}"}
+
+    {:error,
+     dgettext("errors", "Page %{page_number} extraction failed: %{reason}",
+       page_number: page.page_number,
+       reason: reason
+     )}
   end
 
   defp process_page_translation(page, retry_count \\ 0) do
@@ -204,6 +211,11 @@ defmodule Doctrans.Processing.LlmProcessor do
 
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "error"})
     Documents.broadcast_page_update(page)
-    {:error, "Page #{page.page_number} translation failed: #{reason}"}
+
+    {:error,
+     dgettext("errors", "Page %{page_number} translation failed: %{reason}",
+       page_number: page.page_number,
+       reason: reason
+     )}
   end
 end

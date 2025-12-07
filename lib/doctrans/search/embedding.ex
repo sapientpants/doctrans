@@ -9,6 +9,8 @@ defmodule Doctrans.Search.Embedding do
 
   require Logger
 
+  use Gettext, backend: DoctransWeb.Gettext
+
   @doc """
   Generates an embedding vector for the given text.
 
@@ -37,11 +39,16 @@ defmodule Doctrans.Search.Embedding do
 
       {:ok, %{status: status, body: body}} ->
         Logger.error("Ollama embedding error (#{status}): #{inspect(body)}")
-        {:error, "Ollama embedding error (#{status}): #{inspect(body)}"}
+
+        {:error,
+         dgettext("errors", "Ollama embedding error (%{status}): %{body}",
+           status: status,
+           body: inspect(body)
+         )}
 
       {:error, reason} ->
         Logger.error("Embedding request failed: #{inspect(reason)}")
-        {:error, "Request failed: #{inspect(reason)}"}
+        {:error, dgettext("errors", "Request failed: %{reason}", reason: inspect(reason))}
     end
   end
 

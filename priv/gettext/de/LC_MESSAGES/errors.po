@@ -1,190 +1,183 @@
-## This is a PO Template file.
-##
-## `msgid`s here are often extracted from source code.
-## Add new translations manually only if they're dynamic
-## translations that can't be statically extracted.
-##
-## Run `mix gettext.extract` to bring this file up to
-## date. Leave `msgstr`s empty as changing them here has no
-## effect: edit them in PO (`.po`) files instead.
-## From Ecto.Changeset.cast/4
+## "msgid"s in this file come from POT (.pot) files.
+###
+### Do not add, change, or remove "msgid"s manually here as
+### they're tied to the ones in the corresponding POT file
+### (with the same domain).
+###
+### Use "mix gettext.extract --merge" or "mix gettext.merge"
+### to merge POT files into PO files.
+msgid ""
+msgstr ""
+"Language: de\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
 msgid "can't be blank"
-msgstr ""
+msgstr "darf nicht leer sein"
 
-## From Ecto.Changeset.unique_constraint/3
 msgid "has already been taken"
-msgstr ""
+msgstr "wurde bereits vergeben"
 
-## From Ecto.Changeset.put_change/3
 msgid "is invalid"
-msgstr ""
+msgstr "ist ungültig"
 
-## From Ecto.Changeset.validate_acceptance/3
 msgid "must be accepted"
-msgstr ""
+msgstr "muss akzeptiert werden"
 
-## From Ecto.Changeset.validate_format/3
 msgid "has invalid format"
-msgstr ""
+msgstr "hat ein ungültiges Format"
 
-## From Ecto.Changeset.validate_subset/3
 msgid "has an invalid entry"
-msgstr ""
+msgstr "hat einen ungültigen Eintrag"
 
-## From Ecto.Changeset.validate_exclusion/3
 msgid "is reserved"
-msgstr ""
+msgstr "ist reserviert"
 
-## From Ecto.Changeset.validate_confirmation/3
 msgid "does not match confirmation"
-msgstr ""
+msgstr "stimmt nicht mit der Bestätigung überein"
 
-## From Ecto.Changeset.no_assoc_constraint/3
 msgid "is still associated with this entry"
-msgstr ""
+msgstr "ist noch mit diesem Eintrag verknüpft"
 
 msgid "are still associated with this entry"
-msgstr ""
+msgstr "sind noch mit diesem Eintrag verknüpft"
 
-## From Ecto.Changeset.validate_length/3
 msgid "should have %{count} item(s)"
 msgid_plural "should have %{count} item(s)"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "sollte %{count} Element haben"
+msgstr[1] "sollte %{count} Elemente haben"
 
 msgid "should be %{count} character(s)"
 msgid_plural "should be %{count} character(s)"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "sollte %{count} Zeichen sein"
+msgstr[1] "sollte %{count} Zeichen sein"
 
 msgid "should be %{count} byte(s)"
 msgid_plural "should be %{count} byte(s)"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "sollte %{count} Byte sein"
+msgstr[1] "sollte %{count} Bytes sein"
 
 msgid "should have at least %{count} item(s)"
 msgid_plural "should have at least %{count} item(s)"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "sollte mindestens %{count} Element haben"
+msgstr[1] "sollte mindestens %{count} Elemente haben"
 
 msgid "should be at least %{count} character(s)"
 msgid_plural "should be at least %{count} character(s)"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "sollte mindestens %{count} Zeichen sein"
+msgstr[1] "sollte mindestens %{count} Zeichen sein"
 
 msgid "should be at least %{count} byte(s)"
 msgid_plural "should be at least %{count} byte(s)"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "sollte mindestens %{count} Byte sein"
+msgstr[1] "sollte mindestens %{count} Bytes sein"
 
 msgid "should have at most %{count} item(s)"
 msgid_plural "should have at most %{count} item(s)"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "sollte höchstens %{count} Element haben"
+msgstr[1] "sollte höchstens %{count} Elemente haben"
 
 msgid "should be at most %{count} character(s)"
 msgid_plural "should be at most %{count} character(s)"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "sollte höchstens %{count} Zeichen sein"
+msgstr[1] "sollte höchstens %{count} Zeichen sein"
 
 msgid "should be at most %{count} byte(s)"
 msgid_plural "should be at most %{count} byte(s)"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "sollte höchstens %{count} Byte sein"
+msgstr[1] "sollte höchstens %{count} Bytes sein"
 
-## From Ecto.Changeset.validate_number/3
 msgid "must be less than %{number}"
-msgstr ""
+msgstr "muss kleiner als %{number} sein"
 
 msgid "must be greater than %{number}"
-msgstr ""
+msgstr "muss größer als %{number} sein"
 
 msgid "must be less than or equal to %{number}"
-msgstr ""
+msgstr "muss kleiner oder gleich %{number} sein"
 
 msgid "must be greater than or equal to %{number}"
-msgstr ""
+msgstr "muss größer oder gleich %{number} sein"
 
 msgid "must be equal to %{number}"
-msgstr ""
+msgstr "muss gleich %{number} sein"
 
 #: lib/doctrans/processing/pdf_extractor.ex:73
 #, elixir-autogen, elixir-format
 msgid "Could not parse page count from pdfinfo output"
-msgstr ""
+msgstr "Seitenanzahl konnte aus pdfinfo-Ausgabe nicht ermittelt werden"
 
 #: lib/doctrans/processing/pdf_processor.ex:46
 #, elixir-autogen, elixir-format
 msgid "Document not found"
-msgstr ""
+msgstr "Dokument nicht gefunden"
 
 #: lib/doctrans/processing/ollama.ex:133
 #, elixir-autogen, elixir-format
 msgid "Failed to connect to Ollama: %{reason}"
-msgstr ""
+msgstr "Verbindung zu Ollama fehlgeschlagen: %{reason}"
 
 #: lib/doctrans/search/embedding_worker.ex:86
 #, elixir-autogen, elixir-format
 msgid "Failed to generate embedding for page %{page_id}: %{reason}"
-msgstr ""
+msgstr "Embedding für Seite %{page_id} konnte nicht erstellt werden: %{reason}"
 
 #: lib/doctrans/processing/ollama.ex:57
 #, elixir-autogen, elixir-format
 msgid "Failed to read image: %{reason}"
-msgstr ""
+msgstr "Bild konnte nicht gelesen werden: %{reason}"
 
 #: lib/doctrans/search/embedding.ex:42
 #, elixir-autogen, elixir-format
 msgid "Ollama embedding error (%{status}): %{body}"
-msgstr ""
+msgstr "Ollama Embedding-Fehler (%{status}): %{body}"
 
 #: lib/doctrans/processing/ollama.ex:160
 #, elixir-autogen, elixir-format
 msgid "Ollama error (%{status}): %{error}"
-msgstr ""
+msgstr "Ollama-Fehler (%{status}): %{error}"
 
 #: lib/doctrans/processing/ollama.ex:130
 #, elixir-autogen, elixir-format
 msgid "Ollama returned status %{status}: %{body}"
-msgstr ""
+msgstr "Ollama hat Status %{status} zurückgegeben: %{body}"
 
 #: lib/doctrans/processing/pdf_extractor.ex:57
 #, elixir-autogen, elixir-format
 msgid "PDF extraction failed: %{error}"
-msgstr ""
+msgstr "PDF-Extraktion fehlgeschlagen: %{error}"
 
 #: lib/doctrans/processing/pdf_processor.ex:69
 #, elixir-autogen, elixir-format
 msgid "PDF extraction failed: %{reason}"
-msgstr ""
+msgstr "PDF-Extraktion fehlgeschlagen: %{reason}"
 
 #: lib/doctrans/processing/llm_processor.ex:166
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} extraction failed: %{reason}"
-msgstr ""
+msgstr "Extraktion von Seite %{page_number} fehlgeschlagen: %{reason}"
 
 #: lib/doctrans/processing/llm_processor.ex:209
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} translation failed: %{reason}"
-msgstr ""
+msgstr "Übersetzung von Seite %{page_number} fehlgeschlagen: %{reason}"
 
 #: lib/doctrans/processing/ollama.ex:168
 #: lib/doctrans/search/embedding.ex:46
 #, elixir-autogen, elixir-format
 msgid "Request failed: %{reason}"
-msgstr ""
+msgstr "Anfrage fehlgeschlagen: %{reason}"
 
 #: lib/doctrans/processing/ollama.ex:164
 #, elixir-autogen, elixir-format
 msgid "Request timed out"
-msgstr ""
+msgstr "Zeitüberschreitung der Anfrage"
 
 #: lib/doctrans/processing/ollama.ex:154
 #, elixir-autogen, elixir-format
 msgid "Unexpected response format from Ollama"
-msgstr ""
+msgstr "Unerwartetes Antwortformat von Ollama"
 
 #: lib/doctrans/processing/pdf_extractor.ex:77
 #, elixir-autogen, elixir-format
 msgid "pdfinfo failed: %{error}"
-msgstr ""
+msgstr "pdfinfo fehlgeschlagen: %{error}"

@@ -36,12 +36,14 @@ defmodule DoctransWeb.DocumentLive.Components do
             {@status_text}
           </span>
           <span :if={@document.total_pages} class="text-xs text-base-content/70">
-            {@document.total_pages} pages
+            {ngettext("%{count} page", "%{count} pages", @document.total_pages,
+              count: @document.total_pages
+            )}
           </span>
         </div>
         <div :if={@document.status in ["extracting", "processing"]} class="mt-2">
           <div class="flex justify-between text-xs mb-1">
-            <span>Progress</span>
+            <span>{gettext("Progress")}</span>
             <span>{Float.round(@progress, 1)}%</span>
           </div>
           <progress class="progress progress-primary w-full" value={@progress} max="100" />
@@ -51,7 +53,9 @@ defmodule DoctransWeb.DocumentLive.Components do
             type="button"
             phx-click="delete_document"
             phx-value-id={@document.id}
-            data-confirm="Are you sure you want to delete this document? This cannot be undone."
+            data-confirm={
+              gettext("Are you sure you want to delete this document? This cannot be undone.")
+            }
             class="btn btn-ghost btn-xs text-error"
           >
             <.icon name="hero-trash" class="w-4 h-4" />
@@ -107,12 +111,12 @@ defmodule DoctransWeb.DocumentLive.Components do
           <.icon name="hero-x-mark" class="w-5 h-5" />
         </button>
 
-        <h3 class="font-bold text-lg mb-4">Upload New Document</h3>
+        <h3 class="font-bold text-lg mb-4">{gettext("Upload New Document")}</h3>
 
         <form phx-submit="upload_document" phx-change="validate_upload" id="upload-form">
           <div class="form-control mb-4">
             <label class="label">
-              <span class="label-text">PDF Files</span>
+              <span class="label-text">{gettext("PDF Files")}</span>
             </label>
             <div
               class="border-2 border-dashed border-base-300 rounded-lg p-4 text-center hover:border-primary transition-colors"
@@ -127,7 +131,7 @@ defmodule DoctransWeb.DocumentLive.Components do
 
           <div class="form-control mb-6">
             <label class="label">
-              <span class="label-text">Target Language</span>
+              <span class="label-text">{gettext("Target Language")}</span>
             </label>
             <select
               name="target_language"
@@ -140,7 +144,7 @@ defmodule DoctransWeb.DocumentLive.Components do
 
           <div class="modal-action">
             <button type="button" phx-click="hide_upload_modal" class="btn btn-ghost">
-              Cancel
+              {gettext("Cancel")}
             </button>
             <button
               type="submit"
@@ -148,7 +152,7 @@ defmodule DoctransWeb.DocumentLive.Components do
               disabled={@uploads.pdf.entries == []}
               id="start-translation-btn"
             >
-              Start Translation
+              {gettext("Start Translation")}
             </button>
           </div>
         </form>
@@ -163,12 +167,12 @@ defmodule DoctransWeb.DocumentLive.Components do
     <div class="py-4">
       <.icon name="hero-cloud-arrow-up" class="w-12 h-12 mx-auto text-base-content/50" />
       <p class="mt-2 text-sm text-base-content/70">
-        Drag and drop PDF files here, or
+        {gettext("Drag and drop PDF files here, or")}
         <label for={@upload.ref} class="link link-primary cursor-pointer">
-          browse
+          {gettext("browse")}
         </label>
       </p>
-      <p class="mt-1 text-xs text-base-content/50">Up to 10 files at once</p>
+      <p class="mt-1 text-xs text-base-content/50">{gettext("Up to 10 files at once")}</p>
     </div>
     """
   end
@@ -195,7 +199,7 @@ defmodule DoctransWeb.DocumentLive.Components do
         for={@upload.ref}
         class="block text-xs text-base-content/50 cursor-pointer hover:text-primary mt-2"
       >
-        + Add more files
+        {gettext("+ Add more files")}
       </label>
     </div>
     """
@@ -208,18 +212,18 @@ defmodule DoctransWeb.DocumentLive.Components do
 
   def language_options(assigns) do
     languages = [
-      {"de", "German"},
-      {"en", "English"},
-      {"fr", "French"},
-      {"es", "Spanish"},
-      {"it", "Italian"},
-      {"pt", "Portuguese"},
-      {"nl", "Dutch"},
-      {"pl", "Polish"},
-      {"ru", "Russian"},
-      {"zh", "Chinese"},
-      {"ja", "Japanese"},
-      {"ko", "Korean"}
+      {"de", gettext("German")},
+      {"en", gettext("English")},
+      {"fr", gettext("French")},
+      {"es", gettext("Spanish")},
+      {"it", gettext("Italian")},
+      {"pt", gettext("Portuguese")},
+      {"nl", gettext("Dutch")},
+      {"pl", gettext("Polish")},
+      {"ru", gettext("Russian")},
+      {"zh", gettext("Chinese")},
+      {"ja", gettext("Japanese")},
+      {"ko", gettext("Korean")}
     ]
 
     assigns = assign(assigns, :languages, languages)
@@ -239,10 +243,10 @@ defmodule DoctransWeb.DocumentLive.Components do
     """
   end
 
-  defp error_to_string(:too_large), do: "File is too large (max 100MB)"
-  defp error_to_string(:too_many_files), do: "Maximum 10 files can be uploaded at once"
-  defp error_to_string(:not_accepted), do: "Only PDF files are accepted"
-  defp error_to_string(err), do: "Error: #{inspect(err)}"
+  defp error_to_string(:too_large), do: gettext("File is too large (max 100MB)")
+  defp error_to_string(:too_many_files), do: gettext("Maximum 10 files can be uploaded at once")
+  defp error_to_string(:not_accepted), do: gettext("Only PDF files are accepted")
+  defp error_to_string(err), do: gettext("Error: %{error}", error: inspect(err))
 
   @doc """
   Returns the badge color class for a document status.
@@ -258,37 +262,37 @@ defmodule DoctransWeb.DocumentLive.Components do
   @doc """
   Returns the display text for a document status.
   """
-  def status_text("uploading"), do: "Uploading"
-  def status_text("extracting"), do: "Processing"
-  def status_text("queued"), do: "Queued"
-  def status_text("processing"), do: "Processing"
-  def status_text("completed"), do: "Completed"
-  def status_text("error"), do: "Error"
-  def status_text(_), do: "Unknown"
+  def status_text("uploading"), do: gettext("Uploading")
+  def status_text("extracting"), do: gettext("Processing")
+  def status_text("queued"), do: gettext("Queued")
+  def status_text("processing"), do: gettext("Processing")
+  def status_text("completed"), do: gettext("Completed")
+  def status_text("error"), do: gettext("Error")
+  def status_text(_), do: gettext("Unknown")
 
   @doc """
   Returns the sort label for the sort dropdown.
   """
-  def sort_label(:inserted_at, :desc), do: "Newest"
-  def sort_label(:inserted_at, :asc), do: "Oldest"
-  def sort_label(:title, :asc), do: "A-Z"
-  def sort_label(:title, :desc), do: "Z-A"
-  def sort_label(_, _), do: "Sort"
+  def sort_label(:inserted_at, :desc), do: gettext("Newest")
+  def sort_label(:inserted_at, :asc), do: gettext("Oldest")
+  def sort_label(:title, :asc), do: gettext("A-Z")
+  def sort_label(:title, :desc), do: gettext("Z-A")
+  def sort_label(_, _), do: gettext("Sort")
 
   @doc """
   Returns the display name for a language code.
   """
-  def language_name("de"), do: "German"
-  def language_name("en"), do: "English"
-  def language_name("fr"), do: "French"
-  def language_name("es"), do: "Spanish"
-  def language_name("it"), do: "Italian"
-  def language_name("pt"), do: "Portuguese"
-  def language_name("nl"), do: "Dutch"
-  def language_name("pl"), do: "Polish"
-  def language_name("ru"), do: "Russian"
-  def language_name("zh"), do: "Chinese"
-  def language_name("ja"), do: "Japanese"
-  def language_name("ko"), do: "Korean"
+  def language_name("de"), do: gettext("German")
+  def language_name("en"), do: gettext("English")
+  def language_name("fr"), do: gettext("French")
+  def language_name("es"), do: gettext("Spanish")
+  def language_name("it"), do: gettext("Italian")
+  def language_name("pt"), do: gettext("Portuguese")
+  def language_name("nl"), do: gettext("Dutch")
+  def language_name("pl"), do: gettext("Polish")
+  def language_name("ru"), do: gettext("Russian")
+  def language_name("zh"), do: gettext("Chinese")
+  def language_name("ja"), do: gettext("Japanese")
+  def language_name("ko"), do: gettext("Korean")
   def language_name(code), do: code
 end

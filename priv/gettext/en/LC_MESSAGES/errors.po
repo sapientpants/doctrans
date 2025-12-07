@@ -110,3 +110,84 @@ msgstr ""
 
 msgid "must be equal to %{number}"
 msgstr ""
+
+#: lib/doctrans/processing/pdf_extractor.ex:73
+#, elixir-autogen, elixir-format
+msgid "Could not parse page count from pdfinfo output"
+msgstr ""
+
+#: lib/doctrans/processing/pdf_processor.ex:46
+#, elixir-autogen, elixir-format
+msgid "Document not found"
+msgstr ""
+
+#: lib/doctrans/processing/ollama.ex:133
+#, elixir-autogen, elixir-format
+msgid "Failed to connect to Ollama: %{reason}"
+msgstr ""
+
+#: lib/doctrans/search/embedding_worker.ex:86
+#, elixir-autogen, elixir-format
+msgid "Failed to generate embedding for page %{page_id}: %{reason}"
+msgstr ""
+
+#: lib/doctrans/processing/ollama.ex:57
+#, elixir-autogen, elixir-format
+msgid "Failed to read image: %{reason}"
+msgstr ""
+
+#: lib/doctrans/search/embedding.ex:42
+#, elixir-autogen, elixir-format
+msgid "Ollama embedding error (%{status}): %{body}"
+msgstr ""
+
+#: lib/doctrans/processing/ollama.ex:160
+#, elixir-autogen, elixir-format
+msgid "Ollama error (%{status}): %{error}"
+msgstr ""
+
+#: lib/doctrans/processing/ollama.ex:130
+#, elixir-autogen, elixir-format
+msgid "Ollama returned status %{status}: %{body}"
+msgstr ""
+
+#: lib/doctrans/processing/pdf_extractor.ex:57
+#, elixir-autogen, elixir-format
+msgid "PDF extraction failed: %{error}"
+msgstr ""
+
+#: lib/doctrans/processing/pdf_processor.ex:69
+#, elixir-autogen, elixir-format
+msgid "PDF extraction failed: %{reason}"
+msgstr ""
+
+#: lib/doctrans/processing/llm_processor.ex:166
+#, elixir-autogen, elixir-format
+msgid "Page %{page_number} extraction failed: %{reason}"
+msgstr ""
+
+#: lib/doctrans/processing/llm_processor.ex:209
+#, elixir-autogen, elixir-format
+msgid "Page %{page_number} translation failed: %{reason}"
+msgstr ""
+
+#: lib/doctrans/processing/ollama.ex:168
+#: lib/doctrans/search/embedding.ex:46
+#, elixir-autogen, elixir-format
+msgid "Request failed: %{reason}"
+msgstr ""
+
+#: lib/doctrans/processing/ollama.ex:164
+#, elixir-autogen, elixir-format
+msgid "Request timed out"
+msgstr ""
+
+#: lib/doctrans/processing/ollama.ex:154
+#, elixir-autogen, elixir-format
+msgid "Unexpected response format from Ollama"
+msgstr ""
+
+#: lib/doctrans/processing/pdf_extractor.ex:77
+#, elixir-autogen, elixir-format
+msgid "pdfinfo failed: %{error}"
+msgstr ""

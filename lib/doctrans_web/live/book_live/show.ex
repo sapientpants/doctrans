@@ -75,7 +75,7 @@ defmodule DoctransWeb.DocumentLive.Show do
         <header class="flex items-center justify-between px-4 pr-8 py-3 border-b border-base-300 bg-base-200">
           <div class="flex items-center gap-4">
             <.link navigate={back_url(@from, @search_query)} class="btn btn-ghost btn-sm">
-              <.icon name="hero-arrow-left" class="w-5 h-5" /> Back
+              <.icon name="hero-arrow-left" class="w-5 h-5" /> {gettext("Back")}
             </.link>
             <div>
               <h1 class="font-semibold text-lg">{@document.title}</h1>
@@ -104,7 +104,7 @@ defmodule DoctransWeb.DocumentLive.Show do
           <%!-- Left panel - Page image --%>
           <div class="w-1/2 border-r border-base-300 flex flex-col bg-base-200">
             <div class="flex items-center justify-between px-4 py-2 border-b border-base-300">
-              <span class="text-sm font-medium">Original Page</span>
+              <span class="text-sm font-medium">{gettext("Original Page")}</span>
               <div class="flex items-center gap-1">
                 <button
                   type="button"
@@ -134,10 +134,12 @@ defmodule DoctransWeb.DocumentLive.Show do
           <div class="w-1/2 flex flex-col">
             <div class="flex items-center justify-between px-4 py-2 border-b border-base-300">
               <span class="text-sm font-medium">
-                {if @show_original, do: "Original Markdown", else: "Translated Content"}
+                {if @show_original,
+                  do: gettext("Original Markdown"),
+                  else: gettext("Translated Content")}
               </span>
               <label class="flex items-center gap-2 cursor-pointer">
-                <span class="text-xs text-base-content/70">Show Original</span>
+                <span class="text-xs text-base-content/70">{gettext("Show Original")}</span>
                 <input
                   type="checkbox"
                   class="toggle toggle-sm"
@@ -160,11 +162,14 @@ defmodule DoctransWeb.DocumentLive.Show do
             class="btn btn-ghost"
             disabled={@current_page_number <= 1}
           >
-            <.icon name="hero-chevron-left" class="w-5 h-5" /> Previous
+            <.icon name="hero-chevron-left" class="w-5 h-5" /> {gettext("Previous")}
           </button>
 
           <span class="text-sm text-base-content/70">
-            Page {@current_page_number} of {@document.total_pages || "?"}
+            {gettext("Page %{current} of %{total}",
+              current: @current_page_number,
+              total: @document.total_pages || "?"
+            )}
           </span>
 
           <button
@@ -173,7 +178,7 @@ defmodule DoctransWeb.DocumentLive.Show do
             class="btn btn-ghost"
             disabled={@current_page_number >= (@document.total_pages || 0)}
           >
-            Next <.icon name="hero-chevron-right" class="w-5 h-5" />
+            {gettext("Next")} <.icon name="hero-chevron-right" class="w-5 h-5" />
           </button>
         </footer>
       </div>

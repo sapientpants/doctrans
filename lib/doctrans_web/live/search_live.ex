@@ -49,8 +49,8 @@ defmodule DoctransWeb.SearchLive do
             <.icon name="hero-arrow-left" class="w-5 h-5" />
           </.link>
           <div>
-            <h1 class="text-2xl font-bold text-base-content">Search</h1>
-            <p class="text-base-content/70 text-sm">Find content across all documents</p>
+            <h1 class="text-2xl font-bold text-base-content">{gettext("Search")}</h1>
+            <p class="text-base-content/70 text-sm">{gettext("Find content across all documents")}</p>
           </div>
         </div>
 
@@ -64,7 +64,7 @@ defmodule DoctransWeb.SearchLive do
               type="text"
               name="q"
               value={@query}
-              placeholder="Search..."
+              placeholder={gettext("Search...")}
               autofocus
               class={[
                 "input input-bordered w-full pl-12 pr-4",
@@ -77,12 +77,18 @@ defmodule DoctransWeb.SearchLive do
 
         <div :if={@searching} class="flex items-center gap-2 py-8 text-base-content/60">
           <span class="loading loading-spinner loading-md"></span>
-          <span>Searching...</span>
+          <span>{gettext("Searching...")}</span>
         </div>
 
         <div :if={!@searching && @searched && @results != []}>
           <p class="text-sm text-base-content/50 mb-4">
-            {length(@results)} results for "{@query}"
+            {ngettext(
+              "%{count} result for \"%{query}\"",
+              "%{count} results for \"%{query}\"",
+              length(@results),
+              count: length(@results),
+              query: @query
+            )}
           </p>
           <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             <.link
@@ -106,7 +112,7 @@ defmodule DoctransWeb.SearchLive do
                   <.icon name="hero-document-text" class="w-12 h-12 text-base-content/30" />
                 </div>
                 <div class="absolute bottom-2 right-2 px-2 py-1 bg-base-100/90 rounded text-xs font-medium">
-                  Page {result.page_number}
+                  {gettext("Page %{number}", number: result.page_number)}
                 </div>
               </div>
               <div class="p-3">
@@ -120,15 +126,15 @@ defmodule DoctransWeb.SearchLive do
 
         <div :if={!@searching && @searched && @results == []} class="text-center py-16">
           <.icon name="hero-magnifying-glass" class="w-16 h-16 mx-auto text-base-content/20" />
-          <h3 class="mt-4 text-lg font-medium text-base-content">No results found</h3>
-          <p class="mt-2 text-base-content/70">Try a different search term.</p>
+          <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No results found")}</h3>
+          <p class="mt-2 text-base-content/70">{gettext("Try a different search term.")}</p>
         </div>
 
         <div :if={!@searching && !@searched} class="text-center py-16">
           <.icon name="hero-magnifying-glass" class="w-16 h-16 mx-auto text-base-content/20" />
-          <h3 class="mt-4 text-lg font-medium text-base-content">Search documents</h3>
+          <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("Search documents")}</h3>
           <p class="mt-2 text-base-content/70">
-            Enter a search term to find content across all your documents.
+            {gettext("Enter a search term to find content across all your documents.")}
           </p>
         </div>
       </div>
