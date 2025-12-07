@@ -24,6 +24,10 @@ config :doctrans, :uploads,
   upload_dir: Path.expand("../priv/static/uploads", __DIR__),
   max_file_size: 100_000_000
 
+# PDF extraction configuration
+# Higher DPI = better text recognition but larger files
+config :doctrans, :pdf_extraction, dpi: 150
+
 # Document sweeper configuration (cleans up orphaned directories)
 config :doctrans, Doctrans.Documents.SweeperWorker,
   enabled: true,

@@ -31,6 +31,10 @@ defmodule Doctrans.Documents.Page do
     field :embedding, Pgvector.Ecto.Vector
     field :embedding_status, :string, default: "pending"
 
+    # Note: The pages table also has tsvector columns (original_searchable,
+    # translated_searchable) managed by database triggers. These are not
+    # included in the schema since they're only accessed via raw SQL queries.
+
     belongs_to :document, Doctrans.Documents.Document
 
     timestamps()

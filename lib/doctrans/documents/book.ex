@@ -33,6 +33,10 @@ defmodule Doctrans.Documents.Document do
   def changeset(document, attrs) do
     document
     |> cast(attrs, [
+      # :id is explicitly cast because the upload flow pre-generates the UUID
+      # to create the upload directory before the document record exists.
+      # This is safe since UUIDs are generated server-side, not from user input.
+      :id,
       :title,
       :original_filename,
       :total_pages,

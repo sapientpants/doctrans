@@ -13,6 +13,7 @@ defmodule Doctrans.Documents do
   alias Doctrans.Repo
 
   # Delegate page operations for backward compatibility
+  defdelegate get_page(id), to: Pages
   defdelegate get_page!(id), to: Pages
   defdelegate get_page_by_number(document_id, page_number), to: Pages
   defdelegate get_page_by_number!(document_id, page_number), to: Pages
@@ -60,6 +61,17 @@ defmodule Doctrans.Documents do
       progress = calculate_progress_preloaded(doc)
       Map.put(doc, :progress, progress)
     end)
+  end
+
+  @doc """
+  Lists documents that need processing (status is "processing" or "queued").
+  Used by Worker for startup recovery.
+  """
+  def list_incomplete_documents do
+    Document
+    |> where([d], d.status in ["processing", "queued"])
+    |> order_by([d], asc: d.inserted_at)
+    |> Repo.all()
   end
 
   @doc """

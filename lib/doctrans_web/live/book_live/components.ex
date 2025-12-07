@@ -68,6 +68,10 @@ defmodule DoctransWeb.DocumentLive.Components do
 
   @doc """
   Renders a document thumbnail from its first page.
+
+  The thumbnail is shown when the first page has been extracted and its
+  record exists in the database. This ensures we don't show a broken image
+  during the period between total_pages being set and page 1 being extracted.
   """
   attr :document, :map, required: true
 
@@ -76,17 +80,23 @@ defmodule DoctransWeb.DocumentLive.Components do
     pages = Map.get(document, :pages, [])
     first_page = Enum.find(pages, &(&1.page_number == 1))
 
-    assigns = assign(assigns, :first_page, first_page)
+    # Thumbnail is available when first page exists with an image path
+    has_thumbnail = first_page && first_page.image_path
+
+    assigns =
+      assigns
+      |> assign(:has_thumbnail, has_thumbnail)
+      |> assign(:first_page, first_page)
 
     ~H"""
     <img
-      :if={@first_page && @first_page.image_path}
+      :if={@has_thumbnail}
       src={"/uploads/#{@first_page.image_path}"}
-      alt="First page"
+      alt={"Thumbnail for #{@document.title}"}
       class="w-full h-full object-cover"
     />
     <.icon
-      :if={!@first_page || !@first_page.image_path}
+      :if={!@has_thumbnail}
       name="hero-document-text"
       class="w-16 h-16 text-base-content/30"
     />

@@ -11,7 +11,12 @@ defmodule Doctrans.Documents.Pages do
   alias Doctrans.Repo
 
   @doc """
-  Gets a single page by ID.
+  Gets a single page by ID, returns nil if not found.
+  """
+  def get_page(id), do: Repo.get(Page, id)
+
+  @doc """
+  Gets a single page by ID, raises if not found.
   """
   def get_page!(id), do: Repo.get!(Page, id)
 
@@ -124,12 +129,16 @@ defmodule Doctrans.Documents.Pages do
 
   @doc """
   Checks if all pages in a document are fully processed.
+
+  A page is considered "done" if:
+  - translation_status = "completed", OR
+  - extraction_status = "error" (can't translate without successful extraction)
   """
   def all_pages_completed?(document_id) do
     incomplete_count =
       Page
       |> where([p], p.document_id == ^document_id)
-      |> where([p], p.translation_status != "completed")
+      |> where([p], p.translation_status != "completed" and p.extraction_status != "error")
       |> Repo.aggregate(:count)
 
     incomplete_count == 0

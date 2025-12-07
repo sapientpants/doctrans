@@ -41,22 +41,48 @@ defmodule Doctrans.Processing.Ollama do
         image_base64 = Base.encode64(image_data)
 
         prompt = """
-        Extract all text from this image as Markdown.
+        Extract ALL text from this document image as Markdown, preserving the visual formatting as closely as possible.
 
-        CRITICAL INSTRUCTIONS:
-        - Output ONLY the extracted text in Markdown format, nothing else
+        CRITICAL - EXTRACT EVERYTHING:
+        - Extract text from EVERY region: main content, headers, footers, margins, sidebars
+        - Include ALL captions, labels, footnotes, and annotations
+        - Extract text from within figures, diagrams, and charts
+        - Do NOT skip any text, no matter how small or seemingly unimportant
+        - Read the ENTIRE page from top to bottom, left to right
+
+        FORMATTING - MIRROR THE SOURCE LAYOUT:
+        - The Markdown output should visually resemble the original document when rendered
+        - Use # ## ### for headings - match the visual hierarchy (larger/bolder = higher level)
+        - Use **bold** for any bold or heavy-weight text
+        - Use *italic* for any italicized or slanted text
+        - Use `code` for monospace, typewriter, or code-styled text
+        - Use > for blockquotes, pull quotes, or visually indented sections
+        - Use - or * for bullet lists, 1. 2. 3. for numbered lists
+        - Preserve nested list indentation exactly as shown
+        - Use | for tables - maintain column alignment with |---|
+        - Use --- for horizontal lines or section dividers
+        - Preserve paragraph spacing - use blank lines where the source has visual breaks
+        - Keep line breaks within addresses, poems, signatures, or multi-line formatted blocks
+        - Preserve any special formatting like centered text or right-aligned content
+
+        OUTPUT RULES:
+        - Output ONLY the extracted Markdown, nothing else
         - Do NOT wrap output in code fences (```)
-        - Do NOT include any introduction like "Here is the extracted text"
-        - Do NOT include any explanation or commentary
-        - Preserve the original formatting including headings, lists, tables, and structure
-        - Extract ALL visible text from the image
+        - Do NOT add introductions like "Here is the extracted text"
+        - Do NOT add explanations or commentary
+        - Do NOT describe images - extract the TEXT within them
         """
 
         body = %{
           model: model,
           prompt: prompt,
           images: [image_base64],
-          stream: false
+          stream: false,
+          options: %{
+            # 16K context for image + prompt, 8K output for extracted text
+            num_ctx: 16_384,
+            num_predict: 8_192
+          }
         }
 
         make_request("/api/generate", body, timeout)
@@ -86,16 +112,31 @@ defmodule Doctrans.Processing.Ollama do
     Logger.info("Translating to #{target_name} using #{model}")
 
     prompt = """
-    Translate the following text to #{target_name}.
+    Translate the following Markdown text to #{target_name}, preserving ALL formatting exactly.
 
-    CRITICAL INSTRUCTIONS:
-    - Output ONLY the translated text, nothing else
+    FORMATTING PRESERVATION - CRITICAL:
+    - Keep ALL Markdown syntax unchanged: #, ##, ###, **bold**, *italic*, `code`, etc.
+    - Preserve the EXACT same heading levels (# vs ## vs ###)
+    - Keep **bold** markers around translated bold text
+    - Keep *italic* markers around translated italic text
+    - Preserve table structure with | and |---| exactly
+    - Keep list markers (-, *, 1., 2.) and indentation
+    - Preserve > blockquote markers
+    - Keep blank lines and paragraph breaks in the same places
+    - Preserve horizontal rules (---)
+    - Keep any line breaks within formatted blocks
+
+    TRANSLATION RULES:
+    - Translate ALL text content to #{target_name}
+    - Do NOT leave any words in the original language
+    - Keep proper nouns, brand names, and technical terms as appropriate for the target language
+
+    OUTPUT RULES:
+    - Output ONLY the translated Markdown, nothing else
     - Do NOT wrap output in code fences (```)
-    - Do NOT include any introduction like "Here is the translation"
-    - Do NOT include any explanation or commentary
+    - Do NOT include introductions like "Here is the translation"
+    - Do NOT include explanations or commentary
     - Do NOT include the original text
-    - Preserve all Markdown formatting exactly
-    - Translate EVERY word - do not leave any text in the original language
 
     TEXT TO TRANSLATE:
     #{markdown}
@@ -104,7 +145,12 @@ defmodule Doctrans.Processing.Ollama do
     body = %{
       model: model,
       prompt: prompt,
-      stream: false
+      stream: false,
+      options: %{
+        # 16K context for input, 8K output for translated text
+        num_ctx: 16_384,
+        num_predict: 8_192
+      }
     }
 
     make_request("/api/generate", body, timeout)

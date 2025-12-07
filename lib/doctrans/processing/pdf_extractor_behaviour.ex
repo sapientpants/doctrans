@@ -8,6 +8,14 @@ defmodule Doctrans.Processing.PdfExtractorBehaviour do
   @callback extract_pages(pdf_path :: String.t(), output_dir :: String.t(), opts :: keyword()) ::
               {:ok, integer()} | {:error, term()}
 
+  @callback extract_page(
+              pdf_path :: String.t(),
+              output_dir :: String.t(),
+              page_number :: integer(),
+              opts :: keyword()
+            ) ::
+              {:ok, String.t()} | {:error, term()}
+
   @callback get_page_count(pdf_path :: String.t()) :: {:ok, integer()} | {:error, term()}
 
   @callback page_image_path(output_dir :: String.t(), page_number :: integer()) ::

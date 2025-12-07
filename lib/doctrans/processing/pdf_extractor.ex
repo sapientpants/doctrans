@@ -20,10 +20,11 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   ## Options
 
-  - `:dpi` - Resolution in DPI (default: 150)
+  - `:dpi` - Resolution in DPI (default: from config, fallback 200)
   """
   def extract_pages(pdf_path, output_dir, opts \\ []) do
-    dpi = Keyword.get(opts, :dpi, 150)
+    default_dpi = get_in(Application.get_env(:doctrans, :pdf_extraction, []), [:dpi]) || 200
+    dpi = Keyword.get(opts, :dpi, default_dpi)
 
     # Ensure output directory exists
     File.mkdir_p!(output_dir)
@@ -51,6 +52,54 @@ defmodule Doctrans.Processing.PdfExtractor do
         page_count = count_pages(output_dir)
         Logger.info("Successfully extracted #{page_count} pages")
         {:ok, page_count}
+
+      {error_output, exit_code} ->
+        Logger.error("pdftoppm failed with exit code #{exit_code}: #{error_output}")
+
+        {:error,
+         dgettext("errors", "PDF extraction failed: %{error}", error: String.trim(error_output))}
+    end
+  end
+
+  @doc """
+  Extracts a single page from a PDF file as a PNG image.
+
+  Returns `{:ok, image_path}` on success or `{:error, reason}` on failure.
+
+  ## Options
+
+  - `:dpi` - Resolution in DPI (default: from config, fallback 200)
+  """
+  def extract_page(pdf_path, output_dir, page_number, opts \\ []) do
+    default_dpi = get_in(Application.get_env(:doctrans, :pdf_extraction, []), [:dpi]) || 200
+    dpi = Keyword.get(opts, :dpi, default_dpi)
+
+    File.mkdir_p!(output_dir)
+
+    output_prefix = Path.join(output_dir, "page")
+
+    args = [
+      "-png",
+      "-r",
+      to_string(dpi),
+      "-f",
+      to_string(page_number),
+      "-l",
+      to_string(page_number),
+      pdf_path,
+      output_prefix
+    ]
+
+    case System.cmd("pdftoppm", args,
+           stderr_to_stdout: true,
+           env: [{"PATH", System.get_env("PATH")}]
+         ) do
+      {_output, 0} ->
+        # Find the generated file for this page
+        case page_image_path(output_dir, page_number) do
+          nil -> {:error, dgettext("errors", "Page image not found after extraction")}
+          path -> {:ok, path}
+        end
 
       {error_output, exit_code} ->
         Logger.error("pdftoppm failed with exit code #{exit_code}: #{error_output}")

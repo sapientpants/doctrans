@@ -6,21 +6,40 @@ defmodule Doctrans.Processing.WorkerTest do
 
   import Doctrans.Fixtures
 
+  # Wait for Worker to be available and responsive before each test
+  setup do
+    # Give any in-flight operations time to settle
+    Process.sleep(50)
+
+    # Ensure Worker is alive - if it crashed, the supervisor should restart it
+    # Try to get status, with retries if Worker is restarting
+    ensure_worker_responsive()
+
+    :ok
+  end
+
+  defp ensure_worker_responsive(retries \\ 3)
+
+  defp ensure_worker_responsive(0), do: raise("Worker not responsive after retries")
+
+  defp ensure_worker_responsive(retries) do
+    Worker.status()
+  catch
+    :exit, _ ->
+      Process.sleep(100)
+      ensure_worker_responsive(retries - 1)
+  end
+
   describe "status/0" do
-    test "returns current worker status" do
+    test "returns current worker status with expected keys" do
       status = Worker.status()
 
       assert is_map(status)
       assert Map.has_key?(status, :current_document_id)
-      assert Map.has_key?(status, :queue_length)
+      assert Map.has_key?(status, :current_page_id)
+      assert Map.has_key?(status, :page_queue_length)
+      assert Map.has_key?(status, :document_queue_length)
       assert Map.has_key?(status, :extracting_count)
-    end
-
-    test "initial status has no current document" do
-      status = Worker.status()
-
-      assert status.current_document_id == nil
-      assert status.queue_length == 0
     end
 
     test "status returns extracting_count of zero when no extractions in progress" do
@@ -54,6 +73,25 @@ defmodule Doctrans.Processing.WorkerTest do
       # Worker should still be responsive
       status = Worker.status()
       assert is_map(status)
+    end
+  end
+
+  describe "queue_page/1" do
+    test "queueing a page doesn't crash" do
+      doc = document_fixture(%{status: "processing"})
+      page = page_fixture(doc, %{page_number: 1})
+
+      # Cancel the document first to prevent actual processing
+      # (which would fail due to sandbox isolation)
+      :ok = Worker.cancel_document(doc.id)
+
+      # Should not raise
+      assert :ok = Worker.queue_page(page.id)
+    end
+
+    test "queueing non-existent page doesn't crash" do
+      # Should not raise
+      assert :ok = Worker.queue_page(Ecto.UUID.generate())
     end
   end
 
