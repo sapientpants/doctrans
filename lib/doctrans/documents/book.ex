@@ -33,6 +33,7 @@ defmodule Doctrans.Documents.Document do
   def changeset(document, attrs) do
     document
     |> cast(attrs, [
+      :id,
       :title,
       :original_filename,
       :total_pages,
