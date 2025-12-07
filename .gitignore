@@ -48,6 +48,9 @@ npm-debug.log
 # Claude Code local settings (user-specific)
 .claude/settings.local.json
 
+# Playwright MCP screenshots
+.playwright-mcp/
+
 # Environment files (may contain secrets)
 .env
 .env.local
