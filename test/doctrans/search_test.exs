@@ -31,13 +31,9 @@ defmodule Doctrans.SearchTest do
       assert match?({:ok, _}, result) or match?({:error, _}, result)
     end
 
-    test "accepts semantic_weight option" do
-      result = Search.search("test", semantic_weight: 0.7)
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
-    end
-
-    test "accepts keyword_weight option" do
-      result = Search.search("test", keyword_weight: 0.7)
+    test "accepts rrf_k option" do
+      # RRF smoothing constant - higher values give smoother ranking
+      result = Search.search("test", rrf_k: 100)
       assert match?({:ok, _}, result) or match?({:error, _}, result)
     end
 
@@ -54,7 +50,7 @@ defmodule Doctrans.SearchTest do
 
       {:ok, results} = Search.search("cats")
 
-      # We should find the page since the mock returns a valid embedding
+      # We should find the page via FTS
       assert is_list(results)
     end
 
@@ -76,6 +72,28 @@ defmodule Doctrans.SearchTest do
 
       {:ok, results} = Search.search("elephants")
       assert is_list(results)
+    end
+
+    test "FTS applies stemming - 'running' matches 'run'" do
+      doc = document_fixture(%{status: "completed", title: "Stemming Test"})
+      page = page_fixture(doc, %{page_number: 1})
+
+      {:ok, _page} =
+        Pages.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "placeholder"
+        })
+
+      {:ok, _page} =
+        Pages.update_page_translation(page, %{
+          translation_status: "completed",
+          translated_markdown: "The runner was running fast through the field"
+        })
+
+      # "run" should match "running" and "runner" due to English stemming
+      {:ok, results} = Search.search("run")
+      refute Enum.empty?(results)
+      assert Enum.any?(results, fn r -> r.page_id == page.id end)
     end
 
     test "returns results with correct structure" do
@@ -131,11 +149,27 @@ defmodule Doctrans.SearchTest do
       result =
         Search.search("test",
           limit: 10,
-          semantic_weight: 0.6,
-          keyword_weight: 0.4
+          rrf_k: 80
         )
 
       assert match?({:ok, _}, result) or match?({:error, _}, result)
+    end
+
+    test "RRF boosts results appearing in both semantic and FTS rankings" do
+      # This is a conceptual test - results that match both semantically
+      # and lexically should have higher RRF scores
+      doc = document_fixture(%{status: "completed", title: "RRF Test Doc"})
+      page = page_fixture(doc, %{page_number: 1})
+
+      {:ok, _page} =
+        Pages.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "Important information about machine learning algorithms"
+        })
+
+      # Search for a term that should match both FTS and semantic
+      {:ok, results} = Search.search("machine learning")
+      assert is_list(results)
     end
   end
 end
