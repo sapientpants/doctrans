@@ -1,0 +1,143 @@
+## "msgid"s in this file come from POT (.pot) files.
+msgid ""
+msgstr ""
+"Language: nl\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "can't be blank"
+msgstr "mag niet leeg zijn"
+
+msgid "has already been taken"
+msgstr "is al in gebruik"
+
+msgid "is invalid"
+msgstr "is ongeldig"
+
+msgid "must be accepted"
+msgstr "moet worden geaccepteerd"
+
+msgid "has invalid format"
+msgstr "heeft een ongeldig formaat"
+
+msgid "has an invalid entry"
+msgstr "bevat een ongeldige invoer"
+
+msgid "is reserved"
+msgstr "is gereserveerd"
+
+msgid "does not match confirmation"
+msgstr "komt niet overeen met bevestiging"
+
+msgid "is still associated with this entry"
+msgstr "is nog gekoppeld aan deze invoer"
+
+msgid "are still associated with this entry"
+msgstr "zijn nog gekoppeld aan deze invoer"
+
+msgid "should have %{count} item(s)"
+msgid_plural "should have %{count} item(s)"
+msgstr[0] "moet %{count} item hebben"
+msgstr[1] "moet %{count} items hebben"
+
+msgid "should be %{count} character(s)"
+msgid_plural "should be %{count} character(s)"
+msgstr[0] "moet %{count} teken zijn"
+msgstr[1] "moet %{count} tekens zijn"
+
+msgid "should be %{count} byte(s)"
+msgid_plural "should be %{count} byte(s)"
+msgstr[0] "moet %{count} byte zijn"
+msgstr[1] "moet %{count} bytes zijn"
+
+msgid "should have at least %{count} item(s)"
+msgid_plural "should have at least %{count} item(s)"
+msgstr[0] "moet minimaal %{count} item hebben"
+msgstr[1] "moet minimaal %{count} items hebben"
+
+msgid "should be at least %{count} character(s)"
+msgid_plural "should be at least %{count} character(s)"
+msgstr[0] "moet minimaal %{count} teken zijn"
+msgstr[1] "moet minimaal %{count} tekens zijn"
+
+msgid "should be at least %{count} byte(s)"
+msgid_plural "should be at least %{count} byte(s)"
+msgstr[0] "moet minimaal %{count} byte zijn"
+msgstr[1] "moet minimaal %{count} bytes zijn"
+
+msgid "should have at most %{count} item(s)"
+msgid_plural "should have at most %{count} item(s)"
+msgstr[0] "moet maximaal %{count} item hebben"
+msgstr[1] "moet maximaal %{count} items hebben"
+
+msgid "should be at most %{count} character(s)"
+msgid_plural "should be at most %{count} character(s)"
+msgstr[0] "moet maximaal %{count} teken zijn"
+msgstr[1] "moet maximaal %{count} tekens zijn"
+
+msgid "should be at most %{count} byte(s)"
+msgid_plural "should be at most %{count} byte(s)"
+msgstr[0] "moet maximaal %{count} byte zijn"
+msgstr[1] "moet maximaal %{count} bytes zijn"
+
+msgid "must be less than %{number}"
+msgstr "moet kleiner zijn dan %{number}"
+
+msgid "must be greater than %{number}"
+msgstr "moet groter zijn dan %{number}"
+
+msgid "must be less than or equal to %{number}"
+msgstr "moet kleiner of gelijk zijn aan %{number}"
+
+msgid "must be greater than or equal to %{number}"
+msgstr "moet groter of gelijk zijn aan %{number}"
+
+msgid "must be equal to %{number}"
+msgstr "moet gelijk zijn aan %{number}"
+
+msgid "Could not parse page count from pdfinfo output"
+msgstr "Kon aantal pagina's niet uit pdfinfo-uitvoer halen"
+
+msgid "Document not found"
+msgstr "Document niet gevonden"
+
+msgid "Failed to connect to Ollama: %{reason}"
+msgstr "Verbinden met Ollama mislukt: %{reason}"
+
+msgid "Failed to generate embedding for page %{page_id}: %{reason}"
+msgstr "Embedding genereren voor pagina %{page_id} mislukt: %{reason}"
+
+msgid "Failed to read image: %{reason}"
+msgstr "Afbeelding lezen mislukt: %{reason}"
+
+msgid "Ollama embedding error (%{status}): %{body}"
+msgstr "Ollama embedding-fout (%{status}): %{body}"
+
+msgid "Ollama error (%{status}): %{error}"
+msgstr "Ollama-fout (%{status}): %{error}"
+
+msgid "Ollama returned status %{status}: %{body}"
+msgstr "Ollama retourneerde status %{status}: %{body}"
+
+msgid "PDF extraction failed: %{error}"
+msgstr "PDF-extractie mislukt: %{error}"
+
+msgid "PDF extraction failed: %{reason}"
+msgstr "PDF-extractie mislukt: %{reason}"
+
+msgid "Page %{page_number} extraction failed: %{reason}"
+msgstr "Extractie van pagina %{page_number} mislukt: %{reason}"
+
+msgid "Page %{page_number} translation failed: %{reason}"
+msgstr "Vertaling van pagina %{page_number} mislukt: %{reason}"
+
+msgid "Request failed: %{reason}"
+msgstr "Verzoek mislukt: %{reason}"
+
+msgid "Request timed out"
+msgstr "Verzoek verlopen"
+
+msgid "Unexpected response format from Ollama"
+msgstr "Onverwacht antwoordformaat van Ollama"
+
+msgid "pdfinfo failed: %{error}"
+msgstr "pdfinfo mislukt: %{error}"

@@ -1,0 +1,152 @@
+## "msgid"s in this file come from POT (.pot) files.
+msgid ""
+msgstr ""
+"Language: pl\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "can't be blank"
+msgstr "nie może być puste"
+
+msgid "has already been taken"
+msgstr "jest już zajęte"
+
+msgid "is invalid"
+msgstr "jest nieprawidłowe"
+
+msgid "must be accepted"
+msgstr "musi być zaakceptowane"
+
+msgid "has invalid format"
+msgstr "ma nieprawidłowy format"
+
+msgid "has an invalid entry"
+msgstr "zawiera nieprawidłowy wpis"
+
+msgid "is reserved"
+msgstr "jest zarezerwowane"
+
+msgid "does not match confirmation"
+msgstr "nie zgadza się z potwierdzeniem"
+
+msgid "is still associated with this entry"
+msgstr "jest nadal powiązane z tym wpisem"
+
+msgid "are still associated with this entry"
+msgstr "są nadal powiązane z tym wpisem"
+
+msgid "should have %{count} item(s)"
+msgid_plural "should have %{count} item(s)"
+msgstr[0] "powinno mieć %{count} element"
+msgstr[1] "powinno mieć %{count} elementy"
+msgstr[2] "powinno mieć %{count} elementów"
+
+msgid "should be %{count} character(s)"
+msgid_plural "should be %{count} character(s)"
+msgstr[0] "powinno mieć %{count} znak"
+msgstr[1] "powinno mieć %{count} znaki"
+msgstr[2] "powinno mieć %{count} znaków"
+
+msgid "should be %{count} byte(s)"
+msgid_plural "should be %{count} byte(s)"
+msgstr[0] "powinno mieć %{count} bajt"
+msgstr[1] "powinno mieć %{count} bajty"
+msgstr[2] "powinno mieć %{count} bajtów"
+
+msgid "should have at least %{count} item(s)"
+msgid_plural "should have at least %{count} item(s)"
+msgstr[0] "powinno mieć co najmniej %{count} element"
+msgstr[1] "powinno mieć co najmniej %{count} elementy"
+msgstr[2] "powinno mieć co najmniej %{count} elementów"
+
+msgid "should be at least %{count} character(s)"
+msgid_plural "should be at least %{count} character(s)"
+msgstr[0] "powinno mieć co najmniej %{count} znak"
+msgstr[1] "powinno mieć co najmniej %{count} znaki"
+msgstr[2] "powinno mieć co najmniej %{count} znaków"
+
+msgid "should be at least %{count} byte(s)"
+msgid_plural "should be at least %{count} byte(s)"
+msgstr[0] "powinno mieć co najmniej %{count} bajt"
+msgstr[1] "powinno mieć co najmniej %{count} bajty"
+msgstr[2] "powinno mieć co najmniej %{count} bajtów"
+
+msgid "should have at most %{count} item(s)"
+msgid_plural "should have at most %{count} item(s)"
+msgstr[0] "powinno mieć co najwyżej %{count} element"
+msgstr[1] "powinno mieć co najwyżej %{count} elementy"
+msgstr[2] "powinno mieć co najwyżej %{count} elementów"
+
+msgid "should be at most %{count} character(s)"
+msgid_plural "should be at most %{count} character(s)"
+msgstr[0] "powinno mieć co najwyżej %{count} znak"
+msgstr[1] "powinno mieć co najwyżej %{count} znaki"
+msgstr[2] "powinno mieć co najwyżej %{count} znaków"
+
+msgid "should be at most %{count} byte(s)"
+msgid_plural "should be at most %{count} byte(s)"
+msgstr[0] "powinno mieć co najwyżej %{count} bajt"
+msgstr[1] "powinno mieć co najwyżej %{count} bajty"
+msgstr[2] "powinno mieć co najwyżej %{count} bajtów"
+
+msgid "must be less than %{number}"
+msgstr "musi być mniejsze niż %{number}"
+
+msgid "must be greater than %{number}"
+msgstr "musi być większe niż %{number}"
+
+msgid "must be less than or equal to %{number}"
+msgstr "musi być mniejsze lub równe %{number}"
+
+msgid "must be greater than or equal to %{number}"
+msgstr "musi być większe lub równe %{number}"
+
+msgid "must be equal to %{number}"
+msgstr "musi być równe %{number}"
+
+msgid "Could not parse page count from pdfinfo output"
+msgstr "Nie udało się odczytać liczby stron z wyjścia pdfinfo"
+
+msgid "Document not found"
+msgstr "Dokument nie znaleziony"
+
+msgid "Failed to connect to Ollama: %{reason}"
+msgstr "Nie udało się połączyć z Ollama: %{reason}"
+
+msgid "Failed to generate embedding for page %{page_id}: %{reason}"
+msgstr "Nie udało się wygenerować embeddingu dla strony %{page_id}: %{reason}"
+
+msgid "Failed to read image: %{reason}"
+msgstr "Nie udało się odczytać obrazu: %{reason}"
+
+msgid "Ollama embedding error (%{status}): %{body}"
+msgstr "Błąd embeddingu Ollama (%{status}): %{body}"
+
+msgid "Ollama error (%{status}): %{error}"
+msgstr "Błąd Ollama (%{status}): %{error}"
+
+msgid "Ollama returned status %{status}: %{body}"
+msgstr "Ollama zwróciła status %{status}: %{body}"
+
+msgid "PDF extraction failed: %{error}"
+msgstr "Ekstrakcja PDF nie powiodła się: %{error}"
+
+msgid "PDF extraction failed: %{reason}"
+msgstr "Ekstrakcja PDF nie powiodła się: %{reason}"
+
+msgid "Page %{page_number} extraction failed: %{reason}"
+msgstr "Ekstrakcja strony %{page_number} nie powiodła się: %{reason}"
+
+msgid "Page %{page_number} translation failed: %{reason}"
+msgstr "Tłumaczenie strony %{page_number} nie powiodło się: %{reason}"
+
+msgid "Request failed: %{reason}"
+msgstr "Żądanie nie powiodło się: %{reason}"
+
+msgid "Request timed out"
+msgstr "Przekroczono limit czasu żądania"
+
+msgid "Unexpected response format from Ollama"
+msgstr "Nieoczekiwany format odpowiedzi z Ollama"
+
+msgid "pdfinfo failed: %{error}"
+msgstr "pdfinfo nie powiodło się: %{error}"

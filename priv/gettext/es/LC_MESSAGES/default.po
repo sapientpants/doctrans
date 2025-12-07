@@ -1,0 +1,256 @@
+## "msgid"s in this file come from POT (.pot) files.
+msgid ""
+msgstr ""
+"Language: es\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: lib/doctrans_web/live/book_live/components.ex:39
+msgid "%{count} page"
+msgid_plural "%{count} pages"
+msgstr[0] "%{count} página"
+msgstr[1] "%{count} páginas"
+
+#: lib/doctrans_web/live/search_live.ex:85
+msgid "%{count} result for \"%{query}\""
+msgid_plural "%{count} results for \"%{query}\""
+msgstr[0] "%{count} resultado para \"%{query}\""
+msgstr[1] "%{count} resultados para \"%{query}\""
+
+msgid "+ Add more files"
+msgstr "+ Añadir más archivos"
+
+msgid "A-Z"
+msgstr "A-Z"
+
+msgid "Actions"
+msgstr "Acciones"
+
+msgid "An error occurred processing this page"
+msgstr "Se produjo un error al procesar esta página"
+
+msgid "Are you sure you want to delete this document? This cannot be undone."
+msgstr "¿Estás seguro de que deseas eliminar este documento? Esta acción no se puede deshacer."
+
+msgid "Attempting to reconnect"
+msgstr "Intentando reconectar"
+
+msgid "Back"
+msgstr "Atrás"
+
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgid "Completed"
+msgstr "Completado"
+
+msgid "Danish"
+msgstr "Danés"
+
+msgid "Doctrans"
+msgstr "Doctrans"
+
+msgid "Document deleted successfully"
+msgstr "Documento eliminado correctamente"
+
+msgid "Document uploaded!"
+msgid_plural "%{count} documents uploaded!"
+msgstr[0] "¡Documento subido!"
+msgstr[1] "¡%{count} documentos subidos!"
+
+msgid "Drag and drop PDF files here, or"
+msgstr "Arrastra y suelta archivos PDF aquí, o"
+
+msgid "Dutch"
+msgstr "Neerlandés"
+
+msgid "English"
+msgstr "Inglés"
+
+msgid "Enter a search term to find content across all your documents."
+msgstr "Introduce un término de búsqueda para encontrar contenido en todos tus documentos."
+
+msgid "Error"
+msgstr "Error"
+
+msgid "Error: %{error}"
+msgstr "Error: %{error}"
+
+msgid "Extracting text from page..."
+msgstr "Extrayendo texto de la página..."
+
+msgid "Failed to delete document"
+msgstr "Error al eliminar documento"
+
+msgid "File is too large (max 100MB)"
+msgstr "El archivo es demasiado grande (máx. 100 MB)"
+
+msgid "Find content across all documents"
+msgstr "Buscar contenido en todos los documentos"
+
+msgid "French"
+msgstr "Francés"
+
+msgid "German"
+msgstr "Alemán"
+
+msgid "Italian"
+msgstr "Italiano"
+
+msgid "Maximum 10 files can be uploaded at once"
+msgstr "Se pueden subir un máximo de 10 archivos a la vez"
+
+msgid "Name (A-Z)"
+msgstr "Nombre (A-Z)"
+
+msgid "Name (Z-A)"
+msgstr "Nombre (Z-A)"
+
+msgid "Newest"
+msgstr "Más reciente"
+
+msgid "Newest First"
+msgstr "Más reciente primero"
+
+msgid "Next"
+msgstr "Siguiente"
+
+msgid "No documents yet"
+msgstr "Sin documentos aún"
+
+msgid "No files were uploaded"
+msgstr "No se subieron archivos"
+
+msgid "No page selected"
+msgstr "Ninguna página seleccionada"
+
+msgid "No results found"
+msgstr "No se encontraron resultados"
+
+msgid "Norwegian"
+msgstr "Noruego"
+
+msgid "Oldest"
+msgstr "Más antiguo"
+
+msgid "Oldest First"
+msgstr "Más antiguo primero"
+
+msgid "Only PDF files are accepted"
+msgstr "Solo se aceptan archivos PDF"
+
+msgid "Original Markdown"
+msgstr "Markdown original"
+
+msgid "Original Page"
+msgstr "Página original"
+
+msgid "PDF Document Translator"
+msgstr "Traductor de documentos PDF"
+
+msgid "PDF Files"
+msgstr "Archivos PDF"
+
+msgid "Page %{current} of %{total}"
+msgstr "Página %{current} de %{total}"
+
+msgid "Page %{number}"
+msgstr "Página %{number}"
+
+msgid "Page image not available"
+msgstr "Imagen de página no disponible"
+
+msgid "Polish"
+msgstr "Polaco"
+
+msgid "Portuguese"
+msgstr "Portugués"
+
+msgid "Previous"
+msgstr "Anterior"
+
+msgid "Processing"
+msgstr "Procesando"
+
+msgid "Processing will begin shortly."
+msgstr "El procesamiento comenzará pronto."
+
+msgid "Progress"
+msgstr "Progreso"
+
+msgid "Queued"
+msgstr "En cola"
+
+msgid "Search"
+msgstr "Buscar"
+
+msgid "Search documents"
+msgstr "Buscar documentos"
+
+msgid "Search..."
+msgstr "Buscar..."
+
+msgid "Searching..."
+msgstr "Buscando..."
+
+msgid "Show Original"
+msgstr "Mostrar original"
+
+msgid "Something went wrong!"
+msgstr "¡Algo salió mal!"
+
+msgid "Sort"
+msgstr "Ordenar"
+
+msgid "Spanish"
+msgstr "Español"
+
+msgid "Start Translation"
+msgstr "Iniciar traducción"
+
+msgid "Swedish"
+msgstr "Sueco"
+
+msgid "Target Language"
+msgstr "Idioma de destino"
+
+msgid "Translated Content"
+msgstr "Contenido traducido"
+
+msgid "Translating content..."
+msgstr "Traduciendo contenido..."
+
+msgid "Try a different search term."
+msgstr "Prueba con un término de búsqueda diferente."
+
+msgid "Unknown"
+msgstr "Desconocido"
+
+msgid "Up to 10 files at once"
+msgstr "Hasta 10 archivos a la vez"
+
+msgid "Upload"
+msgstr "Subir"
+
+msgid "Upload New Document"
+msgstr "Subir nuevo documento"
+
+msgid "Upload a PDF to get started with translation."
+msgstr "Sube un PDF para comenzar la traducción."
+
+msgid "Uploading"
+msgstr "Subiendo"
+
+msgid "Waiting to process..."
+msgstr "Esperando para procesar..."
+
+msgid "We can't find the internet"
+msgstr "No se puede conectar a Internet"
+
+msgid "Z-A"
+msgstr "Z-A"
+
+msgid "browse"
+msgstr "explorar"
+
+msgid "close"
+msgstr "cerrar"

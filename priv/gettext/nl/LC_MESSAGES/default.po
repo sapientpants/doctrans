@@ -1,0 +1,254 @@
+## "msgid"s in this file come from POT (.pot) files.
+msgid ""
+msgstr ""
+"Language: nl\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "%{count} page"
+msgid_plural "%{count} pages"
+msgstr[0] "%{count} pagina"
+msgstr[1] "%{count} pagina's"
+
+msgid "%{count} result for \"%{query}\""
+msgid_plural "%{count} results for \"%{query}\""
+msgstr[0] "%{count} resultaat voor \"%{query}\""
+msgstr[1] "%{count} resultaten voor \"%{query}\""
+
+msgid "+ Add more files"
+msgstr "+ Meer bestanden toevoegen"
+
+msgid "A-Z"
+msgstr "A-Z"
+
+msgid "Actions"
+msgstr "Acties"
+
+msgid "An error occurred processing this page"
+msgstr "Er is een fout opgetreden bij het verwerken van deze pagina"
+
+msgid "Are you sure you want to delete this document? This cannot be undone."
+msgstr "Weet u zeker dat u dit document wilt verwijderen? Dit kan niet ongedaan worden gemaakt."
+
+msgid "Attempting to reconnect"
+msgstr "Poging tot opnieuw verbinden"
+
+msgid "Back"
+msgstr "Terug"
+
+msgid "Cancel"
+msgstr "Annuleren"
+
+msgid "Completed"
+msgstr "Voltooid"
+
+msgid "Danish"
+msgstr "Deens"
+
+msgid "Doctrans"
+msgstr "Doctrans"
+
+msgid "Document deleted successfully"
+msgstr "Document succesvol verwijderd"
+
+msgid "Document uploaded!"
+msgid_plural "%{count} documents uploaded!"
+msgstr[0] "Document geüpload!"
+msgstr[1] "%{count} documenten geüpload!"
+
+msgid "Drag and drop PDF files here, or"
+msgstr "Sleep PDF-bestanden hierheen, of"
+
+msgid "Dutch"
+msgstr "Nederlands"
+
+msgid "English"
+msgstr "Engels"
+
+msgid "Enter a search term to find content across all your documents."
+msgstr "Voer een zoekterm in om inhoud in al uw documenten te vinden."
+
+msgid "Error"
+msgstr "Fout"
+
+msgid "Error: %{error}"
+msgstr "Fout: %{error}"
+
+msgid "Extracting text from page..."
+msgstr "Tekst uit pagina extraheren..."
+
+msgid "Failed to delete document"
+msgstr "Document verwijderen mislukt"
+
+msgid "File is too large (max 100MB)"
+msgstr "Bestand is te groot (max 100 MB)"
+
+msgid "Find content across all documents"
+msgstr "Zoek inhoud in alle documenten"
+
+msgid "French"
+msgstr "Frans"
+
+msgid "German"
+msgstr "Duits"
+
+msgid "Italian"
+msgstr "Italiaans"
+
+msgid "Maximum 10 files can be uploaded at once"
+msgstr "Maximaal 10 bestanden kunnen tegelijk worden geüpload"
+
+msgid "Name (A-Z)"
+msgstr "Naam (A-Z)"
+
+msgid "Name (Z-A)"
+msgstr "Naam (Z-A)"
+
+msgid "Newest"
+msgstr "Nieuwste"
+
+msgid "Newest First"
+msgstr "Nieuwste eerst"
+
+msgid "Next"
+msgstr "Volgende"
+
+msgid "No documents yet"
+msgstr "Nog geen documenten"
+
+msgid "No files were uploaded"
+msgstr "Geen bestanden geüpload"
+
+msgid "No page selected"
+msgstr "Geen pagina geselecteerd"
+
+msgid "No results found"
+msgstr "Geen resultaten gevonden"
+
+msgid "Norwegian"
+msgstr "Noors"
+
+msgid "Oldest"
+msgstr "Oudste"
+
+msgid "Oldest First"
+msgstr "Oudste eerst"
+
+msgid "Only PDF files are accepted"
+msgstr "Alleen PDF-bestanden worden geaccepteerd"
+
+msgid "Original Markdown"
+msgstr "Originele Markdown"
+
+msgid "Original Page"
+msgstr "Originele pagina"
+
+msgid "PDF Document Translator"
+msgstr "PDF-documentvertaler"
+
+msgid "PDF Files"
+msgstr "PDF-bestanden"
+
+msgid "Page %{current} of %{total}"
+msgstr "Pagina %{current} van %{total}"
+
+msgid "Page %{number}"
+msgstr "Pagina %{number}"
+
+msgid "Page image not available"
+msgstr "Pagina-afbeelding niet beschikbaar"
+
+msgid "Polish"
+msgstr "Pools"
+
+msgid "Portuguese"
+msgstr "Portugees"
+
+msgid "Previous"
+msgstr "Vorige"
+
+msgid "Processing"
+msgstr "Verwerken"
+
+msgid "Processing will begin shortly."
+msgstr "Verwerking begint binnenkort."
+
+msgid "Progress"
+msgstr "Voortgang"
+
+msgid "Queued"
+msgstr "In wachtrij"
+
+msgid "Search"
+msgstr "Zoeken"
+
+msgid "Search documents"
+msgstr "Documenten zoeken"
+
+msgid "Search..."
+msgstr "Zoeken..."
+
+msgid "Searching..."
+msgstr "Zoeken..."
+
+msgid "Show Original"
+msgstr "Origineel tonen"
+
+msgid "Something went wrong!"
+msgstr "Er is iets misgegaan!"
+
+msgid "Sort"
+msgstr "Sorteren"
+
+msgid "Spanish"
+msgstr "Spaans"
+
+msgid "Start Translation"
+msgstr "Vertaling starten"
+
+msgid "Swedish"
+msgstr "Zweeds"
+
+msgid "Target Language"
+msgstr "Doeltaal"
+
+msgid "Translated Content"
+msgstr "Vertaalde inhoud"
+
+msgid "Translating content..."
+msgstr "Inhoud vertalen..."
+
+msgid "Try a different search term."
+msgstr "Probeer een andere zoekterm."
+
+msgid "Unknown"
+msgstr "Onbekend"
+
+msgid "Up to 10 files at once"
+msgstr "Tot 10 bestanden tegelijk"
+
+msgid "Upload"
+msgstr "Uploaden"
+
+msgid "Upload New Document"
+msgstr "Nieuw document uploaden"
+
+msgid "Upload a PDF to get started with translation."
+msgstr "Upload een PDF om te beginnen met vertalen."
+
+msgid "Uploading"
+msgstr "Uploaden"
+
+msgid "Waiting to process..."
+msgstr "Wachten op verwerking..."
+
+msgid "We can't find the internet"
+msgstr "Geen internetverbinding gevonden"
+
+msgid "Z-A"
+msgstr "Z-A"
+
+msgid "browse"
+msgstr "bladeren"
+
+msgid "close"
+msgstr "sluiten"

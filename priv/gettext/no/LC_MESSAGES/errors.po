@@ -1,0 +1,143 @@
+## "msgid"s in this file come from POT (.pot) files.
+msgid ""
+msgstr ""
+"Language: no\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "can't be blank"
+msgstr "kan ikke være tom"
+
+msgid "has already been taken"
+msgstr "er allerede i bruk"
+
+msgid "is invalid"
+msgstr "er ugyldig"
+
+msgid "must be accepted"
+msgstr "må aksepteres"
+
+msgid "has invalid format"
+msgstr "har ugyldig format"
+
+msgid "has an invalid entry"
+msgstr "inneholder en ugyldig oppføring"
+
+msgid "is reserved"
+msgstr "er reservert"
+
+msgid "does not match confirmation"
+msgstr "samsvarer ikke med bekreftelsen"
+
+msgid "is still associated with this entry"
+msgstr "er fortsatt tilknyttet denne oppføringen"
+
+msgid "are still associated with this entry"
+msgstr "er fortsatt tilknyttet denne oppføringen"
+
+msgid "should have %{count} item(s)"
+msgid_plural "should have %{count} item(s)"
+msgstr[0] "skal ha %{count} element"
+msgstr[1] "skal ha %{count} elementer"
+
+msgid "should be %{count} character(s)"
+msgid_plural "should be %{count} character(s)"
+msgstr[0] "skal være %{count} tegn"
+msgstr[1] "skal være %{count} tegn"
+
+msgid "should be %{count} byte(s)"
+msgid_plural "should be %{count} byte(s)"
+msgstr[0] "skal være %{count} byte"
+msgstr[1] "skal være %{count} bytes"
+
+msgid "should have at least %{count} item(s)"
+msgid_plural "should have at least %{count} item(s)"
+msgstr[0] "skal ha minst %{count} element"
+msgstr[1] "skal ha minst %{count} elementer"
+
+msgid "should be at least %{count} character(s)"
+msgid_plural "should be at least %{count} character(s)"
+msgstr[0] "skal være minst %{count} tegn"
+msgstr[1] "skal være minst %{count} tegn"
+
+msgid "should be at least %{count} byte(s)"
+msgid_plural "should be at least %{count} byte(s)"
+msgstr[0] "skal være minst %{count} byte"
+msgstr[1] "skal være minst %{count} bytes"
+
+msgid "should have at most %{count} item(s)"
+msgid_plural "should have at most %{count} item(s)"
+msgstr[0] "skal ha maksimalt %{count} element"
+msgstr[1] "skal ha maksimalt %{count} elementer"
+
+msgid "should be at most %{count} character(s)"
+msgid_plural "should be at most %{count} character(s)"
+msgstr[0] "skal være maksimalt %{count} tegn"
+msgstr[1] "skal være maksimalt %{count} tegn"
+
+msgid "should be at most %{count} byte(s)"
+msgid_plural "should be at most %{count} byte(s)"
+msgstr[0] "skal være maksimalt %{count} byte"
+msgstr[1] "skal være maksimalt %{count} bytes"
+
+msgid "must be less than %{number}"
+msgstr "må være mindre enn %{number}"
+
+msgid "must be greater than %{number}"
+msgstr "må være større enn %{number}"
+
+msgid "must be less than or equal to %{number}"
+msgstr "må være mindre enn eller lik %{number}"
+
+msgid "must be greater than or equal to %{number}"
+msgstr "må være større enn eller lik %{number}"
+
+msgid "must be equal to %{number}"
+msgstr "må være lik %{number}"
+
+msgid "Could not parse page count from pdfinfo output"
+msgstr "Kunne ikke lese sideantall fra pdfinfo-utdata"
+
+msgid "Document not found"
+msgstr "Dokument ikke funnet"
+
+msgid "Failed to connect to Ollama: %{reason}"
+msgstr "Kunne ikke koble til Ollama: %{reason}"
+
+msgid "Failed to generate embedding for page %{page_id}: %{reason}"
+msgstr "Kunne ikke generere embedding for side %{page_id}: %{reason}"
+
+msgid "Failed to read image: %{reason}"
+msgstr "Kunne ikke lese bilde: %{reason}"
+
+msgid "Ollama embedding error (%{status}): %{body}"
+msgstr "Ollama embedding-feil (%{status}): %{body}"
+
+msgid "Ollama error (%{status}): %{error}"
+msgstr "Ollama-feil (%{status}): %{error}"
+
+msgid "Ollama returned status %{status}: %{body}"
+msgstr "Ollama returnerte status %{status}: %{body}"
+
+msgid "PDF extraction failed: %{error}"
+msgstr "PDF-uttrekk feilet: %{error}"
+
+msgid "PDF extraction failed: %{reason}"
+msgstr "PDF-uttrekk feilet: %{reason}"
+
+msgid "Page %{page_number} extraction failed: %{reason}"
+msgstr "Uttrekk av side %{page_number} feilet: %{reason}"
+
+msgid "Page %{page_number} translation failed: %{reason}"
+msgstr "Oversettelse av side %{page_number} feilet: %{reason}"
+
+msgid "Request failed: %{reason}"
+msgstr "Forespørsel feilet: %{reason}"
+
+msgid "Request timed out"
+msgstr "Forespørselen fikk tidsavbrudd"
+
+msgid "Unexpected response format from Ollama"
+msgstr "Uventet svarformat fra Ollama"
+
+msgid "pdfinfo failed: %{error}"
+msgstr "pdfinfo feilet: %{error}"

@@ -32,7 +32,7 @@ config :doctrans, :defaults,
 # Gettext configuration for i18n
 config :doctrans, DoctransWeb.Gettext,
   default_locale: "en",
-  locales: ~w(en de)
+  locales: ~w(da de en es fr it nl no pl pt sv)
 
 # Embedding configuration for semantic search
 config :doctrans, :embedding,

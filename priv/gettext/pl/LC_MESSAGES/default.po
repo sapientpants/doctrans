@@ -1,0 +1,257 @@
+## "msgid"s in this file come from POT (.pot) files.
+msgid ""
+msgstr ""
+"Language: pl\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "%{count} page"
+msgid_plural "%{count} pages"
+msgstr[0] "%{count} strona"
+msgstr[1] "%{count} strony"
+msgstr[2] "%{count} stron"
+
+msgid "%{count} result for \"%{query}\""
+msgid_plural "%{count} results for \"%{query}\""
+msgstr[0] "%{count} wynik dla \"%{query}\""
+msgstr[1] "%{count} wyniki dla \"%{query}\""
+msgstr[2] "%{count} wyników dla \"%{query}\""
+
+msgid "+ Add more files"
+msgstr "+ Dodaj więcej plików"
+
+msgid "A-Z"
+msgstr "A-Z"
+
+msgid "Actions"
+msgstr "Akcje"
+
+msgid "An error occurred processing this page"
+msgstr "Wystąpił błąd podczas przetwarzania tej strony"
+
+msgid "Are you sure you want to delete this document? This cannot be undone."
+msgstr "Czy na pewno chcesz usunąć ten dokument? Tej operacji nie można cofnąć."
+
+msgid "Attempting to reconnect"
+msgstr "Próba ponownego połączenia"
+
+msgid "Back"
+msgstr "Wstecz"
+
+msgid "Cancel"
+msgstr "Anuluj"
+
+msgid "Completed"
+msgstr "Ukończono"
+
+msgid "Danish"
+msgstr "Duński"
+
+msgid "Doctrans"
+msgstr "Doctrans"
+
+msgid "Document deleted successfully"
+msgstr "Dokument usunięty pomyślnie"
+
+msgid "Document uploaded!"
+msgid_plural "%{count} documents uploaded!"
+msgstr[0] "Dokument przesłany!"
+msgstr[1] "%{count} dokumenty przesłane!"
+msgstr[2] "%{count} dokumentów przesłanych!"
+
+msgid "Drag and drop PDF files here, or"
+msgstr "Przeciągnij i upuść pliki PDF tutaj, lub"
+
+msgid "Dutch"
+msgstr "Holenderski"
+
+msgid "English"
+msgstr "Angielski"
+
+msgid "Enter a search term to find content across all your documents."
+msgstr "Wprowadź wyszukiwane hasło, aby znaleźć treść we wszystkich dokumentach."
+
+msgid "Error"
+msgstr "Błąd"
+
+msgid "Error: %{error}"
+msgstr "Błąd: %{error}"
+
+msgid "Extracting text from page..."
+msgstr "Wyodrębnianie tekstu ze strony..."
+
+msgid "Failed to delete document"
+msgstr "Nie udało się usunąć dokumentu"
+
+msgid "File is too large (max 100MB)"
+msgstr "Plik jest za duży (maks. 100 MB)"
+
+msgid "Find content across all documents"
+msgstr "Znajdź treść we wszystkich dokumentach"
+
+msgid "French"
+msgstr "Francuski"
+
+msgid "German"
+msgstr "Niemiecki"
+
+msgid "Italian"
+msgstr "Włoski"
+
+msgid "Maximum 10 files can be uploaded at once"
+msgstr "Można przesłać maksymalnie 10 plików naraz"
+
+msgid "Name (A-Z)"
+msgstr "Nazwa (A-Z)"
+
+msgid "Name (Z-A)"
+msgstr "Nazwa (Z-A)"
+
+msgid "Newest"
+msgstr "Najnowsze"
+
+msgid "Newest First"
+msgstr "Najnowsze najpierw"
+
+msgid "Next"
+msgstr "Następna"
+
+msgid "No documents yet"
+msgstr "Brak dokumentów"
+
+msgid "No files were uploaded"
+msgstr "Nie przesłano żadnych plików"
+
+msgid "No page selected"
+msgstr "Nie wybrano strony"
+
+msgid "No results found"
+msgstr "Nie znaleziono wyników"
+
+msgid "Norwegian"
+msgstr "Norweski"
+
+msgid "Oldest"
+msgstr "Najstarsze"
+
+msgid "Oldest First"
+msgstr "Najstarsze najpierw"
+
+msgid "Only PDF files are accepted"
+msgstr "Akceptowane są tylko pliki PDF"
+
+msgid "Original Markdown"
+msgstr "Oryginalny Markdown"
+
+msgid "Original Page"
+msgstr "Oryginalna strona"
+
+msgid "PDF Document Translator"
+msgstr "Tłumacz dokumentów PDF"
+
+msgid "PDF Files"
+msgstr "Pliki PDF"
+
+msgid "Page %{current} of %{total}"
+msgstr "Strona %{current} z %{total}"
+
+msgid "Page %{number}"
+msgstr "Strona %{number}"
+
+msgid "Page image not available"
+msgstr "Obraz strony niedostępny"
+
+msgid "Polish"
+msgstr "Polski"
+
+msgid "Portuguese"
+msgstr "Portugalski"
+
+msgid "Previous"
+msgstr "Poprzednia"
+
+msgid "Processing"
+msgstr "Przetwarzanie"
+
+msgid "Processing will begin shortly."
+msgstr "Przetwarzanie rozpocznie się wkrótce."
+
+msgid "Progress"
+msgstr "Postęp"
+
+msgid "Queued"
+msgstr "W kolejce"
+
+msgid "Search"
+msgstr "Szukaj"
+
+msgid "Search documents"
+msgstr "Szukaj dokumentów"
+
+msgid "Search..."
+msgstr "Szukaj..."
+
+msgid "Searching..."
+msgstr "Wyszukiwanie..."
+
+msgid "Show Original"
+msgstr "Pokaż oryginał"
+
+msgid "Something went wrong!"
+msgstr "Coś poszło nie tak!"
+
+msgid "Sort"
+msgstr "Sortuj"
+
+msgid "Spanish"
+msgstr "Hiszpański"
+
+msgid "Start Translation"
+msgstr "Rozpocznij tłumaczenie"
+
+msgid "Swedish"
+msgstr "Szwedzki"
+
+msgid "Target Language"
+msgstr "Język docelowy"
+
+msgid "Translated Content"
+msgstr "Przetłumaczona treść"
+
+msgid "Translating content..."
+msgstr "Tłumaczenie treści..."
+
+msgid "Try a different search term."
+msgstr "Spróbuj innego wyszukiwanego hasła."
+
+msgid "Unknown"
+msgstr "Nieznany"
+
+msgid "Up to 10 files at once"
+msgstr "Do 10 plików naraz"
+
+msgid "Upload"
+msgstr "Prześlij"
+
+msgid "Upload New Document"
+msgstr "Prześlij nowy dokument"
+
+msgid "Upload a PDF to get started with translation."
+msgstr "Prześlij PDF, aby rozpocząć tłumaczenie."
+
+msgid "Uploading"
+msgstr "Przesyłanie"
+
+msgid "Waiting to process..."
+msgstr "Oczekiwanie na przetworzenie..."
+
+msgid "We can't find the internet"
+msgstr "Nie można połączyć się z Internetem"
+
+msgid "Z-A"
+msgstr "Z-A"
+
+msgid "browse"
+msgstr "przeglądaj"
+
+msgid "close"
+msgstr "zamknij"

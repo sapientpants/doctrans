@@ -118,20 +118,16 @@ defmodule DoctransWeb.DocumentComponentsTest do
       assert Components.language_name("pl") == "Polish"
     end
 
-    test "returns Russian for ru" do
-      assert Components.language_name("ru") == "Russian"
+    test "returns Danish for da" do
+      assert Components.language_name("da") == "Danish"
     end
 
-    test "returns Chinese for zh" do
-      assert Components.language_name("zh") == "Chinese"
+    test "returns Norwegian for no" do
+      assert Components.language_name("no") == "Norwegian"
     end
 
-    test "returns Japanese for ja" do
-      assert Components.language_name("ja") == "Japanese"
-    end
-
-    test "returns Korean for ko" do
-      assert Components.language_name("ko") == "Korean"
+    test "returns Swedish for sv" do
+      assert Components.language_name("sv") == "Swedish"
     end
 
     test "returns code for unknown language" do

@@ -47,10 +47,9 @@ defmodule DoctransWeb.DocumentLive.ComponentsTest do
       assert Components.language_name("pt") == "Portuguese"
       assert Components.language_name("nl") == "Dutch"
       assert Components.language_name("pl") == "Polish"
-      assert Components.language_name("ru") == "Russian"
-      assert Components.language_name("zh") == "Chinese"
-      assert Components.language_name("ja") == "Japanese"
-      assert Components.language_name("ko") == "Korean"
+      assert Components.language_name("da") == "Danish"
+      assert Components.language_name("no") == "Norwegian"
+      assert Components.language_name("sv") == "Swedish"
       assert Components.language_name("xx") == "xx"
     end
   end

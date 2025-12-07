@@ -211,20 +211,21 @@ defmodule DoctransWeb.DocumentLive.Components do
   attr :selected, :string, required: true
 
   def language_options(assigns) do
-    languages = [
-      {"de", gettext("German")},
-      {"en", gettext("English")},
-      {"fr", gettext("French")},
-      {"es", gettext("Spanish")},
-      {"it", gettext("Italian")},
-      {"pt", gettext("Portuguese")},
-      {"nl", gettext("Dutch")},
-      {"pl", gettext("Polish")},
-      {"ru", gettext("Russian")},
-      {"zh", gettext("Chinese")},
-      {"ja", gettext("Japanese")},
-      {"ko", gettext("Korean")}
-    ]
+    languages =
+      [
+        {"da", gettext("Danish")},
+        {"nl", gettext("Dutch")},
+        {"en", gettext("English")},
+        {"fr", gettext("French")},
+        {"de", gettext("German")},
+        {"it", gettext("Italian")},
+        {"no", gettext("Norwegian")},
+        {"pl", gettext("Polish")},
+        {"pt", gettext("Portuguese")},
+        {"es", gettext("Spanish")},
+        {"sv", gettext("Swedish")}
+      ]
+      |> Enum.sort_by(fn {_code, name} -> name end)
 
     assigns = assign(assigns, :languages, languages)
 
@@ -282,17 +283,16 @@ defmodule DoctransWeb.DocumentLive.Components do
   @doc """
   Returns the display name for a language code.
   """
+  def language_name("da"), do: gettext("Danish")
   def language_name("de"), do: gettext("German")
   def language_name("en"), do: gettext("English")
-  def language_name("fr"), do: gettext("French")
   def language_name("es"), do: gettext("Spanish")
+  def language_name("fr"), do: gettext("French")
   def language_name("it"), do: gettext("Italian")
-  def language_name("pt"), do: gettext("Portuguese")
   def language_name("nl"), do: gettext("Dutch")
+  def language_name("no"), do: gettext("Norwegian")
   def language_name("pl"), do: gettext("Polish")
-  def language_name("ru"), do: gettext("Russian")
-  def language_name("zh"), do: gettext("Chinese")
-  def language_name("ja"), do: gettext("Japanese")
-  def language_name("ko"), do: gettext("Korean")
+  def language_name("pt"), do: gettext("Portuguese")
+  def language_name("sv"), do: gettext("Swedish")
   def language_name(code), do: code
 end
