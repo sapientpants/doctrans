@@ -100,7 +100,15 @@ repos:
         types: [elixir]
         pass_filenames: false
 
-      # 3. Compilation with warnings as errors (medium speed)
+      # 3. Translation completeness check (fast)
+      - id: check-translations
+        name: Check translation completeness
+        entry: elixir scripts/check_translations.exs
+        language: system
+        pass_filenames: false
+        files: ^priv/gettext/.*\.po[t]?$
+
+      # 4. Compilation with warnings as errors (medium speed)
       - id: mix-compile
         name: Mix compile with warnings as errors
         entry: mix compile --warning-as-errors --all-warnings

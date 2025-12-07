@@ -428,10 +428,10 @@ msgstr "Spanisch"
 #: lib/doctrans_web/live/book_live/components.ex:291
 #, elixir-autogen, elixir-format
 msgid "Norwegian"
-msgstr ""
+msgstr "Norwegisch"
 
 #: lib/doctrans_web/live/book_live/components.ex:225
 #: lib/doctrans_web/live/book_live/components.ex:294
 #, elixir-autogen, elixir-format
 msgid "Swedish"
-msgstr ""
+msgstr "Schwedisch"
