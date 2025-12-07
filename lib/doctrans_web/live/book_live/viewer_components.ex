@@ -43,7 +43,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
       class="flex flex-col items-center justify-center h-64 text-base-content/50"
     >
       <.icon name="hero-photo" class="w-16 h-16" />
-      <p class="mt-4">Page image not available</p>
+      <p class="mt-4">{gettext("Page image not available")}</p>
     </div>
     """
   end
@@ -58,7 +58,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
       class="flex flex-col items-center justify-center h-64"
     >
       <span class="loading loading-spinner loading-lg text-primary"></span>
-      <p class="mt-4 text-base-content/70">Extracting text from page...</p>
+      <p class="mt-4 text-base-content/70">{gettext("Extracting text from page...")}</p>
     </div>
     <div
       :if={
@@ -67,28 +67,28 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
       class="flex flex-col items-center justify-center h-64"
     >
       <span class="loading loading-spinner loading-lg text-primary"></span>
-      <p class="mt-4 text-base-content/70">Translating content...</p>
+      <p class="mt-4 text-base-content/70">{gettext("Translating content...")}</p>
     </div>
     <div
       :if={@page && @page.extraction_status == "pending"}
       class="flex flex-col items-center justify-center h-64 text-base-content/50"
     >
       <.icon name="hero-clock" class="w-16 h-16" />
-      <p class="mt-4">Waiting to process...</p>
+      <p class="mt-4">{gettext("Waiting to process...")}</p>
     </div>
     <div
       :if={@page && (@page.extraction_status == "error" || @page.translation_status == "error")}
       class="flex flex-col items-center justify-center h-64 text-error"
     >
       <.icon name="hero-exclamation-triangle" class="w-16 h-16" />
-      <p class="mt-4">An error occurred processing this page</p>
+      <p class="mt-4">{gettext("An error occurred processing this page")}</p>
     </div>
     <div :if={@page && show_content?(@page, @show_original)} class="prose prose-sm max-w-none">
       <.markdown_content content={get_content(@page, @show_original)} />
     </div>
     <div :if={!@page} class="flex flex-col items-center justify-center h-64 text-base-content/50">
       <.icon name="hero-document-text" class="w-16 h-16" />
-      <p class="mt-4">No page selected</p>
+      <p class="mt-4">{gettext("No page selected")}</p>
     </div>
     """
   end

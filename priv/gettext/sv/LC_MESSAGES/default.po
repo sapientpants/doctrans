@@ -1,0 +1,254 @@
+## "msgid"s in this file come from POT (.pot) files.
+msgid ""
+msgstr ""
+"Language: sv\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "%{count} page"
+msgid_plural "%{count} pages"
+msgstr[0] "%{count} sida"
+msgstr[1] "%{count} sidor"
+
+msgid "%{count} result for \"%{query}\""
+msgid_plural "%{count} results for \"%{query}\""
+msgstr[0] "%{count} resultat för \"%{query}\""
+msgstr[1] "%{count} resultat för \"%{query}\""
+
+msgid "+ Add more files"
+msgstr "+ Lägg till fler filer"
+
+msgid "A-Z"
+msgstr "A-Ö"
+
+msgid "Actions"
+msgstr "Åtgärder"
+
+msgid "An error occurred processing this page"
+msgstr "Ett fel uppstod vid bearbetning av denna sida"
+
+msgid "Are you sure you want to delete this document? This cannot be undone."
+msgstr "Är du säker på att du vill ta bort detta dokument? Detta kan inte ångras."
+
+msgid "Attempting to reconnect"
+msgstr "Försöker återansluta"
+
+msgid "Back"
+msgstr "Tillbaka"
+
+msgid "Cancel"
+msgstr "Avbryt"
+
+msgid "Completed"
+msgstr "Slutförd"
+
+msgid "Danish"
+msgstr "Danska"
+
+msgid "Doctrans"
+msgstr "Doctrans"
+
+msgid "Document deleted successfully"
+msgstr "Dokument borttaget"
+
+msgid "Document uploaded!"
+msgid_plural "%{count} documents uploaded!"
+msgstr[0] "Dokument uppladdat!"
+msgstr[1] "%{count} dokument uppladdade!"
+
+msgid "Drag and drop PDF files here, or"
+msgstr "Dra och släpp PDF-filer här, eller"
+
+msgid "Dutch"
+msgstr "Nederländska"
+
+msgid "English"
+msgstr "Engelska"
+
+msgid "Enter a search term to find content across all your documents."
+msgstr "Ange ett sökord för att hitta innehåll i alla dina dokument."
+
+msgid "Error"
+msgstr "Fel"
+
+msgid "Error: %{error}"
+msgstr "Fel: %{error}"
+
+msgid "Extracting text from page..."
+msgstr "Extraherar text från sida..."
+
+msgid "Failed to delete document"
+msgstr "Kunde inte ta bort dokument"
+
+msgid "File is too large (max 100MB)"
+msgstr "Filen är för stor (max 100 MB)"
+
+msgid "Find content across all documents"
+msgstr "Hitta innehåll i alla dokument"
+
+msgid "French"
+msgstr "Franska"
+
+msgid "German"
+msgstr "Tyska"
+
+msgid "Italian"
+msgstr "Italienska"
+
+msgid "Maximum 10 files can be uploaded at once"
+msgstr "Maximalt 10 filer kan laddas upp åt gången"
+
+msgid "Name (A-Z)"
+msgstr "Namn (A-Ö)"
+
+msgid "Name (Z-A)"
+msgstr "Namn (Ö-A)"
+
+msgid "Newest"
+msgstr "Nyaste"
+
+msgid "Newest First"
+msgstr "Nyaste först"
+
+msgid "Next"
+msgstr "Nästa"
+
+msgid "No documents yet"
+msgstr "Inga dokument ännu"
+
+msgid "No files were uploaded"
+msgstr "Inga filer laddades upp"
+
+msgid "No page selected"
+msgstr "Ingen sida vald"
+
+msgid "No results found"
+msgstr "Inga resultat hittades"
+
+msgid "Norwegian"
+msgstr "Norska"
+
+msgid "Oldest"
+msgstr "Äldsta"
+
+msgid "Oldest First"
+msgstr "Äldsta först"
+
+msgid "Only PDF files are accepted"
+msgstr "Endast PDF-filer accepteras"
+
+msgid "Original Content"
+msgstr "Originalinnehåll"
+
+msgid "Original Page"
+msgstr "Originalsida"
+
+msgid "PDF Document Translator"
+msgstr "PDF-dokumentöversättare"
+
+msgid "PDF Files"
+msgstr "PDF-filer"
+
+msgid "Page %{current} of %{total}"
+msgstr "Sida %{current} av %{total}"
+
+msgid "Page %{number}"
+msgstr "Sida %{number}"
+
+msgid "Page image not available"
+msgstr "Sidbild inte tillgänglig"
+
+msgid "Polish"
+msgstr "Polska"
+
+msgid "Portuguese"
+msgstr "Portugisiska"
+
+msgid "Previous"
+msgstr "Föregående"
+
+msgid "Processing"
+msgstr "Bearbetar"
+
+msgid "Processing will begin shortly."
+msgstr "Bearbetning påbörjas snart."
+
+msgid "Progress"
+msgstr "Framsteg"
+
+msgid "Queued"
+msgstr "I kö"
+
+msgid "Search"
+msgstr "Sök"
+
+msgid "Search documents"
+msgstr "Sök dokument"
+
+msgid "Search..."
+msgstr "Sök..."
+
+msgid "Searching..."
+msgstr "Söker..."
+
+msgid "Show Original"
+msgstr "Visa original"
+
+msgid "Something went wrong!"
+msgstr "Något gick fel!"
+
+msgid "Sort"
+msgstr "Sortera"
+
+msgid "Spanish"
+msgstr "Spanska"
+
+msgid "Start Translation"
+msgstr "Starta översättning"
+
+msgid "Swedish"
+msgstr "Svenska"
+
+msgid "Target Language"
+msgstr "Målspråk"
+
+msgid "Translated Content"
+msgstr "Översatt innehåll"
+
+msgid "Translating content..."
+msgstr "Översätter innehåll..."
+
+msgid "Try a different search term."
+msgstr "Försök med ett annat sökord."
+
+msgid "Unknown"
+msgstr "Okänd"
+
+msgid "Up to 10 files at once"
+msgstr "Upp till 10 filer åt gången"
+
+msgid "Upload"
+msgstr "Ladda upp"
+
+msgid "Upload New Document"
+msgstr "Ladda upp nytt dokument"
+
+msgid "Upload a PDF to get started with translation."
+msgstr "Ladda upp en PDF för att börja översätta."
+
+msgid "Uploading"
+msgstr "Laddar upp"
+
+msgid "Waiting to process..."
+msgstr "Väntar på bearbetning..."
+
+msgid "We can't find the internet"
+msgstr "Kan inte hitta internetanslutning"
+
+msgid "Z-A"
+msgstr "Ö-A"
+
+msgid "browse"
+msgstr "bläddra"
+
+msgid "close"
+msgstr "stäng"

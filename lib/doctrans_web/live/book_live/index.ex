@@ -52,8 +52,8 @@ defmodule DoctransWeb.DocumentLive.Index do
       <div class="w-full px-8 py-8">
         <div class="flex justify-between items-center mb-6">
           <div>
-            <h1 class="text-3xl font-bold text-base-content">Doctrans</h1>
-            <p class="text-base-content/70 mt-1">PDF Document Translator</p>
+            <h1 class="text-3xl font-bold text-base-content">{gettext("Doctrans")}</h1>
+            <p class="text-base-content/70 mt-1">{gettext("PDF Document Translator")}</p>
           </div>
           <div class="flex items-center gap-3">
             <%!-- Inline search form --%>
@@ -65,7 +65,7 @@ defmodule DoctransWeb.DocumentLive.Index do
               <input
                 type="text"
                 name="q"
-                placeholder="Search..."
+                placeholder={gettext("Search...")}
                 class="input input-bordered input-sm w-48 pl-9 pr-3"
                 id="dashboard-search-input"
               />
@@ -88,7 +88,7 @@ defmodule DoctransWeb.DocumentLive.Index do
                     phx-value-dir="desc"
                     class={[@sort_by == :inserted_at && @sort_dir == :desc && "active"]}
                   >
-                    Newest First
+                    {gettext("Newest First")}
                   </button>
                 </li>
                 <li>
@@ -98,7 +98,7 @@ defmodule DoctransWeb.DocumentLive.Index do
                     phx-value-dir="asc"
                     class={[@sort_by == :inserted_at && @sort_dir == :asc && "active"]}
                   >
-                    Oldest First
+                    {gettext("Oldest First")}
                   </button>
                 </li>
                 <li>
@@ -108,7 +108,7 @@ defmodule DoctransWeb.DocumentLive.Index do
                     phx-value-dir="asc"
                     class={[@sort_by == :title && @sort_dir == :asc && "active"]}
                   >
-                    Name (A-Z)
+                    {gettext("Name (A-Z)")}
                   </button>
                 </li>
                 <li>
@@ -118,7 +118,7 @@ defmodule DoctransWeb.DocumentLive.Index do
                     phx-value-dir="desc"
                     class={[@sort_by == :title && @sort_dir == :desc && "active"]}
                   >
-                    Name (Z-A)
+                    {gettext("Name (Z-A)")}
                   </button>
                 </li>
               </ul>
@@ -131,15 +131,17 @@ defmodule DoctransWeb.DocumentLive.Index do
               class="btn btn-primary btn-sm"
               id="upload-document-btn"
             >
-              <.icon name="hero-plus" class="w-4 h-4 mr-1" /> Upload
+              <.icon name="hero-plus" class="w-4 h-4 mr-1" /> {gettext("Upload")}
             </button>
           </div>
         </div>
 
         <div :if={@documents == []} class="text-center py-16">
           <.icon name="hero-document-text" class="w-16 h-16 mx-auto text-base-content/30" />
-          <h3 class="mt-4 text-lg font-medium text-base-content">No documents yet</h3>
-          <p class="mt-2 text-base-content/70">Upload a PDF to get started with translation.</p>
+          <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No documents yet")}</h3>
+          <p class="mt-2 text-base-content/70">
+            {gettext("Upload a PDF to get started with translation.")}
+          </p>
         </div>
 
         <div
@@ -207,7 +209,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
     case uploaded_files do
       [] ->
-        {:noreply, put_flash(socket, :error, "No files were uploaded")}
+        {:noreply, put_flash(socket, :error, gettext("No files were uploaded"))}
 
       files ->
         # Create a document for each uploaded file
@@ -218,13 +220,18 @@ defmodule DoctransWeb.DocumentLive.Index do
         file_count = length(files)
 
         message =
-          if file_count == 1, do: "Document uploaded!", else: "#{file_count} documents uploaded!"
+          ngettext(
+            "Document uploaded!",
+            "%{count} documents uploaded!",
+            file_count,
+            count: file_count
+          )
 
         socket =
           socket
           |> assign(:documents, Documents.list_documents_with_progress())
           |> assign(:show_upload_modal, false)
-          |> put_flash(:info, "#{message} Processing will begin shortly.")
+          |> put_flash(:info, "#{message} #{gettext("Processing will begin shortly.")}")
 
         {:noreply, socket}
     end
@@ -242,12 +249,12 @@ defmodule DoctransWeb.DocumentLive.Index do
         socket =
           socket
           |> assign(:documents, Documents.list_documents_with_progress())
-          |> put_flash(:info, "Document deleted successfully")
+          |> put_flash(:info, gettext("Document deleted successfully"))
 
         {:noreply, socket}
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to delete document")}
+        {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
     end
   end
 

@@ -29,6 +29,11 @@ config :doctrans, :defaults,
   source_language: "de",
   target_language: "en"
 
+# Gettext configuration for i18n
+config :doctrans, DoctransWeb.Gettext,
+  default_locale: "en",
+  locales: ~w(da de en es fr it nl no pl pt sv)
+
 # Embedding configuration for semantic search
 config :doctrans, :embedding,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),

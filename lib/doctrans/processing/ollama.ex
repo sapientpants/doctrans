@@ -5,11 +5,20 @@ defmodule Doctrans.Processing.Ollama do
   Provides functions for:
   - Extracting markdown from page images using a vision model (Qwen3-VL)
   - Translating markdown using a text model (Qwen3)
+
+  ## I18n Note
+
+  This module runs in background GenServer processes (document processing workers),
+  not in the web request process. Since Gettext locales are process-specific, error
+  messages from this module will use the default locale, not the user's browser locale.
+  This is acceptable as these errors are primarily logged and displayed as system status.
   """
 
   @behaviour Doctrans.Processing.OllamaBehaviour
 
   require Logger
+
+  use Gettext, backend: DoctransWeb.Gettext
 
   @doc """
   Extracts markdown text from an image using the vision model.
@@ -52,7 +61,7 @@ defmodule Doctrans.Processing.Ollama do
         make_request("/api/generate", body, timeout)
 
       {:error, reason} ->
-        {:error, "Failed to read image: #{inspect(reason)}"}
+        {:error, dgettext("errors", "Failed to read image: %{reason}", reason: inspect(reason))}
     end
   end
 
@@ -125,10 +134,15 @@ defmodule Doctrans.Processing.Ollama do
         {:ok, Enum.map(models, & &1["name"])}
 
       {:ok, %{status: status, body: body}} ->
-        {:error, "Ollama returned status #{status}: #{inspect(body)}"}
+        {:error,
+         dgettext("errors", "Ollama returned status %{status}: %{body}",
+           status: status,
+           body: inspect(body)
+         )}
 
       {:error, reason} ->
-        {:error, "Failed to connect to Ollama: #{inspect(reason)}"}
+        {:error,
+         dgettext("errors", "Failed to connect to Ollama: %{reason}", reason: inspect(reason))}
     end
   end
 
@@ -149,21 +163,26 @@ defmodule Doctrans.Processing.Ollama do
 
           other ->
             Logger.warning("Unexpected response format: #{inspect(other)}")
-            {:error, "Unexpected response format from Ollama"}
+            {:error, dgettext("errors", "Unexpected response format from Ollama")}
         end
 
       {:ok, %{status: status, body: response_body}} ->
         error_msg = get_in(response_body, ["error"]) || inspect(response_body)
         Logger.error("Ollama request failed with status #{status}: #{error_msg}")
-        {:error, "Ollama error (#{status}): #{error_msg}"}
+
+        {:error,
+         dgettext("errors", "Ollama error (%{status}): %{error}",
+           status: status,
+           error: error_msg
+         )}
 
       {:error, %Req.TransportError{reason: :timeout}} ->
         Logger.error("Ollama request timed out after #{timeout}ms")
-        {:error, "Request timed out"}
+        {:error, dgettext("errors", "Request timed out")}
 
       {:error, reason} ->
         Logger.error("Ollama request failed: #{inspect(reason)}")
-        {:error, "Request failed: #{inspect(reason)}"}
+        {:error, dgettext("errors", "Request failed: %{reason}", reason: inspect(reason))}
     end
   end
 

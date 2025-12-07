@@ -8,6 +8,7 @@ defmodule DoctransWeb.Router do
     plug :put_root_layout, html: {DoctransWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug DoctransWeb.Plugs.SetLocale
   end
 
   pipeline :api do
@@ -17,9 +18,11 @@ defmodule DoctransWeb.Router do
   scope "/", DoctransWeb do
     pipe_through :browser
 
-    live "/", DocumentLive.Index, :index
-    live "/search", SearchLive, :index
-    live "/documents/:id", DocumentLive.Show, :show
+    live_session :default, on_mount: [{DoctransWeb.Live.Hooks.SetLocale, :default}] do
+      live "/", DocumentLive.Index, :index
+      live "/search", SearchLive, :index
+      live "/documents/:id", DocumentLive.Show, :show
+    end
   end
 
   # Other scopes may use custom stacks.

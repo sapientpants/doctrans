@@ -3,9 +3,18 @@ defmodule Doctrans.Processing.LlmProcessor do
   Handles LLM-based processing of document pages.
 
   Performs markdown extraction and translation using Ollama models.
+
+  ## I18n Note
+
+  This module runs in background GenServer processes (document processing pipeline),
+  not in the web request process. Since Gettext locales are process-specific, error
+  messages from this module will use the default locale, not the user's browser locale.
+  This is acceptable as these errors are primarily logged and displayed as system status.
   """
 
   require Logger
+
+  use Gettext, backend: DoctransWeb.Gettext
 
   alias Doctrans.Documents
   alias Doctrans.Search.EmbeddingWorker
@@ -161,7 +170,12 @@ defmodule Doctrans.Processing.LlmProcessor do
 
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
     Documents.broadcast_page_update(page)
-    {:error, "Page #{page.page_number} extraction failed: #{reason}"}
+
+    {:error,
+     dgettext("errors", "Page %{page_number} extraction failed: %{reason}",
+       page_number: page.page_number,
+       reason: reason
+     )}
   end
 
   defp process_page_translation(page, retry_count \\ 0) do
@@ -204,6 +218,11 @@ defmodule Doctrans.Processing.LlmProcessor do
 
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "error"})
     Documents.broadcast_page_update(page)
-    {:error, "Page #{page.page_number} translation failed: #{reason}"}
+
+    {:error,
+     dgettext("errors", "Page %{page_number} translation failed: %{reason}",
+       page_number: page.page_number,
+       reason: reason
+     )}
   end
 end

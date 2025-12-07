@@ -5,6 +5,8 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   require Logger
 
+  use Gettext, backend: DoctransWeb.Gettext
+
   alias Doctrans.Documents
 
   # Allow PdfExtractor module to be configured for testing
@@ -41,7 +43,7 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   defp fetch_document(document_id) do
     case Documents.get_document(document_id) do
-      nil -> {:error, "Document not found"}
+      nil -> {:error, dgettext("errors", "Document not found")}
       document -> {:ok, document}
     end
   end
@@ -64,7 +66,7 @@ defmodule Doctrans.Processing.PdfProcessor do
         create_page_records(document, page_count, pages_dir, pdf_path)
 
       {:error, reason} ->
-        {:error, "PDF extraction failed: #{reason}"}
+        {:error, dgettext("errors", "PDF extraction failed: %{reason}", reason: reason)}
     end
   end
 

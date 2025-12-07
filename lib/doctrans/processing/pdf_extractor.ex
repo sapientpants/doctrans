@@ -11,6 +11,8 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   require Logger
 
+  use Gettext, backend: DoctransWeb.Gettext
+
   @doc """
   Extracts all pages from a PDF file as PNG images.
 
@@ -52,7 +54,9 @@ defmodule Doctrans.Processing.PdfExtractor do
 
       {error_output, exit_code} ->
         Logger.error("pdftoppm failed with exit code #{exit_code}: #{error_output}")
-        {:error, "PDF extraction failed: #{String.trim(error_output)}"}
+
+        {:error,
+         dgettext("errors", "PDF extraction failed: %{error}", error: String.trim(error_output))}
     end
   end
 
@@ -68,11 +72,11 @@ defmodule Doctrans.Processing.PdfExtractor do
       {output, 0} ->
         case Regex.run(~r/Pages:\s*(\d+)/, output) do
           [_, count] -> {:ok, String.to_integer(count)}
-          _ -> {:error, "Could not parse page count from pdfinfo output"}
+          _ -> {:error, dgettext("errors", "Could not parse page count from pdfinfo output")}
         end
 
       {error_output, _exit_code} ->
-        {:error, "pdfinfo failed: #{String.trim(error_output)}"}
+        {:error, dgettext("errors", "pdfinfo failed: %{error}", error: String.trim(error_output))}
     end
   end
 

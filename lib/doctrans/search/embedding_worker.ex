@@ -9,6 +9,8 @@ defmodule Doctrans.Search.EmbeddingWorker do
   use GenServer
   require Logger
 
+  use Gettext, backend: DoctransWeb.Gettext
+
   alias Doctrans.Documents.Page
   alias Doctrans.Repo
 
@@ -81,7 +83,12 @@ defmodule Doctrans.Search.EmbeddingWorker do
           Logger.info("Generated embedding for page #{page_id}")
 
         {:error, reason} ->
-          Logger.error("Failed to generate embedding for page #{page_id}: #{reason}")
+          Logger.error(
+            dgettext("errors", "Failed to generate embedding for page %{page_id}: %{reason}",
+              page_id: page_id,
+              reason: reason
+            )
+          )
 
           page
           |> Page.embedding_changeset(%{embedding_status: "error"})

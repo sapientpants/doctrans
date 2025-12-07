@@ -3,11 +3,20 @@ defmodule Doctrans.Search.Embedding do
   Generates text embeddings using Ollama's embedding API.
 
   Uses qwen3-embedding:0.6b model which outputs 1024-dimensional vectors.
+
+  ## I18n Note
+
+  This module runs in background GenServer processes (embedding workers),
+  not in the web request process. Since Gettext locales are process-specific, error
+  messages from this module will use the default locale, not the user's browser locale.
+  This is acceptable as these errors are primarily logged and displayed as system status.
   """
 
   @behaviour Doctrans.Search.EmbeddingBehaviour
 
   require Logger
+
+  use Gettext, backend: DoctransWeb.Gettext
 
   @doc """
   Generates an embedding vector for the given text.
@@ -37,11 +46,16 @@ defmodule Doctrans.Search.Embedding do
 
       {:ok, %{status: status, body: body}} ->
         Logger.error("Ollama embedding error (#{status}): #{inspect(body)}")
-        {:error, "Ollama embedding error (#{status}): #{inspect(body)}"}
+
+        {:error,
+         dgettext("errors", "Ollama embedding error (%{status}): %{body}",
+           status: status,
+           body: inspect(body)
+         )}
 
       {:error, reason} ->
         Logger.error("Embedding request failed: #{inspect(reason)}")
-        {:error, "Request failed: #{inspect(reason)}"}
+        {:error, dgettext("errors", "Request failed: %{reason}", reason: inspect(reason))}
     end
   end
 

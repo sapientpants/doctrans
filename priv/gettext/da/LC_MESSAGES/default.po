@@ -1,0 +1,254 @@
+## "msgid"s in this file come from POT (.pot) files.
+msgid ""
+msgstr ""
+"Language: da\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "%{count} page"
+msgid_plural "%{count} pages"
+msgstr[0] "%{count} side"
+msgstr[1] "%{count} sider"
+
+msgid "%{count} result for \"%{query}\""
+msgid_plural "%{count} results for \"%{query}\""
+msgstr[0] "%{count} resultat for \"%{query}\""
+msgstr[1] "%{count} resultater for \"%{query}\""
+
+msgid "+ Add more files"
+msgstr "+ Tilføj flere filer"
+
+msgid "A-Z"
+msgstr "A-Å"
+
+msgid "Actions"
+msgstr "Handlinger"
+
+msgid "An error occurred processing this page"
+msgstr "Der opstod en fejl under behandling af denne side"
+
+msgid "Are you sure you want to delete this document? This cannot be undone."
+msgstr "Er du sikker på, at du vil slette dette dokument? Dette kan ikke fortrydes."
+
+msgid "Attempting to reconnect"
+msgstr "Forsøger at genoprette forbindelse"
+
+msgid "Back"
+msgstr "Tilbage"
+
+msgid "Cancel"
+msgstr "Annuller"
+
+msgid "Completed"
+msgstr "Fuldført"
+
+msgid "Danish"
+msgstr "Dansk"
+
+msgid "Doctrans"
+msgstr "Doctrans"
+
+msgid "Document deleted successfully"
+msgstr "Dokument slettet"
+
+msgid "Document uploaded!"
+msgid_plural "%{count} documents uploaded!"
+msgstr[0] "Dokument uploadet!"
+msgstr[1] "%{count} dokumenter uploadet!"
+
+msgid "Drag and drop PDF files here, or"
+msgstr "Træk og slip PDF-filer her, eller"
+
+msgid "Dutch"
+msgstr "Nederlandsk"
+
+msgid "English"
+msgstr "Engelsk"
+
+msgid "Enter a search term to find content across all your documents."
+msgstr "Indtast et søgeord for at finde indhold på tværs af alle dine dokumenter."
+
+msgid "Error"
+msgstr "Fejl"
+
+msgid "Error: %{error}"
+msgstr "Fejl: %{error}"
+
+msgid "Extracting text from page..."
+msgstr "Udtrækker tekst fra side..."
+
+msgid "Failed to delete document"
+msgstr "Kunne ikke slette dokument"
+
+msgid "File is too large (max 100MB)"
+msgstr "Filen er for stor (maks. 100 MB)"
+
+msgid "Find content across all documents"
+msgstr "Find indhold på tværs af alle dokumenter"
+
+msgid "French"
+msgstr "Fransk"
+
+msgid "German"
+msgstr "Tysk"
+
+msgid "Italian"
+msgstr "Italiensk"
+
+msgid "Maximum 10 files can be uploaded at once"
+msgstr "Maksimalt 10 filer kan uploades ad gangen"
+
+msgid "Name (A-Z)"
+msgstr "Navn (A-Å)"
+
+msgid "Name (Z-A)"
+msgstr "Navn (Å-A)"
+
+msgid "Newest"
+msgstr "Nyeste"
+
+msgid "Newest First"
+msgstr "Nyeste først"
+
+msgid "Next"
+msgstr "Næste"
+
+msgid "No documents yet"
+msgstr "Ingen dokumenter endnu"
+
+msgid "No files were uploaded"
+msgstr "Ingen filer blev uploadet"
+
+msgid "No page selected"
+msgstr "Ingen side valgt"
+
+msgid "No results found"
+msgstr "Ingen resultater fundet"
+
+msgid "Norwegian"
+msgstr "Norsk"
+
+msgid "Oldest"
+msgstr "Ældste"
+
+msgid "Oldest First"
+msgstr "Ældste først"
+
+msgid "Only PDF files are accepted"
+msgstr "Kun PDF-filer accepteres"
+
+msgid "Original Content"
+msgstr "Originalt indhold"
+
+msgid "Original Page"
+msgstr "Original side"
+
+msgid "PDF Document Translator"
+msgstr "PDF-dokumentoversætter"
+
+msgid "PDF Files"
+msgstr "PDF-filer"
+
+msgid "Page %{current} of %{total}"
+msgstr "Side %{current} af %{total}"
+
+msgid "Page %{number}"
+msgstr "Side %{number}"
+
+msgid "Page image not available"
+msgstr "Sidebillede ikke tilgængeligt"
+
+msgid "Polish"
+msgstr "Polsk"
+
+msgid "Portuguese"
+msgstr "Portugisisk"
+
+msgid "Previous"
+msgstr "Forrige"
+
+msgid "Processing"
+msgstr "Behandler"
+
+msgid "Processing will begin shortly."
+msgstr "Behandling starter snart."
+
+msgid "Progress"
+msgstr "Fremgang"
+
+msgid "Queued"
+msgstr "I kø"
+
+msgid "Search"
+msgstr "Søg"
+
+msgid "Search documents"
+msgstr "Søg i dokumenter"
+
+msgid "Search..."
+msgstr "Søg..."
+
+msgid "Searching..."
+msgstr "Søger..."
+
+msgid "Show Original"
+msgstr "Vis original"
+
+msgid "Something went wrong!"
+msgstr "Noget gik galt!"
+
+msgid "Sort"
+msgstr "Sorter"
+
+msgid "Spanish"
+msgstr "Spansk"
+
+msgid "Start Translation"
+msgstr "Start oversættelse"
+
+msgid "Swedish"
+msgstr "Svensk"
+
+msgid "Target Language"
+msgstr "Målsprog"
+
+msgid "Translated Content"
+msgstr "Oversat indhold"
+
+msgid "Translating content..."
+msgstr "Oversætter indhold..."
+
+msgid "Try a different search term."
+msgstr "Prøv et andet søgeord."
+
+msgid "Unknown"
+msgstr "Ukendt"
+
+msgid "Up to 10 files at once"
+msgstr "Op til 10 filer ad gangen"
+
+msgid "Upload"
+msgstr "Upload"
+
+msgid "Upload New Document"
+msgstr "Upload nyt dokument"
+
+msgid "Upload a PDF to get started with translation."
+msgstr "Upload en PDF for at starte oversættelsen."
+
+msgid "Uploading"
+msgstr "Uploader"
+
+msgid "Waiting to process..."
+msgstr "Venter på behandling..."
+
+msgid "We can't find the internet"
+msgstr "Kan ikke finde internetforbindelse"
+
+msgid "Z-A"
+msgstr "Å-A"
+
+msgid "browse"
+msgstr "gennemse"
+
+msgid "close"
+msgstr "luk"

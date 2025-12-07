@@ -91,7 +91,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       view |> element("input[type='checkbox']") |> render_click()
 
-      assert render(view) =~ "Original Markdown"
+      assert render(view) =~ "Original Content"
     end
 
     test "zoom in increases zoom level", %{conn: conn} do
