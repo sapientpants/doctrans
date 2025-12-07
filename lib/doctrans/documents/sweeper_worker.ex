@@ -1,10 +1,9 @@
 defmodule Doctrans.Documents.SweeperWorker do
   @moduledoc """
-  Scheduled worker that periodically cleans up orphaned document files.
+  Scheduled worker that periodically cleans up orphaned document directories.
 
-  This GenServer runs on a configurable interval and removes:
-  - Orphaned directories (filesystem directories without database records)
-  - Stale documents (documents stuck in transient states for too long)
+  A directory is considered orphaned when it's older than the configured
+  grace period and has no matching document in the database.
 
   ## Configuration
 
@@ -13,8 +12,7 @@ defmodule Doctrans.Documents.SweeperWorker do
       config :doctrans, Doctrans.Documents.SweeperWorker,
         enabled: true,
         interval_hours: 6,
-        stale_document_hours: 24,
-        stale_statuses: ["uploading", "extracting"]
+        grace_period_hours: 24
 
   Set `enabled: false` to disable the sweeper entirely.
   """
@@ -26,8 +24,7 @@ defmodule Doctrans.Documents.SweeperWorker do
   alias Doctrans.Documents.Sweeper
 
   @default_interval_hours 6
-  @default_stale_hours 24
-  @default_stale_statuses ["uploading", "extracting"]
+  @default_grace_period_hours 24
 
   # Client API
 
@@ -58,8 +55,7 @@ defmodule Doctrans.Documents.SweeperWorker do
     state = %{
       enabled: config[:enabled],
       interval_ms: config[:interval_hours] * 60 * 60 * 1000,
-      stale_hours: config[:stale_document_hours],
-      stale_statuses: config[:stale_statuses],
+      grace_period_hours: config[:grace_period_hours],
       last_sweep: nil,
       sweep_count: 0
     }
@@ -88,8 +84,7 @@ defmodule Doctrans.Documents.SweeperWorker do
     status = %{
       enabled: state.enabled,
       interval_hours: div(state.interval_ms, 60 * 60 * 1000),
-      stale_hours: state.stale_hours,
-      stale_statuses: state.stale_statuses,
+      grace_period_hours: state.grace_period_hours,
       last_sweep: state.last_sweep,
       sweep_count: state.sweep_count
     }
@@ -119,28 +114,10 @@ defmodule Doctrans.Documents.SweeperWorker do
   defp do_sweep(state) do
     Logger.info("Starting scheduled document sweep...")
 
-    opts = [
-      max_age_hours: state.stale_hours,
-      statuses: state.stale_statuses
-    ]
-
-    result = Sweeper.sweep_all(opts)
-
-    log_results(result)
+    {:ok, count} = Sweeper.sweep(grace_period_hours: state.grace_period_hours)
+    Logger.info("Sweep complete: #{count} orphaned directories removed")
 
     %{state | last_sweep: DateTime.utc_now(), sweep_count: state.sweep_count + 1}
-  end
-
-  defp log_results(result) do
-    case result do
-      %{orphaned_directories: {:ok, orphaned}, stale_documents: {:ok, stale}} ->
-        Logger.info(
-          "Sweep complete: #{orphaned} orphaned directories, #{stale} stale documents removed"
-        )
-
-      _ ->
-        Logger.warning("Sweep completed with some errors: #{inspect(result)}")
-    end
   end
 
   defp get_config do
@@ -149,8 +126,7 @@ defmodule Doctrans.Documents.SweeperWorker do
     [
       enabled: Keyword.get(config, :enabled, true),
       interval_hours: Keyword.get(config, :interval_hours, @default_interval_hours),
-      stale_document_hours: Keyword.get(config, :stale_document_hours, @default_stale_hours),
-      stale_statuses: Keyword.get(config, :stale_statuses, @default_stale_statuses)
+      grace_period_hours: Keyword.get(config, :grace_period_hours, @default_grace_period_hours)
     ]
   end
 end

@@ -1,14 +1,15 @@
 defmodule Doctrans.Documents.Sweeper do
   @moduledoc """
-  Cleans up orphaned document files from the uploads directory.
+  Cleans up orphaned document directories from the uploads folder.
 
-  Orphaned files can occur when:
-  - Database deletion succeeds but file deletion fails
-  - Application crashes during document deletion
-  - Manual database manipulation
+  A directory is considered orphaned when:
+  - It is older than a configurable threshold (default: 24 hours)
+  - There is no document with that ID in the database
 
-  This module provides functions to identify and remove document directories
-  that no longer have corresponding database records.
+  This handles cases where:
+  - Upload was started but never completed
+  - Database deletion succeeded but file deletion failed
+  - Application crashed during document processing
   """
 
   require Logger
@@ -19,21 +20,31 @@ defmodule Doctrans.Documents.Sweeper do
   alias Doctrans.Documents.Document
   alias Doctrans.Repo
 
+  @default_grace_period_hours 24
+
   @doc """
-  Finds document directories that don't have corresponding database records.
+  Finds document directories that are orphaned (old and no matching DB record).
+
+  ## Options
+
+  - `:grace_period_hours` - Only consider directories older than this (default: 24)
 
   Returns a list of directory paths that are orphaned.
   """
-  def find_orphaned_directories do
+  def find_orphaned_directories(opts \\ []) do
+    grace_period_hours = Keyword.get(opts, :grace_period_hours, @default_grace_period_hours)
     uploads_dir = Documents.uploads_dir()
     documents_dir = Path.join(uploads_dir, "documents")
 
     case File.ls(documents_dir) do
       {:ok, entries} ->
         valid_ids = get_valid_document_ids()
+        cutoff = DateTime.utc_now() |> DateTime.add(-grace_period_hours, :hour)
 
         entries
-        |> Enum.filter(&(directory?(documents_dir, &1) && &1 not in valid_ids))
+        |> Enum.filter(
+          &(directory?(documents_dir, &1) && orphaned?(&1, valid_ids, documents_dir, cutoff))
+        )
         |> Enum.map(&Path.join(documents_dir, &1))
 
       {:error, :enoent} ->
@@ -47,40 +58,18 @@ defmodule Doctrans.Documents.Sweeper do
   end
 
   @doc """
-  Finds documents that have been stuck in a transient status for too long.
-
-  These are documents that may have failed during upload or processing
-  and were never cleaned up.
-
-  ## Options
-
-  - `:max_age_hours` - Documents older than this in hours are considered stale (default: 24)
-  - `:statuses` - List of statuses to check (default: ["uploading", "extracting"])
-  """
-  def find_stale_documents(opts \\ []) do
-    max_age_hours = Keyword.get(opts, :max_age_hours, 24)
-    statuses = Keyword.get(opts, :statuses, ["uploading", "extracting"])
-
-    cutoff = DateTime.utc_now() |> DateTime.add(-max_age_hours, :hour)
-
-    Document
-    |> where([d], d.status in ^statuses)
-    |> where([d], d.inserted_at < ^cutoff)
-    |> Repo.all()
-  end
-
-  @doc """
   Removes orphaned directories from the filesystem.
 
   ## Options
 
-  - `:dry_run` - If true, only logs what would be deleted without actually deleting (default: false)
+  - `:dry_run` - If true, only logs what would be deleted (default: false)
+  - `:grace_period_hours` - Only delete directories older than this (default: 24)
 
-  Returns `{:ok, deleted_count}` or `{:error, reason}`.
+  Returns `{:ok, deleted_count}`.
   """
-  def sweep_orphaned_directories(opts \\ []) do
+  def sweep(opts \\ []) do
     dry_run = Keyword.get(opts, :dry_run, false)
-    orphaned = find_orphaned_directories()
+    orphaned = find_orphaned_directories(opts)
 
     if Enum.empty?(orphaned) do
       Logger.info("No orphaned directories found")
@@ -88,13 +77,13 @@ defmodule Doctrans.Documents.Sweeper do
     else
       Logger.info("Found #{length(orphaned)} orphaned directories")
 
-      deleted_count = Enum.reduce(orphaned, 0, &delete_orphaned_directory(&1, &2, dry_run))
+      deleted_count = Enum.reduce(orphaned, 0, &delete_directory(&1, &2, dry_run))
 
       {:ok, deleted_count}
     end
   end
 
-  defp delete_orphaned_directory(path, count, dry_run) do
+  defp delete_directory(path, count, dry_run) do
     if dry_run do
       Logger.info("[DRY RUN] Would delete: #{path}")
       count + 1
@@ -111,83 +100,6 @@ defmodule Doctrans.Documents.Sweeper do
     end
   end
 
-  @doc """
-  Removes stale documents from the database and filesystem.
-
-  ## Options
-
-  - `:dry_run` - If true, only logs what would be deleted (default: false)
-  - `:max_age_hours` - Documents older than this are considered stale (default: 24)
-  - `:statuses` - List of statuses to check (default: ["uploading", "extracting"])
-
-  Returns `{:ok, deleted_count}` or `{:error, reason}`.
-  """
-  def sweep_stale_documents(opts \\ []) do
-    dry_run = Keyword.get(opts, :dry_run, false)
-    stale = find_stale_documents(opts)
-
-    if Enum.empty?(stale) do
-      Logger.info("No stale documents found")
-      {:ok, 0}
-    else
-      Logger.info("Found #{length(stale)} stale documents")
-
-      deleted_count = Enum.reduce(stale, 0, &delete_stale_document(&1, &2, dry_run))
-
-      {:ok, deleted_count}
-    end
-  end
-
-  defp delete_stale_document(document, count, dry_run) do
-    if dry_run do
-      Logger.info("[DRY RUN] Would delete stale document: #{document.id} (#{document.title})")
-      count + 1
-    else
-      case Documents.delete_document(document) do
-        {:ok, _} ->
-          Logger.info("Deleted stale document: #{document.id} (#{document.title})")
-          count + 1
-
-        {:error, reason} ->
-          Logger.error("Failed to delete document #{document.id}: #{inspect(reason)}")
-          count
-      end
-    end
-  end
-
-  @doc """
-  Runs a full sweep of both orphaned directories and stale documents.
-
-  ## Options
-
-  - `:dry_run` - If true, only logs what would be deleted (default: false)
-  - `:max_age_hours` - For stale documents (default: 24)
-  - `:statuses` - For stale documents (default: ["uploading", "extracting"])
-
-  Returns a map with results:
-  ```
-  %{
-    orphaned_directories: {:ok, count},
-    stale_documents: {:ok, count}
-  }
-  ```
-  """
-  def sweep_all(opts \\ []) do
-    Logger.info("Starting document sweep...")
-
-    orphaned_result = sweep_orphaned_directories(opts)
-    stale_result = sweep_stale_documents(opts)
-
-    Logger.info("Document sweep complete")
-
-    %{
-      orphaned_directories: orphaned_result,
-      stale_documents: stale_result
-    }
-  end
-
-  # Private functions
-
   defp get_valid_document_ids do
     Document
     |> select([d], type(d.id, :string))
@@ -197,5 +109,25 @@ defmodule Doctrans.Documents.Sweeper do
 
   defp directory?(base_path, name) do
     Path.join(base_path, name) |> File.dir?()
+  end
+
+  defp orphaned?(dir_name, valid_ids, documents_dir, cutoff) do
+    # Not in database
+    # And old enough
+    dir_name not in valid_ids &&
+      directory_older_than?(documents_dir, dir_name, cutoff)
+  end
+
+  defp directory_older_than?(base_path, name, cutoff) do
+    path = Path.join(base_path, name)
+
+    case File.stat(path, time: :posix) do
+      {:ok, %{mtime: mtime}} ->
+        dir_time = DateTime.from_unix!(mtime)
+        DateTime.compare(dir_time, cutoff) == :lt
+
+      {:error, _} ->
+        false
+    end
   end
 end

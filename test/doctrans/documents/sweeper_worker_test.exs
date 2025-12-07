@@ -10,8 +10,7 @@ defmodule Doctrans.Documents.SweeperWorkerTest do
       assert is_map(status)
       assert Map.has_key?(status, :enabled)
       assert Map.has_key?(status, :interval_hours)
-      assert Map.has_key?(status, :stale_hours)
-      assert Map.has_key?(status, :stale_statuses)
+      assert Map.has_key?(status, :grace_period_hours)
       assert Map.has_key?(status, :last_sweep)
       assert Map.has_key?(status, :sweep_count)
     end
@@ -22,8 +21,7 @@ defmodule Doctrans.Documents.SweeperWorkerTest do
       # Check that defaults or configured values are present
       assert is_boolean(status.enabled)
       assert is_integer(status.interval_hours)
-      assert is_integer(status.stale_hours)
-      assert is_list(status.stale_statuses)
+      assert is_integer(status.grace_period_hours)
     end
   end
 
