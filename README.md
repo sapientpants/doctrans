@@ -154,13 +154,24 @@ config :doctrans, :defaults,
 
 ```bash
 mix test              # Run tests
-mix precommit         # Run all checks (compile, deps.unlock, format, credo, sobelow, test)
+mix precommit         # Run all checks (compile, deps.unlock, deps.audit, format, credo, sobelow, test)
 mix credo --strict    # Static code analysis
 mix sobelow --config  # Security analysis
 mix dialyzer          # Type checking (first run builds PLT)
-mix coveralls.html    # Test coverage report
+mix deps.audit        # Dependency vulnerability scanning
+mix coveralls.html    # Test coverage report (80% minimum required)
 iex -S mix phx.server # Interactive console
 ```
+
+### Code Quality Standards
+
+This project enforces strict code quality:
+
+- **80% test coverage** minimum (enforced in CI)
+- **500-line module limit** (enforced via pre-commit hook)
+- **Strict Credo checks** including cyclomatic complexity, nesting depth, and code duplication
+- **Security scanning** via Sobelow and dependency auditing
+- **Type checking** via Dialyzer with strict flags
 
 ### Pre-commit Hooks
 
@@ -171,7 +182,17 @@ pip install pre-commit
 pre-commit install
 ```
 
-Hooks run automatically on commit, or manually with:
+Hooks run automatically on commit and include:
+
+- Code formatting (`mix format`)
+- Compilation with warnings as errors
+- Credo strict mode
+- Sobelow security analysis
+- Module size limit check (500 lines max)
+- Dependency vulnerability audit
+- Test suite with coverage
+
+Run manually with:
 
 ```bash
 pre-commit run --all-files

@@ -10,7 +10,11 @@ defmodule Doctrans.Search do
 
   alias Doctrans.Documents.{Document, Page}
   alias Doctrans.Repo
-  alias Doctrans.Search.Embedding
+
+  # Allow embedding module to be configured for testing
+  defp embedding_module do
+    Application.get_env(:doctrans, :embedding_module, Doctrans.Search.Embedding)
+  end
 
   @doc """
   Performs hybrid search across all pages.
@@ -37,7 +41,7 @@ defmodule Doctrans.Search do
     semantic_weight = Keyword.get(opts, :semantic_weight, 0.5)
     keyword_weight = Keyword.get(opts, :keyword_weight, 0.5)
 
-    with {:ok, query_embedding} <- Embedding.generate(query) do
+    with {:ok, query_embedding} <- embedding_module().generate(query, []) do
       results =
         hybrid_search_query(query, query_embedding, semantic_weight, keyword_weight)
         |> Repo.all()

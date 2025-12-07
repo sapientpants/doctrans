@@ -5,6 +5,8 @@ defmodule Doctrans.Search.Embedding do
   Uses qwen3-embedding:0.6b model which outputs 1024-dimensional vectors.
   """
 
+  @behaviour Doctrans.Search.EmbeddingBehaviour
+
   require Logger
 
   @doc """

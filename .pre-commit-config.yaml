@@ -108,6 +108,22 @@ repos:
         pass_filenames: false
         files: ^(lib/|test/|config/|mix\.exs)
 
+      # 3.5. Dependency vulnerability audit
+      - id: deps-audit
+        name: Dependency vulnerability audit
+        entry: mix deps.audit
+        language: system
+        pass_filenames: false
+        files: ^(mix\.exs|mix\.lock)$
+
+      # 3.6. Module size check (500 lines max)
+      - id: check-module-size
+        name: Check module size limits
+        entry: elixir scripts/check_module_size.exs --max-lines 500
+        language: system
+        pass_filenames: false
+        files: ^lib/.*\.ex$
+
       # 4. Static code analysis with Credo (medium speed)
       - id: credo
         name: Credo strict mode

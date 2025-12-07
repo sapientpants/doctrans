@@ -7,6 +7,8 @@ defmodule Doctrans.Processing.Ollama do
   - Translating markdown using a text model (Qwen3)
   """
 
+  @behaviour Doctrans.Processing.OllamaBehaviour
+
   require Logger
 
   @doc """

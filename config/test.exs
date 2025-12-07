@@ -36,3 +36,8 @@ config :phoenix, :plug_init_mode, :runtime
 # Enable helpful, but potentially expensive runtime checks
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
+
+# Use mocks for external services in tests
+config :doctrans, :embedding_module, Doctrans.Search.EmbeddingMock
+config :doctrans, :ollama_module, Doctrans.Processing.OllamaMock
+config :doctrans, :pdf_extractor_module, Doctrans.Processing.PdfExtractorMock

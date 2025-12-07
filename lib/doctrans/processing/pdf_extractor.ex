@@ -7,6 +7,8 @@ defmodule Doctrans.Processing.PdfExtractor do
   - Ubuntu/Debian: `apt-get install poppler-utils`
   """
 
+  @behaviour Doctrans.Processing.PdfExtractorBehaviour
+
   require Logger
 
   @doc """
@@ -37,7 +39,11 @@ defmodule Doctrans.Processing.PdfExtractor do
 
     Logger.info("Extracting pages from #{pdf_path} to #{output_dir}")
 
-    case System.cmd("pdftoppm", args, stderr_to_stdout: true) do
+    # Preserve PATH for command lookup, but clear other potentially sensitive env vars
+    case System.cmd("pdftoppm", args,
+           stderr_to_stdout: true,
+           env: [{"PATH", System.get_env("PATH")}]
+         ) do
       {_output, 0} ->
         # Count the generated files
         page_count = count_pages(output_dir)
@@ -54,7 +60,11 @@ defmodule Doctrans.Processing.PdfExtractor do
   Gets the number of pages in a PDF without extracting.
   """
   def get_page_count(pdf_path) do
-    case System.cmd("pdfinfo", [pdf_path], stderr_to_stdout: true) do
+    # Preserve PATH for command lookup, but clear other potentially sensitive env vars
+    case System.cmd("pdfinfo", [pdf_path],
+           stderr_to_stdout: true,
+           env: [{"PATH", System.get_env("PATH")}]
+         ) do
       {output, 0} ->
         case Regex.run(~r/Pages:\s*(\d+)/, output) do
           [_, count] -> {:ok, String.to_integer(count)}

@@ -21,7 +21,14 @@ defmodule Doctrans.MixProject do
       dialyzer: [
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
         plt_add_apps: [:mix, :ex_unit],
-        ignore_warnings: ".dialyzer_ignore.exs"
+        ignore_warnings: ".dialyzer_ignore.exs",
+        # Stricter dialyzer flags
+        flags: [
+          :error_handling,
+          :underspecs,
+          :unmatched_returns,
+          :no_improper_lists
+        ]
       ]
     ]
   end
@@ -84,12 +91,17 @@ defmodule Doctrans.MixProject do
       {:bandit, "~> 1.5"},
       {:uniq, "~> 0.6"},
       {:earmark, "~> 1.4"},
+      {:html_sanitize_ex, "~> 1.4"},
       {:pgvector, "~> 0.3"},
       # Code quality tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:excoveralls, "~> 0.18", only: :test}
+      {:excoveralls, "~> 0.18", only: :test},
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      # Testing utilities
+      {:mox, "~> 1.0", only: :test},
+      {:bypass, "~> 2.1", only: :test}
     ]
   end
 
@@ -115,6 +127,7 @@ defmodule Doctrans.MixProject do
       precommit: [
         "compile --warning-as-errors --all-warnings",
         "deps.unlock --unused",
+        "deps.audit",
         "format --check-formatted",
         "credo --strict",
         "sobelow --config",
