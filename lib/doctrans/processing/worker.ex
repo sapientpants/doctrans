@@ -91,6 +91,9 @@ defmodule Doctrans.Processing.Worker do
       extraction_tasks: %{}
     }
 
+    # Schedule recovery of incomplete documents after init completes
+    send(self(), :recover_incomplete_documents)
+
     {:ok, state}
   end
 
@@ -222,6 +225,14 @@ defmodule Doctrans.Processing.Worker do
 
     state = %{state | current_page_id: nil, llm_task_ref: nil}
     {:noreply, process_next_page(state)}
+  end
+
+  # Handle startup recovery
+  @impl true
+  def handle_info(:recover_incomplete_documents, state) do
+    Logger.info("Recovering incomplete documents...")
+    state = recover_incomplete_documents(state)
+    {:noreply, state}
   end
 
   @impl true
@@ -427,5 +438,40 @@ defmodule Doctrans.Processing.Worker do
 
   defp do_process_page(page_id, cancelled_documents) do
     LlmProcessor.process_page(page_id, cancelled_documents)
+  end
+
+  # ============================================================================
+  # Startup Recovery
+  # ============================================================================
+
+  defp recover_incomplete_documents(state) do
+    # Find documents that need processing (processing or queued status)
+    incomplete_docs = Documents.list_incomplete_documents()
+
+    case incomplete_docs do
+      [] ->
+        Logger.info("No incomplete documents to recover")
+        state
+
+      docs ->
+        Logger.info("Found #{length(docs)} incomplete documents to recover")
+
+        # Process the first one, queue the rest
+        [first | rest] = docs
+
+        # Add remaining documents to queue
+        document_queue =
+          Enum.reduce(rest, state.document_queue, fn doc, queue ->
+            Logger.info("Queueing document #{doc.id} for recovery")
+            :queue.in(doc.id, queue)
+          end)
+
+        state = %{state | document_queue: document_queue}
+
+        # Start processing the first document
+        Logger.info("Recovering document #{first.id} (#{first.title})")
+        update_document_status_to_processing(first.id)
+        queue_pending_pages_for_document(%{state | current_document_id: first.id}, first.id)
+    end
   end
 end

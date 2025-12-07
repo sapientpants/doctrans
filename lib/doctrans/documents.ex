@@ -64,6 +64,17 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
+  Lists documents that need processing (status is "processing" or "queued").
+  Used by Worker for startup recovery.
+  """
+  def list_incomplete_documents do
+    Document
+    |> where([d], d.status in ["processing", "queued"])
+    |> order_by([d], asc: d.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
   Gets a single document by ID.
 
   Raises `Ecto.NoResultsError` if the Document does not exist.
