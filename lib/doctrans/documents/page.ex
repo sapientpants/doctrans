@@ -31,6 +31,11 @@ defmodule Doctrans.Documents.Page do
     field :embedding, Pgvector.Ecto.Vector
     field :embedding_status, :string, default: "pending"
 
+    # Full-text search tsvector columns (managed by database trigger)
+    # These are virtual since they're auto-populated when markdown columns change
+    field :original_searchable, :string, virtual: true
+    field :translated_searchable, :string, virtual: true
+
     belongs_to :document, Doctrans.Documents.Document
 
     timestamps()

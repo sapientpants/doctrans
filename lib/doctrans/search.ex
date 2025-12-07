@@ -41,27 +41,21 @@ defmodule Doctrans.Search do
     rrf_k = Keyword.get(opts, :rrf_k, @default_rrf_k)
 
     with {:ok, query_embedding} <- embedding_module().generate(query, []) do
-      results = execute_hybrid_search(query, query_embedding, rrf_k, limit)
-
-      {:ok, results}
+      execute_hybrid_search(query, query_embedding, rrf_k, limit)
     end
   end
 
   defp execute_hybrid_search(query, query_embedding, rrf_k, limit) do
     # Use CTE-based query for efficient RRF calculation
-    # - semantic_ranked: pages ranked by embedding similarity
-    # - fts_ranked: pages ranked by full-text search score
+    # - semantic_ranked: pages ranked by embedding similarity (IDs and ranks only)
+    # - fts_ranked: pages ranked by full-text search score (IDs and ranks only)
     # - combined: FULL OUTER JOIN with RRF score calculation
+    # - Final SELECT joins back to pages for snippets using ts_headline()
     sql = """
     WITH semantic_ranked AS (
       SELECT
         p.id,
         p.document_id,
-        d.title as document_title,
-        p.page_number,
-        p.image_path,
-        p.original_markdown,
-        p.translated_markdown,
         1 - (p.embedding <=> $1::vector) as semantic_score,
         ROW_NUMBER() OVER (ORDER BY p.embedding <=> $1::vector ASC) as semantic_rank
       FROM pages p
@@ -76,11 +70,7 @@ defmodule Doctrans.Search do
       SELECT
         p.id,
         p.document_id,
-        d.title as document_title,
-        p.page_number,
-        p.image_path,
-        p.original_markdown,
-        p.translated_markdown,
+        d.target_language,
         (
           COALESCE(ts_rank_cd(p.original_searchable, plainto_tsquery('simple', $2)), 0) +
           COALESCE(ts_rank_cd(p.translated_searchable, plainto_tsquery(get_fts_config(d.target_language), $2)), 0)
@@ -106,12 +96,9 @@ defmodule Doctrans.Search do
       SELECT
         COALESCE(s.id, f.id) as page_id,
         COALESCE(s.document_id, f.document_id) as document_id,
-        COALESCE(s.document_title, f.document_title) as document_title,
-        COALESCE(s.page_number, f.page_number) as page_number,
-        COALESCE(s.image_path, f.image_path) as image_path,
-        COALESCE(s.translated_markdown, s.original_markdown, f.translated_markdown, f.original_markdown) as snippet_source,
         COALESCE(s.semantic_score, 0) as semantic_score,
         COALESCE(f.fts_score, 0) as fts_score,
+        f.target_language,
         s.semantic_rank,
         f.fts_rank,
         -- RRF score: sum of reciprocal ranks
@@ -121,27 +108,50 @@ defmodule Doctrans.Search do
       FULL OUTER JOIN fts_ranked f ON s.id = f.id
     )
     SELECT
-      page_id,
-      document_id,
-      document_title,
-      page_number,
-      image_path,
-      snippet_source,
-      rrf_score
-    FROM combined
-    WHERE rrf_score >= $6
-    ORDER BY rrf_score DESC
+      c.page_id,
+      c.document_id,
+      d.title as document_title,
+      p.page_number,
+      p.image_path,
+      c.rrf_score,
+      -- Use ts_headline for FTS matches (shows context around match)
+      -- Fall back to substring for semantic-only matches
+      CASE
+        WHEN c.fts_score > 0 AND p.translated_markdown IS NOT NULL THEN
+          ts_headline(
+            get_fts_config(COALESCE(c.target_language, 'en')),
+            p.translated_markdown,
+            plainto_tsquery(get_fts_config(COALESCE(c.target_language, 'en')), $2),
+            'MaxWords=35, MinWords=15, MaxFragments=1'
+          )
+        WHEN c.fts_score > 0 AND p.original_markdown IS NOT NULL THEN
+          ts_headline(
+            'simple',
+            p.original_markdown,
+            plainto_tsquery('simple', $2),
+            'MaxWords=35, MinWords=15, MaxFragments=1'
+          )
+        WHEN p.translated_markdown IS NOT NULL THEN
+          LEFT(p.translated_markdown, 200)
+        ELSE
+          LEFT(p.original_markdown, 200)
+      END as snippet
+    FROM combined c
+    JOIN pages p ON c.page_id = p.id
+    JOIN documents d ON c.document_id = d.id
+    WHERE c.rrf_score >= $6
+    ORDER BY c.rrf_score DESC
     LIMIT $5
     """
 
     case Repo.query(sql, [query_embedding, query, rrf_k, limit * 5, limit, @min_score_threshold]) do
       {:ok, %{rows: rows, columns: columns}} ->
-        Enum.map(rows, &format_row(&1, columns))
+        {:ok, Enum.map(rows, &format_row(&1, columns))}
 
       {:error, error} ->
         require Logger
         Logger.error("Hybrid search query failed: #{inspect(error)}")
-        []
+        {:error, {:database_error, error}}
     end
   end
 
@@ -155,7 +165,7 @@ defmodule Doctrans.Search do
       page_number: result["page_number"],
       image_path: result["image_path"],
       score: to_float(result["rrf_score"]),
-      snippet: extract_snippet(result["snippet_source"], 200)
+      snippet: format_snippet(result["snippet"])
     }
   end
 
@@ -168,13 +178,13 @@ defmodule Doctrans.Search do
   defp to_float(f) when is_float(f), do: f
   defp to_float(i) when is_integer(i), do: i / 1
 
-  defp extract_snippet(nil, _), do: nil
+  # Format snippet: normalize whitespace, strip HTML bold tags from ts_headline
+  defp format_snippet(nil), do: nil
 
-  defp extract_snippet(text, max_length) do
+  defp format_snippet(text) do
     text
+    |> String.replace(~r/<b>|<\/b>/, "")
     |> String.replace(~r/\s+/, " ")
     |> String.trim()
-    |> String.slice(0, max_length)
-    |> then(fn s -> if String.length(s) >= max_length, do: s <> "...", else: s end)
   end
 end

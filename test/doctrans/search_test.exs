@@ -156,8 +156,7 @@ defmodule Doctrans.SearchTest do
     end
 
     test "RRF boosts results appearing in both semantic and FTS rankings" do
-      # This is a conceptual test - results that match both semantically
-      # and lexically should have higher RRF scores
+      # Results that match both semantically and lexically should have higher RRF scores
       doc = document_fixture(%{status: "completed", title: "RRF Test Doc"})
       page = page_fixture(doc, %{page_number: 1})
 
@@ -167,9 +166,11 @@ defmodule Doctrans.SearchTest do
           original_markdown: "Important information about machine learning algorithms"
         })
 
-      # Search for a term that should match both FTS and semantic
+      # Search for a term that should match FTS
       {:ok, results} = Search.search("machine learning")
-      assert is_list(results)
+
+      # Verify the page is found in results
+      assert Enum.any?(results, fn r -> r.page_id == page.id end)
     end
   end
 end
