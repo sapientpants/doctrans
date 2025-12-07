@@ -8,10 +8,14 @@ defmodule Doctrans.Processing.LlmProcessor do
   require Logger
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.Ollama
   alias Doctrans.Search.EmbeddingWorker
 
   @max_retries 3
+
+  # Allow Ollama module to be configured for testing
+  defp ollama_module do
+    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
+  end
 
   @doc """
   Processes all pages of a document through the LLM pipeline.
@@ -124,7 +128,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
     image_path = Path.join(Documents.uploads_dir(), page.image_path)
 
-    case Ollama.extract_markdown(image_path) do
+    case ollama_module().extract_markdown(image_path, []) do
       {:ok, markdown} ->
         {:ok, page} =
           Documents.update_page_extraction(page, %{
@@ -168,7 +172,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
     document = Documents.get_document!(page.document_id)
 
-    case Ollama.translate(page.original_markdown, document.target_language) do
+    case ollama_module().translate(page.original_markdown, document.target_language, []) do
       {:ok, translated} ->
         {:ok, page} =
           Documents.update_page_translation(page, %{

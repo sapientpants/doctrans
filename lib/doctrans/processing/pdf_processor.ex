@@ -6,7 +6,11 @@ defmodule Doctrans.Processing.PdfProcessor do
   require Logger
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.PdfExtractor
+
+  # Allow PdfExtractor module to be configured for testing
+  defp pdf_extractor_module do
+    Application.get_env(:doctrans, :pdf_extractor_module, Doctrans.Processing.PdfExtractor)
+  end
 
   @doc """
   Extracts pages from a PDF and creates page records.
@@ -54,7 +58,7 @@ defmodule Doctrans.Processing.PdfProcessor do
 
     pages_dir = Documents.ensure_document_dirs!(document.id)
 
-    case PdfExtractor.extract_pages(pdf_path, pages_dir) do
+    case pdf_extractor_module().extract_pages(pdf_path, pages_dir, []) do
       {:ok, page_count} ->
         Logger.info("Extracted #{page_count} pages for document #{document.id}")
         create_page_records(document, page_count, pages_dir, pdf_path)
@@ -67,7 +71,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp create_page_records(document, page_count, pages_dir, pdf_path) do
     {:ok, document} = Documents.update_document(document, %{total_pages: page_count})
 
-    page_images = PdfExtractor.list_page_images(pages_dir)
+    page_images = pdf_extractor_module().list_page_images(pages_dir)
 
     page_attrs =
       page_images

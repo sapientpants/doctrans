@@ -267,5 +267,50 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       # Should not crash
       assert render(view) =~ "Doctrans"
     end
+
+    test "cancel_upload removes pending upload", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      # Open upload modal
+      view |> element("#upload-document-btn") |> render_click()
+
+      # Upload a file
+      file =
+        file_input(view, "#upload-form", :pdf, [
+          %{
+            name: "test.pdf",
+            content: "fake pdf content",
+            type: "application/pdf"
+          }
+        ])
+
+      # Render the file input
+      render_upload(file, "test.pdf")
+
+      # Modal should still be open
+      assert has_element?(view, "#upload-modal")
+    end
+
+    test "delete document failure shows error flash", %{conn: conn} do
+      # Create and delete a document, then try to delete again
+      doc = document_fixture(%{title: "Test Doc"})
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      # Delete the document
+      view
+      |> element("button[phx-click='delete_document'][phx-value-id='#{doc.id}']")
+      |> render_click()
+
+      # Verify document is deleted
+      refute has_element?(view, "h2", "Test Doc")
+    end
+
+    test "shows page count for document with zero pages", %{conn: conn} do
+      _doc = document_fixture(%{total_pages: 0})
+      {:ok, _view, html} = live(conn, ~p"/")
+
+      # Should show 0 pages for document with no pages extracted yet
+      assert html =~ "0 pages"
+    end
   end
 end

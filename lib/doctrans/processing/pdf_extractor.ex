@@ -7,6 +7,8 @@ defmodule Doctrans.Processing.PdfExtractor do
   - Ubuntu/Debian: `apt-get install poppler-utils`
   """
 
+  @behaviour Doctrans.Processing.PdfExtractorBehaviour
+
   require Logger
 
   @doc """
