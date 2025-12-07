@@ -20,10 +20,11 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   ## Options
 
-  - `:dpi` - Resolution in DPI (default: 150)
+  - `:dpi` - Resolution in DPI (default: from config, fallback 200)
   """
   def extract_pages(pdf_path, output_dir, opts \\ []) do
-    dpi = Keyword.get(opts, :dpi, 150)
+    default_dpi = get_in(Application.get_env(:doctrans, :pdf_extraction, []), [:dpi]) || 200
+    dpi = Keyword.get(opts, :dpi, default_dpi)
 
     # Ensure output directory exists
     File.mkdir_p!(output_dir)

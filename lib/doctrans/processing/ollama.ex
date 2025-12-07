@@ -41,15 +41,34 @@ defmodule Doctrans.Processing.Ollama do
         image_base64 = Base.encode64(image_data)
 
         prompt = """
-        Extract all text from this image as Markdown.
+        Extract ALL text from this document image as Markdown.
 
-        CRITICAL INSTRUCTIONS:
-        - Output ONLY the extracted text in Markdown format, nothing else
+        CRITICAL - EXTRACT EVERYTHING:
+        - Extract text from EVERY region: main content, headers, footers, margins, sidebars
+        - Include ALL captions, labels, footnotes, and annotations
+        - Extract text from within figures, diagrams, and charts
+        - Do NOT skip any text, no matter how small or seemingly unimportant
+        - Read the ENTIRE page from top to bottom, left to right
+
+        FORMATTING - PRESERVE STRUCTURE:
+        - Use # ## ### for headings based on visual hierarchy (size/weight)
+        - Use **bold** for emphasized/bold text
+        - Use *italic* for italicized text
+        - Use `code` for monospace/code snippets
+        - Use > for blockquotes or indented quotes
+        - Use - or * for unordered lists, 1. 2. 3. for numbered lists
+        - Preserve nested list indentation with proper spacing
+        - Use | for tables - align columns properly with |---|
+        - Use --- for horizontal rules/section dividers
+        - Preserve paragraph breaks with blank lines
+        - Keep line breaks within addresses, poems, or formatted blocks
+
+        OUTPUT RULES:
+        - Output ONLY the extracted Markdown, nothing else
         - Do NOT wrap output in code fences (```)
-        - Do NOT include any introduction like "Here is the extracted text"
-        - Do NOT include any explanation or commentary
-        - Preserve the original formatting including headings, lists, tables, and structure
-        - Extract ALL visible text from the image
+        - Do NOT add introductions like "Here is the extracted text"
+        - Do NOT add explanations or commentary
+        - Do NOT describe images - extract the TEXT within them
         """
 
         body = %{

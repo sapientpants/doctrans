@@ -102,8 +102,9 @@ defmodule Doctrans.Documents.Sweeper do
 
   defp get_valid_document_ids do
     Document
-    |> select([d], type(d.id, :string))
+    |> select([d], d.id)
     |> Repo.all()
+    |> Enum.map(&to_string/1)
     |> MapSet.new()
   end
 
