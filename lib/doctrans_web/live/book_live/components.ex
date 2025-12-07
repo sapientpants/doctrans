@@ -92,7 +92,7 @@ defmodule DoctransWeb.DocumentLive.Components do
     <img
       :if={@has_thumbnail}
       src={"/uploads/#{@first_page.image_path}"}
-      alt=""
+      alt={"Thumbnail for #{@document.title}"}
       class="w-full h-full object-cover"
     />
     <.icon
