@@ -24,6 +24,13 @@ config :doctrans, :uploads,
   upload_dir: Path.expand("../priv/static/uploads", __DIR__),
   max_file_size: 100_000_000
 
+# Document sweeper configuration (cleans up orphaned files)
+config :doctrans, Doctrans.Documents.SweeperWorker,
+  enabled: true,
+  interval_hours: 6,
+  stale_document_hours: 24,
+  stale_statuses: ["uploading", "extracting"]
+
 # Default language settings
 config :doctrans, :defaults,
   source_language: "de",

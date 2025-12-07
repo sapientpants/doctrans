@@ -18,6 +18,8 @@ defmodule Doctrans.Application do
       Doctrans.Processing.Worker,
       # Background worker for generating embeddings
       Doctrans.Search.EmbeddingWorker,
+      # Scheduled worker for cleaning up orphaned files
+      Doctrans.Documents.SweeperWorker,
       # Start to serve requests, typically the last entry
       DoctransWeb.Endpoint
     ]
