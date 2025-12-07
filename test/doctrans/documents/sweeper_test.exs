@@ -10,6 +10,8 @@ defmodule Doctrans.Documents.SweeperTest do
     # Create the documents directory for testing
     uploads_dir = Documents.uploads_dir()
     documents_dir = Path.join(uploads_dir, "documents")
+    # Clean up any leftover directories from previous runs to ensure isolation
+    File.rm_rf!(documents_dir)
     File.mkdir_p!(documents_dir)
 
     on_exit(fn ->

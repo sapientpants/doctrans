@@ -101,9 +101,10 @@ defmodule Doctrans.Documents.SweeperWorker do
     new_state = do_sweep(state)
 
     # Schedule next sweep
-    if state.enabled do
-      Process.send_after(self(), :sweep, state.interval_ms)
-    end
+    _ref =
+      if state.enabled do
+        Process.send_after(self(), :sweep, state.interval_ms)
+      end
 
     {:noreply, new_state}
   end
