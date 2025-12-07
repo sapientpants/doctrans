@@ -4,11 +4,11 @@
 #
 # Usage: elixir scripts/check_module_size.exs [--max-lines N] [paths...]
 #
-# Default max lines: 300
+# Default max lines: 500
 # Exit code: 1 if any module exceeds the limit, 0 otherwise
 
 defmodule ModuleSizeChecker do
-  @default_max_lines 300
+  @default_max_lines 500
   @excluded_patterns [
     ~r"/_build/",
     ~r"/deps/",

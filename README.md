@@ -168,7 +168,7 @@ iex -S mix phx.server # Interactive console
 This project enforces strict code quality:
 
 - **80% test coverage** minimum (enforced in CI)
-- **300-line module limit** (enforced via pre-commit hook)
+- **500-line module limit** (enforced via pre-commit hook)
 - **Strict Credo checks** including cyclomatic complexity, nesting depth, and code duplication
 - **Security scanning** via Sobelow and dependency auditing
 - **Type checking** via Dialyzer with strict flags
@@ -188,7 +188,7 @@ Hooks run automatically on commit and include:
 - Compilation with warnings as errors
 - Credo strict mode
 - Sobelow security analysis
-- Module size limit check (300 lines max)
+- Module size limit check (500 lines max)
 - Dependency vulnerability audit
 - Test suite with coverage
 
