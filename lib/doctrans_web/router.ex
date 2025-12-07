@@ -18,9 +18,11 @@ defmodule DoctransWeb.Router do
   scope "/", DoctransWeb do
     pipe_through :browser
 
-    live "/", DocumentLive.Index, :index
-    live "/search", SearchLive, :index
-    live "/documents/:id", DocumentLive.Show, :show
+    live_session :default, on_mount: [{DoctransWeb.Live.Hooks.SetLocale, :default}] do
+      live "/", DocumentLive.Index, :index
+      live "/search", SearchLive, :index
+      live "/documents/:id", DocumentLive.Show, :show
+    end
   end
 
   # Other scopes may use custom stacks.

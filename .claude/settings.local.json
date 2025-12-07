@@ -17,7 +17,8 @@
       "Bash(MIX_ENV=test mix dialyzer:*)",
       "Bash(MIX_ENV=test mix coveralls:*)",
       "Bash(gh pr view:*)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
