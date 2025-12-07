@@ -24,6 +24,12 @@ config :doctrans, :uploads,
   upload_dir: Path.expand("../priv/static/uploads", __DIR__),
   max_file_size: 100_000_000
 
+# Document sweeper configuration (cleans up orphaned directories)
+config :doctrans, Doctrans.Documents.SweeperWorker,
+  enabled: true,
+  interval_hours: 6,
+  grace_period_hours: 24
+
 # Default language settings
 config :doctrans, :defaults,
   source_language: "de",
