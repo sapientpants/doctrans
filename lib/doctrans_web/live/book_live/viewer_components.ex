@@ -62,7 +62,8 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
     </div>
     <div
       :if={
-        @page && @page.extraction_status == "completed" && @page.translation_status == "processing"
+        @page && !@show_original && @page.extraction_status == "completed" &&
+          @page.translation_status == "processing"
       }
       class="flex flex-col items-center justify-center h-64"
     >

@@ -49,8 +49,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 ### Required Ollama Models
 
 ```bash
-ollama pull qwen3-vl:8b        # Vision model for OCR
-ollama pull ministral-3:14b     # Text model for translation
+ollama pull ministral-3:14b     # Model for OCR and translation
 ollama pull qwen3-embedding:0.6b # Embedding model for search
 ```
 
@@ -117,7 +116,7 @@ Configuration in `config/config.exs`:
 # Ollama settings (OLLAMA_HOST env var overrides base_url)
 config :doctrans, :ollama,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
-  vision_model: "qwen3-vl:8b",
+  vision_model: "ministral-3:14b",
   text_model: "ministral-3:14b",
   timeout: 300_000
 
@@ -244,13 +243,12 @@ For Docker, verify `host.docker.internal` resolves correctly.
 ### Missing Ollama models
 
 ```text
-model "qwen3-vl:8b" not found
+model "ministral-3:14b" not found
 ```
 
 Pull the required models before starting:
 
 ```bash
-ollama pull qwen3-vl:8b
 ollama pull ministral-3:14b
 ollama pull qwen3-embedding:0.6b
 ```

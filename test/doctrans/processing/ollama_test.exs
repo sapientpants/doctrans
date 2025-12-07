@@ -43,4 +43,46 @@ defmodule Doctrans.Processing.OllamaTest do
       end
     end
   end
+
+  describe "strip_code_fences/1" do
+    test "strips markdown code fences" do
+      input = "```markdown\n# Hello\nWorld\n```"
+      assert Ollama.strip_code_fences(input) == "# Hello\nWorld"
+    end
+
+    test "strips code fences with md language" do
+      input = "```md\n# Hello\nWorld\n```"
+      assert Ollama.strip_code_fences(input) == "# Hello\nWorld"
+    end
+
+    test "strips plain code fences without language" do
+      input = "```\n# Hello\nWorld\n```"
+      assert Ollama.strip_code_fences(input) == "# Hello\nWorld"
+    end
+
+    test "strips code fences with other language specifiers" do
+      input = "```elixir\ndefmodule Foo do\nend\n```"
+      assert Ollama.strip_code_fences(input) == "defmodule Foo do\nend"
+    end
+
+    test "handles closing fence without preceding newline" do
+      input = "```\nHello World```"
+      assert Ollama.strip_code_fences(input) == "Hello World"
+    end
+
+    test "handles closing fence with trailing whitespace" do
+      input = "```\nHello\n```  "
+      assert Ollama.strip_code_fences(input) == "Hello"
+    end
+
+    test "returns text unchanged when no code fences present" do
+      input = "# Hello\nWorld"
+      assert Ollama.strip_code_fences(input) == "# Hello\nWorld"
+    end
+
+    test "trims whitespace from result" do
+      input = "```\n  Hello  \n```"
+      assert Ollama.strip_code_fences(input) == "Hello"
+    end
+  end
 end
