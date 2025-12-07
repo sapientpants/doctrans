@@ -20,5 +20,8 @@
   {"lib/doctrans_web/live/book_live/show.ex", :unmatched_return},
 
   # Pgvector.t() type is not exported by the library but is valid
-  {"lib/doctrans/search/embedding_behaviour.ex", :unknown_type}
+  {"lib/doctrans/search/embedding_behaviour.ex", :unknown_type},
+
+  # Test fixtures - fire and forget operations
+  {"test/support/fixtures.ex", :unmatched_return}
 ]
