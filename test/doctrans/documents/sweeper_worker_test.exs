@@ -32,8 +32,8 @@ defmodule Doctrans.Documents.SweeperWorkerTest do
 
       :ok = SweeperWorker.sweep_now()
 
-      # Give the async cast time to process (increased for reliability)
-      Process.sleep(500)
+      # Give the async cast time to process
+      Process.sleep(100)
 
       new_status = SweeperWorker.status()
       assert new_status.sweep_count == initial_count + 1
@@ -42,7 +42,7 @@ defmodule Doctrans.Documents.SweeperWorkerTest do
 
     test "updates last_sweep timestamp" do
       :ok = SweeperWorker.sweep_now()
-      Process.sleep(500)
+      Process.sleep(100)
 
       status = SweeperWorker.status()
       assert %DateTime{} = status.last_sweep
