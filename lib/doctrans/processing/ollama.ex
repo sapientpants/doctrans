@@ -193,10 +193,10 @@ defmodule Doctrans.Processing.Ollama do
   end
 
   # Strip markdown code fences that LLMs sometimes wrap their output in
-  defp strip_code_fences(text) do
+  def strip_code_fences(text) do
     text
-    |> String.replace(~r/\A```(?:markdown|md)?\n/, "")
-    |> String.replace(~r/\n```\z/, "")
+    |> String.replace(~r/\A```[^\n]*\n/, "")
+    |> String.replace(~r/\n?```\s*\z/, "")
     |> String.trim()
   end
 
