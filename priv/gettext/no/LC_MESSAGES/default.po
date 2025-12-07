@@ -136,8 +136,8 @@ msgstr "Eldste først"
 msgid "Only PDF files are accepted"
 msgstr "Kun PDF-filer aksepteres"
 
-msgid "Original Markdown"
-msgstr "Original Markdown"
+msgid "Original Content"
+msgstr "Originalt innhold"
 
 msgid "Original Page"
 msgstr "Original side"

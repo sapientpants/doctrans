@@ -135,7 +135,7 @@ defmodule DoctransWeb.DocumentLive.Show do
             <div class="flex items-center justify-between px-4 py-2 border-b border-base-300">
               <span class="text-sm font-medium">
                 {if @show_original,
-                  do: gettext("Original Markdown"),
+                  do: gettext("Original Content"),
                   else: gettext("Translated Content")}
               </span>
               <label class="flex items-center gap-2 cursor-pointer">

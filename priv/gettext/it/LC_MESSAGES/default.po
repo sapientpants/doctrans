@@ -136,8 +136,8 @@ msgstr "Più vecchio prima"
 msgid "Only PDF files are accepted"
 msgstr "Sono accettati solo file PDF"
 
-msgid "Original Markdown"
-msgstr "Markdown originale"
+msgid "Original Content"
+msgstr "Contenuto originale"
 
 msgid "Original Page"
 msgstr "Pagina originale"

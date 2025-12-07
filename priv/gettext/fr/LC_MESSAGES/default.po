@@ -225,8 +225,8 @@ msgstr "Seuls les fichiers PDF sont acceptés"
 
 #: lib/doctrans_web/live/book_live/show.ex:138
 #, elixir-autogen, elixir-format
-msgid "Original Markdown"
-msgstr "Markdown original"
+msgid "Original Content"
+msgstr "Contenu original"
 
 #: lib/doctrans_web/live/book_live/show.ex:107
 #, elixir-autogen, elixir-format

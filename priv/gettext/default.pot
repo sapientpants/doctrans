@@ -225,7 +225,7 @@ msgstr ""
 
 #: lib/doctrans_web/live/book_live/show.ex:138
 #, elixir-autogen, elixir-format
-msgid "Original Markdown"
+msgid "Original Content"
 msgstr ""
 
 #: lib/doctrans_web/live/book_live/show.ex:107
