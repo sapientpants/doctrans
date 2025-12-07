@@ -14,6 +14,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   use Gettext, backend: DoctransWeb.Gettext
 
   alias Doctrans.Documents
+  alias Doctrans.Processing.Worker
 
   # Allow PdfExtractor module to be configured for testing
   defp pdf_extractor_module do
@@ -97,8 +98,13 @@ defmodule Doctrans.Processing.PdfProcessor do
     result =
       Enum.reduce_while(1..page_count, :ok, fn page_number, :ok ->
         case extract_and_create_page(document, pdf_path, pages_dir, page_number) do
-          :ok -> {:cont, :ok}
-          {:error, reason} -> {:halt, {:error, reason}}
+          {:ok, page} ->
+            # Queue page for LLM processing immediately
+            queue_page_for_processing(page)
+            {:cont, :ok}
+
+          {:error, reason} ->
+            {:halt, {:error, reason}}
         end
       end)
 
@@ -106,6 +112,11 @@ defmodule Doctrans.Processing.PdfProcessor do
     Documents.broadcast_document_update(document)
 
     result
+  end
+
+  defp queue_page_for_processing(page) do
+    Logger.info("Queueing page #{page.page_number} for LLM processing")
+    Worker.queue_page(page.id)
   end
 
   defp extract_and_create_page(document, pdf_path, pages_dir, page_number) do
@@ -118,7 +129,7 @@ defmodule Doctrans.Processing.PdfProcessor do
           {:ok, page} ->
             # Broadcast page creation for progressive UI updates
             Documents.broadcast_page_update(page)
-            :ok
+            {:ok, page}
 
           {:error, changeset} ->
             {:error, "Failed to create page record: #{inspect(changeset.errors)}"}

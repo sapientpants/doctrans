@@ -11,7 +11,12 @@ defmodule Doctrans.Documents.Pages do
   alias Doctrans.Repo
 
   @doc """
-  Gets a single page by ID.
+  Gets a single page by ID, returns nil if not found.
+  """
+  def get_page(id), do: Repo.get(Page, id)
+
+  @doc """
+  Gets a single page by ID, raises if not found.
   """
   def get_page!(id), do: Repo.get!(Page, id)
 

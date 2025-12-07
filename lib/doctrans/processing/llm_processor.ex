@@ -1,8 +1,9 @@
 defmodule Doctrans.Processing.LlmProcessor do
   @moduledoc """
-  Handles LLM-based processing of document pages.
+  Handles LLM-based processing of individual pages.
 
   Performs markdown extraction and translation using Ollama models.
+  Each page is processed independently: first extraction, then translation.
 
   ## I18n Note
 
@@ -27,105 +28,43 @@ defmodule Doctrans.Processing.LlmProcessor do
   end
 
   @doc """
-  Processes all pages of a document through the LLM pipeline.
+  Processes a single page through the LLM pipeline (extraction + translation).
 
-  Returns `:ok`, `{:cancelled, document_id}`, or `{:error, reason}`.
+  Returns `:ok` or `{:error, reason}`.
   """
-  def process_document(document_id, cancelled_documents) do
-    if MapSet.member?(cancelled_documents, document_id) do
-      Logger.info("Document #{document_id} was cancelled, skipping LLM processing")
-      :ok
-    else
-      document_id
-      |> process_all_pages(cancelled_documents)
-      |> handle_result(document_id)
+  def process_page(page_id, cancelled_documents) do
+    case Documents.get_page(page_id) do
+      nil ->
+        {:error, dgettext("errors", "Page not found")}
+
+      page ->
+        if MapSet.member?(cancelled_documents, page.document_id) do
+          Logger.info("Document #{page.document_id} was cancelled, skipping page #{page_id}")
+          :ok
+        else
+          do_process_page(page)
+        end
     end
   end
 
-  defp handle_result(:ok, document_id) do
-    document = Documents.get_document!(document_id)
-    Documents.update_document_status(document, "completed")
-    Documents.broadcast_document_update(document)
-    :ok
-  end
-
-  defp handle_result({:cancelled, _}, document_id) do
-    Logger.info("Document #{document_id} LLM processing was cancelled")
-    :ok
-  end
-
-  defp handle_result({:error, reason}, document_id) do
-    Logger.error("Failed to process LLM for document #{document_id}: #{reason}")
-    maybe_update_document_error(document_id, reason)
-    {:error, reason}
-  end
-
-  defp maybe_update_document_error(document_id, reason) do
-    case Documents.get_document(document_id) do
-      nil -> :ok
-      document -> Documents.update_document_status(document, "error", reason)
+  defp do_process_page(page) do
+    with :ok <- maybe_extract(page),
+         page <- Documents.get_page!(page.id) do
+      maybe_translate(page)
     end
   end
 
-  defp process_all_pages(document_id, cancelled_documents) do
-    process_next_page(document_id, cancelled_documents)
+  defp maybe_extract(%{extraction_status: "pending"} = page) do
+    process_page_extraction(page)
   end
 
-  defp process_next_page(document_id, cancelled_documents) do
-    if MapSet.member?(cancelled_documents, document_id) do
-      {:cancelled, document_id}
-    else
-      find_and_process_next_page(document_id, cancelled_documents)
-    end
+  defp maybe_extract(_page), do: :ok
+
+  defp maybe_translate(%{extraction_status: "completed", translation_status: "pending"} = page) do
+    process_page_translation(page)
   end
 
-  defp find_and_process_next_page(document_id, cancelled_documents) do
-    case Documents.get_next_page_for_extraction(document_id) do
-      nil -> find_translation_page(document_id, cancelled_documents)
-      page -> process_page_and_continue(page, document_id, cancelled_documents)
-    end
-  end
-
-  defp find_translation_page(document_id, cancelled_documents) do
-    if Documents.all_pages_completed?(document_id) do
-      :ok
-    else
-      case Documents.get_next_page_for_translation(document_id) do
-        nil -> :ok
-        page -> process_page_and_continue(page, document_id, cancelled_documents)
-      end
-    end
-  end
-
-  defp process_page_and_continue(page, document_id, cancelled_documents) do
-    case maybe_extract_page(page) do
-      {:error, reason} ->
-        {:error, reason}
-
-      updated_page ->
-        maybe_translate_and_continue(updated_page, document_id, cancelled_documents)
-    end
-  end
-
-  defp maybe_extract_page(%{extraction_status: "pending"} = page) do
-    case process_page_extraction(page) do
-      :ok -> Documents.get_page!(page.id)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp maybe_extract_page(page), do: page
-
-  defp maybe_translate_and_continue(page, document_id, cancelled_documents) do
-    if page.extraction_status == "completed" && page.translation_status == "pending" do
-      case process_page_translation(page) do
-        :ok -> process_next_page(document_id, cancelled_documents)
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      process_next_page(document_id, cancelled_documents)
-    end
-  end
+  defp maybe_translate(_page), do: :ok
 
   defp process_page_extraction(page, retry_count \\ 0) do
     Logger.info(

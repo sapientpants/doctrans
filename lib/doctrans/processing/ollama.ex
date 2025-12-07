@@ -79,9 +79,9 @@ defmodule Doctrans.Processing.Ollama do
           images: [image_base64],
           stream: false,
           options: %{
-            # Allow up to 16K tokens for extraction - tables of contents and dense
-            # pages can have a lot of text. Default limits may truncate output.
-            num_predict: 16_384
+            # 16K context for image + prompt, 8K output for extracted text
+            num_ctx: 16_384,
+            num_predict: 8_192
           }
         }
 
@@ -147,8 +147,9 @@ defmodule Doctrans.Processing.Ollama do
       prompt: prompt,
       stream: false,
       options: %{
-        # Allow up to 16K tokens for translation - must handle full page content
-        num_predict: 16_384
+        # 16K context for input, 8K output for translated text
+        num_ctx: 16_384,
+        num_predict: 8_192
       }
     }
 

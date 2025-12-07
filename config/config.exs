@@ -26,7 +26,7 @@ config :doctrans, :uploads,
 
 # PDF extraction configuration
 # Higher DPI = better text recognition but larger files
-config :doctrans, :pdf_extraction, dpi: 200
+config :doctrans, :pdf_extraction, dpi: 150
 
 # Document sweeper configuration (cleans up orphaned directories)
 config :doctrans, Doctrans.Documents.SweeperWorker,

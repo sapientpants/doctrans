@@ -13,6 +13,7 @@ defmodule Doctrans.Documents do
   alias Doctrans.Repo
 
   # Delegate page operations for backward compatibility
+  defdelegate get_page(id), to: Pages
   defdelegate get_page!(id), to: Pages
   defdelegate get_page_by_number(document_id, page_number), to: Pages
   defdelegate get_page_by_number!(document_id, page_number), to: Pages
