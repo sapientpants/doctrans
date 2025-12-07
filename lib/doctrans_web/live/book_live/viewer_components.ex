@@ -106,9 +106,14 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
 
   defp render_markdown(text) do
     case Earmark.as_html(text) do
-      {:ok, html, _} -> html
-      {:error, html, _} -> html
+      {:ok, html, _} -> sanitize_html(html)
+      {:error, html, _} -> sanitize_html(html)
     end
+  end
+
+  # Sanitize HTML to prevent XSS attacks from user-uploaded content
+  defp sanitize_html(html) do
+    HtmlSanitizeEx.basic_html(html)
   end
 
   defp show_content?(page, show_original) do

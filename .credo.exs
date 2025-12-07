@@ -18,8 +18,8 @@
           ~r"/deps/",
           ~r"/node_modules/",
           # Exclude generated test support files from some checks
-          ~r"/test/support/data_case\.ex$/",
-          ~r"/test/support/conn_case\.ex$/"
+          ~r"/test/support/data_case\.ex$",
+          ~r"/test/support/conn_case\.ex$"
         ]
       },
       plugins: [],

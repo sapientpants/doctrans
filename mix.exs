@@ -91,6 +91,7 @@ defmodule Doctrans.MixProject do
       {:bandit, "~> 1.5"},
       {:uniq, "~> 0.6"},
       {:earmark, "~> 1.4"},
+      {:html_sanitize_ex, "~> 1.4"},
       {:pgvector, "~> 0.3"},
       # Code quality tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
