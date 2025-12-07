@@ -33,6 +33,7 @@ doctrans-*.tar
 
 # Ignore uploaded files (user data)
 /priv/static/uploads/
+/priv/static/uploads_test/
 
 # In case you use Node.js/npm, you want to ignore these.
 npm-debug.log

@@ -41,3 +41,8 @@ config :phoenix_live_view,
 config :doctrans, :embedding_module, Doctrans.Search.EmbeddingMock
 config :doctrans, :ollama_module, Doctrans.Processing.OllamaMock
 config :doctrans, :pdf_extractor_module, Doctrans.Processing.PdfExtractorMock
+
+# Use isolated upload directory for tests to avoid conflicts with development
+config :doctrans, :uploads,
+  upload_dir: Path.expand("../priv/static/uploads_test", __DIR__),
+  max_file_size: 100_000_000
