@@ -28,6 +28,18 @@ defmodule Doctrans.Processing.PdfExtractorStub do
   end
 
   @impl true
+  def extract_page(_pdf_path, output_dir, page_number, _opts \\ []) do
+    File.mkdir_p!(output_dir)
+
+    padded = String.pad_leading(to_string(page_number), 2, "0")
+    file_path = Path.join(output_dir, "page-#{padded}.png")
+    # Create a minimal PNG file (1x1 pixel transparent PNG)
+    File.write!(file_path, minimal_png())
+
+    {:ok, file_path}
+  end
+
+  @impl true
   def get_page_count(_pdf_path) do
     {:ok, 3}
   end

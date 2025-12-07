@@ -68,25 +68,33 @@ defmodule DoctransWeb.DocumentLive.Components do
 
   @doc """
   Renders a document thumbnail from its first page.
+
+  The thumbnail path is derived from the document ID rather than requiring
+  pages to be loaded. The thumbnail is available as soon as the first page
+  is extracted (when total_pages is set).
   """
   attr :document, :map, required: true
 
   def document_thumbnail(assigns) do
     document = assigns.document
-    pages = Map.get(document, :pages, [])
-    first_page = Enum.find(pages, &(&1.page_number == 1))
+    # Thumbnail is available once extraction has started (total_pages is set)
+    has_thumbnail = document.total_pages && document.total_pages > 0
+    thumbnail_path = "documents/#{document.id}/pages/page-01.png"
 
-    assigns = assign(assigns, :first_page, first_page)
+    assigns =
+      assigns
+      |> assign(:has_thumbnail, has_thumbnail)
+      |> assign(:thumbnail_path, thumbnail_path)
 
     ~H"""
     <img
-      :if={@first_page && @first_page.image_path}
-      src={"/uploads/#{@first_page.image_path}"}
+      :if={@has_thumbnail}
+      src={"/uploads/#{@thumbnail_path}"}
       alt="First page"
       class="w-full h-full object-cover"
     />
     <.icon
-      :if={!@first_page || !@first_page.image_path}
+      :if={!@has_thumbnail}
       name="hero-document-text"
       class="w-16 h-16 text-base-content/30"
     />

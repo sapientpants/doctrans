@@ -78,6 +78,22 @@ defmodule Doctrans.Processing.PdfExtractorTest do
     end
   end
 
+  describe "extract_page/4" do
+    test "returns error for non-existent PDF" do
+      dir = Path.join(System.tmp_dir!(), "pdf_out_#{:rand.uniform(100_000)}")
+
+      # This test may raise on some systems (e.g., CI without poppler)
+      # or return an error tuple on others
+      try do
+        result = PdfExtractor.extract_page("/nonexistent.pdf", dir, 1)
+        assert {:error, _reason} = result
+      rescue
+        ErlangError -> :ok
+        File.Error -> :ok
+      end
+    end
+  end
+
   describe "get_page_count/1" do
     test "returns error for non-existent PDF" do
       # This test may raise on some systems (e.g., CI without poppler)

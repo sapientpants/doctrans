@@ -1,6 +1,12 @@
 defmodule Doctrans.Processing.PdfProcessor do
   @moduledoc """
   Handles PDF extraction and page creation for documents.
+
+  Extracts pages progressively - each page is extracted and its record created
+  before moving to the next page. This enables:
+  - Immediate thumbnail availability (first page)
+  - Progressive UI updates as pages are extracted
+  - Early total_pages availability for progress tracking
   """
 
   require Logger
@@ -15,7 +21,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   end
 
   @doc """
-  Extracts pages from a PDF and creates page records.
+  Extracts pages from a PDF and creates page records progressively.
 
   Returns `:ok`, `:cancelled`, or `{:error, reason}`.
   """
@@ -60,36 +66,66 @@ defmodule Doctrans.Processing.PdfProcessor do
 
     pages_dir = Documents.ensure_document_dirs!(document.id)
 
-    case pdf_extractor_module().extract_pages(pdf_path, pages_dir, []) do
-      {:ok, page_count} ->
-        Logger.info("Extracted #{page_count} pages for document #{document.id}")
-        create_page_records(document, page_count, pages_dir, pdf_path)
+    # Get page count early so UI can show progress
+    with {:ok, page_count} <- pdf_extractor_module().get_page_count(pdf_path),
+         {:ok, document} <- set_total_pages(document, page_count),
+         :ok <- extract_pages_progressively(document, pdf_path, pages_dir, page_count) do
+      Logger.info("Extracted #{page_count} pages for document #{document.id}")
 
+      # Delete the original PDF to save space
+      File.rm(pdf_path)
+
+      :ok
+    else
       {:error, reason} ->
         {:error, dgettext("errors", "PDF extraction failed: %{reason}", reason: reason)}
     end
   end
 
-  defp create_page_records(document, page_count, pages_dir, pdf_path) do
-    {:ok, document} = Documents.update_document(document, %{total_pages: page_count})
+  defp set_total_pages(document, page_count) do
+    case Documents.update_document(document, %{total_pages: page_count}) do
+      {:ok, updated_document} ->
+        Documents.broadcast_document_update(updated_document)
+        {:ok, updated_document}
 
-    page_images = pdf_extractor_module().list_page_images(pages_dir)
+      error ->
+        error
+    end
+  end
 
-    page_attrs =
-      page_images
-      |> Enum.with_index(1)
-      |> Enum.map(fn {image_path, page_number} ->
-        relative_path = Path.relative_to(image_path, Documents.uploads_dir())
-        %{page_number: page_number, image_path: relative_path}
+  defp extract_pages_progressively(document, pdf_path, pages_dir, page_count) do
+    result =
+      Enum.reduce_while(1..page_count, :ok, fn page_number, :ok ->
+        case extract_and_create_page(document, pdf_path, pages_dir, page_number) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
       end)
 
-    Documents.create_pages(document, page_attrs)
-
-    # Delete the original PDF to save space
-    File.rm(pdf_path)
-
+    # Final broadcast after all pages are extracted
     Documents.broadcast_document_update(document)
 
-    :ok
+    result
+  end
+
+  defp extract_and_create_page(document, pdf_path, pages_dir, page_number) do
+    case pdf_extractor_module().extract_page(pdf_path, pages_dir, page_number, []) do
+      {:ok, image_path} ->
+        relative_path = Path.relative_to(image_path, Documents.uploads_dir())
+        page_attrs = %{page_number: page_number, image_path: relative_path}
+
+        case Documents.create_page(document, page_attrs) do
+          {:ok, page} ->
+            # Broadcast page creation for progressive UI updates
+            Documents.broadcast_page_update(page)
+            :ok
+
+          {:error, changeset} ->
+            {:error, "Failed to create page record: #{inspect(changeset.errors)}"}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 end
