@@ -58,7 +58,15 @@ defmodule DoctransWeb.Plugs.SetLocale do
 
   defp parse_accept_language([]), do: nil
 
+  # Extracts the language code from an Accept-Language header value.
+  # Handles regional codes like "en-US", "de-DE" by taking only the language part.
   defp extract_locale(lang) do
-    lang |> String.split(";") |> hd() |> String.trim() |> String.slice(0, 2)
+    lang
+    |> String.split(";")
+    |> hd()
+    |> String.trim()
+    |> String.split("-")
+    |> hd()
+    |> String.downcase()
   end
 end

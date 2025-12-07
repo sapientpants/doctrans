@@ -5,6 +5,13 @@ defmodule Doctrans.Processing.Ollama do
   Provides functions for:
   - Extracting markdown from page images using a vision model (Qwen3-VL)
   - Translating markdown using a text model (Qwen3)
+
+  ## I18n Note
+
+  This module runs in background GenServer processes (document processing workers),
+  not in the web request process. Since Gettext locales are process-specific, error
+  messages from this module will use the default locale, not the user's browser locale.
+  This is acceptable as these errors are primarily logged and displayed as system status.
   """
 
   @behaviour Doctrans.Processing.OllamaBehaviour

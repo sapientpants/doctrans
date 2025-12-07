@@ -3,6 +3,13 @@ defmodule Doctrans.Processing.LlmProcessor do
   Handles LLM-based processing of document pages.
 
   Performs markdown extraction and translation using Ollama models.
+
+  ## I18n Note
+
+  This module runs in background GenServer processes (document processing pipeline),
+  not in the web request process. Since Gettext locales are process-specific, error
+  messages from this module will use the default locale, not the user's browser locale.
+  This is acceptable as these errors are primarily logged and displayed as system status.
   """
 
   require Logger

@@ -3,6 +3,13 @@ defmodule Doctrans.Search.Embedding do
   Generates text embeddings using Ollama's embedding API.
 
   Uses qwen3-embedding:0.6b model which outputs 1024-dimensional vectors.
+
+  ## I18n Note
+
+  This module runs in background GenServer processes (embedding workers),
+  not in the web request process. Since Gettext locales are process-specific, error
+  messages from this module will use the default locale, not the user's browser locale.
+  This is acceptable as these errors are primarily logged and displayed as system status.
   """
 
   @behaviour Doctrans.Search.EmbeddingBehaviour
