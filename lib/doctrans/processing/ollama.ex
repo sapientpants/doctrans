@@ -197,6 +197,14 @@ defmodule Doctrans.Processing.Ollama do
   # Private functions
 
   defp make_request(path, body, timeout) do
+    alias Doctrans.Resilience.CircuitBreaker
+
+    CircuitBreaker.call(:ollama_api, fn ->
+      do_make_request(path, body, timeout)
+    end)
+  end
+
+  defp do_make_request(path, body, timeout) do
     config = ollama_config()
     url = "#{config[:base_url]}#{path}"
 

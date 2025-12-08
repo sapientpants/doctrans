@@ -5,8 +5,13 @@ defmodule Doctrans.Application do
 
   use Application
 
+  alias Doctrans.Resilience.CircuitBreaker
+
   @impl true
   def start(_type, _args) do
+    # Install circuit breakers before starting workers
+    CircuitBreaker.install_fuses()
+
     children = [
       DoctransWeb.Telemetry,
       Doctrans.Repo,
@@ -20,6 +25,8 @@ defmodule Doctrans.Application do
       Doctrans.Search.EmbeddingWorker,
       # Scheduled worker for cleaning up orphaned files
       Doctrans.Documents.SweeperWorker,
+      # Periodic health check worker
+      Doctrans.Resilience.HealthCheckWorker,
       # Start to serve requests, typically the last entry
       DoctransWeb.Endpoint
     ]

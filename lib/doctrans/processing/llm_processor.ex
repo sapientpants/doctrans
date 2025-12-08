@@ -18,9 +18,20 @@ defmodule Doctrans.Processing.LlmProcessor do
   use Gettext, backend: DoctransWeb.Gettext
 
   alias Doctrans.Documents
+  alias Doctrans.Resilience.{Backoff, ErrorClassifier}
   alias Doctrans.Search.EmbeddingWorker
 
   @max_retries 3
+
+  defp retry_config do
+    config = Application.get_env(:doctrans, :retry, [])
+
+    %{
+      max_attempts: Keyword.get(config, :max_attempts, @max_retries),
+      base_delay_ms: Keyword.get(config, :base_delay_ms, 2_000),
+      max_delay_ms: Keyword.get(config, :max_delay_ms, 30_000)
+    }
+  end
 
   # Allow Ollama module to be configured for testing
   defp ollama_module do
@@ -93,27 +104,69 @@ defmodule Doctrans.Processing.LlmProcessor do
     end
   end
 
-  defp handle_extraction_error(page, _reason, retry_count) when retry_count < @max_retries do
-    Logger.warning(
-      "Extraction failed for page #{page.page_number}, retrying (#{retry_count + 1}/#{@max_retries})"
-    )
+  defp handle_extraction_error(page, reason, retry_count) do
+    config = retry_config()
+    classification = ErrorClassifier.classify(reason)
 
-    Process.sleep(1_000)
-    process_page_extraction(page, retry_count + 1)
+    cond do
+      # Circuit breaker is open - don't retry
+      reason == :circuit_open ->
+        Logger.error("Circuit breaker open, not retrying extraction for page #{page.page_number}")
+        mark_extraction_failed(page, reason)
+
+      # Permanent error - don't retry
+      classification == :permanent ->
+        Logger.error(
+          "Permanent error for page #{page.page_number}, not retrying: #{inspect(reason)}"
+        )
+
+        mark_extraction_failed(page, reason)
+
+      # Retryable error and we have retries left
+      retry_count < config.max_attempts ->
+        delay =
+          Backoff.calculate(retry_count,
+            base: config.base_delay_ms,
+            max: config.max_delay_ms
+          )
+
+        Logger.warning(
+          "Extraction failed for page #{page.page_number}, retrying in #{delay}ms (#{retry_count + 1}/#{config.max_attempts})"
+        )
+
+        :telemetry.execute(
+          [:doctrans, :retry, :attempt],
+          %{count: 1, delay_ms: delay},
+          %{type: :extraction, page_id: page.id, attempt: retry_count + 1}
+        )
+
+        Process.sleep(delay)
+        process_page_extraction(page, retry_count + 1)
+
+      # Max retries exceeded
+      true ->
+        Logger.error(
+          "Extraction failed for page #{page.page_number} after #{config.max_attempts} retries: #{inspect(reason)}"
+        )
+
+        :telemetry.execute(
+          [:doctrans, :retry, :exhausted],
+          %{count: 1},
+          %{type: :extraction, page_id: page.id}
+        )
+
+        mark_extraction_failed(page, reason)
+    end
   end
 
-  defp handle_extraction_error(page, reason, _retry_count) do
-    Logger.error(
-      "Extraction failed for page #{page.page_number} after #{@max_retries} retries: #{reason}"
-    )
-
+  defp mark_extraction_failed(page, reason) do
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
     Documents.broadcast_page_update(page)
 
     {:error,
      dgettext("errors", "Page %{page_number} extraction failed: %{reason}",
        page_number: page.page_number,
-       reason: reason
+       reason: inspect(reason)
      )}
   end
 
@@ -141,27 +194,72 @@ defmodule Doctrans.Processing.LlmProcessor do
     end
   end
 
-  defp handle_translation_error(page, _reason, retry_count) when retry_count < @max_retries do
-    Logger.warning(
-      "Translation failed for page #{page.page_number}, retrying (#{retry_count + 1}/#{@max_retries})"
-    )
+  defp handle_translation_error(page, reason, retry_count) do
+    config = retry_config()
+    classification = ErrorClassifier.classify(reason)
 
-    Process.sleep(1_000)
-    process_page_translation(page, retry_count + 1)
+    cond do
+      # Circuit breaker is open - don't retry
+      reason == :circuit_open ->
+        Logger.error(
+          "Circuit breaker open, not retrying translation for page #{page.page_number}"
+        )
+
+        mark_translation_failed(page, reason)
+
+      # Permanent error - don't retry
+      classification == :permanent ->
+        Logger.error(
+          "Permanent error for page #{page.page_number}, not retrying: #{inspect(reason)}"
+        )
+
+        mark_translation_failed(page, reason)
+
+      # Retryable error and we have retries left
+      retry_count < config.max_attempts ->
+        delay =
+          Backoff.calculate(retry_count,
+            base: config.base_delay_ms,
+            max: config.max_delay_ms
+          )
+
+        Logger.warning(
+          "Translation failed for page #{page.page_number}, retrying in #{delay}ms (#{retry_count + 1}/#{config.max_attempts})"
+        )
+
+        :telemetry.execute(
+          [:doctrans, :retry, :attempt],
+          %{count: 1, delay_ms: delay},
+          %{type: :translation, page_id: page.id, attempt: retry_count + 1}
+        )
+
+        Process.sleep(delay)
+        process_page_translation(page, retry_count + 1)
+
+      # Max retries exceeded
+      true ->
+        Logger.error(
+          "Translation failed for page #{page.page_number} after #{config.max_attempts} retries: #{inspect(reason)}"
+        )
+
+        :telemetry.execute(
+          [:doctrans, :retry, :exhausted],
+          %{count: 1},
+          %{type: :translation, page_id: page.id}
+        )
+
+        mark_translation_failed(page, reason)
+    end
   end
 
-  defp handle_translation_error(page, reason, _retry_count) do
-    Logger.error(
-      "Translation failed for page #{page.page_number} after #{@max_retries} retries: #{reason}"
-    )
-
+  defp mark_translation_failed(page, reason) do
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "error"})
     Documents.broadcast_page_update(page)
 
     {:error,
      dgettext("errors", "Page %{page_number} translation failed: %{reason}",
        page_number: page.page_number,
-       reason: reason
+       reason: inspect(reason)
      )}
   end
 end
