@@ -206,16 +206,7 @@ defmodule Doctrans.Processing.Ollama do
     config = ollama_config()
     url = "#{config[:base_url]}#{path}"
 
-    # Log request details (truncate prompt for readability, omit image data)
-    log_body = body |> Map.delete(:images) |> Map.update(:prompt, "", &String.slice(&1, 0, 200))
-    has_images = Map.has_key?(body, :images)
-
-    Logger.info(
-      "Ollama request: model=#{body[:model]}, has_images=#{has_images}, prompt_length=#{String.length(body[:prompt] || "")}"
-    )
-
-    Logger.info("Ollama request body (truncated): #{inspect(log_body)}")
-    Logger.debug("Ollama full prompt:\n#{body[:prompt]}")
+    log_request(body)
 
     case Req.post(url, json: body, receive_timeout: timeout) do
       {:ok, %{status: 200, body: response_body}} ->
@@ -268,6 +259,18 @@ defmodule Doctrans.Processing.Ollama do
 
   defp ollama_config do
     Application.get_env(:doctrans, :ollama, [])
+  end
+
+  defp log_request(body) do
+    image_bytes =
+      case body[:images] do
+        [img | _] -> byte_size(img)
+        _ -> 0
+      end
+
+    Logger.info(
+      "Ollama request: model=#{body[:model]}, prompt_length=#{String.length(body[:prompt] || "")}, image_base64_bytes=#{image_bytes}"
+    )
   end
 
   # Strip markdown code fences that LLMs sometimes wrap their output in
