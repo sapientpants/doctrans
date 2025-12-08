@@ -17,7 +17,7 @@ config :doctrans, :ollama,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
   vision_model: "ministral-3:14b",
   text_model: "ministral-3:14b",
-  timeout: 120_000
+  timeout: 300_000
 
 # Circuit breaker configuration for resilience
 config :doctrans, :circuit_breakers,

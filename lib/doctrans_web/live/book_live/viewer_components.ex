@@ -102,6 +102,94 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
     ~H"<div>{raw(@html)}</div>"
   end
 
+  attr :page, :map, required: true
+  attr :extraction_model, :string, required: true
+  attr :translation_model, :string, required: true
+  attr :available_models, :list, required: true
+  attr :models_loading, :boolean, default: false
+
+  def reprocess_modal(assigns) do
+    ~H"""
+    <div class="modal modal-open" id="reprocess-modal">
+      <div class="modal-box max-w-md">
+        <button
+          type="button"
+          phx-click="hide_reprocess_modal"
+          class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2"
+        >
+          <.icon name="hero-x-mark" class="w-5 h-5" />
+        </button>
+
+        <h3 class="font-bold text-lg mb-4">{gettext("Reprocess Page")}</h3>
+        <p class="text-sm text-base-content/70 mb-4">
+          {gettext("Select models to use for re-extracting and re-translating this page.")}
+        </p>
+
+        <form phx-submit="reprocess_page" phx-change="update_reprocess_models" id="reprocess-form">
+          <div class="form-control mb-4">
+            <label class="label">
+              <span class="label-text">{gettext("Extraction Model")}</span>
+            </label>
+            <select
+              name="extraction_model"
+              class="select select-bordered w-full"
+              id="extraction-model-select"
+              disabled={@models_loading}
+            >
+              <option :if={@models_loading} value="">{gettext("Loading models...")}</option>
+              <option
+                :for={model <- @available_models}
+                :if={!@models_loading}
+                value={model}
+                selected={model == @extraction_model}
+              >
+                {model}
+              </option>
+            </select>
+          </div>
+
+          <div class="form-control mb-6">
+            <label class="label">
+              <span class="label-text">{gettext("Translation Model")}</span>
+            </label>
+            <select
+              name="translation_model"
+              class="select select-bordered w-full"
+              id="translation-model-select"
+              disabled={@models_loading}
+            >
+              <option :if={@models_loading} value="">{gettext("Loading models...")}</option>
+              <option
+                :for={model <- @available_models}
+                :if={!@models_loading}
+                value={model}
+                selected={model == @translation_model}
+              >
+                {model}
+              </option>
+            </select>
+          </div>
+
+          <div class="modal-action">
+            <button type="button" phx-click="hide_reprocess_modal" class="btn btn-ghost">
+              {gettext("Cancel")}
+            </button>
+            <button
+              type="submit"
+              class="btn btn-primary"
+              disabled={@models_loading || @available_models == []}
+              id="reprocess-submit-btn"
+            >
+              {gettext("Reprocess")}
+            </button>
+          </div>
+        </form>
+      </div>
+      <div class="modal-backdrop bg-black/50" phx-click="hide_reprocess_modal"></div>
+    </div>
+    """
+  end
+
   defp render_markdown(nil), do: ""
   defp render_markdown(""), do: ""
 
