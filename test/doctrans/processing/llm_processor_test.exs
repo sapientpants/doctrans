@@ -82,4 +82,106 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       assert {:error, _} = result
     end
   end
+
+  describe "extraction error handling" do
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:doctrans, :ollama_stub_extraction_error)
+        Application.delete_env(:doctrans, :ollama_stub_translation_error)
+      end)
+
+      :ok
+    end
+
+    test "fails immediately on circuit breaker open" do
+      document = document_fixture(%{status: "processing"})
+      page = page_fixture(document, %{page_number: 1})
+
+      # Create the image file
+      setup_image_file(page)
+
+      # Configure stub to return circuit open error
+      Application.put_env(:doctrans, :ollama_stub_extraction_error, :circuit_open)
+
+      result = LlmProcessor.process_page(page.id, MapSet.new())
+
+      assert {:error, _} = result
+
+      # Verify page is marked as error
+      updated_page = Documents.get_page!(page.id)
+      assert updated_page.extraction_status == "error"
+    end
+
+    test "fails immediately on permanent error" do
+      document = document_fixture(%{status: "processing"})
+      page = page_fixture(document, %{page_number: 1})
+
+      setup_image_file(page)
+
+      # Configure stub to return permanent error (404)
+      Application.put_env(:doctrans, :ollama_stub_extraction_error, "HTTP 404: Model not found")
+
+      result = LlmProcessor.process_page(page.id, MapSet.new())
+
+      assert {:error, _} = result
+
+      updated_page = Documents.get_page!(page.id)
+      assert updated_page.extraction_status == "error"
+    end
+  end
+
+  describe "translation error handling" do
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:doctrans, :ollama_stub_extraction_error)
+        Application.delete_env(:doctrans, :ollama_stub_translation_error)
+      end)
+
+      :ok
+    end
+
+    test "fails immediately on circuit breaker open during translation" do
+      document = document_fixture(%{status: "processing"})
+      page = page_fixture(document, %{page_number: 1})
+
+      setup_image_file(page)
+
+      # Configure stub: extraction succeeds, translation fails
+      Application.put_env(:doctrans, :ollama_stub_translation_error, :circuit_open)
+
+      result = LlmProcessor.process_page(page.id, MapSet.new())
+
+      assert {:error, _} = result
+
+      updated_page = Documents.get_page!(page.id)
+      assert updated_page.extraction_status == "completed"
+      assert updated_page.translation_status == "error"
+    end
+
+    test "fails immediately on permanent error during translation" do
+      document = document_fixture(%{status: "processing"})
+      page = page_fixture(document, %{page_number: 1})
+
+      setup_image_file(page)
+
+      # Configure stub: extraction succeeds, translation returns permanent error
+      Application.put_env(:doctrans, :ollama_stub_translation_error, "HTTP 400: Invalid request")
+
+      result = LlmProcessor.process_page(page.id, MapSet.new())
+
+      assert {:error, _} = result
+
+      updated_page = Documents.get_page!(page.id)
+      assert updated_page.extraction_status == "completed"
+      assert updated_page.translation_status == "error"
+    end
+  end
+
+  # Helper to create a fake image file for tests
+  defp setup_image_file(page) do
+    upload_dir = Documents.uploads_dir()
+    full_path = Path.join(upload_dir, page.image_path)
+    File.mkdir_p!(Path.dirname(full_path))
+    File.write!(full_path, "fake image")
+  end
 end

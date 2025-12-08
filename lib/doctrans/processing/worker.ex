@@ -24,9 +24,8 @@ defmodule Doctrans.Processing.Worker do
   alias Doctrans.Documents
   alias Doctrans.Processing.{LlmProcessor, PdfProcessor}
 
-  # ============================================================================
-  # Client API
-  # ============================================================================
+  # Task timeout: 3 minutes (slightly longer than Ollama timeout to allow for retries)
+  @default_task_timeout_ms 180_000
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -68,26 +67,16 @@ defmodule Doctrans.Processing.Worker do
     GenServer.call(__MODULE__, :status)
   end
 
-  # ============================================================================
-  # Server Callbacks
-  # ============================================================================
-
   @impl true
   def init(_opts) do
     state = %{
-      # Currently processing document
       current_document_id: nil,
-      # Currently processing page within that document
       current_page_id: nil,
-      # Pages queued for the current document
       page_queue: :queue.new(),
-      # Documents waiting to be processed
       document_queue: :queue.new(),
-      # Cancelled document IDs
       cancelled_documents: MapSet.new(),
-      # Task ref for LLM processing
       llm_task_ref: nil,
-      # Extraction tasks in progress
+      llm_timeout_ref: nil,
       extraction_tasks: %{}
     }
 
@@ -182,6 +171,11 @@ defmodule Doctrans.Processing.Worker do
   def handle_info({ref, result}, %{llm_task_ref: ref} = state) do
     Process.demonitor(ref, [:flush])
 
+    # Cancel the timeout timer
+    if state.llm_timeout_ref do
+      Process.cancel_timer(state.llm_timeout_ref)
+    end
+
     case result do
       :ok ->
         Logger.info("Page #{state.current_page_id} LLM processing completed")
@@ -190,7 +184,7 @@ defmodule Doctrans.Processing.Worker do
         Logger.error("Page #{state.current_page_id} LLM processing failed: #{reason}")
     end
 
-    state = %{state | current_page_id: nil, llm_task_ref: nil}
+    state = %{state | current_page_id: nil, llm_task_ref: nil, llm_timeout_ref: nil}
     {:noreply, process_next_page(state)}
   end
 
@@ -216,6 +210,11 @@ defmodule Doctrans.Processing.Worker do
       "LLM processing task crashed for page #{state.current_page_id}: #{inspect(reason)}"
     )
 
+    # Cancel the timeout timer
+    if state.llm_timeout_ref do
+      Process.cancel_timer(state.llm_timeout_ref)
+    end
+
     if state.current_page_id do
       case Documents.get_page(state.current_page_id) do
         nil -> :ok
@@ -223,7 +222,7 @@ defmodule Doctrans.Processing.Worker do
       end
     end
 
-    state = %{state | current_page_id: nil, llm_task_ref: nil}
+    state = %{state | current_page_id: nil, llm_task_ref: nil, llm_timeout_ref: nil}
     {:noreply, process_next_page(state)}
   end
 
@@ -235,22 +234,49 @@ defmodule Doctrans.Processing.Worker do
     {:noreply, state}
   end
 
+  # Handle LLM task timeout
+  @impl true
+  def handle_info({:llm_timeout, ref}, %{llm_task_ref: ref} = state) do
+    Logger.error("LLM processing task timed out for page #{state.current_page_id}")
+
+    :telemetry.execute(
+      [:doctrans, :processing, :timeout],
+      %{count: 1},
+      %{page_id: state.current_page_id}
+    )
+
+    # The task will be killed by Task.Supervisor.terminate_child or will
+    # complete eventually. We mark the page as error and move on.
+    if state.current_page_id do
+      case Documents.get_page(state.current_page_id) do
+        nil ->
+          :ok
+
+        page ->
+          Documents.update_page_extraction(page, %{extraction_status: "error"})
+          Documents.broadcast_page_update(page)
+      end
+    end
+
+    # Clear the task ref so we don't process the result if it arrives later
+    state = %{state | current_page_id: nil, llm_task_ref: nil, llm_timeout_ref: nil}
+    {:noreply, process_next_page(state)}
+  end
+
+  # Ignore stale timeout messages (task already completed)
+  @impl true
+  def handle_info({:llm_timeout, _ref}, state) do
+    {:noreply, state}
+  end
+
   @impl true
   def handle_info(_msg, state) do
     {:noreply, state}
   end
 
-  # ============================================================================
-  # PDF Extraction (delegated to PdfProcessor)
-  # ============================================================================
-
   defp do_extract_pdf(document_id, pdf_path, cancelled_documents) do
     PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents)
   end
-
-  # ============================================================================
-  # Page Queue Management
-  # ============================================================================
 
   defp handle_page_queue(state, page) do
     cond do
@@ -294,31 +320,24 @@ defmodule Doctrans.Processing.Worker do
     end
   end
 
-  defp update_document_status_to_processing(document_id) do
+  defp update_document_status(document_id, new_status, valid_from) do
     case Documents.get_document(document_id) do
       nil ->
         :ok
 
       document ->
-        if document.status in ["extracting", "queued"] do
-          {:ok, document} = Documents.update_document_status(document, "processing")
+        if document.status in valid_from do
+          {:ok, document} = Documents.update_document_status(document, new_status)
           Documents.broadcast_document_update(document)
         end
     end
   end
 
-  defp update_document_status_to_queued(document_id) do
-    case Documents.get_document(document_id) do
-      nil ->
-        :ok
+  defp update_document_status_to_processing(document_id),
+    do: update_document_status(document_id, "processing", ["extracting", "queued"])
 
-      document ->
-        if document.status == "extracting" do
-          {:ok, document} = Documents.update_document_status(document, "queued")
-          Documents.broadcast_document_update(document)
-        end
-    end
-  end
+  defp update_document_status_to_queued(document_id),
+    do: update_document_status(document_id, "queued", ["extracting"])
 
   defp start_page_processing(state, page) do
     Logger.info("Starting LLM processing for page #{page.id} (doc #{page.document_id})")
@@ -329,7 +348,16 @@ defmodule Doctrans.Processing.Worker do
         fn -> do_process_page(page.id, state.cancelled_documents) end
       )
 
-    %{state | current_page_id: page.id, llm_task_ref: task.ref}
+    # Schedule a timeout to prevent indefinitely stuck tasks
+    timeout_ms = task_timeout_ms()
+    timeout_ref = Process.send_after(self(), {:llm_timeout, task.ref}, timeout_ms)
+
+    %{state | current_page_id: page.id, llm_task_ref: task.ref, llm_timeout_ref: timeout_ref}
+  end
+
+  defp task_timeout_ms do
+    config = Application.get_env(:doctrans, __MODULE__, [])
+    Keyword.get(config, :task_timeout_ms, @default_task_timeout_ms)
   end
 
   defp process_next_page(state) do
@@ -432,17 +460,9 @@ defmodule Doctrans.Processing.Worker do
     end
   end
 
-  # ============================================================================
-  # Page Processing Logic (delegated to LlmProcessor)
-  # ============================================================================
-
   defp do_process_page(page_id, cancelled_documents) do
     LlmProcessor.process_page(page_id, cancelled_documents)
   end
-
-  # ============================================================================
-  # Startup Recovery
-  # ============================================================================
 
   defp recover_incomplete_documents(state) do
     # Find documents that need processing (processing or queued status)

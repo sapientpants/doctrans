@@ -46,3 +46,12 @@ config :doctrans, :pdf_extractor_module, Doctrans.Processing.PdfExtractorMock
 config :doctrans, :uploads,
   upload_dir: Path.expand("../priv/static/uploads_test", __DIR__),
   max_file_size: 100_000_000
+
+# Use shorter retry delays for faster tests
+config :doctrans, :retry,
+  max_attempts: 2,
+  base_delay_ms: 10,
+  max_delay_ms: 50
+
+# Disable health check worker in tests (makes real HTTP/DB calls)
+config :doctrans, Doctrans.Resilience.HealthCheckWorker, enabled: false

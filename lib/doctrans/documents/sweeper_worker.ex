@@ -61,7 +61,8 @@ defmodule Doctrans.Documents.SweeperWorker do
       interval_ms: config[:interval_hours] * 60 * 60 * 1000,
       grace_period_hours: config[:grace_period_hours],
       last_sweep: nil,
-      sweep_count: 0
+      sweep_count: 0,
+      last_result: nil
     }
 
     if state.enabled do
@@ -90,7 +91,8 @@ defmodule Doctrans.Documents.SweeperWorker do
       interval_hours: div(state.interval_ms, 60 * 60 * 1000),
       grace_period_hours: state.grace_period_hours,
       last_sweep: state.last_sweep,
-      sweep_count: state.sweep_count
+      sweep_count: state.sweep_count,
+      last_result: state.last_result
     }
 
     {:reply, status, state}
@@ -119,10 +121,38 @@ defmodule Doctrans.Documents.SweeperWorker do
   defp do_sweep(state) do
     Logger.info("Starting scheduled document sweep...")
 
-    {:ok, count} = Sweeper.sweep(grace_period_hours: state.grace_period_hours)
-    Logger.info("Sweep complete: #{count} orphaned directories removed")
+    result =
+      try do
+        {:ok, count} = Sweeper.sweep(grace_period_hours: state.grace_period_hours)
+        Logger.info("Sweep complete: #{count} orphaned directories removed")
 
-    %{state | last_sweep: DateTime.utc_now(), sweep_count: state.sweep_count + 1}
+        :telemetry.execute(
+          [:doctrans, :sweeper, :completed],
+          %{count: count},
+          %{}
+        )
+
+        {:ok, count}
+      rescue
+        e ->
+          reason = Exception.message(e)
+          Logger.error("Sweep failed: #{reason}")
+
+          :telemetry.execute(
+            [:doctrans, :sweeper, :failed],
+            %{count: 1},
+            %{error: reason}
+          )
+
+          {:error, reason}
+      end
+
+    %{
+      state
+      | last_sweep: DateTime.utc_now(),
+        sweep_count: state.sweep_count + 1,
+        last_result: result
+    }
   end
 
   defp get_config do

@@ -17,7 +17,24 @@ config :doctrans, :ollama,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
   vision_model: "ministral-3:14b",
   text_model: "ministral-3:14b",
-  timeout: 300_000
+  timeout: 120_000
+
+# Circuit breaker configuration for resilience
+config :doctrans, :circuit_breakers,
+  ollama_api: [
+    strategy: {:standard, 5, 60_000},
+    refresh: 30_000
+  ],
+  embedding_api: [
+    strategy: {:standard, 3, 30_000},
+    refresh: 15_000
+  ]
+
+# Retry configuration for exponential backoff
+config :doctrans, :retry,
+  max_attempts: 3,
+  base_delay_ms: 2_000,
+  max_delay_ms: 30_000
 
 # File upload configuration
 config :doctrans, :uploads,

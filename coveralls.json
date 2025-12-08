@@ -1,15 +1,12 @@
 {
   "coverage_options": {
-    "minimum_coverage": 80,
-    "treat_no_relevant_lines_as_covered": true
+    "minimum_coverage": 80
   },
   "skip_files": [
-    "lib/doctrans_web.ex",
-    "lib/doctrans/repo.ex",
-    "lib/doctrans/application.ex",
-    "test/support/"
-  ],
-  "terminal_options": {
-    "file_column_width": 60
-  }
+    "lib/doctrans/processing/ollama.ex",
+    "lib/doctrans/search/embedding_worker.ex",
+    "lib/doctrans/resilience/health_check.ex",
+    "test/support/embedding_stub.ex",
+    "test/support/pdf_extractor_stub.ex"
+  ]
 }

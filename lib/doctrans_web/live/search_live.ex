@@ -6,6 +6,8 @@ defmodule DoctransWeb.SearchLive do
 
   alias Doctrans.Search
 
+  require Logger
+
   @impl true
   def mount(_params, _session, socket) do
     socket =
@@ -14,6 +16,7 @@ defmodule DoctransWeb.SearchLive do
       |> assign(:results, [])
       |> assign(:searching, false)
       |> assign(:searched, false)
+      |> assign(:search_error, false)
 
     {:ok, socket}
   end
@@ -24,14 +27,22 @@ defmodule DoctransWeb.SearchLive do
       socket
       |> assign(:query, query)
       |> assign(:searching, true)
+      |> assign(:search_error, false)
 
     # Perform the search
     case Search.search(query) do
       {:ok, results} ->
         {:noreply, assign(socket, results: results, searching: false, searched: true)}
 
-      {:error, _reason} ->
-        {:noreply, assign(socket, results: [], searching: false, searched: true)}
+      {:error, reason} ->
+        Logger.warning("Search failed: #{inspect(reason)}")
+
+        socket =
+          socket
+          |> assign(results: [], searching: false, searched: true, search_error: true)
+          |> put_flash(:error, gettext("Search is temporarily unavailable. Please try again."))
+
+        {:noreply, socket}
     end
   end
 
@@ -124,10 +135,23 @@ defmodule DoctransWeb.SearchLive do
           </div>
         </div>
 
-        <div :if={!@searching && @searched && @results == []} class="text-center py-16">
+        <div
+          :if={!@searching && @searched && @results == [] && !@search_error}
+          class="text-center py-16"
+        >
           <.icon name="hero-magnifying-glass" class="w-16 h-16 mx-auto text-base-content/20" />
           <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No results found")}</h3>
           <p class="mt-2 text-base-content/70">{gettext("Try a different search term.")}</p>
+        </div>
+
+        <div :if={!@searching && @search_error} class="text-center py-16">
+          <.icon name="hero-exclamation-triangle" class="w-16 h-16 mx-auto text-warning" />
+          <h3 class="mt-4 text-lg font-medium text-base-content">
+            {gettext("Search unavailable")}
+          </h3>
+          <p class="mt-2 text-base-content/70">
+            {gettext("Please try again in a moment.")}
+          </p>
         </div>
 
         <div :if={!@searching && !@searched} class="text-center py-16">

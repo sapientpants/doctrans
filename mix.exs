@@ -39,7 +39,7 @@ defmodule Doctrans.MixProject do
   def application do
     [
       mod: {Doctrans.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools, :fuse]
     ]
   end
 
@@ -83,6 +83,7 @@ defmodule Doctrans.MixProject do
        depth: 1},
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
+      {:fuse, "~> 2.5"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 0.26"},

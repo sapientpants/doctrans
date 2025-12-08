@@ -79,7 +79,62 @@ defmodule DoctransWeb.Telemetry do
       summary("vm.memory.total", unit: {:byte, :kilobyte}),
       summary("vm.total_run_queue_lengths.total"),
       summary("vm.total_run_queue_lengths.cpu"),
-      summary("vm.total_run_queue_lengths.io")
+      summary("vm.total_run_queue_lengths.io"),
+
+      # Resilience Metrics - Circuit Breakers
+      counter("doctrans.circuit_breaker.blown.count",
+        tags: [:fuse_name],
+        description: "Circuit breaker blown events"
+      ),
+      counter("doctrans.circuit_breaker.reset.count",
+        tags: [:fuse_name],
+        description: "Circuit breaker reset events"
+      ),
+      counter("doctrans.circuit_breaker.failure.count",
+        tags: [:fuse_name],
+        description: "Circuit breaker failure reports"
+      ),
+      counter("doctrans.circuit_breaker.rejected.count",
+        tags: [:fuse_name],
+        description: "Requests rejected due to open circuit"
+      ),
+
+      # Resilience Metrics - Retries
+      counter("doctrans.retry.attempt.count",
+        tags: [:type],
+        description: "Retry attempts by operation type"
+      ),
+      counter("doctrans.retry.exhausted.count",
+        tags: [:type],
+        description: "Operations that exhausted all retries"
+      ),
+
+      # Resilience Metrics - Health Checks
+      summary("doctrans.health_check.completed.duration_ms",
+        tags: [:check],
+        unit: :millisecond,
+        description: "Health check duration"
+      ),
+      counter("doctrans.health_check.all_completed.healthy",
+        description: "Count of healthy services"
+      ),
+      counter("doctrans.health_check.all_completed.unhealthy",
+        description: "Count of unhealthy services"
+      ),
+
+      # Processing Metrics
+      counter("doctrans.processing.timeout.count",
+        description: "Page processing timeouts"
+      ),
+      counter("doctrans.embedding.crashed.count",
+        description: "Embedding task crashes"
+      ),
+      counter("doctrans.sweeper.completed.count",
+        description: "Successful sweeper runs"
+      ),
+      counter("doctrans.sweeper.failed.count",
+        description: "Failed sweeper runs"
+      )
     ]
   end
 

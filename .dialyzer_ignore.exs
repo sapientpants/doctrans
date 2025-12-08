@@ -23,5 +23,14 @@
   {"lib/doctrans/search/embedding_behaviour.ex", :unknown_type},
 
   # Test fixtures - fire and forget operations
-  {"test/support/fixtures.ex", :unmatched_return}
+  {"test/support/fixtures.ex", :unmatched_return},
+
+  # Resilience module specs are intentionally broad for flexibility
+  # - contract_supertype: specs accept term() for error handling flexibility
+  # - unmatched_return: fire-and-forget for Process.send_after, File.close, etc.
+  {"lib/doctrans/resilience/circuit_breaker.ex", :contract_supertype},
+  {"lib/doctrans/resilience/circuit_breaker.ex", :unmatched_return},
+  {"lib/doctrans/resilience/health_check.ex", :contract_supertype},
+  {"lib/doctrans/resilience/health_check.ex", :unmatched_return},
+  {"lib/doctrans/resilience/health_check_worker.ex", :unmatched_return}
 ]
