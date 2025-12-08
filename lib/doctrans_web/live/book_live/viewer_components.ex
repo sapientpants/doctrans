@@ -107,6 +107,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
   attr :translation_model, :string, required: true
   attr :available_models, :list, required: true
   attr :models_loading, :boolean, default: false
+  attr :model_fetch_error, :string, default: nil
 
   def reprocess_modal(assigns) do
     assigns = assign(assigns, :sorted_models, Enum.sort(assigns.available_models))
@@ -126,6 +127,11 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
         <p class="text-sm text-base-content/70 mb-4">
           {gettext("Select models to use for re-extracting and re-translating this page.")}
         </p>
+
+        <div :if={@model_fetch_error} class="alert alert-error mb-4">
+          <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
+          <span>{@model_fetch_error}</span>
+        </div>
 
         <form phx-submit="reprocess_page" phx-change="update_reprocess_models" id="reprocess-form">
           <div class="form-control mb-4">

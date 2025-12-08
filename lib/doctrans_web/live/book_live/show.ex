@@ -37,6 +37,7 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:show_reprocess_modal, false)
       |> assign(:available_models, [])
       |> assign(:models_loading, false)
+      |> assign(:model_fetch_error, nil)
       |> assign(:extraction_model, ollama_config[:vision_model] || "ministral-3:14b")
       |> assign(:translation_model, ollama_config[:text_model] || "ministral-3:14b")
 
@@ -212,6 +213,7 @@ defmodule DoctransWeb.DocumentLive.Show do
         translation_model={@translation_model}
         available_models={@available_models}
         models_loading={@models_loading}
+        model_fetch_error={@model_fetch_error}
       />
     </Layouts.app>
     """
@@ -306,24 +308,43 @@ defmodule DoctransWeb.DocumentLive.Show do
     page = socket.assigns.current_page
     extraction_model = params["extraction_model"]
     translation_model = params["translation_model"]
+    available_models = socket.assigns.available_models
 
-    # Reset the page for reprocessing
-    {:ok, page} = Documents.reset_page_for_reprocessing(page)
-    Documents.broadcast_page_update(page)
+    # Validate model selection
+    if extraction_model not in available_models or translation_model not in available_models do
+      socket =
+        socket
+        |> put_flash(:error, gettext("Invalid model selection"))
+        |> assign(:show_reprocess_modal, false)
 
-    # Queue for reprocessing with custom models
-    Worker.queue_page_reprocess(page.id,
-      extraction_model: extraction_model,
-      translation_model: translation_model
-    )
+      {:noreply, socket}
+    else
+      case Documents.reset_page_for_reprocessing(page) do
+        {:ok, page} ->
+          Documents.broadcast_page_update(page)
 
-    socket =
-      socket
-      |> assign(:current_page, page)
-      |> assign(:show_reprocess_modal, false)
-      |> put_flash(:info, gettext("Page queued for reprocessing"))
+          Worker.queue_page_reprocess(page.id,
+            extraction_model: extraction_model,
+            translation_model: translation_model
+          )
 
-    {:noreply, socket}
+          socket =
+            socket
+            |> assign(:current_page, page)
+            |> assign(:show_reprocess_modal, false)
+            |> put_flash(:info, gettext("Page queued for reprocessing"))
+
+          {:noreply, socket}
+
+        {:error, _reason} ->
+          socket =
+            socket
+            |> put_flash(:error, gettext("Failed to reset page for reprocessing"))
+            |> assign(:show_reprocess_modal, false)
+
+          {:noreply, socket}
+      end
+    end
   end
 
   defp goto_page(socket, page_number) do
@@ -339,16 +360,17 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def handle_info(:fetch_available_models, socket) do
-    models =
+    {models, error} =
       case Ollama.list_models() do
-        {:ok, models} -> models
-        {:error, _} -> []
+        {:ok, models} -> {models, nil}
+        {:error, _} -> {[], gettext("Failed to fetch models from Ollama")}
       end
 
     socket =
       socket
       |> assign(:available_models, models)
       |> assign(:models_loading, false)
+      |> assign(:model_fetch_error, error)
 
     {:noreply, socket}
   end
