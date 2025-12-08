@@ -77,7 +77,11 @@ defmodule Doctrans.Processing.Ollama do
           model: model,
           prompt: prompt,
           images: [image_base64],
-          stream: false
+          stream: false,
+          options: %{
+            num_ctx: 16_384,
+            num_predict: 8_192
+          }
         }
 
         make_request("/api/generate", body, timeout)
@@ -140,7 +144,11 @@ defmodule Doctrans.Processing.Ollama do
     body = %{
       model: model,
       prompt: prompt,
-      stream: false
+      stream: false,
+      options: %{
+        num_ctx: 16_384,
+        num_predict: 8_192
+      }
     }
 
     make_request("/api/generate", body, timeout)
@@ -198,13 +206,27 @@ defmodule Doctrans.Processing.Ollama do
     config = ollama_config()
     url = "#{config[:base_url]}#{path}"
 
-    Logger.debug("Making request to #{url}")
+    # Log request details (truncate prompt for readability, omit image data)
+    log_body = body |> Map.delete(:images) |> Map.update(:prompt, "", &String.slice(&1, 0, 200))
+    has_images = Map.has_key?(body, :images)
+
+    Logger.debug(
+      "Ollama request: model=#{body[:model]}, has_images=#{has_images}, prompt_length=#{String.length(body[:prompt] || "")}"
+    )
+
+    Logger.debug("Ollama request body (truncated): #{inspect(log_body)}")
 
     case Req.post(url, json: body, receive_timeout: timeout) do
       {:ok, %{status: 200, body: response_body}} ->
         # Extract the response text from Ollama's response
+        Logger.debug("Ollama raw response keys: #{inspect(Map.keys(response_body))}")
+
         case response_body do
           %{"response" => response} ->
+            Logger.debug(
+              "Ollama response length: #{String.length(response)}, first 500 chars: #{String.slice(response, 0, 500)}"
+            )
+
             result = response |> String.trim() |> strip_code_fences()
 
             if result == "" do
