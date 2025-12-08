@@ -77,10 +77,27 @@ defmodule Doctrans.Processing.LlmProcessor do
   defp maybe_extract(_page, _opts), do: :ok
 
   defp maybe_translate(
-         %{extraction_status: "completed", translation_status: "pending"} = page,
+         %{
+           extraction_status: "completed",
+           translation_status: "pending",
+           original_markdown: markdown
+         } =
+           page,
          opts
-       ) do
+       )
+       when is_binary(markdown) and markdown != "" do
     process_page_translation(page, 0, opts)
+  end
+
+  defp maybe_translate(
+         %{extraction_status: "completed", translation_status: "pending"} = page,
+         _opts
+       ) do
+    # No content to translate - mark as completed with empty translation
+    Logger.warning("Page #{page.page_number} has no content to translate, marking as completed")
+    {:ok, page} = Documents.update_page_translation(page, %{translation_status: "completed"})
+    Documents.broadcast_page_update(page)
+    :ok
   end
 
   defp maybe_translate(_page, _opts), do: :ok
