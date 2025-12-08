@@ -210,20 +210,20 @@ defmodule Doctrans.Processing.Ollama do
     log_body = body |> Map.delete(:images) |> Map.update(:prompt, "", &String.slice(&1, 0, 200))
     has_images = Map.has_key?(body, :images)
 
-    Logger.debug(
+    Logger.info(
       "Ollama request: model=#{body[:model]}, has_images=#{has_images}, prompt_length=#{String.length(body[:prompt] || "")}"
     )
 
-    Logger.debug("Ollama request body (truncated): #{inspect(log_body)}")
+    Logger.info("Ollama request body (truncated): #{inspect(log_body)}")
 
     case Req.post(url, json: body, receive_timeout: timeout) do
       {:ok, %{status: 200, body: response_body}} ->
         # Extract the response text from Ollama's response
-        Logger.debug("Ollama raw response keys: #{inspect(Map.keys(response_body))}")
+        Logger.info("Ollama raw response keys: #{inspect(Map.keys(response_body))}")
 
         case response_body do
           %{"response" => response} ->
-            Logger.debug(
+            Logger.info(
               "Ollama response length: #{String.length(response)}, first 500 chars: #{String.slice(response, 0, 500)}"
             )
 
