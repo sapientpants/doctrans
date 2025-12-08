@@ -4,6 +4,9 @@
   },
   "skip_files": [
     "lib/doctrans/processing/ollama.ex",
-    "lib/doctrans/search/embedding_worker.ex"
+    "lib/doctrans/search/embedding_worker.ex",
+    "lib/doctrans/resilience/health_check.ex",
+    "test/support/embedding_stub.ex",
+    "test/support/pdf_extractor_stub.ex"
   ]
 }

@@ -52,3 +52,6 @@ config :doctrans, :retry,
   max_attempts: 2,
   base_delay_ms: 10,
   max_delay_ms: 50
+
+# Disable health check worker in tests (makes real HTTP/DB calls)
+config :doctrans, Doctrans.Resilience.HealthCheckWorker, enabled: false

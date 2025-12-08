@@ -85,6 +85,11 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   end
 
   @impl true
+  def handle_cast(:check_now, %{enabled: false} = state) do
+    # Skip check when disabled
+    {:noreply, state}
+  end
+
   def handle_cast(:check_now, state) do
     {:noreply, do_check(state)}
   end

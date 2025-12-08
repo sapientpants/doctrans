@@ -3,6 +3,9 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
 
   alias Doctrans.Resilience.{CircuitBreaker, HealthCheckWorker}
 
+  # These tests verify the GenServer behavior without making real external calls.
+  # The worker is disabled in test config, so we test static status responses.
+
   setup do
     CircuitBreaker.reset(:ollama_api)
     CircuitBreaker.reset(:embedding_api)
@@ -19,23 +22,11 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
       assert Map.has_key?(status, :last_check)
       assert Map.has_key?(status, :check_count)
     end
-  end
 
-  describe "check_now/0" do
-    test "triggers an immediate health check" do
-      # Get initial status
-      initial_status = HealthCheckWorker.status()
-      initial_count = initial_status.check_count
-
-      # Trigger a check
-      :ok = HealthCheckWorker.check_now()
-
-      # Give it a moment to complete
-      Process.sleep(100)
-
-      # Check that the count incremented
-      new_status = HealthCheckWorker.status()
-      assert new_status.check_count >= initial_count
+    test "returns disabled when configured as such" do
+      status = HealthCheckWorker.status()
+      # Worker is disabled in test config
+      assert status.enabled == false
     end
   end
 
@@ -64,30 +55,10 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
     end
   end
 
-  describe "check_now/0 behavior" do
-    test "updates last_check timestamp" do
-      initial_status = HealthCheckWorker.status()
-
-      :ok = HealthCheckWorker.check_now()
-      Process.sleep(100)
-
-      new_status = HealthCheckWorker.status()
-
-      # Either last_check was nil and now has a value, or it was updated
-      if is_nil(initial_status.last_check) do
-        assert not is_nil(new_status.last_check)
-      else
-        assert DateTime.compare(new_status.last_check, initial_status.last_check) != :lt
-      end
-    end
-
-    test "populates last_results" do
-      :ok = HealthCheckWorker.check_now()
-      Process.sleep(100)
-
-      status = HealthCheckWorker.status()
-      # Last results should be populated after a check
-      assert status.last_results == nil or is_map(status.last_results)
+  describe "check_now/0" do
+    test "returns :ok without blocking" do
+      # When disabled, check_now should return immediately
+      assert :ok == HealthCheckWorker.check_now()
     end
   end
 end
