@@ -109,6 +109,8 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
   attr :models_loading, :boolean, default: false
 
   def reprocess_modal(assigns) do
+    assigns = assign(assigns, :sorted_models, Enum.sort(assigns.available_models))
+
     ~H"""
     <div class="modal modal-open" id="reprocess-modal">
       <div class="modal-box max-w-md">
@@ -138,7 +140,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
             >
               <option :if={@models_loading} value="">{gettext("Loading models...")}</option>
               <option
-                :for={model <- @available_models}
+                :for={model <- @sorted_models}
                 :if={!@models_loading}
                 value={model}
                 selected={model == @extraction_model}
@@ -160,7 +162,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
             >
               <option :if={@models_loading} value="">{gettext("Loading models...")}</option>
               <option
-                :for={model <- @available_models}
+                :for={model <- @sorted_models}
                 :if={!@models_loading}
                 value={model}
                 selected={model == @translation_model}
