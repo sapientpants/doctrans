@@ -218,12 +218,15 @@ defmodule Doctrans.Processing.Ollama do
             result = response |> String.trim() |> strip_code_fences()
 
             if result == "" do
-              Logger.warning("Ollama returned empty response after processing")
+              Logger.warning(
+                "Ollama returned empty response - model may have failed to process the image"
+              )
+
+              {:error, dgettext("errors", "Model returned empty response")}
             else
               Logger.debug("Ollama returned #{String.length(result)} chars")
+              {:ok, result}
             end
-
-            {:ok, result}
 
           other ->
             Logger.warning("Unexpected response format: #{inspect(other)}")
