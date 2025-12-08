@@ -109,9 +109,11 @@ config :tailwind,
   ]
 
 # Configures Elixir's Logger
+# Format: timestamp metadata[level] message
+# Metadata includes request_id (Phoenix), mfa (module.function/arity)
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id]
+  metadata: [:request_id, :mfa]
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
