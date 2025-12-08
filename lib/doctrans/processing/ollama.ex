@@ -77,12 +77,7 @@ defmodule Doctrans.Processing.Ollama do
           model: model,
           prompt: prompt,
           images: [image_base64],
-          stream: false,
-          options: %{
-            # 16K context for image + prompt, 8K output for extracted text
-            num_ctx: 16_384,
-            num_predict: 8_192
-          }
+          stream: false
         }
 
         make_request("/api/generate", body, timeout)
@@ -145,12 +140,7 @@ defmodule Doctrans.Processing.Ollama do
     body = %{
       model: model,
       prompt: prompt,
-      stream: false,
-      options: %{
-        # 16K context for input, 8K output for translated text
-        num_ctx: 16_384,
-        num_predict: 8_192
-      }
+      stream: false
     }
 
     make_request("/api/generate", body, timeout)
