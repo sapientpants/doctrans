@@ -215,6 +215,7 @@ defmodule Doctrans.Processing.Ollama do
     )
 
     Logger.info("Ollama request body (truncated): #{inspect(log_body)}")
+    Logger.debug("Ollama full prompt:\n#{body[:prompt]}")
 
     case Req.post(url, json: body, receive_timeout: timeout) do
       {:ok, %{status: 200, body: response_body}} ->
