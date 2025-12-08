@@ -215,7 +215,15 @@ defmodule Doctrans.Processing.Ollama do
         # Extract the response text from Ollama's response
         case response_body do
           %{"response" => response} ->
-            {:ok, response |> String.trim() |> strip_code_fences()}
+            result = response |> String.trim() |> strip_code_fences()
+
+            if result == "" do
+              Logger.warning("Ollama returned empty response after processing")
+            else
+              Logger.debug("Ollama returned #{String.length(result)} chars")
+            end
+
+            {:ok, result}
 
           other ->
             Logger.warning("Unexpected response format: #{inspect(other)}")

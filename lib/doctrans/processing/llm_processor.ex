@@ -74,7 +74,10 @@ defmodule Doctrans.Processing.LlmProcessor do
     process_page_extraction(page, 0, opts)
   end
 
-  defp maybe_extract(_page, _opts), do: :ok
+  defp maybe_extract(%{extraction_status: status} = page, _opts) do
+    Logger.debug("Skipping extraction for page #{page.page_number}, status is #{status}")
+    :ok
+  end
 
   defp maybe_translate(
          %{
