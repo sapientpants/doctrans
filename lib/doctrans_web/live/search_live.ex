@@ -8,6 +8,8 @@ defmodule DoctransWeb.SearchLive do
 
   require Logger
 
+  @per_page 20
+
   @impl true
   def mount(_params, _session, socket) do
     socket =
@@ -17,29 +19,48 @@ defmodule DoctransWeb.SearchLive do
       |> assign(:searching, false)
       |> assign(:searched, false)
       |> assign(:search_error, false)
+      |> assign(:page, 1)
+      |> assign(:per_page, @per_page)
+      |> assign(:total_count, 0)
 
     {:ok, socket}
   end
 
   @impl true
-  def handle_params(%{"q" => query}, _uri, socket) when query != "" do
+  def handle_params(%{"q" => query} = params, _uri, socket) when query != "" do
+    page = parse_page(params["page"])
+    offset = (page - 1) * @per_page
+
     socket =
       socket
       |> assign(:query, query)
+      |> assign(:page, page)
       |> assign(:searching, true)
       |> assign(:search_error, false)
 
-    # Perform the search
-    case Search.search(query) do
-      {:ok, results} ->
-        {:noreply, assign(socket, results: results, searching: false, searched: true)}
-
+    # Get total count and search results
+    with {:ok, total_count} <- Search.count_results(query),
+         {:ok, results} <- Search.search(query, limit: @per_page, offset: offset) do
+      {:noreply,
+       assign(socket,
+         results: results,
+         total_count: total_count,
+         searching: false,
+         searched: true
+       )}
+    else
       {:error, reason} ->
         Logger.warning("Search failed: #{inspect(reason)}")
 
         socket =
           socket
-          |> assign(results: [], searching: false, searched: true, search_error: true)
+          |> assign(
+            results: [],
+            total_count: 0,
+            searching: false,
+            searched: true,
+            search_error: true
+          )
           |> put_flash(:error, gettext("Search is temporarily unavailable. Please try again."))
 
         {:noreply, socket}
@@ -48,6 +69,15 @@ defmodule DoctransWeb.SearchLive do
 
   def handle_params(_params, _uri, socket) do
     {:noreply, socket}
+  end
+
+  defp parse_page(nil), do: 1
+
+  defp parse_page(page) when is_binary(page) do
+    case Integer.parse(page) do
+      {p, ""} when p > 0 -> p
+      _ -> 1
+    end
   end
 
   @impl true
@@ -93,13 +123,7 @@ defmodule DoctransWeb.SearchLive do
 
         <div :if={!@searching && @searched && @results != []}>
           <p class="text-sm text-base-content/50 mb-4">
-            {ngettext(
-              "%{count} result for \"%{query}\"",
-              "%{count} results for \"%{query}\"",
-              length(@results),
-              count: length(@results),
-              query: @query
-            )}
+            {pagination_text(@total_count, @page, @per_page, @query)}
           </p>
           <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             <.link
@@ -122,6 +146,9 @@ defmodule DoctransWeb.SearchLive do
                 >
                   <.icon name="hero-document-text" class="w-12 h-12 text-base-content/30" />
                 </div>
+                <div class="absolute top-2 left-2 px-2 py-1 bg-base-100/90 rounded text-xs font-mono text-base-content/70">
+                  {:erlang.float_to_binary(result.score, decimals: 3)}
+                </div>
                 <div class="absolute bottom-2 right-2 px-2 py-1 bg-base-100/90 rounded text-xs font-medium">
                   {gettext("Page %{number}", number: result.page_number)}
                 </div>
@@ -133,6 +160,13 @@ defmodule DoctransWeb.SearchLive do
               </div>
             </.link>
           </div>
+          <.pagination
+            :if={@total_count > @per_page}
+            page={@page}
+            total_count={@total_count}
+            per_page={@per_page}
+            query={@query}
+          />
         </div>
 
         <div
@@ -175,5 +209,46 @@ defmodule DoctransWeb.SearchLive do
     else
       {:noreply, push_patch(socket, to: ~p"/search?q=#{query}")}
     end
+  end
+
+  defp pagination_text(total_count, page, per_page, query) do
+    start_idx = (page - 1) * per_page + 1
+    end_idx = min(page * per_page, total_count)
+
+    gettext("Showing %{start}-%{end} of %{total} results for \"%{query}\"",
+      start: start_idx,
+      end: end_idx,
+      total: total_count,
+      query: query
+    )
+  end
+
+  defp pagination(assigns) do
+    total_pages = ceil(assigns.total_count / assigns.per_page)
+    assigns = assign(assigns, :total_pages, total_pages)
+
+    ~H"""
+    <div class="flex justify-center items-center gap-2 mt-6">
+      <.link
+        :if={@page > 1}
+        patch={~p"/search?q=#{@query}&page=#{@page - 1}"}
+        class="btn btn-sm"
+      >
+        <.icon name="hero-chevron-left" class="w-4 h-4" />
+        {gettext("Previous")}
+      </.link>
+      <span class="text-sm text-base-content/70">
+        {gettext("Page %{page} of %{total}", page: @page, total: @total_pages)}
+      </span>
+      <.link
+        :if={@page < @total_pages}
+        patch={~p"/search?q=#{@query}&page=#{@page + 1}"}
+        class="btn btn-sm"
+      >
+        {gettext("Next")}
+        <.icon name="hero-chevron-right" class="w-4 h-4" />
+      </.link>
+    </div>
+    """
   end
 end

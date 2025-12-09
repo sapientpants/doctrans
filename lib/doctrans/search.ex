@@ -38,14 +38,90 @@ defmodule Doctrans.Search do
 
   def search(query, opts) when is_binary(query) do
     limit = Keyword.get(opts, :limit, 20)
+    offset = Keyword.get(opts, :offset, 0)
     rrf_k = Keyword.get(opts, :rrf_k, @default_rrf_k)
 
     with {:ok, query_embedding} <- embedding_module().generate(query, []) do
-      execute_hybrid_search(query, query_embedding, rrf_k, limit)
+      execute_hybrid_search(query, query_embedding, rrf_k, limit, offset)
     end
   end
 
-  defp execute_hybrid_search(query, query_embedding, rrf_k, limit) do
+  @doc """
+  Counts total matching results for a query.
+
+  Used for pagination to determine total pages.
+
+  ## Options
+
+  - `:rrf_k` - RRF smoothing constant (default: 60)
+  """
+  def count_results(query, opts \\ [])
+  def count_results("", _opts), do: {:ok, 0}
+  def count_results(nil, _opts), do: {:ok, 0}
+
+  def count_results(query, opts) when is_binary(query) do
+    rrf_k = Keyword.get(opts, :rrf_k, @default_rrf_k)
+
+    with {:ok, query_embedding} <- embedding_module().generate(query, []) do
+      execute_count_query(query, query_embedding, rrf_k)
+    end
+  end
+
+  defp execute_count_query(query, query_embedding, rrf_k) do
+    sql = """
+    WITH semantic_ranked AS (
+      SELECT
+        p.id,
+        ROW_NUMBER() OVER (ORDER BY p.embedding <=> $1::vector ASC) as semantic_rank
+      FROM pages p
+      JOIN documents d ON p.document_id = d.id
+      WHERE d.status = 'completed'
+        AND p.extraction_status = 'completed'
+        AND p.embedding IS NOT NULL
+    ),
+    fts_ranked AS (
+      SELECT
+        p.id,
+        ROW_NUMBER() OVER (
+          ORDER BY (
+            COALESCE(ts_rank_cd(p.original_searchable, plainto_tsquery('simple', $2)), 0) +
+            COALESCE(ts_rank_cd(p.translated_searchable, plainto_tsquery(get_fts_config(d.target_language), $2)), 0)
+          ) DESC
+        ) as fts_rank
+      FROM pages p
+      JOIN documents d ON p.document_id = d.id
+      WHERE d.status = 'completed'
+        AND p.extraction_status = 'completed'
+        AND (
+          p.original_searchable @@ plainto_tsquery('simple', $2)
+          OR p.translated_searchable @@ plainto_tsquery(get_fts_config(d.target_language), $2)
+        )
+    ),
+    combined AS (
+      SELECT
+        COALESCE(s.id, f.id) as page_id,
+        COALESCE(1.0 / ($3 + s.semantic_rank), 0) +
+        COALESCE(1.0 / ($3 + f.fts_rank), 0) as rrf_score
+      FROM semantic_ranked s
+      FULL OUTER JOIN fts_ranked f ON s.id = f.id
+    )
+    SELECT COUNT(*) as total
+    FROM combined
+    WHERE rrf_score >= $4
+    """
+
+    case Repo.query(sql, [query_embedding, query, rrf_k, @min_score_threshold]) do
+      {:ok, %{rows: [[count]]}} ->
+        {:ok, count}
+
+      {:error, error} ->
+        require Logger
+        Logger.error("Count query failed: #{inspect(error)}")
+        {:error, {:database_error, error}}
+    end
+  end
+
+  defp execute_hybrid_search(query, query_embedding, rrf_k, limit, offset) do
     # Use CTE-based query for efficient RRF calculation
     # - semantic_ranked: pages ranked by embedding similarity (IDs and ranks only)
     # - fts_ranked: pages ranked by full-text search score (IDs and ranks only)
@@ -63,7 +139,6 @@ defmodule Doctrans.Search do
       WHERE d.status = 'completed'
         AND p.extraction_status = 'completed'
         AND p.embedding IS NOT NULL
-      LIMIT $4
     ),
     fts_ranked AS (
       SELECT
@@ -88,7 +163,6 @@ defmodule Doctrans.Search do
           p.original_searchable @@ plainto_tsquery('simple', $2)
           OR p.translated_searchable @@ plainto_tsquery(get_fts_config(d.target_language), $2)
         )
-      LIMIT $4
     ),
     combined AS (
       SELECT
@@ -143,12 +217,13 @@ defmodule Doctrans.Search do
     FROM combined c
     JOIN pages p ON c.page_id = p.id
     JOIN documents d ON c.document_id = d.id
-    WHERE c.rrf_score >= $6
+    WHERE c.rrf_score >= $4
     ORDER BY c.rrf_score DESC
     LIMIT $5
+    OFFSET $6
     """
 
-    case Repo.query(sql, [query_embedding, query, rrf_k, limit * 5, limit, @min_score_threshold]) do
+    case Repo.query(sql, [query_embedding, query, rrf_k, @min_score_threshold, limit, offset]) do
       {:ok, %{rows: rows, columns: columns}} ->
         {:ok, Enum.map(rows, &format_row(&1, columns))}
 
