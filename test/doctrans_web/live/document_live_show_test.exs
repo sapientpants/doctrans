@@ -440,5 +440,37 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       assert has_element?(view, "#translation-model-select")
       assert has_element?(view, "#reprocess-submit-btn")
     end
+
+    test "reprocess form rejects invalid model selection", %{conn: conn} do
+      doc = document_with_pages_fixture(%{}, 1)
+      [page] = doc.pages
+
+      {:ok, page} =
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "# Test"
+        })
+
+      {:ok, _page} =
+        Documents.update_page_translation(page, %{
+          translation_status: "completed",
+          translated_markdown: "# Translated"
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      # Open modal
+      view |> element("button[phx-click='show_reprocess_modal']") |> render_click()
+
+      # Submit form directly with invalid models (bypasses form validation)
+      # This simulates a malicious request with invalid model names
+      render_click(view, "reprocess_page", %{
+        "extraction_model" => "nonexistent-model",
+        "translation_model" => "another-fake-model"
+      })
+
+      # Should show error flash
+      assert render(view) =~ "Invalid model selection"
+    end
   end
 end
