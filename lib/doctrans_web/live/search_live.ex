@@ -146,12 +146,6 @@ defmodule DoctransWeb.SearchLive do
                 >
                   <.icon name="hero-document-text" class="w-12 h-12 text-base-content/30" />
                 </div>
-                <div
-                  class="absolute top-2 left-2 px-2 py-1 bg-base-100/90 rounded text-xs font-mono text-base-content/70"
-                  aria-label={gettext("Relevance score: %{score}", score: format_score(result.score))}
-                >
-                  {format_score(result.score)}
-                </div>
                 <div class="absolute bottom-2 right-2 px-2 py-1 bg-base-100/90 rounded text-xs font-medium">
                   {gettext("Page %{number}", number: result.page_number)}
                 </div>
@@ -213,13 +207,6 @@ defmodule DoctransWeb.SearchLive do
       {:noreply, push_patch(socket, to: ~p"/search?q=#{query}")}
     end
   end
-
-  defp format_score(score) when is_float(score), do: :erlang.float_to_binary(score, decimals: 3)
-
-  defp format_score(score) when is_integer(score),
-    do: :erlang.float_to_binary(score / 1, decimals: 3)
-
-  defp format_score(_), do: "0.000"
 
   defp pagination_text(total_count, page, per_page, query) do
     start_idx = (page - 1) * per_page + 1
