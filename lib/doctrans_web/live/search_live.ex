@@ -129,7 +129,7 @@ defmodule DoctransWeb.SearchLive do
             <.link
               :for={result <- @results}
               navigate={
-                ~p"/documents/#{result.document_id}?page=#{result.page_number}&from=search&q=#{@query}"
+                ~p"/documents/#{result.document_id}?page=#{result.page_number}&from=search&q=#{@query}&search_page=#{@page}"
               }
               class="group block rounded-lg bg-base-200/50 hover:bg-base-200 transition-colors overflow-hidden"
             >

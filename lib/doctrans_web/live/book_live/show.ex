@@ -33,6 +33,7 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:zoom_level, 100)
       |> assign(:from, nil)
       |> assign(:search_query, nil)
+      |> assign(:search_page, nil)
       # Reprocess modal state
       |> assign(:show_reprocess_modal, false)
       |> assign(:available_models, [])
@@ -57,10 +58,12 @@ defmodule DoctransWeb.DocumentLive.Show do
   defp maybe_assign_from(socket, params) do
     from = Map.get(params, "from")
     search_query = Map.get(params, "q")
+    search_page = Map.get(params, "search_page")
 
     socket
     |> assign(:from, from)
     |> assign(:search_query, search_query)
+    |> assign(:search_page, search_page)
   end
 
   defp maybe_goto_page(socket, %{"page" => page_str}) do
@@ -85,7 +88,10 @@ defmodule DoctransWeb.DocumentLive.Show do
         <%!-- Header --%>
         <header class="flex items-center justify-between px-4 pr-8 py-3 border-b border-base-300 bg-base-200">
           <div class="flex items-center gap-4">
-            <.link navigate={back_url(@from, @search_query)} class="btn btn-ghost btn-sm">
+            <.link
+              navigate={back_url(@from, @search_query, @search_page)}
+              class="btn btn-ghost btn-sm"
+            >
               <.icon name="hero-arrow-left" class="w-5 h-5" /> {gettext("Back")}
             </.link>
             <div>
@@ -219,11 +225,15 @@ defmodule DoctransWeb.DocumentLive.Show do
     """
   end
 
-  defp back_url("search", query) when is_binary(query) and query != "" do
-    ~p"/search?q=#{query}"
+  defp back_url("search", query, page) when is_binary(query) and query != "" do
+    case page do
+      nil -> ~p"/search?q=#{query}"
+      "1" -> ~p"/search?q=#{query}"
+      p -> ~p"/search?q=#{query}&page=#{p}"
+    end
   end
 
-  defp back_url(_from, _query), do: ~p"/"
+  defp back_url(_from, _query, _page), do: ~p"/"
 
   # Show reprocess button when page has completed processing or has an error
   # but not when it's currently processing (to prevent double-processing)
