@@ -17,7 +17,7 @@ config :doctrans, :ollama,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
   vision_model: "ministral-3:14b",
   text_model: "ministral-3:14b",
-  timeout: 120_000
+  timeout: 300_000
 
 # Circuit breaker configuration for resilience
 config :doctrans, :circuit_breakers,
@@ -109,9 +109,11 @@ config :tailwind,
   ]
 
 # Configures Elixir's Logger
+# Format: timestamp metadata[level] message
+# Metadata includes request_id (Phoenix), mfa (module.function/arity)
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id]
+  metadata: [:request_id, :mfa]
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason

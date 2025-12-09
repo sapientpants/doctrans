@@ -287,4 +287,52 @@ defmodule Doctrans.Documents.PagesTest do
       assert Pages.all_pages_completed?(doc.id)
     end
   end
+
+  describe "reset_page_for_reprocessing/1" do
+    test "resets all processing fields to pending state" do
+      doc = document_fixture()
+      page = page_fixture(doc)
+
+      # First complete the page processing
+      {:ok, page} =
+        Pages.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "# Test"
+        })
+
+      {:ok, page} =
+        Pages.update_page_translation(page, %{
+          translation_status: "completed",
+          translated_markdown: "# Translated"
+        })
+
+      {:ok, page} =
+        Pages.update_page(page, %{
+          embedding: Pgvector.new(List.duplicate(0.5, 768)),
+          embedding_status: "completed"
+        })
+
+      # Reset for reprocessing
+      {:ok, reset_page} = Pages.reset_page_for_reprocessing(page)
+
+      assert reset_page.extraction_status == "pending"
+      assert reset_page.translation_status == "pending"
+      assert reset_page.embedding_status == "pending"
+      assert is_nil(reset_page.original_markdown)
+      assert is_nil(reset_page.translated_markdown)
+      assert is_nil(reset_page.embedding)
+    end
+
+    test "resets page with error status" do
+      doc = document_fixture()
+      page = page_fixture(doc)
+
+      {:ok, page} = Pages.update_page_extraction(page, %{extraction_status: "error"})
+
+      {:ok, reset_page} = Pages.reset_page_for_reprocessing(page)
+
+      assert reset_page.extraction_status == "pending"
+      assert reset_page.translation_status == "pending"
+    end
+  end
 end

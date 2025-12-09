@@ -42,8 +42,13 @@ defmodule Doctrans.Processing.LlmProcessor do
   Processes a single page through the LLM pipeline (extraction + translation).
 
   Returns `:ok` or `{:error, reason}`.
+
+  ## Options
+
+  - `:extraction_model` - Override the default extraction model
+  - `:translation_model` - Override the default translation model
   """
-  def process_page(page_id, cancelled_documents) do
+  def process_page(page_id, cancelled_documents, opts \\ []) do
     case Documents.get_page(page_id) do
       nil ->
         {:error, dgettext("errors", "Page not found")}
@@ -53,31 +58,54 @@ defmodule Doctrans.Processing.LlmProcessor do
           Logger.info("Document #{page.document_id} was cancelled, skipping page #{page_id}")
           :ok
         else
-          do_process_page(page)
+          do_process_page(page, opts)
         end
     end
   end
 
-  defp do_process_page(page) do
-    with :ok <- maybe_extract(page),
+  defp do_process_page(page, opts) do
+    with :ok <- maybe_extract(page, opts),
          page <- Documents.get_page!(page.id) do
-      maybe_translate(page)
+      maybe_translate(page, opts)
     end
   end
 
-  defp maybe_extract(%{extraction_status: "pending"} = page) do
-    process_page_extraction(page)
+  defp maybe_extract(%{extraction_status: "pending"} = page, opts) do
+    process_page_extraction(page, 0, opts)
   end
 
-  defp maybe_extract(_page), do: :ok
-
-  defp maybe_translate(%{extraction_status: "completed", translation_status: "pending"} = page) do
-    process_page_translation(page)
+  defp maybe_extract(%{extraction_status: status} = page, _opts) do
+    Logger.debug("Skipping extraction for page #{page.page_number}, status is #{status}")
+    :ok
   end
 
-  defp maybe_translate(_page), do: :ok
+  defp maybe_translate(
+         %{
+           extraction_status: "completed",
+           translation_status: "pending",
+           original_markdown: markdown
+         } =
+           page,
+         opts
+       )
+       when is_binary(markdown) and markdown != "" do
+    process_page_translation(page, 0, opts)
+  end
 
-  defp process_page_extraction(page, retry_count \\ 0) do
+  defp maybe_translate(
+         %{extraction_status: "completed", translation_status: "pending"} = page,
+         _opts
+       ) do
+    # No content to translate - mark as completed with empty translation
+    Logger.warning("Page #{page.page_number} has no content to translate, marking as completed")
+    {:ok, page} = Documents.update_page_translation(page, %{translation_status: "completed"})
+    Documents.broadcast_page_update(page)
+    :ok
+  end
+
+  defp maybe_translate(_page, _opts), do: :ok
+
+  defp process_page_extraction(page, retry_count, opts) do
     Logger.info(
       "Extracting markdown for page #{page.page_number} of document #{page.document_id}"
     )
@@ -86,8 +114,9 @@ defmodule Doctrans.Processing.LlmProcessor do
     Documents.broadcast_page_update(page)
 
     image_path = Path.join(Documents.uploads_dir(), page.image_path)
+    ollama_opts = build_extraction_opts(opts)
 
-    case ollama_module().extract_markdown(image_path, []) do
+    case ollama_module().extract_markdown(image_path, ollama_opts) do
       {:ok, markdown} ->
         {:ok, page} =
           Documents.update_page_extraction(page, %{
@@ -100,11 +129,18 @@ defmodule Doctrans.Processing.LlmProcessor do
         :ok
 
       {:error, reason} ->
-        handle_extraction_error(page, reason, retry_count)
+        handle_extraction_error(page, reason, retry_count, opts)
     end
   end
 
-  defp handle_extraction_error(page, reason, retry_count) do
+  defp build_extraction_opts(opts) do
+    case Keyword.get(opts, :extraction_model) do
+      nil -> []
+      model -> [model: model]
+    end
+  end
+
+  defp handle_extraction_error(page, reason, retry_count, opts) do
     config = retry_config()
     classification = ErrorClassifier.classify(reason)
 
@@ -141,7 +177,7 @@ defmodule Doctrans.Processing.LlmProcessor do
         )
 
         Process.sleep(delay)
-        process_page_extraction(page, retry_count + 1)
+        process_page_extraction(page, retry_count + 1, opts)
 
       # Max retries exceeded
       true ->
@@ -170,15 +206,16 @@ defmodule Doctrans.Processing.LlmProcessor do
      )}
   end
 
-  defp process_page_translation(page, retry_count \\ 0) do
+  defp process_page_translation(page, retry_count, opts) do
     Logger.info("Translating page #{page.page_number} of document #{page.document_id}")
 
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "processing"})
     Documents.broadcast_page_update(page)
 
     document = Documents.get_document!(page.document_id)
+    ollama_opts = build_translation_opts(opts)
 
-    case ollama_module().translate(page.original_markdown, document.target_language, []) do
+    case ollama_module().translate(page.original_markdown, document.target_language, ollama_opts) do
       {:ok, translated} ->
         {:ok, page} =
           Documents.update_page_translation(page, %{
@@ -190,11 +227,18 @@ defmodule Doctrans.Processing.LlmProcessor do
         :ok
 
       {:error, reason} ->
-        handle_translation_error(page, reason, retry_count)
+        handle_translation_error(page, reason, retry_count, opts)
     end
   end
 
-  defp handle_translation_error(page, reason, retry_count) do
+  defp build_translation_opts(opts) do
+    case Keyword.get(opts, :translation_model) do
+      nil -> []
+      model -> [model: model]
+    end
+  end
+
+  defp handle_translation_error(page, reason, retry_count, opts) do
     config = retry_config()
     classification = ErrorClassifier.classify(reason)
 
@@ -234,7 +278,7 @@ defmodule Doctrans.Processing.LlmProcessor do
         )
 
         Process.sleep(delay)
-        process_page_translation(page, retry_count + 1)
+        process_page_translation(page, retry_count + 1, opts)
 
       # Max retries exceeded
       true ->

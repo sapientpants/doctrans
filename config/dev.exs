@@ -71,8 +71,10 @@ config :doctrans, DoctransWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :doctrans, dev_routes: true
 
-# Do not include metadata nor timestamps in development logs
-config :logger, :default_formatter, format: "[$level] $message\n"
+# Include timestamps and metadata in development logs for debugging
+config :logger, :default_formatter,
+  format: "$time $metadata[$level] $message\n",
+  metadata: [:request_id, :mfa]
 
 # Set log level to debug in development
 config :logger, level: :debug

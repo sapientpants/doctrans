@@ -3,6 +3,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   use DoctransWeb, :live_view
 
   alias Doctrans.Documents
+  alias Doctrans.Processing.{Ollama, Worker}
 
   import DoctransWeb.DocumentLive.Components,
     only: [status_color: 1, status_text: 1, language_name: 1]
@@ -20,6 +21,9 @@ defmodule DoctransWeb.DocumentLive.Show do
     current_page_number = 1
     current_page = Documents.get_page_by_number(document.id, current_page_number)
 
+    # Get default models from config
+    ollama_config = Application.get_env(:doctrans, :ollama, [])
+
     socket =
       socket
       |> assign(:document, document)
@@ -29,6 +33,13 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:zoom_level, 100)
       |> assign(:from, nil)
       |> assign(:search_query, nil)
+      # Reprocess modal state
+      |> assign(:show_reprocess_modal, false)
+      |> assign(:available_models, [])
+      |> assign(:models_loading, false)
+      |> assign(:model_fetch_error, nil)
+      |> assign(:extraction_model, ollama_config[:vision_model] || "ministral-3:14b")
+      |> assign(:translation_model, ollama_config[:text_model] || "ministral-3:14b")
 
     {:ok, socket}
   end
@@ -138,15 +149,26 @@ defmodule DoctransWeb.DocumentLive.Show do
                   do: gettext("Original Content"),
                   else: gettext("Translated Content")}
               </span>
-              <label class="flex items-center gap-2 cursor-pointer">
-                <span class="text-xs text-base-content/70">{gettext("Show Original")}</span>
-                <input
-                  type="checkbox"
-                  class="toggle toggle-sm"
-                  checked={@show_original}
-                  phx-click="toggle_original"
-                />
-              </label>
+              <div class="flex items-center gap-2">
+                <button
+                  :if={can_reprocess?(@current_page)}
+                  type="button"
+                  phx-click="show_reprocess_modal"
+                  class="btn btn-ghost btn-xs"
+                  title={gettext("Reprocess this page")}
+                >
+                  <.icon name="hero-arrow-path" class="w-4 h-4" />
+                </button>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <span class="text-xs text-base-content/70">{gettext("Show Original")}</span>
+                  <input
+                    type="checkbox"
+                    class="toggle toggle-sm"
+                    checked={@show_original}
+                    phx-click="toggle_original"
+                  />
+                </label>
+              </div>
             </div>
             <div class="flex-1 overflow-auto p-6">
               <.page_content page={@current_page} show_original={@show_original} />
@@ -182,6 +204,17 @@ defmodule DoctransWeb.DocumentLive.Show do
           </button>
         </footer>
       </div>
+
+      <%!-- Reprocess Modal --%>
+      <.reprocess_modal
+        :if={@show_reprocess_modal}
+        page={@current_page}
+        extraction_model={@extraction_model}
+        translation_model={@translation_model}
+        available_models={@available_models}
+        models_loading={@models_loading}
+        model_fetch_error={@model_fetch_error}
+      />
     </Layouts.app>
     """
   end
@@ -191,6 +224,15 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   defp back_url(_from, _query), do: ~p"/"
+
+  # Show reprocess button when page has completed processing or has an error
+  # but not when it's currently processing (to prevent double-processing)
+  defp can_reprocess?(nil), do: false
+
+  defp can_reprocess?(page) do
+    page.extraction_status in ["completed", "error"] ||
+      page.translation_status == "error"
+  end
 
   @impl true
   def handle_event("prev_page", _params, socket) do
@@ -230,6 +272,81 @@ defmodule DoctransWeb.DocumentLive.Show do
     {:noreply, assign(socket, :zoom_level, new_zoom)}
   end
 
+  @impl true
+  def handle_event("show_reprocess_modal", _params, socket) do
+    # Show modal and trigger async model fetch
+    socket =
+      socket
+      |> assign(:show_reprocess_modal, true)
+      |> assign(:models_loading, true)
+
+    send(self(), :fetch_available_models)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("hide_reprocess_modal", _params, socket) do
+    {:noreply, assign(socket, :show_reprocess_modal, false)}
+  end
+
+  @impl true
+  def handle_event("update_reprocess_models", params, socket) do
+    socket =
+      socket
+      |> assign(:extraction_model, params["extraction_model"] || socket.assigns.extraction_model)
+      |> assign(
+        :translation_model,
+        params["translation_model"] || socket.assigns.translation_model
+      )
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("reprocess_page", params, socket) do
+    page = socket.assigns.current_page
+    extraction_model = params["extraction_model"]
+    translation_model = params["translation_model"]
+    available_models = socket.assigns.available_models
+
+    # Validate model selection
+    if extraction_model not in available_models or translation_model not in available_models do
+      socket =
+        socket
+        |> put_flash(:error, gettext("Invalid model selection"))
+        |> assign(:show_reprocess_modal, false)
+
+      {:noreply, socket}
+    else
+      case Documents.reset_page_for_reprocessing(page) do
+        {:ok, page} ->
+          Documents.broadcast_page_update(page)
+
+          Worker.queue_page_reprocess(page.id,
+            extraction_model: extraction_model,
+            translation_model: translation_model
+          )
+
+          socket =
+            socket
+            |> assign(:current_page, page)
+            |> assign(:show_reprocess_modal, false)
+            |> put_flash(:info, gettext("Page queued for reprocessing"))
+
+          {:noreply, socket}
+
+        {:error, _reason} ->
+          socket =
+            socket
+            |> put_flash(:error, gettext("Failed to reset page for reprocessing"))
+            |> assign(:show_reprocess_modal, false)
+
+          {:noreply, socket}
+      end
+    end
+  end
+
   defp goto_page(socket, page_number) do
     document = socket.assigns.document
     page = Documents.get_page_by_number(document.id, page_number)
@@ -240,6 +357,23 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   # PubSub Handlers
+
+  @impl true
+  def handle_info(:fetch_available_models, socket) do
+    {models, error} =
+      case Ollama.list_models() do
+        {:ok, models} -> {models, nil}
+        {:error, _} -> {[], gettext("Failed to fetch models from Ollama")}
+      end
+
+    socket =
+      socket
+      |> assign(:available_models, models)
+      |> assign(:models_loading, false)
+      |> assign(:model_fetch_error, error)
+
+    {:noreply, socket}
+  end
 
   @impl true
   def handle_info({:document_updated, document}, socket) do

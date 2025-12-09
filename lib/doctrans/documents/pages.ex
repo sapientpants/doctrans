@@ -143,4 +143,24 @@ defmodule Doctrans.Documents.Pages do
 
     incomplete_count == 0
   end
+
+  @doc """
+  Resets a page for reprocessing.
+
+  Clears extracted and translated content and resets all statuses to pending.
+  Uses `Ecto.Changeset.change/2` to directly update all fields including
+  embedding fields that aren't in the standard changeset.
+  """
+  def reset_page_for_reprocessing(%Page{} = page) do
+    page
+    |> Ecto.Changeset.change(%{
+      original_markdown: nil,
+      translated_markdown: nil,
+      extraction_status: "pending",
+      translation_status: "pending",
+      embedding: nil,
+      embedding_status: "pending"
+    })
+    |> Repo.update()
+  end
 end

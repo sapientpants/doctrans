@@ -79,7 +79,6 @@ defmodule Doctrans.Processing.Ollama do
           images: [image_base64],
           stream: false,
           options: %{
-            # 16K context for image + prompt, 8K output for extracted text
             num_ctx: 16_384,
             num_predict: 8_192
           }
@@ -147,7 +146,6 @@ defmodule Doctrans.Processing.Ollama do
       prompt: prompt,
       stream: false,
       options: %{
-        # 16K context for input, 8K output for translated text
         num_ctx: 16_384,
         num_predict: 8_192
       }
@@ -208,14 +206,31 @@ defmodule Doctrans.Processing.Ollama do
     config = ollama_config()
     url = "#{config[:base_url]}#{path}"
 
-    Logger.debug("Making request to #{url}")
+    log_request(body)
 
     case Req.post(url, json: body, receive_timeout: timeout) do
       {:ok, %{status: 200, body: response_body}} ->
         # Extract the response text from Ollama's response
+        Logger.info("Ollama raw response keys: #{inspect(Map.keys(response_body))}")
+
         case response_body do
           %{"response" => response} ->
-            {:ok, response |> String.trim() |> strip_code_fences()}
+            Logger.info(
+              "Ollama response length: #{String.length(response)}, first 500 chars: #{String.slice(response, 0, 500)}"
+            )
+
+            result = response |> String.trim() |> strip_code_fences()
+
+            if result == "" do
+              Logger.warning(
+                "Ollama returned empty response - model may have failed to process the image"
+              )
+
+              {:error, dgettext("errors", "Model returned empty response")}
+            else
+              Logger.debug("Ollama returned #{String.length(result)} chars")
+              {:ok, result}
+            end
 
           other ->
             Logger.warning("Unexpected response format: #{inspect(other)}")
@@ -244,6 +259,18 @@ defmodule Doctrans.Processing.Ollama do
 
   defp ollama_config do
     Application.get_env(:doctrans, :ollama, [])
+  end
+
+  defp log_request(body) do
+    image_bytes =
+      case body[:images] do
+        [img | _] -> byte_size(img)
+        _ -> 0
+      end
+
+    Logger.info(
+      "Ollama request: model=#{body[:model]}, prompt_length=#{String.length(body[:prompt] || "")}, image_base64_bytes=#{image_bytes}"
+    )
   end
 
   # Strip markdown code fences that LLMs sometimes wrap their output in

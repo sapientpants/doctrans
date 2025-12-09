@@ -322,4 +322,155 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       assert render(view) =~ "PubSub Updated Content"
     end
   end
+
+  describe "Reprocess functionality" do
+    test "shows reprocess button for completed page", %{conn: conn} do
+      doc = document_with_pages_fixture(%{}, 1)
+      [page] = doc.pages
+
+      {:ok, page} =
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "# Test"
+        })
+
+      Documents.update_page_translation(page, %{
+        translation_status: "completed",
+        translated_markdown: "# Translated"
+      })
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(view, "button[phx-click='show_reprocess_modal']")
+    end
+
+    test "shows reprocess button for page with error", %{conn: conn} do
+      doc = document_with_pages_fixture(%{}, 1)
+      [page] = doc.pages
+
+      Documents.update_page_extraction(page, %{extraction_status: "error"})
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(view, "button[phx-click='show_reprocess_modal']")
+    end
+
+    test "does not show reprocess button for processing page", %{conn: conn} do
+      doc = document_with_pages_fixture(%{}, 1)
+      [page] = doc.pages
+
+      Documents.update_page_extraction(page, %{extraction_status: "processing"})
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      refute has_element?(view, "button[phx-click='show_reprocess_modal']")
+    end
+
+    test "opens reprocess modal on button click", %{conn: conn} do
+      doc = document_with_pages_fixture(%{}, 1)
+      [page] = doc.pages
+
+      {:ok, page} =
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "# Test"
+        })
+
+      Documents.update_page_translation(page, %{
+        translation_status: "completed",
+        translated_markdown: "# Translated"
+      })
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      view |> element("button[phx-click='show_reprocess_modal']") |> render_click()
+
+      assert has_element?(view, "#reprocess-modal")
+      assert render(view) =~ "Reprocess Page"
+    end
+
+    test "closes reprocess modal on cancel", %{conn: conn} do
+      doc = document_with_pages_fixture(%{}, 1)
+      [page] = doc.pages
+
+      {:ok, page} =
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "# Test"
+        })
+
+      Documents.update_page_translation(page, %{
+        translation_status: "completed",
+        translated_markdown: "# Translated"
+      })
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      # Open modal
+      view |> element("button[phx-click='show_reprocess_modal']") |> render_click()
+      assert has_element?(view, "#reprocess-modal")
+
+      # Close modal via Cancel button (btn-ghost)
+      view |> element("#reprocess-modal button.btn-ghost", "Cancel") |> render_click()
+      refute has_element?(view, "#reprocess-modal")
+    end
+
+    test "reprocess modal shows model selection form", %{conn: conn} do
+      doc = document_with_pages_fixture(%{}, 1)
+      [page] = doc.pages
+
+      {:ok, page} =
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "# Test"
+        })
+
+      Documents.update_page_translation(page, %{
+        translation_status: "completed",
+        translated_markdown: "# Translated"
+      })
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      view |> element("button[phx-click='show_reprocess_modal']") |> render_click()
+
+      # Should show form elements
+      assert has_element?(view, "#reprocess-form")
+      assert has_element?(view, "#extraction-model-select")
+      assert has_element?(view, "#translation-model-select")
+      assert has_element?(view, "#reprocess-submit-btn")
+    end
+
+    test "reprocess form rejects invalid model selection", %{conn: conn} do
+      doc = document_with_pages_fixture(%{}, 1)
+      [page] = doc.pages
+
+      {:ok, page} =
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "# Test"
+        })
+
+      {:ok, _page} =
+        Documents.update_page_translation(page, %{
+          translation_status: "completed",
+          translated_markdown: "# Translated"
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      # Open modal
+      view |> element("button[phx-click='show_reprocess_modal']") |> render_click()
+
+      # Submit form directly with invalid models (bypasses form validation)
+      # This simulates a malicious request with invalid model names
+      render_click(view, "reprocess_page", %{
+        "extraction_model" => "nonexistent-model",
+        "translation_model" => "another-fake-model"
+      })
+
+      # Should show error flash
+      assert render(view) =~ "Invalid model selection"
+    end
+  end
 end

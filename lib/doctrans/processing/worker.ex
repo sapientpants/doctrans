@@ -24,8 +24,8 @@ defmodule Doctrans.Processing.Worker do
   alias Doctrans.Documents
   alias Doctrans.Processing.{LlmProcessor, PdfProcessor}
 
-  # Task timeout: 3 minutes (slightly longer than Ollama timeout to allow for retries)
-  @default_task_timeout_ms 180_000
+  # Task timeout: 6 minutes (slightly longer than Ollama timeout to allow for retries)
+  @default_task_timeout_ms 360_000
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -53,6 +53,21 @@ defmodule Doctrans.Processing.Worker do
   end
 
   @doc """
+  Queues a page for reprocessing with custom model options.
+
+  The page will be processed immediately (bypassing document queue) since
+  it's a single page reprocess, not a full document import.
+
+  ## Options
+
+  - `:extraction_model` - Override the default extraction model
+  - `:translation_model` - Override the default translation model
+  """
+  def queue_page_reprocess(page_id, opts \\ []) do
+    GenServer.cast(__MODULE__, {:queue_page_reprocess, page_id, opts})
+  end
+
+  @doc """
   Cancels processing for a specific document.
   All pages of the document will be skipped.
   """
@@ -77,7 +92,9 @@ defmodule Doctrans.Processing.Worker do
       cancelled_documents: MapSet.new(),
       llm_task_ref: nil,
       llm_timeout_ref: nil,
-      extraction_tasks: %{}
+      extraction_tasks: %{},
+      # Maps page_id to model options for reprocessing
+      page_model_opts: %{}
     }
 
     # Schedule recovery of incomplete documents after init completes
@@ -122,6 +139,26 @@ defmodule Doctrans.Processing.Worker do
           {:noreply, state}
         else
           {:noreply, handle_page_queue(state, page)}
+        end
+    end
+  end
+
+  @impl true
+  def handle_cast({:queue_page_reprocess, page_id, opts}, state) do
+    case Documents.get_page(page_id) do
+      nil ->
+        Logger.warning("Page #{page_id} not found, skipping reprocess")
+        {:noreply, state}
+
+      page ->
+        if MapSet.member?(state.cancelled_documents, page.document_id) do
+          Logger.info(
+            "Document #{page.document_id} was cancelled, not reprocessing page #{page_id}"
+          )
+
+          {:noreply, state}
+        else
+          {:noreply, handle_page_reprocess(state, page, opts)}
         end
     end
   end
@@ -284,7 +321,7 @@ defmodule Doctrans.Processing.Worker do
       state.current_document_id == page.document_id ->
         if state.current_page_id == nil do
           # Not busy, start processing immediately
-          start_page_processing(state, page)
+          start_page_processing(state, page, [])
         else
           # Busy, add to page queue
           Logger.info("Page #{page.id} added to queue for active document #{page.document_id}")
@@ -297,7 +334,38 @@ defmodule Doctrans.Processing.Worker do
         # Start processing this document
         Logger.info("Starting processing for document #{page.document_id}")
         update_document_status_to_processing(page.document_id)
-        start_page_processing(%{state | current_document_id: page.document_id}, page)
+        start_page_processing(%{state | current_document_id: page.document_id}, page, [])
+
+      # Another document is processing, queue this document
+      true ->
+        queue_document_if_not_queued(state, page)
+    end
+  end
+
+  defp handle_page_reprocess(state, page, opts) do
+    # Store the model options for this page
+    page_model_opts = Map.put(state.page_model_opts, page.id, opts)
+    state = %{state | page_model_opts: page_model_opts}
+
+    cond do
+      # This page's document is currently being processed
+      state.current_document_id == page.document_id ->
+        if state.current_page_id == nil do
+          # Not busy, start processing immediately with opts
+          start_page_processing(state, page, opts)
+        else
+          # Busy, add to page queue (opts already stored in state)
+          Logger.info("Page #{page.id} queued for reprocessing")
+          page_queue = :queue.in(page.id, state.page_queue)
+          %{state | page_queue: page_queue}
+        end
+
+      # No document is currently processing
+      state.current_document_id == nil ->
+        # Start processing this page immediately
+        Logger.info("Starting reprocessing for page #{page.id}")
+        update_document_status_to_processing(page.document_id)
+        start_page_processing(%{state | current_document_id: page.document_id}, page, opts)
 
       # Another document is processing, queue this document
       true ->
@@ -339,20 +407,29 @@ defmodule Doctrans.Processing.Worker do
   defp update_document_status_to_queued(document_id),
     do: update_document_status(document_id, "queued", ["extracting"])
 
-  defp start_page_processing(state, page) do
+  defp start_page_processing(state, page, opts) do
     Logger.info("Starting LLM processing for page #{page.id} (doc #{page.document_id})")
 
     task =
       Task.Supervisor.async_nolink(
         Doctrans.TaskSupervisor,
-        fn -> do_process_page(page.id, state.cancelled_documents) end
+        fn -> do_process_page(page.id, state.cancelled_documents, opts) end
       )
 
     # Schedule a timeout to prevent indefinitely stuck tasks
     timeout_ms = task_timeout_ms()
     timeout_ref = Process.send_after(self(), {:llm_timeout, task.ref}, timeout_ms)
 
-    %{state | current_page_id: page.id, llm_task_ref: task.ref, llm_timeout_ref: timeout_ref}
+    # Remove opts from state after starting (they've been passed to the task)
+    page_model_opts = Map.delete(state.page_model_opts, page.id)
+
+    %{
+      state
+      | current_page_id: page.id,
+        llm_task_ref: task.ref,
+        llm_timeout_ref: timeout_ref,
+        page_model_opts: page_model_opts
+    }
   end
 
   defp task_timeout_ms do
@@ -376,7 +453,9 @@ defmodule Doctrans.Processing.Worker do
             if MapSet.member?(state.cancelled_documents, page.document_id) do
               process_next_page(%{state | page_queue: page_queue})
             else
-              start_page_processing(%{state | page_queue: page_queue}, page)
+              # Look up any stored model opts for this page (from reprocessing)
+              opts = Map.get(state.page_model_opts, page_id, [])
+              start_page_processing(%{state | page_queue: page_queue}, page, opts)
             end
         end
     end
@@ -456,12 +535,12 @@ defmodule Doctrans.Processing.Worker do
           end)
 
         state = %{state | page_queue: page_queue}
-        start_page_processing(state, first)
+        start_page_processing(state, first, [])
     end
   end
 
-  defp do_process_page(page_id, cancelled_documents) do
-    LlmProcessor.process_page(page_id, cancelled_documents)
+  defp do_process_page(page_id, cancelled_documents, opts) do
+    LlmProcessor.process_page(page_id, cancelled_documents, opts)
   end
 
   defp recover_incomplete_documents(state) do
