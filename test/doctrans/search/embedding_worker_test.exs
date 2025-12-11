@@ -1,5 +1,5 @@
 defmodule Doctrans.Search.EmbeddingWorkerTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Doctrans.Search.EmbeddingWorker
 

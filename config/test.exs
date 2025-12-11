@@ -55,3 +55,12 @@ config :doctrans, :retry,
 
 # Disable health check worker in tests (makes real HTTP/DB calls)
 config :doctrans, Doctrans.Resilience.HealthCheckWorker, enabled: false
+
+# Oban configuration for testing
+config :doctrans, Oban,
+  repo: Doctrans.Repo,
+  plugins: [
+    Oban.Plugins.Pruner
+  ],
+  queues: false,
+  testing: :inline

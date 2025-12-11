@@ -62,6 +62,16 @@ defmodule Doctrans.Processing.PdfProcessor do
     end
   end
 
+  @doc """
+  Gets the PDF file path for a document.
+  """
+  def get_pdf_path(document_id) do
+    Path.join([
+      Application.get_env(:doctrans, :uploads)[:upload_dir] || "uploads",
+      "#{document_id}.pdf"
+    ])
+  end
+
   defp extract_pdf_pages(document, pdf_path) do
     Logger.info("Extracting pages from PDF for document #{document.id}")
 

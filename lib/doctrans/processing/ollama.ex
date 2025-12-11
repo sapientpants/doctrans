@@ -28,7 +28,9 @@ defmodule Doctrans.Processing.Ollama do
   - `:model` - Override the default vision model
   - `:timeout` - Override the default timeout
   """
-  def extract_markdown(image_path, opts \\ []) do
+  def extract_markdown(image_path), do: extract_markdown(image_path, [])
+
+  def extract_markdown(image_path, opts) do
     config = ollama_config()
     model = Keyword.get(opts, :model, config[:vision_model])
     timeout = Keyword.get(opts, :timeout, config[:timeout])
@@ -101,7 +103,9 @@ defmodule Doctrans.Processing.Ollama do
   - `:model` - Override the default text model
   - `:timeout` - Override the default timeout
   """
-  def translate(markdown, target_language, opts \\ []) do
+  def translate(markdown, target_language), do: translate(markdown, target_language, [])
+
+  def translate(markdown, target_language, opts) do
     config = ollama_config()
     model = Keyword.get(opts, :model, config[:text_model])
     timeout = Keyword.get(opts, :timeout, config[:timeout])

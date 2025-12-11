@@ -67,6 +67,20 @@ config :doctrans, :embedding,
   model: "qwen3-embedding:0.6b",
   timeout: 60_000
 
+# Oban configuration for persistent job queuing
+config :doctrans, Oban,
+  repo: Doctrans.Repo,
+  plugins: [
+    Oban.Plugins.Pruner,
+    {Oban.Plugins.Cron, crontab: [{"* * * * *", Doctrans.Jobs.HealthCheckJob}]}
+  ],
+  queues: [
+    pdf_extraction: 50,
+    llm_processing: 10,
+    embedding_generation: 20,
+    health_checks: 1
+  ]
+
 # Configures the endpoint
 config :doctrans, DoctransWeb.Endpoint,
   url: [host: "localhost"],

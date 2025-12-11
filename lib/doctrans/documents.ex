@@ -11,6 +11,7 @@ defmodule Doctrans.Documents do
 
   alias Doctrans.Documents.{Document, Page, Pages}
   alias Doctrans.Repo
+  alias Doctrans.Validation
 
   # Delegate page operations for backward compatibility
   defdelegate get_page(id), to: Pages
@@ -97,12 +98,24 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
-  Creates a new document.
+  Creates a document with validation.
   """
   def create_document(attrs \\ %{}) do
-    %Document{}
-    |> Document.changeset(attrs)
-    |> Repo.insert()
+    case Validation.validate_document_attrs(attrs) do
+      {:ok, validated_attrs} ->
+        %Document{}
+        |> Document.changeset(validated_attrs)
+        |> Repo.insert()
+
+      {:error, reason} when is_binary(reason) ->
+        %Document{}
+        |> Document.changeset(%{})
+        |> Ecto.Changeset.add_error(:base, reason)
+        |> Ecto.Changeset.apply_action(:insert)
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   @doc """
