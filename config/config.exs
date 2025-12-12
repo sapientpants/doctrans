@@ -70,7 +70,7 @@ config :doctrans, :embedding,
 # Oban configuration for persistent job queuing
 #
 # Queue concurrency values:
-# - pdf_extraction: 1 - Sequential extraction to avoid disk I/O contention
+# - pdf_extraction: 1 - Sequential extraction to ensure pages are processed in order
 # - llm_processing: 1 - Sequential processing to process pages in order (one at a time)
 # - embedding_generation: 5 - Moderate concurrency for embedding API calls
 # - health_check: 1 - Single worker for periodic health checks (cron job)

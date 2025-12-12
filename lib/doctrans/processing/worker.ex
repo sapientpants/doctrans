@@ -41,9 +41,10 @@ defmodule Doctrans.Processing.Worker do
   def queue_page(page_id, opts \\ []) do
     page_number = Keyword.get(opts, :page_number, 0)
 
-    # Oban priority: 0-3, lower = higher priority
-    # We use page_number to influence ordering within the same priority level
-    # by including it in the args for consistent job ordering
+    # Note: page_number in args does NOT influence job execution order.
+    # Oban orders jobs by priority and scheduled_at timestamp.
+    # Sequential processing is guaranteed by setting concurrency: 1 for the queue.
+    # page_number is included for logging/debugging purposes only.
     %{"page_id" => page_id, "page_number" => page_number}
     |> LlmProcessingJob.new(priority: 2)
     |> Oban.insert()
