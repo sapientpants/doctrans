@@ -194,7 +194,7 @@ defmodule Doctrans.Validation do
       String.length(filename) > 255 ->
         {:error, "Filename too long (max 255 characters)"}
 
-      String.match?(filename, ~r/[<>:"|\\|?*\x00-\x1f]/) ->
+      String.match?(filename, ~r/[<>:"\/?*|\x00-\x1f]/) ->
         {:error, "Filename contains invalid characters"}
 
       true ->
@@ -328,7 +328,7 @@ defmodule Doctrans.Validation do
     |> String.replace("/", "_")
     # Remove null bytes completely
     |> String.replace("\0", "")
-    |> String.replace(~r/[<>:"|\\|?*\x01-\x1f]/, "_")
+    |> String.replace(~r/[<>:"\/?*|\x01-\x1f]/, "_")
   end
 
   def sanitize_filename_string(_), do: ""

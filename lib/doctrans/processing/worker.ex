@@ -72,27 +72,40 @@ defmodule Doctrans.Processing.Worker do
   Cancels all pending jobs for the document.
   """
   def cancel_document(document_id) do
-    # Cancel all pending jobs for this document
-    Oban.cancel_all_jobs(Oban.Job, where: "args->>'document_id' = $1", args: [document_id])
+    # Cancel all pending jobs for this document using Ecto query
+    document_jobs_query =
+      from(j in Oban.Job,
+        where: fragment("args->>'document_id' = ?", ^document_id),
+        where: j.state in ["available", "scheduled", "retryable"]
+      )
+
+    Oban.cancel_all_jobs(document_jobs_query)
 
     # Also cancel page jobs
-    pages = Documents.list_pages(document_id: document_id)
+    pages = Documents.list_pages(document_id)
     page_ids = Enum.map(pages, & &1.id)
 
     unless Enum.empty?(page_ids) do
-      placeholders = Enum.map_join(page_ids, ",", &"'#{&1}'")
-      Oban.cancel_all_jobs(Oban.Job, where: "args->>'page_id' IN (#{placeholders})")
+      page_jobs_query =
+        from(j in Oban.Job,
+          where: fragment("args->>'page_id' = ANY(?)", ^page_ids),
+          where: j.state in ["available", "scheduled", "retryable"]
+        )
+
+      Oban.cancel_all_jobs(page_jobs_query)
     end
 
     :ok
   rescue
-    RuntimeError ->
-      # Oban not available (likely in tests)
+    error in RuntimeError ->
+      Logger.warning("Failed to cancel document jobs: #{Exception.message(error)}")
       :ok
   end
 
   @doc """
   Returns the current processing status from Oban queues.
+
+  Returns a map with job counts per queue, or zeros if Oban is not available.
   """
   def status do
     repo = Application.get_env(:doctrans, Oban)[:repo] || Doctrans.Repo
@@ -108,6 +121,10 @@ defmodule Doctrans.Processing.Worker do
       embedding_generation: repo.aggregate(embedding_generation_query, :count, :id),
       health_check: repo.aggregate(health_check_query, :count, :id)
     }
+  rescue
+    _ ->
+      # Oban not available (likely in tests) - return zeros
+      %{pdf_extraction: 0, llm_processing: 0, embedding_generation: 0, health_check: 0}
   end
 
   @impl true
@@ -133,25 +150,38 @@ defmodule Doctrans.Processing.Worker do
     Logger.info("Recovering incomplete documents...")
 
     # Find documents with incomplete processing and queue them
-    Documents.list_documents(status: "extracting")
+    Documents.list_incomplete_documents()
     |> Enum.each(fn document ->
-      Logger.info("Re-queuing incomplete document: #{document.id}")
-      # Skip if file_path is not available
-      if document.file_path do
-        process_document(document.id, document.file_path)
-      else
-        Logger.warning("Document #{document.id} has no file_path, skipping recovery")
+      case document.status do
+        "extracting" ->
+          Logger.info("Re-queuing extracting document: #{document.id}")
+
+          if document.file_path do
+            process_document(document.id, document.file_path)
+          else
+            Logger.warning("Document #{document.id} has no file_path, skipping recovery")
+          end
+
+        "processing" ->
+          Logger.info("Re-queuing processing document: #{document.id}")
+
+          Documents.list_pages(document.id)
+          |> Enum.each(fn page ->
+            queue_page(page.id)
+          end)
+
+        "queued" ->
+          Logger.info("Re-queuing queued document: #{document.id}")
+
+          if document.file_path do
+            process_document(document.id, document.file_path)
+          else
+            Logger.warning("Document #{document.id} has no file_path, skipping recovery")
+          end
+
+        _ ->
+          :ok
       end
-    end)
-
-    Documents.list_documents(status: "processing")
-    |> Enum.each(fn document ->
-      Logger.info("Re-queuing processing document: #{document.id}")
-
-      Documents.list_pages(document_id: document.id)
-      |> Enum.each(fn page ->
-        queue_page(page.id)
-      end)
     end)
 
     {:noreply, state}

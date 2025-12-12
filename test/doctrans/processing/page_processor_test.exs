@@ -1,6 +1,5 @@
 defmodule Doctrans.Processing.PageProcessorTest do
   use Doctrans.DataCase
-  use ExUnit.Case
 
   alias Doctrans.Documents.Pages
   alias Doctrans.Processing.PageProcessor

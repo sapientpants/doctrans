@@ -94,7 +94,7 @@ defmodule Doctrans.MixProject do
       {:earmark, "~> 1.4"},
       {:html_sanitize_ex, "~> 1.4"},
       {:pgvector, "~> 0.3"},
-      {:oban, "~> 2.17"},
+      {:oban, "~> 2.20"},
       # Code quality tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false},

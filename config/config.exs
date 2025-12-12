@@ -68,6 +68,12 @@ config :doctrans, :embedding,
   timeout: 60_000
 
 # Oban configuration for persistent job queuing
+#
+# Queue concurrency values:
+# - pdf_extraction: 50 - High concurrency for CPU-bound PDF page extraction (pdftoppm)
+# - llm_processing: 10 - Lower concurrency to avoid overwhelming Ollama API
+# - embedding_generation: 20 - Moderate concurrency for embedding API calls
+# - health_check: 1 - Single worker for periodic health checks (cron job)
 config :doctrans, Oban,
   repo: Doctrans.Repo,
   plugins: [

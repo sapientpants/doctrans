@@ -1,6 +1,5 @@
 defmodule Doctrans.Processing.QueueManagerTest do
   use Doctrans.DataCase
-  use ExUnit.Case
 
   alias Doctrans.Processing.QueueManager
 

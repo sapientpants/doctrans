@@ -63,7 +63,13 @@ defmodule Doctrans.Processing.PdfProcessor do
   end
 
   @doc """
-  Gets the PDF file path for a document.
+  Gets the expected PDF file path for a document.
+
+  Returns the path where the PDF would be stored, based on the configured
+  upload directory and document ID. Note that this returns the expected path
+  regardless of whether the file actually exists on disk.
+
+  If `upload_dir` is not configured, defaults to "uploads".
   """
   def get_pdf_path(document_id) do
     Path.join([

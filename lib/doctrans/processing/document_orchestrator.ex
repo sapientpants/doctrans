@@ -55,6 +55,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
       document ->
         {:ok, document} = Documents.update_document_status(document, "completed")
         Documents.broadcast_document_update(document)
+        :ok
     end
   end
 
@@ -105,6 +106,8 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
           {:ok, document} = Documents.update_document_status(document, new_status)
           Documents.broadcast_document_update(document)
         end
+
+        :ok
     end
   end
 

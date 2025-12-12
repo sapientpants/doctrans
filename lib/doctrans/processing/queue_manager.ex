@@ -7,9 +7,16 @@ defmodule Doctrans.Processing.QueueManager do
   - Page queue: pages of the active document being processed sequentially
   - Cancelled documents tracking
   - Page model options for reprocessing
+
+  ## Configuration
+
+  - `:max_queue_size` - Maximum number of jobs in the queue (default: 10)
   """
 
   require Logger
+
+  # Default max queue size, can be overridden via config
+  @default_max_queue_size 10
 
   def start_link do
     Agent.start_link(fn -> new_state() end, name: __MODULE__)
@@ -47,7 +54,10 @@ defmodule Doctrans.Processing.QueueManager do
     Agent.get_and_update(__MODULE__, fn state ->
       current_size = :queue.len(state.queue)
 
-      if current_size >= 10 do
+      max_size =
+        Application.get_env(:doctrans, __MODULE__, [])[:max_queue_size] || @default_max_queue_size
+
+      if current_size >= max_size do
         {{:error, :queue_full}, state}
       else
         # Handle priority - high priority jobs go to front

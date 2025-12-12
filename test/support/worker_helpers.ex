@@ -25,14 +25,11 @@ defmodule Doctrans.TestSupport.WorkerHelpers do
 
   @doc """
   Cleans up after worker tests.
-  """
-  def cleanup_worker_sandbox(tags) do
-    if tags[:background_processes] do
-      # Note: disallow/2 doesn't exist, the connection will be cleaned up automatically
-      # when the test process exits
-      :ok
-    end
 
+  Note: This is a no-op placeholder. The database connection is automatically
+  cleaned up when the test process exits due to Ecto's sandbox ownership model.
+  """
+  def cleanup_worker_sandbox(_tags) do
     :ok
   end
 

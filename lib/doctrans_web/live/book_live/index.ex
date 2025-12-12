@@ -1,12 +1,12 @@
 defmodule DoctransWeb.DocumentLive.Index do
   @moduledoc "Dashboard LiveView for managing documents."
   use DoctransWeb, :live_view
-  alias Doctrans.Documents
-  alias Doctrans.Validation
-  require Logger
 
   alias Doctrans.Documents
   alias Doctrans.Processing.Worker
+  alias Doctrans.Validation
+
+  require Logger
 
   import DoctransWeb.DocumentLive.Components
 
@@ -256,14 +256,15 @@ defmodule DoctransWeb.DocumentLive.Index do
 
         message =
           ngettext(
-            "Document uploaded!",
-            "%{count} documents uploaded!",
+            "Document uploaded! Processing will begin shortly.",
+            "%{count} documents uploaded! Processing will begin shortly.",
             count: file_count
           )
 
         {:noreply,
          socket
          |> assign(:show_upload_modal, false)
+         |> assign(:documents, Documents.list_documents_with_progress())
          |> put_flash(:info, message)}
     end
   end
