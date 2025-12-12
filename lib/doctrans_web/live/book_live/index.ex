@@ -258,7 +258,7 @@ defmodule DoctransWeb.DocumentLive.Index do
           ngettext(
             "Document uploaded! Processing will begin shortly.",
             "%{count} documents uploaded! Processing will begin shortly.",
-            count: file_count
+            file_count
           )
 
         {:noreply,
