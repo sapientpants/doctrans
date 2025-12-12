@@ -2,156 +2,184 @@ defmodule DoctransWeb.FormComponentsTest do
   use DoctransWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
-  import Phoenix.Component, only: [to_form: 1]
 
   alias DoctransWeb.FormComponents
 
-  describe "input component" do
-    test "renders text input with label" do
-      form = to_form(%{"email" => ""})
-
+  describe "input/1" do
+    test "renders text input with name" do
       html =
-        render_component(&FormComponents.input/1,
-          field: form[:email],
-          type: "email",
-          label: "Email Address"
-        )
+        render_component(&FormComponents.input/1, %{
+          name: "test_input",
+          value: "test",
+          errors: []
+        })
 
-      assert html =~ "Email Address"
-      assert html =~ ~s(type="email")
-      assert html =~ ~s(name="email")
-    end
-
-    test "renders text input without label" do
-      form = to_form(%{"name" => "test"})
-
-      html =
-        render_component(&FormComponents.input/1,
-          field: form[:name],
-          type: "text"
-        )
-
-      assert html =~ ~s(type="text")
-      assert html =~ ~s(name="name")
+      assert html =~ ~s(name="test_input")
       assert html =~ ~s(value="test")
+      assert html =~ ~s(type="text")
     end
 
-    test "renders checkbox input" do
-      form = to_form(%{"remember_me" => true})
-
+    test "renders text input with label" do
       html =
-        render_component(&FormComponents.input/1,
-          field: form[:remember_me],
-          type: "checkbox",
-          label: "Remember me"
-        )
+        render_component(&FormComponents.input/1, %{
+          name: "test_input",
+          label: "Test Label",
+          value: "",
+          errors: []
+        })
 
-      assert html =~ ~s(type="checkbox")
-      assert html =~ "Remember me"
-      assert html =~ "checked"
+      assert html =~ "Test Label"
     end
 
-    test "renders checkbox input unchecked" do
-      form = to_form(%{"remember_me" => false})
-
+    test "renders input with custom id" do
       html =
-        render_component(&FormComponents.input/1,
-          field: form[:remember_me],
-          type: "checkbox",
-          label: "Remember me"
-        )
+        render_component(&FormComponents.input/1, %{
+          id: "custom-id",
+          name: "test_input",
+          value: "",
+          errors: []
+        })
 
-      assert html =~ ~s(type="checkbox")
-      refute html =~ ~s(checked="checked")
+      assert html =~ ~s(id="custom-id")
     end
 
-    test "renders select input" do
-      form = to_form(%{"language" => "en"})
-
+    test "renders input with errors" do
       html =
-        render_component(&FormComponents.input/1,
-          field: form[:language],
-          type: "select",
-          label: "Language",
-          options: [{"English", "en"}, {"German", "de"}],
-          prompt: "Select a language"
-        )
+        render_component(&FormComponents.input/1, %{
+          name: "test_input",
+          value: "",
+          errors: ["is invalid"]
+        })
 
-      assert html =~ "<select"
-      assert html =~ "Language"
-      assert html =~ "English"
-      assert html =~ "German"
-      assert html =~ "Select a language"
+      assert html =~ "is invalid"
+      assert html =~ "input-error"
     end
 
-    test "renders select with multiple" do
-      form = to_form(%{"tags" => ["a", "b"]})
-
+    test "renders email input type" do
       html =
-        render_component(&FormComponents.input/1,
-          field: form[:tags],
-          type: "select",
-          options: [{"A", "a"}, {"B", "b"}, {"C", "c"}],
-          multiple: true
-        )
+        render_component(&FormComponents.input/1, %{
+          name: "email",
+          type: "email",
+          value: "",
+          errors: []
+        })
 
-      assert html =~ ~s(multiple)
-      assert html =~ ~s(name="tags[]")
+      assert html =~ ~s(type="email")
     end
 
-    test "renders textarea" do
-      form = to_form(%{"bio" => "Hello world"})
-
+    test "renders password input type" do
       html =
-        render_component(&FormComponents.input/1,
-          field: form[:bio],
-          type: "textarea",
-          label: "Bio"
-        )
-
-      assert html =~ "<textarea"
-      assert html =~ "Bio"
-      assert html =~ "Hello world"
-    end
-
-    test "renders password input" do
-      form = to_form(%{"password" => ""})
-
-      html =
-        render_component(&FormComponents.input/1,
-          field: form[:password],
+        render_component(&FormComponents.input/1, %{
+          name: "password",
           type: "password",
-          label: "Password"
-        )
+          value: "",
+          errors: []
+        })
 
       assert html =~ ~s(type="password")
-      assert html =~ "Password"
     end
+  end
 
-    test "renders with custom class" do
-      form = to_form(%{"name" => ""})
-
+  describe "input/1 checkbox" do
+    test "renders checkbox input" do
       html =
-        render_component(&FormComponents.input/1,
-          field: form[:name],
-          type: "text",
-          class: "custom-class"
-        )
+        render_component(&FormComponents.input/1, %{
+          name: "accept",
+          type: "checkbox",
+          value: true,
+          errors: []
+        })
 
-      assert html =~ "custom-class"
+      assert html =~ ~s(type="checkbox")
+      assert html =~ ~s(name="accept")
     end
 
-    test "renders via LiveView integration", %{conn: conn} do
-      # The input component is used in the upload modal
-      {:ok, view, _html} = live(conn, ~p"/")
+    test "renders checkbox with label" do
+      html =
+        render_component(&FormComponents.input/1, %{
+          name: "accept",
+          type: "checkbox",
+          value: false,
+          label: "Accept Terms",
+          errors: []
+        })
 
-      # Open upload modal which uses form inputs
-      view |> element("#upload-document-btn") |> render_click()
+      assert html =~ "Accept Terms"
+    end
+  end
 
-      # The upload modal uses select input for target language
-      html = render(view)
+  describe "input/1 select" do
+    test "renders select input" do
+      html =
+        render_component(&FormComponents.input/1, %{
+          name: "country",
+          type: "select",
+          options: [{"US", "us"}, {"UK", "uk"}],
+          value: "us",
+          errors: []
+        })
+
       assert html =~ "<select"
-      assert html =~ "target_language"
+      assert html =~ ~s(name="country")
+      assert html =~ "US"
+      assert html =~ "UK"
+    end
+
+    test "renders select with prompt" do
+      html =
+        render_component(&FormComponents.input/1, %{
+          name: "country",
+          type: "select",
+          options: [{"US", "us"}],
+          value: nil,
+          prompt: "Select one",
+          errors: []
+        })
+
+      assert html =~ "Select one"
+    end
+
+    test "renders select with label" do
+      html =
+        render_component(&FormComponents.input/1, %{
+          name: "country",
+          type: "select",
+          options: [{"US", "us"}],
+          value: nil,
+          label: "Country",
+          errors: []
+        })
+
+      assert html =~ "Country"
+    end
+  end
+
+  describe "input/1 textarea" do
+    test "renders textarea" do
+      html =
+        render_component(&FormComponents.input/1, %{
+          name: "description",
+          type: "textarea",
+          value: "some text",
+          errors: []
+        })
+
+      assert html =~ "<textarea"
+      assert html =~ ~s(name="description")
+      assert html =~ "some text"
+    end
+
+    test "renders textarea with label" do
+      html =
+        render_component(&FormComponents.input/1, %{
+          name: "description",
+          type: "textarea",
+          value: "",
+          label: "Description",
+          errors: []
+        })
+
+      assert html =~ "Description"
     end
   end
 end

@@ -17,6 +17,8 @@ defmodule Doctrans.Application do
       Doctrans.Repo,
       {DNSCluster, query: Application.get_env(:doctrans, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Doctrans.PubSub},
+      # Oban for persistent job queuing
+      {Oban, Application.get_env(:doctrans, Oban)},
       # Task supervisor for background processing
       {Task.Supervisor, name: Doctrans.TaskSupervisor},
       # Background worker for processing books

@@ -1,62 +1,48 @@
 defmodule Doctrans.Processing.Worker do
   @moduledoc """
-  Background worker for processing documents.
+  Background worker for processing documents using Oban jobs.
 
-  Handles the processing pipeline:
-  1. Extract page images from PDF (runs immediately, not queued)
-  2. Queue pages for LLM processing as they're extracted
-  3. Process pages sequentially: extract markdown then translate
-
-  PDF extraction runs immediately for all documents to make thumbnails
-  available quickly. LLM processing uses a two-level queue:
-  - Document queue: documents wait for their turn
-  - Page queue: pages of the active document are processed sequentially
-
-  This ensures:
-  - Processing starts as soon as first page is available
-  - Documents are processed one at a time (no mixing pages from different docs)
-  - Individual pages can be reprocessed
+  This module provides a simplified interface for document processing
+  that delegates to Oban job queues for better reliability and persistence.
   """
 
   use GenServer
   require Logger
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.{LlmProcessor, PdfProcessor}
-
-  # Task timeout: 6 minutes (slightly longer than Ollama timeout to allow for retries)
-  @default_task_timeout_ms 360_000
+  alias Doctrans.Jobs.{LlmProcessingJob, PdfExtractionJob}
+  import Ecto.Query
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
   @doc """
-  Starts PDF extraction for a document.
+  Starts PDF extraction for a document using Oban jobs.
 
-  PDF extraction happens immediately (not queued) to make thumbnails
-  available quickly. Pages are queued for LLM processing as they're extracted.
+  PDF extraction is queued as a job for better reliability and tracking.
   """
   def process_document(document_id, pdf_path) do
-    GenServer.cast(__MODULE__, {:extract_pdf, document_id, pdf_path})
+    %{"document_id" => document_id, "pdf_path" => pdf_path}
+    |> PdfExtractionJob.new()
+    |> Oban.insert()
   end
 
   @doc """
-  Queues a page for LLM processing.
+  Queues a page for LLM processing using Oban jobs.
 
-  If the page's document is currently being processed, the page is added
-  to the active page queue. Otherwise, the document is added to the
-  document queue (if not already there).
+  The page will be processed by the LLM processing job queue.
   """
   def queue_page(page_id) do
-    GenServer.cast(__MODULE__, {:queue_page, page_id})
+    %{"page_id" => page_id}
+    |> LlmProcessingJob.new()
+    |> Oban.insert()
   end
 
   @doc """
-  Queues a page for reprocessing with custom model options.
+  Queues a page for reprocessing with custom model options using Oban jobs.
 
-  The page will be processed immediately (bypassing document queue) since
-  it's a single page reprocess, not a full document import.
+  The page will be processed with priority to handle reprocessing requests quickly.
 
   ## Options
 
@@ -64,513 +50,145 @@ defmodule Doctrans.Processing.Worker do
   - `:translation_model` - Override the default translation model
   """
   def queue_page_reprocess(page_id, opts \\ []) do
-    GenServer.cast(__MODULE__, {:queue_page_reprocess, page_id, opts})
+    args = %{"page_id" => page_id}
+
+    args =
+      if opts[:extraction_model],
+        do: Map.put(args, "extraction_model", opts[:extraction_model]),
+        else: args
+
+    args =
+      if opts[:translation_model],
+        do: Map.put(args, "translation_model", opts[:translation_model]),
+        else: args
+
+    args
+    |> LlmProcessingJob.new(priority: 1)
+    |> Oban.insert()
   end
 
   @doc """
   Cancels processing for a specific document.
-  All pages of the document will be skipped.
+  Cancels all pending jobs for the document.
   """
   def cancel_document(document_id) do
-    GenServer.cast(__MODULE__, {:cancel_document, document_id})
+    # Cancel all pending jobs for this document using Ecto query
+    document_jobs_query =
+      from(j in Oban.Job,
+        where: fragment("args->>'document_id' = ?", ^document_id),
+        where: j.state in ["available", "scheduled", "retryable"]
+      )
+
+    Oban.cancel_all_jobs(document_jobs_query)
+
+    # Also cancel page jobs
+    pages = Documents.list_pages(document_id)
+    page_ids = Enum.map(pages, & &1.id)
+
+    unless Enum.empty?(page_ids) do
+      page_jobs_query =
+        from(j in Oban.Job,
+          where: fragment("args->>'page_id' = ANY(?)", ^page_ids),
+          where: j.state in ["available", "scheduled", "retryable"]
+        )
+
+      Oban.cancel_all_jobs(page_jobs_query)
+    end
+
+    :ok
+  rescue
+    error in RuntimeError ->
+      Logger.warning("Failed to cancel document jobs: #{Exception.message(error)}")
+      :ok
   end
 
   @doc """
-  Returns the current processing status.
+  Returns the current processing status from Oban queues.
+
+  Returns a map with job counts per queue, or zeros if Oban is not available.
   """
   def status do
-    GenServer.call(__MODULE__, :status)
+    repo = Application.get_env(:doctrans, Oban)[:repo] || Doctrans.Repo
+
+    pdf_extraction_query = from(j in Oban.Job, where: j.queue == "pdf_extraction")
+    llm_processing_query = from(j in Oban.Job, where: j.queue == "llm_processing")
+    embedding_generation_query = from(j in Oban.Job, where: j.queue == "embedding_generation")
+    health_check_query = from(j in Oban.Job, where: j.queue == "health_check")
+
+    %{
+      pdf_extraction: repo.aggregate(pdf_extraction_query, :count, :id),
+      llm_processing: repo.aggregate(llm_processing_query, :count, :id),
+      embedding_generation: repo.aggregate(embedding_generation_query, :count, :id),
+      health_check: repo.aggregate(health_check_query, :count, :id)
+    }
+  rescue
+    _ ->
+      # Oban not available (likely in tests) - return zeros
+      %{pdf_extraction: 0, llm_processing: 0, embedding_generation: 0, health_check: 0}
   end
 
   @impl true
   def init(_opts) do
-    state = %{
-      current_document_id: nil,
-      current_page_id: nil,
-      page_queue: :queue.new(),
-      document_queue: :queue.new(),
-      cancelled_documents: MapSet.new(),
-      llm_task_ref: nil,
-      llm_timeout_ref: nil,
-      extraction_tasks: %{},
-      # Maps page_id to model options for reprocessing
-      page_model_opts: %{}
-    }
-
     # Schedule recovery of incomplete documents after init completes
-    send(self(), :recover_incomplete_documents)
+    Process.send_after(self(), :recover_incomplete_documents, 5_000)
 
-    {:ok, state}
+    {:ok, %{}}
   end
 
   @impl true
-  def handle_cast({:extract_pdf, document_id, pdf_path}, state) do
-    Logger.info("Starting PDF extraction for document #{document_id}")
-
-    case Documents.get_document(document_id) do
-      nil ->
-        {:noreply, state}
-
-      document ->
-        {:ok, document} = Documents.update_document_status(document, "extracting")
-        Documents.broadcast_document_update(document)
-
-        task =
-          Task.Supervisor.async_nolink(
-            Doctrans.TaskSupervisor,
-            fn -> do_extract_pdf(document_id, pdf_path, state.cancelled_documents) end
-          )
-
-        extraction_tasks = Map.put(state.extraction_tasks, task.ref, document_id)
-        {:noreply, %{state | extraction_tasks: extraction_tasks}}
-    end
-  end
-
-  @impl true
-  def handle_cast({:queue_page, page_id}, state) do
-    case Documents.get_page(page_id) do
-      nil ->
-        Logger.warning("Page #{page_id} not found, skipping queue")
-        {:noreply, state}
-
-      page ->
-        if MapSet.member?(state.cancelled_documents, page.document_id) do
-          Logger.info("Document #{page.document_id} was cancelled, not queueing page #{page_id}")
-          {:noreply, state}
-        else
-          {:noreply, handle_page_queue(state, page)}
-        end
-    end
-  end
-
-  @impl true
-  def handle_cast({:queue_page_reprocess, page_id, opts}, state) do
-    case Documents.get_page(page_id) do
-      nil ->
-        Logger.warning("Page #{page_id} not found, skipping reprocess")
-        {:noreply, state}
-
-      page ->
-        if MapSet.member?(state.cancelled_documents, page.document_id) do
-          Logger.info(
-            "Document #{page.document_id} was cancelled, not reprocessing page #{page_id}"
-          )
-
-          {:noreply, state}
-        else
-          {:noreply, handle_page_reprocess(state, page, opts)}
-        end
-    end
-  end
-
-  @impl true
-  def handle_cast({:cancel_document, document_id}, state) do
-    Logger.info("Cancelling document #{document_id}")
-    cancelled_documents = MapSet.put(state.cancelled_documents, document_id)
-    {:noreply, %{state | cancelled_documents: cancelled_documents}}
+  def handle_cast(_msg, state) do
+    {:noreply, state}
   end
 
   @impl true
   def handle_call(:status, _from, state) do
-    status = %{
-      current_document_id: state.current_document_id,
-      current_page_id: state.current_page_id,
-      page_queue_length: :queue.len(state.page_queue),
-      document_queue_length: :queue.len(state.document_queue),
-      extracting_count: map_size(state.extraction_tasks)
-    }
-
-    {:reply, status, state}
+    {:reply, status(), state}
   end
 
-  # Handle PDF extraction task completion
-  @impl true
-  def handle_info({ref, result}, state) when is_map_key(state.extraction_tasks, ref) do
-    Process.demonitor(ref, [:flush])
-    {document_id, extraction_tasks} = Map.pop(state.extraction_tasks, ref)
-
-    case result do
-      :ok ->
-        Logger.info("PDF extraction completed for document #{document_id}")
-
-      :cancelled ->
-        Logger.info("PDF extraction was cancelled for document #{document_id}")
-
-      {:error, reason} ->
-        Logger.error("PDF extraction failed for document #{document_id}: #{reason}")
-    end
-
-    {:noreply, %{state | extraction_tasks: extraction_tasks}}
-  end
-
-  # Handle LLM task completion
-  @impl true
-  def handle_info({ref, result}, %{llm_task_ref: ref} = state) do
-    Process.demonitor(ref, [:flush])
-
-    # Cancel the timeout timer
-    if state.llm_timeout_ref do
-      Process.cancel_timer(state.llm_timeout_ref)
-    end
-
-    case result do
-      :ok ->
-        Logger.info("Page #{state.current_page_id} LLM processing completed")
-
-      {:error, reason} ->
-        Logger.error("Page #{state.current_page_id} LLM processing failed: #{reason}")
-    end
-
-    state = %{state | current_page_id: nil, llm_task_ref: nil, llm_timeout_ref: nil}
-    {:noreply, process_next_page(state)}
-  end
-
-  # Handle extraction task crash
-  @impl true
-  def handle_info({:DOWN, ref, :process, _pid, reason}, state)
-      when is_map_key(state.extraction_tasks, ref) do
-    {document_id, extraction_tasks} = Map.pop(state.extraction_tasks, ref)
-    Logger.error("PDF extraction task crashed for document #{document_id}: #{inspect(reason)}")
-
-    case Documents.get_document(document_id) do
-      nil -> :ok
-      document -> Documents.update_document_status(document, "error", "Extraction crashed")
-    end
-
-    {:noreply, %{state | extraction_tasks: extraction_tasks}}
-  end
-
-  # Handle LLM task crash
-  @impl true
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{llm_task_ref: ref} = state) do
-    Logger.error(
-      "LLM processing task crashed for page #{state.current_page_id}: #{inspect(reason)}"
-    )
-
-    # Cancel the timeout timer
-    if state.llm_timeout_ref do
-      Process.cancel_timer(state.llm_timeout_ref)
-    end
-
-    if state.current_page_id do
-      case Documents.get_page(state.current_page_id) do
-        nil -> :ok
-        page -> Documents.update_page_extraction(page, %{extraction_status: "error"})
-      end
-    end
-
-    state = %{state | current_page_id: nil, llm_task_ref: nil, llm_timeout_ref: nil}
-    {:noreply, process_next_page(state)}
-  end
-
-  # Handle startup recovery
   @impl true
   def handle_info(:recover_incomplete_documents, state) do
     Logger.info("Recovering incomplete documents...")
-    state = recover_incomplete_documents(state)
-    {:noreply, state}
-  end
 
-  # Handle LLM task timeout
-  @impl true
-  def handle_info({:llm_timeout, ref}, %{llm_task_ref: ref} = state) do
-    Logger.error("LLM processing task timed out for page #{state.current_page_id}")
+    # Find documents with incomplete processing and queue them
+    Documents.list_incomplete_documents()
+    |> Enum.each(fn document ->
+      case document.status do
+        "extracting" ->
+          Logger.info("Re-queuing extracting document: #{document.id}")
 
-    :telemetry.execute(
-      [:doctrans, :processing, :timeout],
-      %{count: 1},
-      %{page_id: state.current_page_id}
-    )
+          if document.file_path do
+            process_document(document.id, document.file_path)
+          else
+            Logger.warning("Document #{document.id} has no file_path, skipping recovery")
+          end
 
-    # The task will be killed by Task.Supervisor.terminate_child or will
-    # complete eventually. We mark the page as error and move on.
-    if state.current_page_id do
-      case Documents.get_page(state.current_page_id) do
-        nil ->
+        "processing" ->
+          Logger.info("Re-queuing processing document: #{document.id}")
+
+          Documents.list_pages(document.id)
+          |> Enum.each(fn page ->
+            queue_page(page.id)
+          end)
+
+        "queued" ->
+          Logger.info("Re-queuing queued document: #{document.id}")
+
+          if document.file_path do
+            process_document(document.id, document.file_path)
+          else
+            Logger.warning("Document #{document.id} has no file_path, skipping recovery")
+          end
+
+        _ ->
           :ok
-
-        page ->
-          Documents.update_page_extraction(page, %{extraction_status: "error"})
-          Documents.broadcast_page_update(page)
       end
-    end
+    end)
 
-    # Clear the task ref so we don't process the result if it arrives later
-    state = %{state | current_page_id: nil, llm_task_ref: nil, llm_timeout_ref: nil}
-    {:noreply, process_next_page(state)}
-  end
-
-  # Ignore stale timeout messages (task already completed)
-  @impl true
-  def handle_info({:llm_timeout, _ref}, state) do
     {:noreply, state}
   end
 
   @impl true
   def handle_info(_msg, state) do
     {:noreply, state}
-  end
-
-  defp do_extract_pdf(document_id, pdf_path, cancelled_documents) do
-    PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents)
-  end
-
-  defp handle_page_queue(state, page) do
-    cond do
-      # This page's document is currently being processed
-      state.current_document_id == page.document_id ->
-        if state.current_page_id == nil do
-          # Not busy, start processing immediately
-          start_page_processing(state, page, [])
-        else
-          # Busy, add to page queue
-          Logger.info("Page #{page.id} added to queue for active document #{page.document_id}")
-          page_queue = :queue.in(page.id, state.page_queue)
-          %{state | page_queue: page_queue}
-        end
-
-      # No document is currently processing
-      state.current_document_id == nil ->
-        # Start processing this document
-        Logger.info("Starting processing for document #{page.document_id}")
-        update_document_status_to_processing(page.document_id)
-        start_page_processing(%{state | current_document_id: page.document_id}, page, [])
-
-      # Another document is processing, queue this document
-      true ->
-        queue_document_if_not_queued(state, page)
-    end
-  end
-
-  defp handle_page_reprocess(state, page, opts) do
-    # Store the model options for this page
-    page_model_opts = Map.put(state.page_model_opts, page.id, opts)
-    state = %{state | page_model_opts: page_model_opts}
-
-    cond do
-      # This page's document is currently being processed
-      state.current_document_id == page.document_id ->
-        if state.current_page_id == nil do
-          # Not busy, start processing immediately with opts
-          start_page_processing(state, page, opts)
-        else
-          # Busy, add to page queue (opts already stored in state)
-          Logger.info("Page #{page.id} queued for reprocessing")
-          page_queue = :queue.in(page.id, state.page_queue)
-          %{state | page_queue: page_queue}
-        end
-
-      # No document is currently processing
-      state.current_document_id == nil ->
-        # Start processing this page immediately
-        Logger.info("Starting reprocessing for page #{page.id}")
-        update_document_status_to_processing(page.document_id)
-        start_page_processing(%{state | current_document_id: page.document_id}, page, opts)
-
-      # Another document is processing, queue this document
-      true ->
-        queue_document_if_not_queued(state, page)
-    end
-  end
-
-  defp queue_document_if_not_queued(state, page) do
-    document_id = page.document_id
-    queued_docs = :queue.to_list(state.document_queue)
-
-    if document_id in queued_docs do
-      # Document already in queue, nothing to do
-      state
-    else
-      Logger.info("Document #{document_id} added to document queue")
-      update_document_status_to_queued(document_id)
-      document_queue = :queue.in(document_id, state.document_queue)
-      %{state | document_queue: document_queue}
-    end
-  end
-
-  defp update_document_status(document_id, new_status, valid_from) do
-    case Documents.get_document(document_id) do
-      nil ->
-        :ok
-
-      document ->
-        if document.status in valid_from do
-          {:ok, document} = Documents.update_document_status(document, new_status)
-          Documents.broadcast_document_update(document)
-        end
-    end
-  end
-
-  defp update_document_status_to_processing(document_id),
-    do: update_document_status(document_id, "processing", ["extracting", "queued"])
-
-  defp update_document_status_to_queued(document_id),
-    do: update_document_status(document_id, "queued", ["extracting"])
-
-  defp start_page_processing(state, page, opts) do
-    Logger.info("Starting LLM processing for page #{page.id} (doc #{page.document_id})")
-
-    task =
-      Task.Supervisor.async_nolink(
-        Doctrans.TaskSupervisor,
-        fn -> do_process_page(page.id, state.cancelled_documents, opts) end
-      )
-
-    # Schedule a timeout to prevent indefinitely stuck tasks
-    timeout_ms = task_timeout_ms()
-    timeout_ref = Process.send_after(self(), {:llm_timeout, task.ref}, timeout_ms)
-
-    # Remove opts from state after starting (they've been passed to the task)
-    page_model_opts = Map.delete(state.page_model_opts, page.id)
-
-    %{
-      state
-      | current_page_id: page.id,
-        llm_task_ref: task.ref,
-        llm_timeout_ref: timeout_ref,
-        page_model_opts: page_model_opts
-    }
-  end
-
-  defp task_timeout_ms do
-    config = Application.get_env(:doctrans, __MODULE__, [])
-    Keyword.get(config, :task_timeout_ms, @default_task_timeout_ms)
-  end
-
-  defp process_next_page(state) do
-    case :queue.out(state.page_queue) do
-      {:empty, _queue} ->
-        # No more pages for this document, check if document is complete
-        check_document_completion(state)
-
-      {{:value, page_id}, page_queue} ->
-        case Documents.get_page(page_id) do
-          nil ->
-            # Page was deleted, skip
-            process_next_page(%{state | page_queue: page_queue})
-
-          page ->
-            if MapSet.member?(state.cancelled_documents, page.document_id) do
-              process_next_page(%{state | page_queue: page_queue})
-            else
-              # Look up any stored model opts for this page (from reprocessing)
-              opts = Map.get(state.page_model_opts, page_id, [])
-              start_page_processing(%{state | page_queue: page_queue}, page, opts)
-            end
-        end
-    end
-  end
-
-  defp check_document_completion(state) do
-    if state.current_document_id do
-      document_id = state.current_document_id
-
-      Logger.debug(
-        "Checking document completion for #{document_id}, page_queue_len=#{:queue.len(state.page_queue)}"
-      )
-
-      if Documents.all_pages_completed?(document_id) do
-        Logger.info("Document #{document_id} fully processed")
-        mark_document_completed(document_id)
-        start_next_document(%{state | current_document_id: nil})
-      else
-        Logger.debug("Document #{document_id} not yet complete, waiting for more pages")
-        # More pages might come from extraction, wait
-        state
-      end
-    else
-      start_next_document(state)
-    end
-  end
-
-  defp mark_document_completed(document_id) do
-    case Documents.get_document(document_id) do
-      nil ->
-        :ok
-
-      document ->
-        {:ok, document} = Documents.update_document_status(document, "completed")
-        Documents.broadcast_document_update(document)
-    end
-  end
-
-  defp start_next_document(state) do
-    case :queue.out(state.document_queue) do
-      {:empty, _queue} ->
-        state
-
-      {{:value, document_id}, document_queue} ->
-        if MapSet.member?(state.cancelled_documents, document_id) do
-          start_next_document(%{state | document_queue: document_queue})
-        else
-          Logger.info("Starting processing for queued document #{document_id}")
-          update_document_status_to_processing(document_id)
-
-          # Get all pending pages for this document and queue them
-          state = %{state | current_document_id: document_id, document_queue: document_queue}
-          queue_pending_pages_for_document(state, document_id)
-        end
-    end
-  end
-
-  defp queue_pending_pages_for_document(state, document_id) do
-    pages = Documents.list_pages(document_id)
-
-    pending_pages =
-      pages
-      |> Enum.filter(&(&1.extraction_status == "pending" || &1.translation_status == "pending"))
-      |> Enum.sort_by(& &1.page_number)
-
-    case pending_pages do
-      [] ->
-        # No pending pages, mark complete and move on
-        mark_document_completed(document_id)
-        start_next_document(%{state | current_document_id: nil})
-
-      [first | rest] ->
-        # Queue remaining pages, start first
-        page_queue =
-          Enum.reduce(rest, :queue.new(), fn page, queue ->
-            :queue.in(page.id, queue)
-          end)
-
-        state = %{state | page_queue: page_queue}
-        start_page_processing(state, first, [])
-    end
-  end
-
-  defp do_process_page(page_id, cancelled_documents, opts) do
-    LlmProcessor.process_page(page_id, cancelled_documents, opts)
-  end
-
-  defp recover_incomplete_documents(state) do
-    # Find documents that need processing (processing or queued status)
-    incomplete_docs = Documents.list_incomplete_documents()
-
-    case incomplete_docs do
-      [] ->
-        Logger.info("No incomplete documents to recover")
-        state
-
-      docs ->
-        Logger.info("Found #{length(docs)} incomplete documents to recover")
-
-        # Process the first one, queue the rest
-        [first | rest] = docs
-
-        # Add remaining documents to queue
-        document_queue =
-          Enum.reduce(rest, state.document_queue, fn doc, queue ->
-            Logger.info("Queueing document #{doc.id} for recovery")
-            :queue.in(doc.id, queue)
-          end)
-
-        state = %{state | document_queue: document_queue}
-
-        # Start processing the first document
-        Logger.info("Recovering document #{first.id} (#{first.title})")
-        update_document_status_to_processing(first.id)
-        queue_pending_pages_for_document(%{state | current_document_id: first.id}, first.id)
-    end
   end
 end

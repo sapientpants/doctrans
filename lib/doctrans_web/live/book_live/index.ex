@@ -1,10 +1,12 @@
 defmodule DoctransWeb.DocumentLive.Index do
   @moduledoc "Dashboard LiveView for managing documents."
   use DoctransWeb, :live_view
-  require Logger
 
   alias Doctrans.Documents
   alias Doctrans.Processing.Worker
+  alias Doctrans.Validation
+
+  require Logger
 
   import DoctransWeb.DocumentLive.Components
 
@@ -196,6 +198,39 @@ defmodule DoctransWeb.DocumentLive.Index do
   def handle_event("upload_document", params, socket) do
     target_language = params["target_language"] || socket.assigns.target_language
 
+    # Validate target language
+    case Validation.validate_language(target_language) do
+      {:ok, validated_language} ->
+        upload_documents_with_validated_language(socket, validated_language)
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Invalid language: #{reason}")}
+    end
+  end
+
+  @impl true
+  def handle_event("delete_document", %{"id" => id}, socket) do
+    document = Documents.get_document!(id)
+
+    # Cancel any in-progress processing
+    Worker.cancel_document(document.id)
+
+    case Documents.delete_document(document) do
+      {:ok, _} ->
+        socket =
+          socket
+          |> assign(:documents, Documents.list_documents_with_progress())
+          |> put_flash(:info, gettext("Document deleted successfully"))
+
+        {:noreply, socket}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
+    end
+  end
+
+  # Private function to handle document upload with validated language
+  defp upload_documents_with_validated_language(socket, target_language) do
     # Consume all uploaded files
     uploaded_files =
       consume_uploaded_entries(socket, :pdf, fn %{path: path}, entry ->
@@ -221,40 +256,16 @@ defmodule DoctransWeb.DocumentLive.Index do
 
         message =
           ngettext(
-            "Document uploaded!",
-            "%{count} documents uploaded!",
-            file_count,
+            "Document uploaded! Processing will begin shortly.",
+            "%{count} documents uploaded! Processing will begin shortly.",
             count: file_count
           )
 
-        socket =
-          socket
-          |> assign(:documents, Documents.list_documents_with_progress())
-          |> assign(:show_upload_modal, false)
-          |> put_flash(:info, "#{message} #{gettext("Processing will begin shortly.")}")
-
-        {:noreply, socket}
-    end
-  end
-
-  @impl true
-  def handle_event("delete_document", %{"id" => id}, socket) do
-    document = Documents.get_document!(id)
-
-    # Cancel any in-progress processing
-    Worker.cancel_document(document.id)
-
-    case Documents.delete_document(document) do
-      {:ok, _} ->
-        socket =
-          socket
-          |> assign(:documents, Documents.list_documents_with_progress())
-          |> put_flash(:info, gettext("Document deleted successfully"))
-
-        {:noreply, socket}
-
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
+        {:noreply,
+         socket
+         |> assign(:show_upload_modal, false)
+         |> assign(:documents, Documents.list_documents_with_progress())
+         |> put_flash(:info, message)}
     end
   end
 
@@ -265,19 +276,22 @@ defmodule DoctransWeb.DocumentLive.Index do
       |> Path.basename(".pdf")
       |> String.replace(~r/[_-]+/, " ")
 
-    case Documents.create_document(%{
-           id: document_id,
-           title: title,
-           original_filename: original_filename,
-           target_language: target_language,
-           status: "uploading"
-         }) do
+    attrs = %{
+      id: document_id,
+      title: title,
+      original_filename: original_filename,
+      target_language: target_language,
+      status: "uploading"
+    }
+
+    case Documents.create_document(attrs) do
       {:ok, document} ->
         Logger.info("Subscribing to new document:#{document.id}")
         Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document.id}")
         Worker.process_document(document.id, pdf_path)
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
+        Logger.error("Failed to create document: #{inspect(changeset)}")
         File.rm(pdf_path)
     end
   end

@@ -62,6 +62,22 @@ defmodule Doctrans.Processing.PdfProcessor do
     end
   end
 
+  @doc """
+  Gets the expected PDF file path for a document.
+
+  Returns the path where the PDF would be stored, based on the configured
+  upload directory and document ID. Note that this returns the expected path
+  regardless of whether the file actually exists on disk.
+
+  If `upload_dir` is not configured, defaults to "uploads".
+  """
+  def get_pdf_path(document_id) do
+    Path.join([
+      Application.get_env(:doctrans, :uploads)[:upload_dir] || "uploads",
+      "#{document_id}.pdf"
+    ])
+  end
+
   defp extract_pdf_pages(document, pdf_path) do
     Logger.info("Extracting pages from PDF for document #{document.id}")
 

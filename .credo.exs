@@ -19,7 +19,9 @@
           ~r"/node_modules/",
           # Exclude generated test support files from some checks
           ~r"/test/support/data_case\.ex$",
-          ~r"/test/support/conn_case\.ex$"
+          ~r"/test/support/conn_case\.ex$",
+          # Exclude worker helpers from alias usage check (false positives)
+          ~r"/test/support/worker_helpers\.ex$"
         ]
       },
       plugins: [],
