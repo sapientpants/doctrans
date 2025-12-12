@@ -110,6 +110,10 @@ defmodule Doctrans.Processing.LlmProcessor do
       "Extracting markdown for page #{page.page_number} of document #{page.document_id}"
     )
 
+    # Update document status to "processing" when first page starts extraction
+    # This transitions from "uploading" or "extracting" to "processing"
+    maybe_update_document_to_processing(page)
+
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "processing"})
     Documents.broadcast_page_update(page)
 
@@ -305,5 +309,26 @@ defmodule Doctrans.Processing.LlmProcessor do
        page_number: page.page_number,
        reason: inspect(reason)
      )}
+  end
+
+  # Updates document status to "processing" when page processing starts
+  # Only updates if document is in a pre-processing state (uploading, extracting, queued)
+  defp maybe_update_document_to_processing(page) do
+    case Documents.get_document(page.document_id) do
+      nil ->
+        :ok
+
+      document ->
+        if document.status in ["uploading", "extracting", "queued"] do
+          Logger.info(
+            "Updating document #{document.id} status from #{document.status} to processing"
+          )
+
+          {:ok, document} = Documents.update_document_status(document, "processing")
+          Documents.broadcast_document_update(document)
+        end
+
+        :ok
+    end
   end
 end

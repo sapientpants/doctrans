@@ -132,7 +132,7 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   defp queue_page_for_processing(page) do
     Logger.info("Queueing page #{page.page_number} for LLM processing")
-    Worker.queue_page(page.id)
+    Worker.queue_page(page.id, page_number: page.page_number)
   end
 
   defp extract_and_create_page(document, pdf_path, pages_dir, page_number) do

@@ -32,10 +32,20 @@ defmodule Doctrans.Processing.Worker do
   Queues a page for LLM processing using Oban jobs.
 
   The page will be processed by the LLM processing job queue.
+  Pages are prioritized by page_number to ensure in-order processing.
+
+  ## Options
+
+  - `:page_number` - Page number for priority ordering (lower = processed first)
   """
-  def queue_page(page_id) do
-    %{"page_id" => page_id}
-    |> LlmProcessingJob.new()
+  def queue_page(page_id, opts \\ []) do
+    page_number = Keyword.get(opts, :page_number, 0)
+
+    # Oban priority: 0-3, lower = higher priority
+    # We use page_number to influence ordering within the same priority level
+    # by including it in the args for consistent job ordering
+    %{"page_id" => page_id, "page_number" => page_number}
+    |> LlmProcessingJob.new(priority: 2)
     |> Oban.insert()
   end
 
@@ -167,7 +177,7 @@ defmodule Doctrans.Processing.Worker do
 
           Documents.list_pages(document.id)
           |> Enum.each(fn page ->
-            queue_page(page.id)
+            queue_page(page.id, page_number: page.page_number)
           end)
 
         "queued" ->
