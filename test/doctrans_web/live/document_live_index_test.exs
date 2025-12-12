@@ -276,7 +276,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
 
       # Upload a file
       file =
-        file_input(view, "#upload-form", :pdf, [
+        file_input(view, "#upload-form", :document, [
           %{
             name: "test.pdf",
             content: "fake pdf content",

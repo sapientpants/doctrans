@@ -1,5 +1,5 @@
 defmodule Doctrans.Jobs.HealthCheckJobTest do
-  use ExUnit.Case
+  use Doctrans.DataCase
   use Oban.Testing, repo: Doctrans.Repo
 
   alias Doctrans.Jobs.HealthCheckJob

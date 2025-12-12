@@ -45,6 +45,12 @@ config :doctrans, :uploads,
 # Higher DPI = better text recognition but larger files
 config :doctrans, :pdf_extraction, dpi: 150
 
+# Document conversion configuration (for Word, OpenDocument, etc.)
+# Requires LibreOffice to be installed:
+# - macOS: brew install --cask libreoffice
+# - Ubuntu: apt-get install libreoffice-writer-nogui
+config :doctrans, :document_conversion, timeout: 120_000
+
 # Document sweeper configuration (cleans up orphaned directories)
 config :doctrans, Doctrans.Documents.SweeperWorker,
   enabled: true,

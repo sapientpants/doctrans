@@ -35,8 +35,8 @@ defmodule DoctransWeb.DocumentLive.Index do
       # Sort state
       |> assign(:sort_by, :inserted_at)
       |> assign(:sort_dir, :desc)
-      |> allow_upload(:pdf,
-        accept: ~w(.pdf),
+      |> allow_upload(:document,
+        accept: ~w(.pdf .docx .doc .odt .rtf),
         max_entries: 10,
         max_file_size: Application.get_env(:doctrans, :uploads)[:max_file_size] || 100_000_000
       )
@@ -179,7 +179,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def handle_event("cancel_upload", %{"ref" => ref}, socket),
-    do: {:noreply, cancel_upload(socket, :pdf, ref)}
+    do: {:noreply, cancel_upload(socket, :document, ref)}
 
   @impl true
   def handle_event("sort", %{"field" => field, "dir" => dir}, socket) do
@@ -233,11 +233,14 @@ defmodule DoctransWeb.DocumentLive.Index do
   defp upload_documents_with_validated_language(socket, target_language) do
     # Consume all uploaded files
     uploaded_files =
-      consume_uploaded_entries(socket, :pdf, fn %{path: path}, entry ->
+      consume_uploaded_entries(socket, :document, fn %{path: path}, entry ->
         document_id = Uniq.UUID.uuid7()
         dest_dir = Documents.document_upload_dir(document_id)
         File.mkdir_p!(dest_dir)
-        dest_path = Path.join(dest_dir, "original.pdf")
+
+        # Preserve the original file extension for proper processing
+        extension = entry.client_name |> Path.extname() |> String.downcase()
+        dest_path = Path.join(dest_dir, "original#{extension}")
         File.cp!(path, dest_path)
         {:ok, {document_id, entry.client_name, dest_path}}
       end)
