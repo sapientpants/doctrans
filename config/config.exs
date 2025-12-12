@@ -70,9 +70,9 @@ config :doctrans, :embedding,
 # Oban configuration for persistent job queuing
 #
 # Queue concurrency values:
-# - pdf_extraction: 50 - High concurrency for CPU-bound PDF page extraction (pdftoppm)
-# - llm_processing: 10 - Lower concurrency to avoid overwhelming Ollama API
-# - embedding_generation: 20 - Moderate concurrency for embedding API calls
+# - pdf_extraction: 1 - Sequential extraction to ensure pages are processed in order
+# - llm_processing: 1 - Sequential processing to process pages in order (one at a time)
+# - embedding_generation: 5 - Moderate concurrency for embedding API calls
 # - health_check: 1 - Single worker for periodic health checks (cron job)
 config :doctrans, Oban,
   repo: Doctrans.Repo,
@@ -81,9 +81,9 @@ config :doctrans, Oban,
     {Oban.Plugins.Cron, crontab: [{"* * * * *", Doctrans.Jobs.HealthCheckJob}]}
   ],
   queues: [
-    pdf_extraction: 50,
-    llm_processing: 10,
-    embedding_generation: 20,
+    pdf_extraction: 1,
+    llm_processing: 1,
+    embedding_generation: 5,
     health_check: 1
   ]
 

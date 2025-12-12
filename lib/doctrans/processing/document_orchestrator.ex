@@ -80,10 +80,13 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
 
   @doc """
   Updates document status to processing.
+
+  Only updates if document is currently in uploading, extracting, or queued state.
+  This is safe to call multiple times - it will only update if needed.
   """
   @spec update_document_status_to_processing(Uniq.UUID.t()) :: :ok
   def update_document_status_to_processing(document_id) do
-    update_document_status(document_id, "processing", ["extracting", "queued"])
+    update_document_status(document_id, "processing", ["uploading", "extracting", "queued"])
   end
 
   @doc """
