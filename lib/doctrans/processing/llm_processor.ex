@@ -18,6 +18,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   use Gettext, backend: DoctransWeb.Gettext
 
   alias Doctrans.Documents
+  alias Doctrans.Processing.DocumentOrchestrator
   alias Doctrans.Resilience.{Backoff, ErrorClassifier}
   alias Doctrans.Search.EmbeddingWorker
 
@@ -100,6 +101,9 @@ defmodule Doctrans.Processing.LlmProcessor do
     Logger.warning("Page #{page.page_number} has no content to translate, marking as completed")
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "completed"})
     Documents.broadcast_page_update(page)
+
+    # Check if all pages are complete and mark document as completed if so
+    DocumentOrchestrator.check_document_completion(page.document_id)
     :ok
   end
 
@@ -228,6 +232,9 @@ defmodule Doctrans.Processing.LlmProcessor do
           })
 
         Documents.broadcast_page_update(page)
+
+        # Check if all pages are complete and mark document as completed if so
+        DocumentOrchestrator.check_document_completion(page.document_id)
         :ok
 
       {:error, reason} ->
