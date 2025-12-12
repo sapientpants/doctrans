@@ -75,7 +75,7 @@ defmodule Doctrans.Processing.PageProcessorTest do
       document = Doctrans.Fixtures.document_fixture()
 
       {:ok, page} =
-        Doctrans.Documents.Pages.create_page(document, %{
+        Pages.create_page(document, %{
           page_number: 1,
           image_path: "/test/path.jpg"
         })
@@ -100,6 +100,126 @@ defmodule Doctrans.Processing.PageProcessorTest do
       # Reset should make it processable again
       PageProcessor.reset_page_for_retry(page_id)
       assert PageProcessor.can_process_page?(page_id) == true
+    end
+  end
+
+  describe "state management" do
+    test "new_state creates empty state" do
+      state = PageProcessor.new_state()
+      assert state.current_page_id == nil
+      assert state.llm_task_ref == nil
+      assert state.llm_timeout_ref == nil
+    end
+
+    test "processing? returns false for empty state" do
+      state = PageProcessor.new_state()
+      assert PageProcessor.processing?(state) == false
+    end
+
+    test "processing? returns true when page is being processed" do
+      state = %{current_page_id: Uniq.UUID.uuid7(), llm_task_ref: nil, llm_timeout_ref: nil}
+      assert PageProcessor.processing?(state) == true
+    end
+
+    test "current_page_id returns nil for empty state" do
+      state = PageProcessor.new_state()
+      assert PageProcessor.current_page_id(state) == nil
+    end
+
+    test "current_page_id returns page_id when set" do
+      page_id = Uniq.UUID.uuid7()
+      state = %{current_page_id: page_id, llm_task_ref: nil, llm_timeout_ref: nil}
+      assert PageProcessor.current_page_id(state) == page_id
+    end
+
+    test "matches_current_task? returns false when no task" do
+      state = PageProcessor.new_state()
+      ref = make_ref()
+      assert PageProcessor.matches_current_task?(state, ref) == false
+    end
+
+    test "matches_current_task? returns true for matching ref" do
+      ref = make_ref()
+      state = %{current_page_id: nil, llm_task_ref: ref, llm_timeout_ref: nil}
+      assert PageProcessor.matches_current_task?(state, ref) == true
+    end
+
+    test "matches_current_task? returns false for different ref" do
+      ref1 = make_ref()
+      ref2 = make_ref()
+      state = %{current_page_id: nil, llm_task_ref: ref1, llm_timeout_ref: nil}
+      assert PageProcessor.matches_current_task?(state, ref2) == false
+    end
+
+    test "cancel_timeout handles nil timeout_ref" do
+      state = PageProcessor.new_state()
+      new_state = PageProcessor.cancel_timeout(state)
+      assert new_state.llm_timeout_ref == nil
+    end
+
+    test "cancel_timeout cancels timer" do
+      timer_ref = Process.send_after(self(), :test, 60_000)
+      state = %{current_page_id: nil, llm_task_ref: nil, llm_timeout_ref: timer_ref}
+      new_state = PageProcessor.cancel_timeout(state)
+      assert new_state.llm_timeout_ref == nil
+    end
+
+    test "handle_task_success clears state" do
+      page_id = Uniq.UUID.uuid7()
+      timer_ref = Process.send_after(self(), :test, 60_000)
+
+      state = %{
+        current_page_id: page_id,
+        llm_task_ref: make_ref(),
+        llm_timeout_ref: timer_ref
+      }
+
+      new_state = PageProcessor.handle_task_success(state)
+      assert new_state.current_page_id == nil
+      assert new_state.llm_task_ref == nil
+      assert new_state.llm_timeout_ref == nil
+    end
+
+    test "handle_task_failure clears state" do
+      page_id = Uniq.UUID.uuid7()
+
+      state = %{
+        current_page_id: page_id,
+        llm_task_ref: make_ref(),
+        llm_timeout_ref: nil
+      }
+
+      new_state = PageProcessor.handle_task_failure(state, "test error")
+      assert new_state.current_page_id == nil
+      assert new_state.llm_task_ref == nil
+    end
+
+    test "handle_task_crash clears state" do
+      page_id = Uniq.UUID.uuid7()
+
+      state = %{
+        current_page_id: page_id,
+        llm_task_ref: make_ref(),
+        llm_timeout_ref: nil
+      }
+
+      new_state = PageProcessor.handle_task_crash(state, {:error, :crashed})
+      assert new_state.current_page_id == nil
+      assert new_state.llm_task_ref == nil
+    end
+
+    test "handle_task_timeout clears state" do
+      page_id = Uniq.UUID.uuid7()
+
+      state = %{
+        current_page_id: page_id,
+        llm_task_ref: make_ref(),
+        llm_timeout_ref: nil
+      }
+
+      new_state = PageProcessor.handle_task_timeout(state)
+      assert new_state.current_page_id == nil
+      assert new_state.llm_task_ref == nil
     end
   end
 end

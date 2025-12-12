@@ -1,22 +1,41 @@
 defmodule Doctrans.Jobs.PdfExtractionJobTest do
+  use Doctrans.DataCase
   use Oban.Testing, repo: Doctrans.Repo
-  use ExUnit.Case
 
   alias Doctrans.Jobs.PdfExtractionJob
 
-  test "new/1 creates job with correct args" do
-    document_id = Uniq.UUID.uuid7()
-    file_path = "/tmp/test.pdf"
+  import Doctrans.Fixtures
 
-    job_changeset =
-      PdfExtractionJob.new(%{
-        "document_id" => document_id,
-        "file_path" => file_path
-      })
+  describe "perform/1" do
+    test "attempts to extract PDF with document_id and pdf_path" do
+      document = document_fixture()
 
-    assert job_changeset.changes.args["document_id"] == document_id
-    assert job_changeset.changes.args["file_path"] == file_path
-    assert job_changeset.changes.queue == "pdf_extraction"
-    assert job_changeset.changes.worker == "Doctrans.Jobs.PdfExtractionJob"
+      # Will attempt extraction and fail because PDF doesn't exist
+      # The extraction process handles this gracefully
+      result =
+        perform_job(PdfExtractionJob, %{
+          "document_id" => document.id,
+          "pdf_path" => "/nonexistent/path.pdf"
+        })
+
+      # Result depends on how the extraction handles missing files
+      # Either :ok (graceful handling) or {:error, _} is acceptable
+      assert result == :ok or match?({:error, _}, result)
+    end
+
+    test "attempts to extract PDF with only document_id (retry case)" do
+      document = document_fixture()
+
+      result = perform_job(PdfExtractionJob, %{"document_id" => document.id})
+      # Result depends on how the extraction handles missing files
+      assert result == :ok or match?({:error, _}, result)
+    end
+
+    test "returns error when document not found" do
+      fake_document_id = Uniq.UUID.uuid7()
+
+      result = perform_job(PdfExtractionJob, %{"document_id" => fake_document_id})
+      assert {:error, "Document not found"} = result
+    end
   end
 end

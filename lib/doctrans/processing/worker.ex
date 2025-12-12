@@ -100,13 +100,13 @@ defmodule Doctrans.Processing.Worker do
     pdf_extraction_query = from(j in Oban.Job, where: j.queue == "pdf_extraction")
     llm_processing_query = from(j in Oban.Job, where: j.queue == "llm_processing")
     embedding_generation_query = from(j in Oban.Job, where: j.queue == "embedding_generation")
-    health_checks_query = from(j in Oban.Job, where: j.queue == "health_checks")
+    health_check_query = from(j in Oban.Job, where: j.queue == "health_check")
 
     %{
       pdf_extraction: repo.aggregate(pdf_extraction_query, :count, :id),
       llm_processing: repo.aggregate(llm_processing_query, :count, :id),
       embedding_generation: repo.aggregate(embedding_generation_query, :count, :id),
-      health_checks: repo.aggregate(health_checks_query, :count, :id)
+      health_check: repo.aggregate(health_check_query, :count, :id)
     }
   end
 

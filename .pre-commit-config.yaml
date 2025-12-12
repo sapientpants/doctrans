@@ -150,12 +150,11 @@ repos:
 
       # 6. Test suite with coverage (slow - runs last)
       - id: mix-test-coverage
-        name: Mix test with 75% coverage
-        entry: bash -c 'MIX_ENV=test mix coveralls --min-coverage 75'
+        name: Mix test with 80% coverage
+        entry: bash -c 'MIX_ENV=test mix coveralls'
         language: system
         pass_filenames: false
         files: ^(lib/|test/).*\.ex[s]?$
-        fail_fast: true
 
       # 7. Clean up unused dependencies (fast cleanup task)
       - id: mix-deps-unlock

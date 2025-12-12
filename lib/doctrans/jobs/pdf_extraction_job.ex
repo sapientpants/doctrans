@@ -27,16 +27,4 @@ defmodule Doctrans.Jobs.PdfExtractionJob do
         PdfProcessor.extract_document(document_id, pdf_path, MapSet.new())
     end
   end
-
-  @doc """
-  Creates a new PDF extraction job.
-  """
-  def new(args) do
-    %{
-      args: args,
-      queue: :pdf_extraction,
-      worker: __MODULE__
-    }
-    |> Oban.Job.new()
-  end
 end

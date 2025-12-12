@@ -38,7 +38,7 @@ defmodule Doctrans.Processing.WorkerTest do
       assert Map.has_key?(status, :pdf_extraction)
       assert Map.has_key?(status, :llm_processing)
       assert Map.has_key?(status, :embedding_generation)
-      assert Map.has_key?(status, :health_checks)
+      assert Map.has_key?(status, :health_check)
     end
 
     test "status returns queue counts when no jobs are running" do
@@ -46,7 +46,7 @@ defmodule Doctrans.Processing.WorkerTest do
       assert status.pdf_extraction == 0
       assert status.llm_processing == 0
       assert status.embedding_generation == 0
-      assert status.health_checks == 0
+      assert status.health_check == 0
     end
   end
 

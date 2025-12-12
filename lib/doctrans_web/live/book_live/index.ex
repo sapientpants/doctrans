@@ -208,6 +208,27 @@ defmodule DoctransWeb.DocumentLive.Index do
     end
   end
 
+  @impl true
+  def handle_event("delete_document", %{"id" => id}, socket) do
+    document = Documents.get_document!(id)
+
+    # Cancel any in-progress processing
+    Worker.cancel_document(document.id)
+
+    case Documents.delete_document(document) do
+      {:ok, _} ->
+        socket =
+          socket
+          |> assign(:documents, Documents.list_documents_with_progress())
+          |> put_flash(:info, gettext("Document deleted successfully"))
+
+        {:noreply, socket}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
+    end
+  end
+
   # Private function to handle document upload with validated language
   defp upload_documents_with_validated_language(socket, target_language) do
     # Consume all uploaded files
@@ -244,27 +265,6 @@ defmodule DoctransWeb.DocumentLive.Index do
          socket
          |> assign(:show_upload_modal, false)
          |> put_flash(:info, message)}
-    end
-  end
-
-  @impl true
-  def handle_event("delete_document", %{"id" => id}, socket) do
-    document = Documents.get_document!(id)
-
-    # Cancel any in-progress processing
-    Worker.cancel_document(document.id)
-
-    case Documents.delete_document(document) do
-      {:ok, _} ->
-        socket =
-          socket
-          |> assign(:documents, Documents.list_documents_with_progress())
-          |> put_flash(:info, gettext("Document deleted successfully"))
-
-        {:noreply, socket}
-
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
     end
   end
 

@@ -14,16 +14,4 @@ defmodule Doctrans.Jobs.HealthCheckJob do
     HealthCheck.check_all()
     :ok
   end
-
-  @doc """
-  Creates a new health check job.
-  """
-  def new(args) do
-    %{
-      args: args,
-      queue: :health_check,
-      worker: __MODULE__
-    }
-    |> Oban.Job.new()
-  end
 end

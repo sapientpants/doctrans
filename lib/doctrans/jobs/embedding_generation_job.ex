@@ -21,7 +21,7 @@ defmodule Doctrans.Jobs.EmbeddingGenerationJob do
         content = page.translated_markdown || page.original_markdown
 
         if content do
-          Embedding.generate(page_id, content)
+          Embedding.generate(content)
         else
           {:error, "No content available for embedding generation"}
         end

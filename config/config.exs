@@ -78,7 +78,7 @@ config :doctrans, Oban,
     pdf_extraction: 50,
     llm_processing: 10,
     embedding_generation: 20,
-    health_checks: 1
+    health_check: 1
   ]
 
 # Configures the endpoint

@@ -19,16 +19,4 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
   def perform(%Oban.Job{args: %{"page_id" => page_id}}) do
     LlmProcessor.process_page(page_id, MapSet.new(), [])
   end
-
-  @doc """
-  Creates a new LLM processing job.
-  """
-  def new(args) do
-    %{
-      args: args,
-      queue: :llm_processing,
-      worker: __MODULE__
-    }
-    |> Oban.Job.new()
-  end
 end
