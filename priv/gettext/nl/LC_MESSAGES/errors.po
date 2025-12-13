@@ -211,7 +211,7 @@ msgstr "Page not found"
 msgid "Source file not found: %{path}"
 msgstr "Bronbestand niet gevonden: %{path}"
 
-#: lib/doctrans/processing/document_processor.ex:48
+#: lib/doctrans/processing/document_processor.ex:49
 #, elixir-autogen, elixir-format
 msgid "Unsupported file format: %{format}"
 msgstr "Niet-ondersteund bestandsformaat: %{format}"

@@ -183,7 +183,7 @@ defmodule DoctransWeb.DocumentLive.Components do
         </label>
       </p>
       <p class="mt-1 text-xs text-base-content/50">
-        {gettext("PDF, Word (.docx), OpenDocument (.odt) - Up to 10 files")}
+        {gettext("PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Up to 10 files")}
       </p>
     </div>
     """
@@ -258,7 +258,10 @@ defmodule DoctransWeb.DocumentLive.Components do
 
   defp error_to_string(:too_large), do: gettext("File is too large (max 100MB)")
   defp error_to_string(:too_many_files), do: gettext("Maximum 10 files can be uploaded at once")
-  defp error_to_string(:not_accepted), do: gettext("Only PDF and Word documents are accepted")
+
+  defp error_to_string(:not_accepted),
+    do: gettext("Only PDF, Word, OpenDocument, and RTF documents are accepted")
+
   defp error_to_string(err), do: gettext("Error: %{error}", error: inspect(err))
 
   @doc """

@@ -4,7 +4,8 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   Routes documents to appropriate processors based on file type:
   - PDF files are processed directly via PdfProcessor
-  - Word documents (.docx, .doc) are converted to PDF first, then processed
+  - Word, OpenDocument, and Rich Text Format documents (.docx, .doc, .odt, .rtf)
+    are converted to PDF first, then processed
 
   This provides a unified interface for document processing while supporting
   multiple input formats.
@@ -28,8 +29,8 @@ defmodule Doctrans.Processing.DocumentProcessor do
   @doc """
   Extracts pages from a document and creates page records progressively.
 
-  Supports PDF and Word document formats. Word documents are converted to PDF
-  before extraction.
+  Supports PDF, Word (.docx, .doc), OpenDocument (.odt), and Rich Text Format (.rtf).
+  Non-PDF documents are converted to PDF before extraction.
 
   Returns `:ok`, `:cancelled`, or `{:error, reason}`.
   """
@@ -41,7 +42,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
         PdfProcessor.extract_document(document_id, file_path, cancelled_documents)
 
       ext when ext in [".docx", ".doc", ".odt", ".rtf"] ->
-        extract_word_document(document_id, file_path, cancelled_documents)
+        extract_convertible_document(document_id, file_path, cancelled_documents)
 
       _ ->
         Logger.error("Unsupported file format: #{extension}")
@@ -49,7 +50,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
     end
   end
 
-  defp extract_word_document(document_id, file_path, cancelled_documents) do
+  defp extract_convertible_document(document_id, file_path, cancelled_documents) do
     if MapSet.member?(cancelled_documents, document_id) do
       Logger.info("Document #{document_id} was cancelled, skipping conversion")
       File.rm(file_path)
@@ -62,11 +63,11 @@ defmodule Doctrans.Processing.DocumentProcessor do
   defp do_convert_and_extract(document_id, file_path, cancelled_documents) do
     output_dir = Path.dirname(file_path)
 
-    Logger.info("Converting Word document #{file_path} to PDF")
+    Logger.info("Converting document #{file_path} to PDF")
 
     case document_converter_module().convert_to_pdf(file_path, output_dir) do
       {:ok, pdf_path} ->
-        # Delete the original Word document after successful conversion
+        # Delete the original document after successful conversion
         File.rm(file_path)
 
         # Process the converted PDF
@@ -74,6 +75,8 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
       {:error, reason} ->
         Logger.error("Failed to convert document #{document_id}: #{reason}")
+        # Clean up the source file on failure to prevent storage leaks
+        File.rm(file_path)
         {:error, reason}
     end
   end

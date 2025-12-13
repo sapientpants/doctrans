@@ -220,7 +220,7 @@ msgstr "Page not found"
 msgid "Source file not found: %{path}"
 msgstr "Nie znaleziono pliku źródłowego: %{path}"
 
-#: lib/doctrans/processing/document_processor.ex:48
+#: lib/doctrans/processing/document_processor.ex:49
 #, elixir-autogen, elixir-format
 msgid "Unsupported file format: %{format}"
 msgstr "Nieobsługiwany format pliku: %{format}"
