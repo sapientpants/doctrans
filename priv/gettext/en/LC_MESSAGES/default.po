@@ -404,8 +404,8 @@ msgstr "Swedish"
 #, elixir-autogen, elixir-format
 msgid "Document uploaded! Processing will begin shortly."
 msgid_plural "%{count} documents uploaded! Processing will begin shortly."
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Document uploaded! Processing will begin shortly."
+msgstr[1] "%{count} documents uploaded! Processing will begin shortly."
 
 #: lib/doctrans_web/live/book_live/components.ex:129
 #, elixir-autogen, elixir-format
@@ -502,7 +502,7 @@ msgstr "Select models to use for re-extracting and re-translating this page."
 #: lib/doctrans_web/live/search_live.ex:215
 #, elixir-autogen, elixir-format
 msgid "Showing %{start}-%{end} of %{total} results for \"%{query}\""
-msgstr ""
+msgstr "Showing %{start}-%{end} of %{total} results for \"%{query}\""
 
 #: lib/doctrans_web/live/book_live/viewer_components.ex:161
 #, elixir-autogen, elixir-format

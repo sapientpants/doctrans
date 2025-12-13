@@ -399,8 +399,8 @@ msgstr "Szwedzki"
 msgid "Document uploaded! Processing will begin shortly."
 msgid_plural "%{count} documents uploaded! Processing will begin shortly."
 msgstr[0] "Dokument przesłany! Przetwarzanie rozpocznie się wkrótce."
-msgstr[1] "%{count} dokumentów przesłanych! Przetwarzanie rozpocznie się wkrótce."
-msgstr[2] ""
+msgstr[1] "%{count} dokumenty przesłane! Przetwarzanie rozpocznie się wkrótce."
+msgstr[2] "%{count} dokumentów przesłanych! Przetwarzanie rozpocznie się wkrótce."
 
 #: lib/doctrans_web/live/book_live/components.ex:129
 #, elixir-autogen, elixir-format
