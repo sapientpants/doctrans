@@ -222,8 +222,18 @@ defmodule Doctrans.Validation do
 
   defp validate_content_type(content_type) when is_binary(content_type) do
     allowed_types = [
+      # PDF
       "application/pdf",
-      "application/octet-stream"
+      # Generic binary (browsers sometimes use this)
+      "application/octet-stream",
+      # Word documents
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/msword",
+      # OpenDocument
+      "application/vnd.oasis.opendocument.text",
+      # Rich Text Format
+      "application/rtf",
+      "text/rtf"
     ]
 
     if content_type in allowed_types do

@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     postgresql-client \
     poppler-utils \
+    libreoffice-writer-nogui \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js (required for esbuild and tailwind)

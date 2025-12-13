@@ -126,16 +126,16 @@ defmodule DoctransWeb.DocumentLive.Components do
         <form phx-submit="upload_document" phx-change="validate_upload" id="upload-form">
           <div class="form-control mb-4">
             <label class="label">
-              <span class="label-text">{gettext("PDF Files")}</span>
+              <span class="label-text">{gettext("Documents")}</span>
             </label>
             <div
               class="border-2 border-dashed border-base-300 rounded-lg p-4 text-center hover:border-primary transition-colors"
-              phx-drop-target={@uploads.pdf.ref}
+              phx-drop-target={@uploads.document.ref}
             >
-              <.live_file_input upload={@uploads.pdf} class="hidden" />
-              <.upload_empty_state :if={@uploads.pdf.entries == []} upload={@uploads.pdf} />
-              <.upload_entries_list :if={@uploads.pdf.entries != []} upload={@uploads.pdf} />
-              <.upload_error :for={err <- upload_errors(@uploads.pdf)} error={err} />
+              <.live_file_input upload={@uploads.document} class="hidden" />
+              <.upload_empty_state :if={@uploads.document.entries == []} upload={@uploads.document} />
+              <.upload_entries_list :if={@uploads.document.entries != []} upload={@uploads.document} />
+              <.upload_error :for={err <- upload_errors(@uploads.document)} error={err} />
             </div>
           </div>
 
@@ -159,7 +159,7 @@ defmodule DoctransWeb.DocumentLive.Components do
             <button
               type="submit"
               class="btn btn-primary"
-              disabled={@uploads.pdf.entries == []}
+              disabled={@uploads.document.entries == []}
               id="start-translation-btn"
             >
               {gettext("Start Translation")}
@@ -177,12 +177,14 @@ defmodule DoctransWeb.DocumentLive.Components do
     <div class="py-4">
       <.icon name="hero-cloud-arrow-up" class="w-12 h-12 mx-auto text-base-content/50" />
       <p class="mt-2 text-sm text-base-content/70">
-        {gettext("Drag and drop PDF files here, or")}
+        {gettext("Drag and drop documents here, or")}
         <label for={@upload.ref} class="link link-primary cursor-pointer">
           {gettext("browse")}
         </label>
       </p>
-      <p class="mt-1 text-xs text-base-content/50">{gettext("Up to 10 files at once")}</p>
+      <p class="mt-1 text-xs text-base-content/50">
+        {gettext("PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Up to 10 files")}
+      </p>
     </div>
     """
   end
@@ -256,7 +258,10 @@ defmodule DoctransWeb.DocumentLive.Components do
 
   defp error_to_string(:too_large), do: gettext("File is too large (max 100MB)")
   defp error_to_string(:too_many_files), do: gettext("Maximum 10 files can be uploaded at once")
-  defp error_to_string(:not_accepted), do: gettext("Only PDF files are accepted")
+
+  defp error_to_string(:not_accepted),
+    do: gettext("Only PDF, Word, OpenDocument, and RTF documents are accepted")
+
   defp error_to_string(err), do: gettext("Error: %{error}", error: inspect(err))
 
   @doc """

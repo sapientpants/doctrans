@@ -101,83 +101,124 @@ msgstr "muss größer oder gleich %{number} sein"
 msgid "must be equal to %{number}"
 msgstr "muss gleich %{number} sein"
 
-#: lib/doctrans/processing/pdf_extractor.ex:75
+#: lib/doctrans/processing/pdf_extractor.ex:124
 #, elixir-autogen, elixir-format
 msgid "Could not parse page count from pdfinfo output"
 msgstr "Seitenanzahl konnte aus pdfinfo-Ausgabe nicht ermittelt werden"
 
-#: lib/doctrans/processing/pdf_processor.ex:46
+#: lib/doctrans/processing/pdf_processor.ex:53
 #, elixir-autogen, elixir-format
 msgid "Document not found"
 msgstr "Dokument nicht gefunden"
 
-#: lib/doctrans/processing/ollama.ex:138
+#: lib/doctrans/processing/ollama.ex:195
 #, elixir-autogen, elixir-format
 msgid "Failed to connect to Ollama: %{reason}"
 msgstr "Verbindung zu Ollama fehlgeschlagen: %{reason}"
 
-#: lib/doctrans/search/embedding_worker.ex:87
-#, elixir-autogen, elixir-format
-msgid "Failed to generate embedding for page %{page_id}: %{reason}"
-msgstr "Embedding für Seite %{page_id} konnte nicht erstellt werden: %{reason}"
-
-#: lib/doctrans/processing/ollama.ex:57
+#: lib/doctrans/processing/ollama.ex:92
 #, elixir-autogen, elixir-format
 msgid "Failed to read image: %{reason}"
 msgstr "Bild konnte nicht gelesen werden: %{reason}"
 
-#: lib/doctrans/search/embedding.ex:44
+#: lib/doctrans/search/embedding.ex:51
 #, elixir-autogen, elixir-format
 msgid "Ollama embedding error (%{status}): %{body}"
 msgstr "Ollama Embedding-Fehler (%{status}): %{body}"
 
-#: lib/doctrans/processing/ollama.ex:167
+#: lib/doctrans/processing/ollama.ex:249
 #, elixir-autogen, elixir-format
 msgid "Ollama error (%{status}): %{error}"
 msgstr "Ollama-Fehler (%{status}): %{error}"
 
-#: lib/doctrans/processing/ollama.ex:131
+#: lib/doctrans/processing/ollama.ex:188
 #, elixir-autogen, elixir-format
 msgid "Ollama returned status %{status}: %{body}"
 msgstr "Ollama hat Status %{status} zurückgegeben: %{body}"
 
-#: lib/doctrans/processing/pdf_extractor.ex:59
+#: lib/doctrans/processing/pdf_extractor.ex:60
+#: lib/doctrans/processing/pdf_extractor.ex:108
 #, elixir-autogen, elixir-format
 msgid "PDF extraction failed: %{error}"
 msgstr "PDF-Extraktion fehlgeschlagen: %{error}"
 
-#: lib/doctrans/processing/pdf_processor.ex:69
+#: lib/doctrans/processing/pdf_processor.ex:98
 #, elixir-autogen, elixir-format
 msgid "PDF extraction failed: %{reason}"
 msgstr "PDF-Extraktion fehlgeschlagen: %{reason}"
 
-#: lib/doctrans/processing/llm_processor.ex:168
+#: lib/doctrans/processing/llm_processor.ex:212
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} extraction failed: %{reason}"
 msgstr "Extraktion von Seite %{page_number} fehlgeschlagen: %{reason}"
 
-#: lib/doctrans/processing/llm_processor.ex:216
+#: lib/doctrans/processing/llm_processor.ex:316
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} translation failed: %{reason}"
 msgstr "Übersetzung von Seite %{page_number} fehlgeschlagen: %{reason}"
 
-#: lib/doctrans/processing/ollama.ex:178
-#: lib/doctrans/search/embedding.ex:51
+#: lib/doctrans/processing/ollama.ex:260
+#: lib/doctrans/search/embedding.ex:58
 #, elixir-autogen, elixir-format
 msgid "Request failed: %{reason}"
 msgstr "Anfrage fehlgeschlagen: %{reason}"
 
-#: lib/doctrans/processing/ollama.ex:174
+#: lib/doctrans/processing/ollama.ex:256
 #, elixir-autogen, elixir-format
 msgid "Request timed out"
 msgstr "Zeitüberschreitung der Anfrage"
 
-#: lib/doctrans/processing/ollama.ex:159
+#: lib/doctrans/processing/ollama.ex:241
 #, elixir-autogen, elixir-format
 msgid "Unexpected response format from Ollama"
 msgstr "Unerwartetes Antwortformat von Ollama"
 
-#: lib/doctrans/processing/pdf_extractor.ex:79
+#: lib/doctrans/processing/pdf_extractor.ex:128
 #, elixir-autogen, elixir-format
 msgid "pdfinfo failed: %{error}"
 msgstr "pdfinfo fehlgeschlagen: %{error}"
+
+#: lib/doctrans/processing/document_converter.ex:88
+#, elixir-autogen, elixir-format
+msgid "Conversion completed but PDF file not found"
+msgstr "Konvertierung abgeschlossen, aber PDF-Datei nicht gefunden"
+
+#: lib/doctrans/processing/document_converter.ex:95
+#, elixir-autogen, elixir-format
+msgid "Document conversion failed: %{error}"
+msgstr "Dokumentkonvertierung fehlgeschlagen: %{error}"
+
+#: lib/doctrans/processing/document_converter.ex:101
+#, elixir-autogen, elixir-format
+msgid "Document conversion timed out"
+msgstr "Zeitüberschreitung bei der Dokumentkonvertierung"
+
+#: lib/doctrans/processing/document_converter.ex:47
+#, elixir-autogen, elixir-format
+msgid "LibreOffice is not installed"
+msgstr "LibreOffice ist nicht installiert"
+
+#: lib/doctrans/processing/ollama.ex:233
+#, elixir-autogen, elixir-format
+msgid "Model returned empty response"
+msgstr "Model returned empty response"
+
+#: lib/doctrans/processing/pdf_extractor.ex:100
+#, elixir-autogen, elixir-format
+msgid "Page image not found after extraction"
+msgstr "Page image not found after extraction"
+
+#: lib/doctrans/processing/llm_processor.ex:55
+#, elixir-autogen, elixir-format
+msgid "Page not found"
+msgstr "Page not found"
+
+#: lib/doctrans/processing/document_converter.ex:38
+#, elixir-autogen, elixir-format
+msgid "Source file not found: %{path}"
+msgstr "Quelldatei nicht gefunden: %{path}"
+
+#: lib/doctrans/processing/document_processor.ex:49
+#, elixir-autogen, elixir-format
+msgid "Unsupported file format: %{format}"
+msgstr "Nicht unterstütztes Dateiformat: %{format}"

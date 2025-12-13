@@ -56,5 +56,11 @@
   {"lib/doctrans/validation.ex", :pattern_match_cov},
 
   # Jobs fire-and-forget operations
-  {"lib/doctrans/jobs/health_check_job.ex", :unmatched_return}
+  {"lib/doctrans/jobs/health_check_job.ex", :unmatched_return},
+
+  # Document processor uses File.rm for fire-and-forget cleanup
+  {"lib/doctrans/processing/document_processor.ex", :unmatched_return},
+
+  # Document converter uses File.rm and mkdir_p for fire-and-forget operations
+  {"lib/doctrans/processing/document_converter.ex", :unmatched_return}
 ]

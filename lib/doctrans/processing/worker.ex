@@ -10,7 +10,7 @@ defmodule Doctrans.Processing.Worker do
   require Logger
 
   alias Doctrans.Documents
-  alias Doctrans.Jobs.{LlmProcessingJob, PdfExtractionJob}
+  alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
   import Ecto.Query
 
   def start_link(opts) do
@@ -18,13 +18,14 @@ defmodule Doctrans.Processing.Worker do
   end
 
   @doc """
-  Starts PDF extraction for a document using Oban jobs.
+  Starts document extraction for a document using Oban jobs.
 
-  PDF extraction is queued as a job for better reliability and tracking.
+  Supports PDF, Word (.docx), and other document formats.
+  Document extraction is queued as a job for better reliability and tracking.
   """
-  def process_document(document_id, pdf_path) do
-    %{"document_id" => document_id, "pdf_path" => pdf_path}
-    |> PdfExtractionJob.new()
+  def process_document(document_id, file_path) do
+    %{"document_id" => document_id, "file_path" => file_path}
+    |> DocumentExtractionJob.new()
     |> Oban.insert()
   end
 
