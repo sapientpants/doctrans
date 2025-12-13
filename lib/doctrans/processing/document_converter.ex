@@ -40,6 +40,15 @@ defmodule Doctrans.Processing.DocumentConverter do
   end
 
   defp do_convert(source_path, output_dir) do
+    if available?() do
+      run_conversion(source_path, output_dir)
+    else
+      Logger.error("LibreOffice is not installed")
+      {:error, dgettext("errors", "LibreOffice is not installed")}
+    end
+  end
+
+  defp run_conversion(source_path, output_dir) do
     File.mkdir_p!(output_dir)
 
     soffice_path = get_soffice_path()
