@@ -57,4 +57,26 @@ defmodule Doctrans.Processing.OllamaStub do
       error -> {:error, error}
     end
   end
+
+  @impl true
+  def chat(messages, opts \\ [])
+
+  def chat(messages, _opts) do
+    case Application.get_env(:doctrans, :ollama_stub_chat_error) do
+      nil ->
+        # Extract the last user message to generate a contextual response
+        user_msg =
+          messages
+          |> Enum.filter(&(&1.role == "user" || &1[:role] == "user"))
+          |> List.last()
+
+        question = user_msg[:content] || user_msg.content || "unknown question"
+
+        {:ok,
+         "This is a mock response to your question about: #{String.slice(question, 0, 50)}. The document contains relevant information."}
+
+      error ->
+        {:error, error}
+    end
+  end
 end

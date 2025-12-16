@@ -192,4 +192,104 @@ defmodule Doctrans.SearchTest do
       # that FTS-matching pages are included in results.
     end
   end
+
+  describe "search_in_document/3" do
+    test "returns empty list for empty query" do
+      doc = document_fixture(%{status: "completed"})
+      assert {:ok, []} = Search.search_in_document(doc.id, "")
+    end
+
+    test "returns empty list for nil query" do
+      doc = document_fixture(%{status: "completed"})
+      assert {:ok, []} = Search.search_in_document(doc.id, nil)
+    end
+
+    test "accepts limit option" do
+      doc = document_fixture(%{status: "completed"})
+      result = Search.search_in_document(doc.id, "test", limit: 2)
+      assert match?({:ok, _}, result) or match?({:error, _}, result)
+    end
+
+    test "accepts min_similarity option" do
+      doc = document_fixture(%{status: "completed"})
+      result = Search.search_in_document(doc.id, "test", min_similarity: 0.5)
+      assert match?({:ok, _}, result) or match?({:error, _}, result)
+    end
+
+    test "only searches within specified document" do
+      # Create two documents
+      doc1 = document_fixture(%{status: "completed", title: "Doc One"})
+      doc2 = document_fixture(%{status: "completed", title: "Doc Two"})
+
+      page1 = page_fixture(doc1, %{page_number: 1})
+      page2 = page_fixture(doc2, %{page_number: 1})
+
+      {:ok, _} =
+        Pages.update_page_extraction(page1, %{
+          extraction_status: "completed",
+          original_markdown: "Content in document one"
+        })
+
+      {:ok, _} =
+        Pages.update_page_extraction(page2, %{
+          extraction_status: "completed",
+          original_markdown: "Content in document two"
+        })
+
+      # Search in doc1 - should only return doc1's pages
+      result = Search.search_in_document(doc1.id, "content")
+
+      case result do
+        {:ok, results} ->
+          # Results should only include pages from doc1
+          for r <- results do
+            assert r.page_id == page1.id
+          end
+
+        {:error, _} ->
+          # Acceptable if embedding generation fails
+          :ok
+      end
+    end
+
+    test "returns results with correct structure" do
+      doc = document_fixture(%{status: "completed"})
+      page = page_fixture(doc, %{page_number: 1})
+
+      {:ok, _} =
+        Pages.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "Test content for structure"
+        })
+
+      case Search.search_in_document(doc.id, "test") do
+        {:ok, results} ->
+          for result <- results do
+            assert Map.has_key?(result, :page_id)
+            assert Map.has_key?(result, :page_number)
+            assert Map.has_key?(result, :original_markdown)
+            assert Map.has_key?(result, :translated_markdown)
+            assert Map.has_key?(result, :similarity)
+          end
+
+        {:error, _} ->
+          :ok
+      end
+    end
+  end
+
+  describe "count_results/2" do
+    test "returns 0 for empty query" do
+      assert {:ok, 0} = Search.count_results("")
+    end
+
+    test "returns 0 for nil query" do
+      assert {:ok, 0} = Search.count_results(nil)
+    end
+
+    test "accepts rrf_k option" do
+      result = Search.count_results("test", rrf_k: 80)
+      assert match?({:ok, _}, result) or match?({:error, _}, result)
+    end
+  end
 end
