@@ -47,6 +47,8 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:chat_open, false)
       |> assign(:chat_loading, false)
       |> assign(:chat_history, [])
+      |> assign(:chat_task_ref, nil)
+      |> assign(:chat_last_question, nil)
       |> assign(:embeddings_ready, Chat.embeddings_ready?(document))
       |> stream(:chat_messages, [])
 
@@ -408,37 +410,45 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   @impl true
-  def handle_event("send_chat_message", %{"message" => ""}, socket) do
-    {:noreply, socket}
-  end
-
-  @impl true
   def handle_event("send_chat_message", %{"message" => message}, socket) do
-    document = socket.assigns.document
+    trimmed_message = String.trim(message || "")
 
-    # Add user message to stream
-    user_msg = %{id: "msg-#{System.unique_integer([:positive])}", role: "user", content: message}
+    if trimmed_message == "" do
+      {:noreply, socket}
+    else
+      document = socket.assigns.document
 
-    socket =
-      socket
-      |> stream_insert(:chat_messages, user_msg)
-      |> assign(:chat_loading, true)
+      # Add user message to stream
+      user_msg = %{
+        id: "msg-#{System.unique_integer([:positive])}",
+        role: "user",
+        content: trimmed_message
+      }
 
-    # Get existing chat history
-    chat_history = socket.assigns.chat_history
+      socket =
+        socket
+        |> stream_insert(:chat_messages, user_msg)
+        |> assign(:chat_loading, true)
 
-    # Spawn async task for LLM call
-    pid = self()
+      # Get existing chat history
+      chat_history = socket.assigns.chat_history
 
-    Task.Supervisor.start_child(
-      Doctrans.TaskSupervisor,
-      fn ->
-        result = Chat.send_message(document, message, chat_history)
-        send(pid, {:chat_response, result, message})
-      end
-    )
+      # Spawn async task for LLM call with monitoring
+      task =
+        Task.Supervisor.async_nolink(
+          Doctrans.TaskSupervisor,
+          fn ->
+            Chat.send_message(document, trimmed_message, chat_history)
+          end
+        )
 
-    {:noreply, socket}
+      socket =
+        socket
+        |> assign(:chat_task_ref, task.ref)
+        |> assign(:chat_last_question, trimmed_message)
+
+      {:noreply, socket}
+    end
   end
 
   defp maybe_refresh_embeddings_status(socket) do
@@ -504,10 +514,15 @@ defmodule DoctransWeb.DocumentLive.Show do
     {:noreply, socket}
   end
 
-  # Chat response handlers
+  # Chat response handlers (async_nolink pattern)
 
   @impl true
-  def handle_info({:chat_response, {:ok, response}, user_message}, socket) do
+  def handle_info({ref, {:ok, response}}, socket) when socket.assigns.chat_task_ref == ref do
+    # Flush the :DOWN message
+    Process.demonitor(ref, [:flush])
+
+    user_message = socket.assigns.chat_last_question
+
     # Add assistant message to stream
     assistant_msg = %{
       id: "msg-#{System.unique_integer([:positive])}",
@@ -527,36 +542,48 @@ defmodule DoctransWeb.DocumentLive.Show do
       socket
       |> stream_insert(:chat_messages, assistant_msg)
       |> assign(:chat_loading, false)
+      |> assign(:chat_task_ref, nil)
+      |> assign(:chat_last_question, nil)
       |> assign(:chat_history, updated_history)
 
     {:noreply, socket}
   end
 
   @impl true
-  def handle_info({:chat_response, {:error, reason}, _user_message}, socket) do
-    error_content =
-      case reason do
-        :empty_question ->
-          gettext("Please enter a question.")
+  def handle_info({ref, {:error, reason}}, socket) when socket.assigns.chat_task_ref == ref do
+    Process.demonitor(ref, [:flush])
+    {:noreply, handle_chat_error(socket, chat_error_message(reason))}
+  end
 
-        {:database_error, _} ->
-          gettext("Failed to search the document. Please try again.")
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, socket)
+      when socket.assigns.chat_task_ref == ref do
+    msg =
+      if reason == :normal,
+        do: gettext("Chat completed unexpectedly."),
+        else: chat_error_message(:unknown)
 
-        _ ->
-          gettext("Sorry, I encountered an error. Please try again.")
-      end
+    {:noreply, handle_chat_error(socket, msg)}
+  end
 
+  defp handle_chat_error(socket, message) do
     error_msg = %{
       id: "msg-#{System.unique_integer([:positive])}",
       role: "error",
-      content: error_content
+      content: message
     }
 
-    socket =
-      socket
-      |> stream_insert(:chat_messages, error_msg)
-      |> assign(:chat_loading, false)
-
-    {:noreply, socket}
+    socket
+    |> stream_insert(:chat_messages, error_msg)
+    |> assign(:chat_loading, false)
+    |> assign(:chat_task_ref, nil)
+    |> assign(:chat_last_question, nil)
   end
+
+  defp chat_error_message(:empty_question), do: gettext("Please enter a question.")
+
+  defp chat_error_message({:database_error, _}),
+    do: gettext("Failed to search the document. Please try again.")
+
+  defp chat_error_message(_), do: gettext("Sorry, I encountered an error. Please try again.")
 end

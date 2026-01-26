@@ -49,39 +49,45 @@ defmodule Doctrans.Chat do
   end
 
   def send_message(document, question, chat_history, opts) do
-    context_limit = Keyword.get(opts, :context_limit, 3)
-    min_similarity = Keyword.get(opts, :min_similarity)
+    trimmed_question = String.trim(question)
 
-    Logger.info(
-      "Processing chat question for document #{document.id}: #{String.slice(question, 0, 100)}"
-    )
+    if trimmed_question == "" do
+      {:error, :empty_question}
+    else
+      context_limit = Keyword.get(opts, :context_limit, 3)
+      min_similarity = Keyword.get(opts, :min_similarity)
 
-    search_opts =
-      [limit: context_limit]
-      |> then(fn o ->
-        if min_similarity, do: Keyword.put(o, :min_similarity, min_similarity), else: o
-      end)
+      Logger.info(
+        "Processing chat question for document #{document.id}: #{String.slice(trimmed_question, 0, 100)}"
+      )
 
-    case Search.search_in_document(document.id, question, search_opts) do
-      {:ok, pages} ->
-        log_search_results(pages, document.id)
+      search_opts =
+        [limit: context_limit]
+        |> then(fn o ->
+          if min_similarity, do: Keyword.put(o, :min_similarity, min_similarity), else: o
+        end)
 
-        context = build_context(pages)
-        system_prompt = build_system_prompt(document.title, context)
-        messages = build_messages(system_prompt, chat_history, question)
+      case Search.search_in_document(document.id, trimmed_question, search_opts) do
+        {:ok, pages} ->
+          log_search_results(pages, document.id)
 
-        case Ollama.chat(messages, opts) do
-          {:ok, response} ->
-            {:ok, response}
+          context = build_context(pages)
+          system_prompt = build_system_prompt(document.title, context)
+          messages = build_messages(system_prompt, chat_history, trimmed_question)
 
-          {:error, reason} = error ->
-            Logger.error("Chat failed for document #{document.id}: #{inspect(reason)}")
-            error
-        end
+          case Ollama.chat(messages, opts) do
+            {:ok, response} ->
+              {:ok, response}
 
-      {:error, reason} = error ->
-        Logger.error("Chat search failed for document #{document.id}: #{inspect(reason)}")
-        error
+            {:error, reason} = error ->
+              Logger.error("Chat failed for document #{document.id}: #{inspect(reason)}")
+              error
+          end
+
+        {:error, reason} = error ->
+          Logger.error("Chat search failed for document #{document.id}: #{inspect(reason)}")
+          error
+      end
     end
   end
 

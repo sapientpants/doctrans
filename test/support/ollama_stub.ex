@@ -70,7 +70,11 @@ defmodule Doctrans.Processing.OllamaStub do
           |> Enum.filter(&(&1.role == "user" || &1[:role] == "user"))
           |> List.last()
 
-        question = user_msg[:content] || user_msg.content || "unknown question"
+        question =
+          case user_msg do
+            nil -> "unknown question"
+            _ -> user_msg[:content] || user_msg.content || "unknown question"
+          end
 
         {:ok,
          "This is a mock response to your question about: #{String.slice(question, 0, 50)}. The document contains relevant information."}
