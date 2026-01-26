@@ -6,7 +6,6 @@ defmodule Doctrans.Chat do
   via Ollama's /api/chat endpoint.
   """
 
-  alias Doctrans.Processing.Ollama
   alias Doctrans.Search
 
   require Logger
@@ -75,7 +74,7 @@ defmodule Doctrans.Chat do
           system_prompt = build_system_prompt(document.title, context)
           messages = build_messages(system_prompt, chat_history, trimmed_question)
 
-          case Ollama.chat(messages, opts) do
+          case ollama_module().chat(messages, opts) do
             {:ok, response} ->
               {:ok, response}
 
@@ -147,6 +146,10 @@ defmodule Doctrans.Chat do
   end
 
   # Private functions
+
+  defp ollama_module do
+    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
+  end
 
   defp build_system_prompt(document_title, context) when context == "" do
     """
