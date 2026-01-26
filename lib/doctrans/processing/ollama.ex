@@ -159,6 +159,109 @@ defmodule Doctrans.Processing.Ollama do
   end
 
   @doc """
+  Sends a chat completion request to Ollama.
+
+  Uses the /api/chat endpoint for multi-turn conversations.
+
+  ## Parameters
+
+  - `messages` - List of message maps with `:role` and `:content` keys.
+    Roles can be "system", "user", or "assistant".
+  - `opts` - Options (see below)
+
+  ## Options
+
+  - `:model` - Override the default text model
+  - `:timeout` - Override the default timeout (default: 120_000 for chat)
+
+  ## Returns
+
+  - `{:ok, response_text}` on success
+  - `{:error, reason}` on failure
+
+  ## Examples
+
+      messages = [
+        %{role: "system", content: "You are a helpful assistant."},
+        %{role: "user", content: "What is 2+2?"}
+      ]
+      {:ok, response} = Ollama.chat(messages)
+  """
+  def chat(messages, opts \\ []) do
+    config = ollama_config()
+    model = Keyword.get(opts, :model, config[:text_model])
+    # Use shorter timeout for chat (2 minutes) for better UX
+    timeout = Keyword.get(opts, :timeout, 120_000)
+
+    Logger.info("Sending chat request with #{length(messages)} messages using #{model}")
+
+    body = %{
+      model: model,
+      messages: messages,
+      stream: false,
+      options: %{
+        num_ctx: 16_384,
+        num_predict: 4_096
+      }
+    }
+
+    make_chat_request("/api/chat", body, timeout)
+  end
+
+  defp make_chat_request(path, body, timeout) do
+    alias Doctrans.Resilience.CircuitBreaker
+
+    CircuitBreaker.call(:ollama_api, fn ->
+      do_make_chat_request(path, body, timeout)
+    end)
+  end
+
+  defp do_make_chat_request(path, body, timeout) do
+    config = ollama_config()
+    url = "#{config[:base_url]}#{path}"
+
+    Logger.info("Ollama chat request: model=#{body[:model]}, messages=#{length(body[:messages])}")
+
+    case Req.post(url, json: body, receive_timeout: timeout) do
+      {:ok, %{status: 200, body: response_body}} ->
+        case response_body do
+          %{"message" => %{"content" => content}} ->
+            result = content |> String.trim() |> strip_code_fences()
+
+            if result == "" do
+              Logger.warning("Ollama chat returned empty response")
+              {:error, dgettext("errors", "Model returned empty response")}
+            else
+              Logger.debug("Ollama chat returned #{String.length(result)} chars")
+              {:ok, result}
+            end
+
+          other ->
+            Logger.warning("Unexpected chat response format: #{inspect(other)}")
+            {:error, dgettext("errors", "Unexpected response format from Ollama")}
+        end
+
+      {:ok, %{status: status, body: response_body}} ->
+        error_msg = get_in(response_body, ["error"]) || inspect(response_body)
+        Logger.error("Ollama chat request failed with status #{status}: #{error_msg}")
+
+        {:error,
+         dgettext("errors", "Ollama error (%{status}): %{error}",
+           status: status,
+           error: error_msg
+         )}
+
+      {:error, %Req.TransportError{reason: :timeout}} ->
+        Logger.error("Ollama chat request timed out after #{timeout}ms")
+        {:error, dgettext("errors", "Request timed out")}
+
+      {:error, reason} ->
+        Logger.error("Ollama chat request failed: #{inspect(reason)}")
+        {:error, dgettext("errors", "Request failed: %{reason}", reason: inspect(reason))}
+    end
+  end
+
+  @doc """
   Checks if Ollama is running and accessible.
   """
   def available? do

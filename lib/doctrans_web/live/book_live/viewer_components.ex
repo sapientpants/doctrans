@@ -2,6 +2,8 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
   @moduledoc "Components for the document viewer page."
   use DoctransWeb, :html
 
+  import DoctransWeb.DocumentLive.MarkdownHelpers, only: [render_markdown: 1]
+
   attr :current_page, :integer, required: true
   attr :total_pages, :integer, required: true
   attr :document, :map, required: true
@@ -196,21 +198,6 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
       <div class="modal-backdrop bg-black/50" phx-click="hide_reprocess_modal"></div>
     </div>
     """
-  end
-
-  defp render_markdown(nil), do: ""
-  defp render_markdown(""), do: ""
-
-  defp render_markdown(text) do
-    case Earmark.as_html(text) do
-      {:ok, html, _} -> sanitize_html(html)
-      {:error, html, _} -> sanitize_html(html)
-    end
-  end
-
-  # Sanitize HTML to prevent XSS attacks from user-uploaded content
-  defp sanitize_html(html) do
-    HtmlSanitizeEx.basic_html(html)
   end
 
   defp show_content?(page, show_original) do

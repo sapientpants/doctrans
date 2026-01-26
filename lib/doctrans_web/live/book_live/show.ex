@@ -2,6 +2,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   @moduledoc "Document Viewer LiveView with split-screen layout."
   use DoctransWeb, :live_view
 
+  alias Doctrans.Chat
   alias Doctrans.Documents
   alias Doctrans.Processing.{Ollama, Worker}
 
@@ -9,6 +10,7 @@ defmodule DoctransWeb.DocumentLive.Show do
     only: [status_color: 1, status_text: 1, language_name: 1]
 
   import DoctransWeb.DocumentLive.ViewerComponents
+  import DoctransWeb.DocumentLive.ChatComponents
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -41,6 +43,14 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:model_fetch_error, nil)
       |> assign(:extraction_model, ollama_config[:vision_model] || "ministral-3:14b")
       |> assign(:translation_model, ollama_config[:text_model] || "ministral-3:14b")
+      # Chat state
+      |> assign(:chat_open, false)
+      |> assign(:chat_loading, false)
+      |> assign(:chat_history, [])
+      |> assign(:chat_task_ref, nil)
+      |> assign(:chat_last_question, nil)
+      |> assign(:embeddings_ready, Chat.embeddings_ready?(document))
+      |> stream(:chat_messages, [])
 
     {:ok, socket}
   end
@@ -107,19 +117,36 @@ defmodule DoctransWeb.DocumentLive.Show do
             </div>
           </div>
 
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-3">
             <.page_selector
               current_page={@current_page_number}
               total_pages={@document.total_pages || 0}
               document={@document}
             />
+            <button
+              type="button"
+              phx-click="toggle_chat"
+              class={[
+                "btn btn-sm",
+                @chat_open && "btn-primary",
+                !@chat_open && "btn-ghost"
+              ]}
+              title={gettext("Chat with document")}
+            >
+              <.icon name="hero-chat-bubble-left-right" class="w-5 h-5" />
+              <span class="hidden sm:inline">{gettext("Chat")}</span>
+            </button>
           </div>
         </header>
 
         <%!-- Main content - Split screen --%>
         <main class="flex-1 flex overflow-hidden">
           <%!-- Left panel - Page image --%>
-          <div class="w-1/2 border-r border-base-300 flex flex-col bg-base-200">
+          <div class={[
+            "border-r border-base-300 flex flex-col bg-base-200 transition-all duration-200",
+            @chat_open && "w-2/5",
+            !@chat_open && "w-1/2"
+          ]}>
             <div class="flex items-center justify-between px-4 py-2 border-b border-base-300">
               <span class="text-sm font-medium">{gettext("Original Page")}</span>
               <div class="flex items-center gap-1">
@@ -148,7 +175,11 @@ defmodule DoctransWeb.DocumentLive.Show do
           </div>
 
           <%!-- Right panel - Translated content --%>
-          <div class="w-1/2 flex flex-col">
+          <div class={[
+            "flex flex-col transition-all duration-200",
+            @chat_open && "w-2/5",
+            !@chat_open && "w-1/2"
+          ]}>
             <div class="flex items-center justify-between px-4 py-2 border-b border-base-300">
               <span class="text-sm font-medium">
                 {if @show_original,
@@ -180,6 +211,14 @@ defmodule DoctransWeb.DocumentLive.Show do
               <.page_content page={@current_page} show_original={@show_original} />
             </div>
           </div>
+
+          <%!-- Chat panel --%>
+          <.chat_panel
+            :if={@chat_open}
+            chat_messages={@streams.chat_messages}
+            chat_loading={@chat_loading}
+            embeddings_ready={@embeddings_ready}
+          />
         </main>
 
         <%!-- Footer - Navigation --%>
@@ -357,6 +396,70 @@ defmodule DoctransWeb.DocumentLive.Show do
     end
   end
 
+  # Chat event handlers
+
+  @impl true
+  def handle_event("toggle_chat", _params, socket) do
+    socket =
+      socket
+      |> assign(:chat_open, !socket.assigns.chat_open)
+      # Refresh embeddings status when opening chat
+      |> maybe_refresh_embeddings_status()
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("send_chat_message", %{"message" => message}, socket) do
+    trimmed_message = String.trim(message || "")
+
+    # Guard against empty messages and double submits
+    if trimmed_message == "" or socket.assigns.chat_loading do
+      {:noreply, socket}
+    else
+      document = socket.assigns.document
+
+      # Add user message to stream
+      user_msg = %{
+        id: "msg-#{System.unique_integer([:positive])}",
+        role: "user",
+        content: trimmed_message
+      }
+
+      socket =
+        socket
+        |> stream_insert(:chat_messages, user_msg)
+        |> assign(:chat_loading, true)
+
+      # Get existing chat history
+      chat_history = socket.assigns.chat_history
+
+      # Spawn async task for LLM call with monitoring
+      task =
+        Task.Supervisor.async_nolink(
+          Doctrans.TaskSupervisor,
+          fn ->
+            Chat.send_message(document, trimmed_message, chat_history)
+          end
+        )
+
+      socket =
+        socket
+        |> assign(:chat_task_ref, task.ref)
+        |> assign(:chat_last_question, trimmed_message)
+
+      {:noreply, socket}
+    end
+  end
+
+  defp maybe_refresh_embeddings_status(socket) do
+    if socket.assigns.chat_open do
+      assign(socket, :embeddings_ready, Chat.embeddings_ready?(socket.assigns.document))
+    else
+      socket
+    end
+  end
+
   defp goto_page(socket, page_number) do
     document = socket.assigns.document
     page = Documents.get_page_by_number(document.id, page_number)
@@ -402,6 +505,95 @@ defmodule DoctransWeb.DocumentLive.Show do
 
     # Also refresh the document to update progress
     document = Documents.get_document_with_pages!(socket.assigns.document.id)
-    {:noreply, assign(socket, :document, document)}
+
+    # Also refresh embeddings status if chat is open
+    socket =
+      socket
+      |> assign(:document, document)
+      |> maybe_refresh_embeddings_status()
+
+    {:noreply, socket}
   end
+
+  # Chat response handlers (async_nolink pattern)
+
+  @impl true
+  def handle_info({ref, {:ok, response}}, socket) when socket.assigns.chat_task_ref == ref do
+    # Flush the :DOWN message
+    Process.demonitor(ref, [:flush])
+
+    user_message = socket.assigns.chat_last_question
+
+    # Add assistant message to stream
+    assistant_msg = %{
+      id: "msg-#{System.unique_integer([:positive])}",
+      role: "assistant",
+      content: response
+    }
+
+    # Update chat history for context in future messages (keep last 16 messages = 8 exchanges)
+    updated_history =
+      (socket.assigns.chat_history ++
+         [
+           %{role: "user", content: user_message},
+           %{role: "assistant", content: response}
+         ])
+      |> Enum.take(-16)
+
+    socket =
+      socket
+      |> stream_insert(:chat_messages, assistant_msg)
+      |> assign(:chat_loading, false)
+      |> assign(:chat_task_ref, nil)
+      |> assign(:chat_last_question, nil)
+      |> assign(:chat_history, updated_history)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({ref, {:error, reason}}, socket) when socket.assigns.chat_task_ref == ref do
+    Process.demonitor(ref, [:flush])
+    {:noreply, handle_chat_error(socket, chat_error_message(reason))}
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, socket)
+      when socket.assigns.chat_task_ref == ref do
+    # :normal = success (result already handled); only error on crashes
+    if reason == :normal,
+      do: {:noreply, socket},
+      else: {:noreply, handle_chat_error(socket, chat_error_message(:unknown))}
+  end
+
+  # Catch-all handlers for stale task refs
+  @impl true
+  def handle_info({ref, _result}, socket) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket), do: {:noreply, socket}
+
+  defp handle_chat_error(socket, message) do
+    error_msg = %{
+      id: "msg-#{System.unique_integer([:positive])}",
+      role: "error",
+      content: message
+    }
+
+    socket
+    |> stream_insert(:chat_messages, error_msg)
+    |> assign(:chat_loading, false)
+    |> assign(:chat_task_ref, nil)
+    |> assign(:chat_last_question, nil)
+  end
+
+  defp chat_error_message(:empty_question), do: gettext("Please enter a question.")
+
+  defp chat_error_message({:database_error, _}),
+    do: gettext("Failed to search the document. Please try again.")
+
+  defp chat_error_message(_), do: gettext("Sorry, I encountered an error. Please try again.")
 end

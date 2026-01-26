@@ -192,4 +192,120 @@ defmodule Doctrans.SearchTest do
       # that FTS-matching pages are included in results.
     end
   end
+
+  describe "search_in_document/3" do
+    test "returns empty list for empty query" do
+      doc = document_fixture(%{status: "completed"})
+      assert {:ok, []} = Search.search_in_document(doc.id, "")
+    end
+
+    test "returns empty list for nil query" do
+      doc = document_fixture(%{status: "completed"})
+      assert {:ok, []} = Search.search_in_document(doc.id, nil)
+    end
+
+    test "accepts limit option" do
+      doc = document_fixture(%{status: "completed"})
+      assert {:ok, results} = Search.search_in_document(doc.id, "test", limit: 2)
+      assert is_list(results)
+    end
+
+    test "accepts min_similarity option" do
+      doc = document_fixture(%{status: "completed"})
+      assert {:ok, results} = Search.search_in_document(doc.id, "test", min_similarity: 0.5)
+      assert is_list(results)
+    end
+
+    test "only searches within specified document" do
+      # Create two documents with pages that have embeddings
+      doc1 = document_fixture(%{status: "completed", title: "Doc One"})
+      doc2 = document_fixture(%{status: "completed", title: "Doc Two"})
+
+      # Create embeddings for both pages
+      embedding = Pgvector.new(List.duplicate(0.1, 1024))
+
+      page1 =
+        Doctrans.Repo.insert!(%Doctrans.Documents.Page{
+          id: Ecto.UUID.generate(),
+          document_id: doc1.id,
+          page_number: 1,
+          image_path: "documents/#{doc1.id}/pages/page_1.png",
+          original_markdown: "Content in document one",
+          extraction_status: "completed",
+          translation_status: "pending",
+          embedding_status: "completed",
+          embedding: embedding
+        })
+
+      _page2 =
+        Doctrans.Repo.insert!(%Doctrans.Documents.Page{
+          id: Ecto.UUID.generate(),
+          document_id: doc2.id,
+          page_number: 1,
+          image_path: "documents/#{doc2.id}/pages/page_1.png",
+          original_markdown: "Content in document two",
+          extraction_status: "completed",
+          translation_status: "pending",
+          embedding_status: "completed",
+          embedding: embedding
+        })
+
+      # Search in doc1 - should only return doc1's pages
+      assert {:ok, results} = Search.search_in_document(doc1.id, "content")
+
+      # Results should only include pages from doc1
+      for r <- results do
+        assert r.page_id == page1.id
+      end
+    end
+
+    test "returns results with correct structure" do
+      doc = document_fixture(%{status: "completed"})
+
+      # Create page with embedding so search can find it
+      embedding = Pgvector.new(List.duplicate(0.1, 1024))
+
+      page =
+        Doctrans.Repo.insert!(%Doctrans.Documents.Page{
+          id: Ecto.UUID.generate(),
+          document_id: doc.id,
+          page_number: 1,
+          image_path: "documents/#{doc.id}/pages/page_1.png",
+          original_markdown: "Test content for structure",
+          translated_markdown: "Translated test content",
+          extraction_status: "completed",
+          translation_status: "completed",
+          embedding_status: "completed",
+          embedding: embedding
+        })
+
+      assert {:ok, results} = Search.search_in_document(doc.id, "test")
+      # With embedding, we should get results
+      refute Enum.empty?(results)
+
+      for result <- results do
+        assert Map.has_key?(result, :page_id)
+        assert Map.has_key?(result, :page_number)
+        assert Map.has_key?(result, :original_markdown)
+        assert Map.has_key?(result, :translated_markdown)
+        assert Map.has_key?(result, :similarity)
+        assert result.page_id == page.id
+      end
+    end
+  end
+
+  describe "count_results/2" do
+    test "returns 0 for empty query" do
+      assert {:ok, 0} = Search.count_results("")
+    end
+
+    test "returns 0 for nil query" do
+      assert {:ok, 0} = Search.count_results(nil)
+    end
+
+    test "accepts rrf_k option" do
+      result = Search.count_results("test", rrf_k: 80)
+      assert match?({:ok, _}, result) or match?({:error, _}, result)
+    end
+  end
 end

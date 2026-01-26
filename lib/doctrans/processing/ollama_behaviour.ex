@@ -14,4 +14,7 @@ defmodule Doctrans.Processing.OllamaBehaviour do
   @callback available?() :: boolean()
 
   @callback list_models() :: {:ok, [String.t()]} | {:error, term()}
+
+  @callback chat(messages :: [map()], opts :: keyword()) ::
+              {:ok, String.t()} | {:error, term()}
 end

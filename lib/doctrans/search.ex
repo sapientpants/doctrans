@@ -46,6 +46,90 @@ defmodule Doctrans.Search do
     end
   end
 
+  # Minimum cosine similarity threshold for chat context
+  # Pages below this threshold are considered irrelevant
+  # Cosine similarity: 0 = unrelated, 1 = identical
+  # 0.35 is a reasonable threshold to filter out noise while keeping relevant content
+  @chat_similarity_threshold 0.35
+
+  @doc """
+  Performs semantic search within a specific document.
+
+  Returns pages from the given document sorted by semantic similarity to the query.
+  This is optimized for RAG use cases where we need to find relevant context
+  from a single document.
+
+  Only pages with similarity above the threshold (#{@chat_similarity_threshold}) are returned
+  to ensure only highly relevant content is used for chat responses.
+
+  ## Options
+
+  - `:limit` - Maximum number of pages to return (default: 3)
+  - `:min_similarity` - Minimum similarity threshold (default: #{@chat_similarity_threshold})
+
+  ## Returns
+
+  A list of maps containing:
+  - `:page_id` - The page's UUID
+  - `:page_number` - Page number in the document
+  - `:original_markdown` - Original extracted text
+  - `:translated_markdown` - Translated text (if available)
+  - `:similarity` - Cosine similarity score (0-1, higher is better)
+  """
+  def search_in_document(document_id, query, opts \\ [])
+  def search_in_document(_document_id, "", _opts), do: {:ok, []}
+  def search_in_document(_document_id, nil, _opts), do: {:ok, []}
+
+  def search_in_document(document_id, query, opts) when is_binary(query) do
+    limit = Keyword.get(opts, :limit, 3)
+    min_similarity = Keyword.get(opts, :min_similarity, @chat_similarity_threshold)
+
+    with {:ok, query_embedding} <- embedding_module().generate(query, []) do
+      execute_document_search(document_id, query_embedding, limit, min_similarity)
+    end
+  end
+
+  defp execute_document_search(document_id, query_embedding, limit, min_similarity) do
+    # Filter by similarity threshold in the query to only return highly relevant pages
+    sql = """
+    SELECT
+      p.id as page_id,
+      p.page_number,
+      p.original_markdown,
+      p.translated_markdown,
+      1 - (p.embedding <=> $1::vector) as similarity
+    FROM pages p
+    WHERE p.document_id = $2
+      AND p.extraction_status = 'completed'
+      AND p.embedding IS NOT NULL
+      AND (1 - (p.embedding <=> $1::vector)) >= $4
+    ORDER BY p.embedding <=> $1::vector ASC
+    LIMIT $3
+    """
+
+    case Repo.query(sql, [query_embedding, Ecto.UUID.dump!(document_id), limit, min_similarity]) do
+      {:ok, %{rows: rows, columns: columns}} ->
+        {:ok, Enum.map(rows, &format_document_search_row(&1, columns))}
+
+      {:error, error} ->
+        require Logger
+        Logger.error("Document search query failed: #{inspect(error)}")
+        {:error, {:database_error, error}}
+    end
+  end
+
+  defp format_document_search_row(row, columns) do
+    result = Enum.zip(columns, row) |> Map.new()
+
+    %{
+      page_id: uuid_to_string(result["page_id"]),
+      page_number: result["page_number"],
+      original_markdown: result["original_markdown"],
+      translated_markdown: result["translated_markdown"],
+      similarity: to_float(result["similarity"])
+    }
+  end
+
   @doc """
   Counts total matching results for a query.
 
