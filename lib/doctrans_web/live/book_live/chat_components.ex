@@ -2,6 +2,8 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
   @moduledoc "Components for the document chat panel."
   use DoctransWeb, :html
 
+  import DoctransWeb.DocumentLive.MarkdownHelpers, only: [render_markdown: 1]
+
   attr :chat_messages, :any, required: true
   attr :chat_loading, :boolean, required: true
   attr :embeddings_ready, :boolean, required: true
@@ -129,19 +131,5 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
     html = render_markdown(assigns.content || "")
     assigns = assign(assigns, :html, html)
     ~H"<div>{raw(@html)}</div>"
-  end
-
-  defp render_markdown(nil), do: ""
-  defp render_markdown(""), do: ""
-
-  defp render_markdown(text) do
-    case Earmark.as_html(text) do
-      {:ok, html, _} -> sanitize_html(html)
-      {:error, html, _} -> sanitize_html(html)
-    end
-  end
-
-  defp sanitize_html(html) do
-    HtmlSanitizeEx.basic_html(html)
   end
 end

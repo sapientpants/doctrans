@@ -112,10 +112,9 @@ defmodule Doctrans.ChatTest do
     end
   end
 
-  # Helper to create a test embedding vector (1024 dimensions)
+  # Helper to create a deterministic test embedding vector (1024 dimensions)
   defp create_test_embedding do
-    1..1024
-    |> Enum.map(fn _ -> :rand.uniform() end)
+    List.duplicate(0.1, 1024)
     |> Pgvector.new()
   end
 

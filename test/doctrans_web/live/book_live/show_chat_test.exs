@@ -41,8 +41,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       view |> element("header button[phx-click='toggle_chat']") |> render_click()
       assert has_element?(view, "#chat-messages")
 
-      # Close panel using the X button in the chat panel header
-      view |> element("#chat-messages") |> render()
+      # Close panel using the chat toggle button in the header
       view |> element("header button[phx-click='toggle_chat']") |> render_click()
       refute has_element?(view, "#chat-messages")
     end
@@ -129,10 +128,9 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
         total_pages: 1
       })
 
-    # Use direct Repo insert to set embedding with Pgvector type
+    # Use direct Repo insert to set deterministic embedding with Pgvector type
     embedding =
-      1..1024
-      |> Enum.map(fn _ -> :rand.uniform() end)
+      List.duplicate(0.1, 1024)
       |> Pgvector.new()
 
     Repo.insert!(%Doctrans.Documents.Page{

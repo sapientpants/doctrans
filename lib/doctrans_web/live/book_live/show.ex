@@ -560,13 +560,21 @@ defmodule DoctransWeb.DocumentLive.Show do
   @impl true
   def handle_info({:DOWN, ref, :process, _pid, reason}, socket)
       when socket.assigns.chat_task_ref == ref do
-    msg =
-      if reason == :normal,
-        do: gettext("Chat completed unexpectedly."),
-        else: chat_error_message(:unknown)
-
-    {:noreply, handle_chat_error(socket, msg)}
+    # :normal = success (result already handled); only error on crashes
+    if reason == :normal,
+      do: {:noreply, socket},
+      else: {:noreply, handle_chat_error(socket, chat_error_message(:unknown))}
   end
+
+  # Catch-all handlers for stale task refs
+  @impl true
+  def handle_info({ref, _result}, socket) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket), do: {:noreply, socket}
 
   defp handle_chat_error(socket, message) do
     error_msg = %{

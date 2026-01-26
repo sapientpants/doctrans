@@ -30,6 +30,7 @@ defmodule Doctrans.Chat do
   ## Options
 
   - `:context_limit` - Number of pages to use for context (default: 3)
+  - `:min_similarity` - Minimum similarity threshold for search results (default: none)
   - `:model` - Override the default text model
 
   ## Returns
