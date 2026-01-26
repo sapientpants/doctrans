@@ -65,15 +65,22 @@ defmodule Doctrans.Processing.OllamaStub do
     case Application.get_env(:doctrans, :ollama_stub_chat_error) do
       nil ->
         # Extract the last user message to generate a contextual response
+        # Handle both atom keys (%{role: "user"}) and string keys (%{"role" => "user"})
         user_msg =
           messages
-          |> Enum.filter(&(&1.role == "user" || &1[:role] == "user"))
+          |> Enum.filter(fn msg ->
+            role = Map.get(msg, :role) || Map.get(msg, "role")
+            role == "user"
+          end)
           |> List.last()
 
         question =
           case user_msg do
-            nil -> "unknown question"
-            _ -> user_msg[:content] || user_msg.content || "unknown question"
+            nil ->
+              "unknown question"
+
+            msg ->
+              Map.get(msg, :content) || Map.get(msg, "content") || "unknown question"
           end
 
         {:ok,

@@ -129,8 +129,11 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
         total_pages: 1
       })
 
-    # Use direct Repo insert to set embedding
-    embedding = Enum.map(1..1024, fn _ -> :rand.uniform() end)
+    # Use direct Repo insert to set embedding with Pgvector type
+    embedding =
+      1..1024
+      |> Enum.map(fn _ -> :rand.uniform() end)
+      |> Pgvector.new()
 
     Repo.insert!(%Doctrans.Documents.Page{
       id: Ecto.UUID.generate(),

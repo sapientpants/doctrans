@@ -206,74 +206,90 @@ defmodule Doctrans.SearchTest do
 
     test "accepts limit option" do
       doc = document_fixture(%{status: "completed"})
-      result = Search.search_in_document(doc.id, "test", limit: 2)
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
+      assert {:ok, results} = Search.search_in_document(doc.id, "test", limit: 2)
+      assert is_list(results)
     end
 
     test "accepts min_similarity option" do
       doc = document_fixture(%{status: "completed"})
-      result = Search.search_in_document(doc.id, "test", min_similarity: 0.5)
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
+      assert {:ok, results} = Search.search_in_document(doc.id, "test", min_similarity: 0.5)
+      assert is_list(results)
     end
 
     test "only searches within specified document" do
-      # Create two documents
+      # Create two documents with pages that have embeddings
       doc1 = document_fixture(%{status: "completed", title: "Doc One"})
       doc2 = document_fixture(%{status: "completed", title: "Doc Two"})
 
-      page1 = page_fixture(doc1, %{page_number: 1})
-      page2 = page_fixture(doc2, %{page_number: 1})
+      # Create embeddings for both pages
+      embedding = Pgvector.new(List.duplicate(0.1, 1024))
 
-      {:ok, _} =
-        Pages.update_page_extraction(page1, %{
+      page1 =
+        Doctrans.Repo.insert!(%Doctrans.Documents.Page{
+          id: Ecto.UUID.generate(),
+          document_id: doc1.id,
+          page_number: 1,
+          image_path: "documents/#{doc1.id}/pages/page_1.png",
+          original_markdown: "Content in document one",
           extraction_status: "completed",
-          original_markdown: "Content in document one"
+          translation_status: "pending",
+          embedding_status: "completed",
+          embedding: embedding
         })
 
-      {:ok, _} =
-        Pages.update_page_extraction(page2, %{
+      _page2 =
+        Doctrans.Repo.insert!(%Doctrans.Documents.Page{
+          id: Ecto.UUID.generate(),
+          document_id: doc2.id,
+          page_number: 1,
+          image_path: "documents/#{doc2.id}/pages/page_1.png",
+          original_markdown: "Content in document two",
           extraction_status: "completed",
-          original_markdown: "Content in document two"
+          translation_status: "pending",
+          embedding_status: "completed",
+          embedding: embedding
         })
 
       # Search in doc1 - should only return doc1's pages
-      result = Search.search_in_document(doc1.id, "content")
+      assert {:ok, results} = Search.search_in_document(doc1.id, "content")
 
-      case result do
-        {:ok, results} ->
-          # Results should only include pages from doc1
-          for r <- results do
-            assert r.page_id == page1.id
-          end
-
-        {:error, _} ->
-          # Acceptable if embedding generation fails
-          :ok
+      # Results should only include pages from doc1
+      for r <- results do
+        assert r.page_id == page1.id
       end
     end
 
     test "returns results with correct structure" do
       doc = document_fixture(%{status: "completed"})
-      page = page_fixture(doc, %{page_number: 1})
 
-      {:ok, _} =
-        Pages.update_page_extraction(page, %{
+      # Create page with embedding so search can find it
+      embedding = Pgvector.new(List.duplicate(0.1, 1024))
+
+      page =
+        Doctrans.Repo.insert!(%Doctrans.Documents.Page{
+          id: Ecto.UUID.generate(),
+          document_id: doc.id,
+          page_number: 1,
+          image_path: "documents/#{doc.id}/pages/page_1.png",
+          original_markdown: "Test content for structure",
+          translated_markdown: "Translated test content",
           extraction_status: "completed",
-          original_markdown: "Test content for structure"
+          translation_status: "completed",
+          embedding_status: "completed",
+          embedding: embedding
         })
 
-      case Search.search_in_document(doc.id, "test") do
-        {:ok, results} ->
-          for result <- results do
-            assert Map.has_key?(result, :page_id)
-            assert Map.has_key?(result, :page_number)
-            assert Map.has_key?(result, :original_markdown)
-            assert Map.has_key?(result, :translated_markdown)
-            assert Map.has_key?(result, :similarity)
-          end
+      assert {:ok, results} = Search.search_in_document(doc.id, "test")
+      # With embedding, we should get results
+      refute Enum.empty?(results)
 
-        {:error, _} ->
-          :ok
+      for result <- results do
+        assert Map.has_key?(result, :page_id)
+        assert Map.has_key?(result, :page_number)
+        assert Map.has_key?(result, :original_markdown)
+        assert Map.has_key?(result, :translated_markdown)
+        assert Map.has_key?(result, :similarity)
+        assert result.page_id == page.id
       end
     end
   end

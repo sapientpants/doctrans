@@ -413,7 +413,8 @@ defmodule DoctransWeb.DocumentLive.Show do
   def handle_event("send_chat_message", %{"message" => message}, socket) do
     trimmed_message = String.trim(message || "")
 
-    if trimmed_message == "" do
+    # Guard against empty messages and double submits
+    if trimmed_message == "" or socket.assigns.chat_loading do
       {:noreply, socket}
     else
       document = socket.assigns.document
@@ -530,13 +531,14 @@ defmodule DoctransWeb.DocumentLive.Show do
       content: response
     }
 
-    # Update chat history for context in future messages
+    # Update chat history for context in future messages (keep last 16 messages = 8 exchanges)
     updated_history =
-      socket.assigns.chat_history ++
-        [
-          %{role: "user", content: user_message},
-          %{role: "assistant", content: response}
-        ]
+      (socket.assigns.chat_history ++
+         [
+           %{role: "user", content: user_message},
+           %{role: "assistant", content: response}
+         ])
+      |> Enum.take(-16)
 
     socket =
       socket
