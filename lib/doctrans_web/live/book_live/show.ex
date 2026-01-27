@@ -41,8 +41,8 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:available_models, [])
       |> assign(:models_loading, false)
       |> assign(:model_fetch_error, nil)
-      |> assign(:extraction_model, ollama_config[:vision_model] || "ministral-3:14b")
-      |> assign(:translation_model, ollama_config[:text_model] || "ministral-3:14b")
+      |> assign(:extraction_model, ollama_config[:vision_model] || "gemma3:27b")
+      |> assign(:translation_model, ollama_config[:text_model] || "gemma3:27b")
       # Chat state
       |> assign(:chat_open, false)
       |> assign(:chat_loading, false)
