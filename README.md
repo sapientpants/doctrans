@@ -116,8 +116,8 @@ Configuration in `config/config.exs`:
 # Ollama settings (OLLAMA_HOST env var overrides base_url)
 config :doctrans, :ollama,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
-  vision_model: "ministral-3:14b",
-  text_model: "ministral-3:14b",
+  vision_model: "gemma3:27b",
+  text_model: "gemma3:27b",
   timeout: 300_000
 
 # Embedding settings
