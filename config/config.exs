@@ -15,8 +15,8 @@ config :doctrans,
 # OLLAMA_HOST env var allows overriding for Docker (e.g., http://host.docker.internal:11434)
 config :doctrans, :ollama,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
-  vision_model: "qwen3.5:latest",
-  text_model: "qwen3.5:latest",
+  vision_model: "qwen3.5:9b",
+  text_model: "qwen3.5:9b",
   timeout: 300_000
 
 # Circuit breaker configuration for resilience
