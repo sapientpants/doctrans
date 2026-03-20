@@ -18,8 +18,9 @@ defmodule Doctrans.Processing.OllamaTest do
     test "module defines expected functions" do
       # extract_markdown has a default for opts, so it can be called with 1 arg
       assert function_exported?(Ollama, :extract_markdown, 1)
-      # translate has a default for opts, so it can be called with 3 args
+      # translate has a default for opts, so it can be called with 3 or 4 args
       assert function_exported?(Ollama, :translate, 3)
+      assert function_exported?(Ollama, :translate, 4)
       assert function_exported?(Ollama, :available?, 0)
       assert function_exported?(Ollama, :list_models, 0)
     end

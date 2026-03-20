@@ -224,7 +224,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     document = Documents.get_document!(page.document_id)
     ollama_opts = build_translation_opts(opts)
 
-    source_language = Application.get_env(:doctrans, :defaults)[:source_language]
+    source_language = Application.get_env(:doctrans, :defaults, [])[:source_language] || "de"
 
     case ollama_module().translate(
            page.original_markdown,
