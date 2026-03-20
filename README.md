@@ -1,26 +1,33 @@
 # Doctrans
 
-A Phoenix LiveView application for translating PDF documents using local AI models via
-Ollama. Upload a PDF, and Doctrans will extract each page as an image, use a vision model
-to extract text as Markdown, and then translate it to your target language.
+A privacy-first Phoenix LiveView application for translating documents using local AI
+models via Ollama. Upload a PDF, Word, OpenDocument, or RTF file, and Doctrans will extract
+each page as an image, use a vision model to extract text as Markdown, and then translate it
+to your target language. All processing happens on your device — no data is ever sent to
+external services.
 
 ## Features
 
-- PDF upload with automatic page extraction
+- **100% local processing** — your documents never leave your device
+- Upload PDF, DOCX, DOC, ODT, and RTF files (up to 10 at once)
 - Background processing pipeline (image extraction → OCR → translation)
 - Split-screen document viewer (original page image | translated markdown)
 - Real-time progress updates via LiveView
 - Progressive loading - view completed pages while processing continues
+- Document chat (RAG) - ask questions about your translated documents
 - Hybrid search - semantic + keyword search across all pages
+- Reprocess pages with different AI models
+- Zoom controls for page images
 - Document sorting by date or name
+- Internationalized UI (11 locales: da, de, en, es, fr, it, nl, no, pl, pt, sv)
 
 ## Prerequisites
 
 - **Erlang** 27.0+
 - **Elixir** 1.18+
-- **Node.js** 20+ - for asset compilation (esbuild, Tailwind)
 - **PostgreSQL** 14+ with pgvector extension
 - **poppler-utils** - for PDF page extraction (`pdftoppm`)
+- **LibreOffice** (optional) - for DOCX, DOC, ODT, and RTF conversion
 - **Ollama** - local AI model server
 
 ### Installing poppler-utils
@@ -36,6 +43,21 @@ sudo apt-get install poppler-utils
 sudo dnf install poppler-utils
 ```
 
+### Installing LibreOffice (optional)
+
+Required only for non-PDF formats (DOCX, DOC, ODT, RTF):
+
+```bash
+# macOS
+brew install --cask libreoffice
+
+# Ubuntu/Debian
+sudo apt-get install libreoffice-writer-nogui
+
+# Fedora
+sudo dnf install libreoffice-writer
+```
+
 ### Installing Ollama
 
 ```bash
@@ -49,8 +71,9 @@ curl -fsSL https://ollama.com/install.sh | sh
 ### Required Ollama Models
 
 ```bash
-ollama pull qwen3.5:9b      # Model for OCR, extraction and translation
-ollama pull qwen3-embedding:0.6b # Embedding model for search
+ollama pull qwen3.5:9b           # Vision model for OCR and text extraction
+ollama pull translategemma:12b   # Text model for translation
+ollama pull qwen3-embedding:0.6b # Embedding model for search and chat
 ```
 
 Ensure Ollama is running before starting Doctrans:
@@ -96,7 +119,7 @@ cp .env.example .env
 ## Usage
 
 1. Click **Upload** on the dashboard
-2. Drag and drop PDF files or click to browse
+2. Drag and drop files (PDF, DOCX, DOC, ODT, RTF) or click to browse
 3. Select target language
 4. Click **Start Translation**
 
@@ -108,6 +131,12 @@ Use the search input on the dashboard to find content across all documents. Sear
 semantic similarity (AI embeddings) with keyword matching. Press Enter to see results, then
 click a result to jump directly to that page.
 
+### Document Chat
+
+Open the chat panel on any document to ask questions about its content. The chat uses
+retrieval-augmented generation (RAG) to find relevant pages via semantic search and answer
+using the AI model. Chat is available once page embeddings have been generated.
+
 ## Configuration
 
 Configuration in `config/config.exs`:
@@ -117,7 +146,7 @@ Configuration in `config/config.exs`:
 config :doctrans, :ollama,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
   vision_model: "qwen3.5:9b",
-  text_model: "qwen3.5:9b",
+  text_model: "translategemma:12b",
   timeout: 300_000
 
 # Embedding settings
@@ -126,10 +155,27 @@ config :doctrans, :embedding,
   model: "qwen3-embedding:0.6b",
   timeout: 60_000
 
+# Circuit breaker configuration for resilience
+config :doctrans, :circuit_breakers,
+  ollama_api: [strategy: {:standard, 5, 60_000}, refresh: 30_000],
+  embedding_api: [strategy: {:standard, 3, 30_000}, refresh: 15_000]
+
+# Retry configuration for exponential backoff
+config :doctrans, :retry,
+  max_attempts: 3,
+  base_delay_ms: 2_000,
+  max_delay_ms: 30_000
+
 # Upload settings
 config :doctrans, :uploads,
   upload_dir: Path.expand("../priv/static/uploads", __DIR__),
   max_file_size: 100_000_000  # 100MB
+
+# PDF extraction configuration
+config :doctrans, :pdf_extraction, dpi: 150
+
+# Document conversion timeout (for DOCX, ODT, RTF via LibreOffice)
+config :doctrans, :document_conversion, timeout: 120_000
 
 # Default language settings
 config :doctrans, :defaults,
@@ -250,6 +296,7 @@ Pull the required models before starting:
 
 ```bash
 ollama pull qwen3.5:9b
+ollama pull translategemma:12b
 ollama pull qwen3-embedding:0.6b
 ```
 

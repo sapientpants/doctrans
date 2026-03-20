@@ -185,6 +185,10 @@ defmodule DoctransWeb.DocumentLive.Components do
       <p class="mt-1 text-xs text-base-content/50">
         {gettext("PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Up to 10 files")}
       </p>
+      <p class="mt-2 text-xs text-base-content/40">
+        <.icon name="hero-lock-closed" class="w-3 h-3 inline-block align-text-top" />
+        {gettext("Your documents never leave your device")}
+      </p>
     </div>
     """
   end

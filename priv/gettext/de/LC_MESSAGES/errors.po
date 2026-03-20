@@ -111,7 +111,7 @@ msgstr "Seitenanzahl konnte aus pdfinfo-Ausgabe nicht ermittelt werden"
 msgid "Document not found"
 msgstr "Dokument nicht gefunden"
 
-#: lib/doctrans/processing/ollama.ex:195
+#: lib/doctrans/processing/ollama.ex:277
 #, elixir-autogen, elixir-format
 msgid "Failed to connect to Ollama: %{reason}"
 msgstr "Verbindung zu Ollama fehlgeschlagen: %{reason}"
@@ -126,12 +126,13 @@ msgstr "Bild konnte nicht gelesen werden: %{reason}"
 msgid "Ollama embedding error (%{status}): %{body}"
 msgstr "Ollama Embedding-Fehler (%{status}): %{body}"
 
-#: lib/doctrans/processing/ollama.ex:249
+#: lib/doctrans/processing/ollama.ex:228
+#: lib/doctrans/processing/ollama.ex:331
 #, elixir-autogen, elixir-format
 msgid "Ollama error (%{status}): %{error}"
 msgstr "Ollama-Fehler (%{status}): %{error}"
 
-#: lib/doctrans/processing/ollama.ex:188
+#: lib/doctrans/processing/ollama.ex:270
 #, elixir-autogen, elixir-format
 msgid "Ollama returned status %{status}: %{body}"
 msgstr "Ollama hat Status %{status} zurückgegeben: %{body}"
@@ -152,23 +153,26 @@ msgstr "PDF-Extraktion fehlgeschlagen: %{reason}"
 msgid "Page %{page_number} extraction failed: %{reason}"
 msgstr "Extraktion von Seite %{page_number} fehlgeschlagen: %{reason}"
 
-#: lib/doctrans/processing/llm_processor.ex:316
+#: lib/doctrans/processing/llm_processor.ex:323
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} translation failed: %{reason}"
 msgstr "Übersetzung von Seite %{page_number} fehlgeschlagen: %{reason}"
 
-#: lib/doctrans/processing/ollama.ex:260
+#: lib/doctrans/processing/ollama.ex:239
+#: lib/doctrans/processing/ollama.ex:342
 #: lib/doctrans/search/embedding.ex:58
 #, elixir-autogen, elixir-format
 msgid "Request failed: %{reason}"
 msgstr "Anfrage fehlgeschlagen: %{reason}"
 
-#: lib/doctrans/processing/ollama.ex:256
+#: lib/doctrans/processing/ollama.ex:235
+#: lib/doctrans/processing/ollama.ex:338
 #, elixir-autogen, elixir-format
 msgid "Request timed out"
 msgstr "Zeitüberschreitung der Anfrage"
 
-#: lib/doctrans/processing/ollama.ex:241
+#: lib/doctrans/processing/ollama.ex:220
+#: lib/doctrans/processing/ollama.ex:323
 #, elixir-autogen, elixir-format
 msgid "Unexpected response format from Ollama"
 msgstr "Unerwartetes Antwortformat von Ollama"
@@ -198,7 +202,8 @@ msgstr "Zeitüberschreitung bei der Dokumentkonvertierung"
 msgid "LibreOffice is not installed"
 msgstr "LibreOffice ist nicht installiert"
 
-#: lib/doctrans/processing/ollama.ex:233
+#: lib/doctrans/processing/ollama.ex:212
+#: lib/doctrans/processing/ollama.ex:315
 #, elixir-autogen, elixir-format
 msgid "Model returned empty response"
 msgstr "Model returned empty response"
