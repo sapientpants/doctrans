@@ -1,12 +1,14 @@
 # Doctrans
 
-A Phoenix LiveView application for translating documents using local AI models via
-Ollama. Upload a PDF, Word, OpenDocument, or RTF file, and Doctrans will extract each page
-as an image, use a vision model to extract text as Markdown, and then translate it to your
-target language.
+A privacy-first Phoenix LiveView application for translating documents using local AI
+models via Ollama. Upload a PDF, Word, OpenDocument, or RTF file, and Doctrans will extract
+each page as an image, use a vision model to extract text as Markdown, and then translate it
+to your target language. All processing happens on your device — no data is ever sent to
+external services.
 
 ## Features
 
+- **100% local processing** — your documents never leave your device
 - Upload PDF, DOCX, DOC, ODT, and RTF files (up to 10 at once)
 - Background processing pipeline (image extraction → OCR → translation)
 - Split-screen document viewer (original page image | translated markdown)

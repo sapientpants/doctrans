@@ -4,7 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <.live_title default="Doctrans" suffix=" · Phoenix Framework">
+    <meta
+      name="description"
+      content="Translate PDF, Word, and OpenDocument files privately using local AI. No data leaves your device."
+    />
+    <meta property="og:title" content="Doctrans" />
+    <meta
+      property="og:description"
+      content="Privacy-first document translation powered by local AI models."
+    />
+    <.live_title default="Doctrans" suffix=" · Doctrans">
       {assigns[:page_title]}
     </.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />

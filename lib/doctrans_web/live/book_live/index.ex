@@ -55,7 +55,9 @@ defmodule DoctransWeb.DocumentLive.Index do
         <div class="flex justify-between items-center mb-6">
           <div>
             <h1 class="text-3xl font-bold text-base-content">{gettext("Doctrans")}</h1>
-            <p class="text-base-content/70 mt-1">{gettext("PDF Document Translator")}</p>
+            <p class="text-base-content/70 mt-1">
+              {gettext("Private document translation powered by local AI")}
+            </p>
           </div>
           <div class="flex items-center gap-3">
             <%!-- Inline search form --%>
@@ -142,7 +144,9 @@ defmodule DoctransWeb.DocumentLive.Index do
           <.icon name="hero-document-text" class="w-16 h-16 mx-auto text-base-content/30" />
           <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No documents yet")}</h3>
           <p class="mt-2 text-base-content/70">
-            {gettext("Upload a PDF to get started with translation.")}
+            {gettext(
+              "Upload a document to get started. All processing happens locally on your device."
+            )}
           </p>
         </div>
 
