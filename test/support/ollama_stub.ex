@@ -36,9 +36,9 @@ defmodule Doctrans.Processing.OllamaStub do
   end
 
   @impl true
-  def translate(markdown, target_language, opts \\ [])
+  def translate(markdown, source_language, target_language, opts \\ [])
 
-  def translate(markdown, target_language, _opts) do
+  def translate(markdown, _source_language, target_language, _opts) do
     case Application.get_env(:doctrans, :ollama_stub_translation_error) do
       nil -> {:ok, "# Translated to #{target_language}\n\n#{markdown}"}
       error -> {:error, error}

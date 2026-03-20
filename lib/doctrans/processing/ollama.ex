@@ -94,60 +94,39 @@ defmodule Doctrans.Processing.Ollama do
   end
 
   @doc """
-  Translates markdown text to the target language.
+  Translates markdown text from the source language to the target language.
 
-  The source language is automatically detected by the model.
+  Uses the TranslateGemma prompt format with the /api/chat endpoint.
 
   ## Options
 
   - `:model` - Override the default text model
   - `:timeout` - Override the default timeout
   """
-  def translate(markdown, target_language), do: translate(markdown, target_language, [])
+  def translate(markdown, source_language, target_language),
+    do: translate(markdown, source_language, target_language, [])
 
-  def translate(markdown, target_language, opts) do
+  def translate(markdown, source_language, target_language, opts) do
     config = ollama_config()
     model = Keyword.get(opts, :model, config[:text_model])
     timeout = Keyword.get(opts, :timeout, config[:timeout])
 
+    source_name = language_name(source_language)
     target_name = language_name(target_language)
 
-    Logger.info("Translating to #{target_name} using #{model}")
+    Logger.info("Translating from #{source_name} to #{target_name} using #{model}")
 
-    prompt = """
-    Translate the following Markdown text to #{target_name}, preserving ALL formatting exactly.
-
-    FORMATTING PRESERVATION - CRITICAL:
-    - Keep ALL Markdown syntax unchanged: #, ##, ###, **bold**, *italic*, `code`, etc.
-    - Preserve the EXACT same heading levels (# vs ## vs ###)
-    - Keep **bold** markers around translated bold text
-    - Keep *italic* markers around translated italic text
-    - Preserve table structure with | and |---| exactly
-    - Keep list markers (-, *, 1., 2.) and indentation
-    - Preserve > blockquote markers
-    - Keep blank lines and paragraph breaks in the same places
-    - Preserve horizontal rules (---)
-    - Keep any line breaks within formatted blocks
-
-    TRANSLATION RULES:
-    - Translate ALL text content to #{target_name}
-    - Do NOT leave any words in the original language
-    - Keep proper nouns, brand names, and technical terms as appropriate for the target language
-
-    OUTPUT RULES:
-    - Output ONLY the translated Markdown, nothing else
-    - Do NOT wrap output in code fences (```)
-    - Do NOT include introductions like "Here is the translation"
-    - Do NOT include explanations or commentary
-    - Do NOT include the original text
-
-    TEXT TO TRANSLATE:
-    #{markdown}
-    """
+    prompt =
+      "You are a professional #{source_name} (#{source_language}) to #{target_name} (#{target_language}) translator. " <>
+        "Your goal is to accurately convey the meaning and nuances of the original #{source_name} text " <>
+        "while adhering to #{target_name} grammar, vocabulary, and cultural sensitivities.\n" <>
+        "Produce only the #{target_name} translation, without any additional explanations or commentary. " <>
+        "Please translate the following #{source_name} text into #{target_name}:\n\n\n" <>
+        markdown
 
     body = %{
       model: model,
-      prompt: prompt,
+      messages: [%{role: "user", content: prompt}],
       stream: false,
       options: %{
         num_ctx: 16_384,
@@ -155,7 +134,7 @@ defmodule Doctrans.Processing.Ollama do
       }
     }
 
-    make_request("/api/generate", body, timeout)
+    make_chat_request("/api/chat", body, timeout)
   end
 
   @doc """
@@ -401,7 +380,10 @@ defmodule Doctrans.Processing.Ollama do
       "ru" => "Russian",
       "zh" => "Chinese",
       "ja" => "Japanese",
-      "ko" => "Korean"
+      "ko" => "Korean",
+      "da" => "Danish",
+      "no" => "Norwegian",
+      "sv" => "Swedish"
     }
 
     Map.get(languages, code, code)
