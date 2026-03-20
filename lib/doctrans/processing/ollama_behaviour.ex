@@ -8,7 +8,12 @@ defmodule Doctrans.Processing.OllamaBehaviour do
   @callback extract_markdown(image_path :: String.t(), opts :: keyword()) ::
               {:ok, String.t()} | {:error, term()}
 
-  @callback translate(markdown :: String.t(), target_language :: String.t(), opts :: keyword()) ::
+  @callback translate(
+              markdown :: String.t(),
+              source_language :: String.t(),
+              target_language :: String.t(),
+              opts :: keyword()
+            ) ::
               {:ok, String.t()} | {:error, term()}
 
   @callback available?() :: boolean()

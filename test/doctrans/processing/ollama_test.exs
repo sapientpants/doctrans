@@ -12,14 +12,15 @@ defmodule Doctrans.Processing.OllamaTest do
     end
   end
 
-  describe "translate/3" do
+  describe "translate/4" do
     # Translation requires a running Ollama service, which is mocked in integration tests
     # Here we test the module structure and function signatures
     test "module defines expected functions" do
       # extract_markdown has a default for opts, so it can be called with 1 arg
       assert function_exported?(Ollama, :extract_markdown, 1)
-      # translate has a default for opts, so it can be called with 2 args
-      assert function_exported?(Ollama, :translate, 2)
+      # translate has a default for opts, so it can be called with 3 or 4 args
+      assert function_exported?(Ollama, :translate, 3)
+      assert function_exported?(Ollama, :translate, 4)
       assert function_exported?(Ollama, :available?, 0)
       assert function_exported?(Ollama, :list_models, 0)
     end
