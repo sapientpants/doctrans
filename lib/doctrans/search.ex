@@ -85,12 +85,67 @@ defmodule Doctrans.Search do
     min_similarity = Keyword.get(opts, :min_similarity, @chat_similarity_threshold)
 
     with {:ok, query_embedding} <- embedding_module().generate(query, []) do
-      execute_document_search(document_id, query_embedding, limit, min_similarity)
+      search_by_embedding(document_id, query_embedding,
+        limit: limit,
+        min_similarity: min_similarity
+      )
     end
   end
 
-  defp execute_document_search(document_id, query_embedding, limit, min_similarity) do
-    # Filter by similarity threshold in the query to only return highly relevant pages
+  @doc """
+  Performs semantic search within a document using a pre-computed embedding vector.
+
+  This is useful when you already have an embedding and want to avoid recomputing it,
+  for example when searching with multiple query variants in parallel.
+
+  ## Options
+
+  - `:limit` - Maximum number of pages to return (default: 3)
+  - `:min_similarity` - Minimum similarity threshold (default: #{@chat_similarity_threshold})
+  """
+  def search_by_embedding(document_id, query_embedding, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 5)
+    min_similarity = Keyword.get(opts, :min_similarity, @chat_similarity_threshold)
+
+    # Try chunk-level search first, fall back to page-level if no chunks exist
+    case execute_chunk_search(document_id, query_embedding, limit, min_similarity) do
+      {:ok, []} -> execute_page_search(document_id, query_embedding, limit, min_similarity)
+      result -> result
+    end
+  end
+
+  defp execute_chunk_search(document_id, query_embedding, limit, min_similarity) do
+    sql = """
+    SELECT
+      c.id as chunk_id,
+      c.page_id,
+      p.page_number,
+      c.content as original_markdown,
+      c.translated_content as translated_markdown,
+      c.chunk_index,
+      1 - (c.embedding <=> $1::vector) as similarity
+    FROM chunks c
+    JOIN pages p ON c.page_id = p.id
+    WHERE p.document_id = $2
+      AND p.extraction_status = 'completed'
+      AND c.embedding IS NOT NULL
+      AND (1 - (c.embedding <=> $1::vector)) >= $4
+    ORDER BY c.embedding <=> $1::vector ASC
+    LIMIT $3
+    """
+
+    case Repo.query(sql, [query_embedding, Ecto.UUID.dump!(document_id), limit, min_similarity]) do
+      {:ok, %{rows: rows, columns: columns}} ->
+        {:ok, Enum.map(rows, &format_chunk_search_row(&1, columns))}
+
+      {:error, error} ->
+        require Logger
+        Logger.error("Chunk search query failed: #{inspect(error)}")
+        {:error, {:database_error, error}}
+    end
+  end
+
+  defp execute_page_search(document_id, query_embedding, limit, min_similarity) do
     sql = """
     SELECT
       p.id as page_id,
@@ -109,16 +164,30 @@ defmodule Doctrans.Search do
 
     case Repo.query(sql, [query_embedding, Ecto.UUID.dump!(document_id), limit, min_similarity]) do
       {:ok, %{rows: rows, columns: columns}} ->
-        {:ok, Enum.map(rows, &format_document_search_row(&1, columns))}
+        {:ok, Enum.map(rows, &format_page_search_row(&1, columns))}
 
       {:error, error} ->
         require Logger
-        Logger.error("Document search query failed: #{inspect(error)}")
+        Logger.error("Page search query failed: #{inspect(error)}")
         {:error, {:database_error, error}}
     end
   end
 
-  defp format_document_search_row(row, columns) do
+  defp format_chunk_search_row(row, columns) do
+    result = Enum.zip(columns, row) |> Map.new()
+
+    %{
+      chunk_id: uuid_to_string(result["chunk_id"]),
+      page_id: uuid_to_string(result["page_id"]),
+      page_number: result["page_number"],
+      original_markdown: result["original_markdown"],
+      translated_markdown: result["translated_markdown"],
+      chunk_index: result["chunk_index"],
+      similarity: to_float(result["similarity"])
+    }
+  end
+
+  defp format_page_search_row(row, columns) do
     result = Enum.zip(columns, row) |> Map.new()
 
     %{

@@ -108,7 +108,7 @@ defmodule Doctrans.Processing.Ollama do
 
   def translate(markdown, source_language, target_language, opts) do
     config = ollama_config()
-    model = Keyword.get(opts, :model, config[:text_model])
+    model = Keyword.get(opts, :model, config[:translation_model])
     timeout = Keyword.get(opts, :timeout, config[:timeout])
 
     source_name = language_name(source_language)
@@ -168,9 +168,10 @@ defmodule Doctrans.Processing.Ollama do
   """
   def chat(messages, opts \\ []) do
     config = ollama_config()
-    model = Keyword.get(opts, :model, config[:text_model])
+    model = Keyword.get(opts, :model, config[:chat_model])
     # Use shorter timeout for chat (2 minutes) for better UX
     timeout = Keyword.get(opts, :timeout, 120_000)
+    num_predict = Keyword.get(opts, :num_predict, 4_096)
 
     Logger.info("Sending chat request with #{length(messages)} messages using #{model}")
 
@@ -180,7 +181,7 @@ defmodule Doctrans.Processing.Ollama do
       stream: false,
       options: %{
         num_ctx: 16_384,
-        num_predict: 4_096
+        num_predict: num_predict
       }
     }
 
