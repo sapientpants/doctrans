@@ -54,6 +54,24 @@ defmodule Doctrans.Chat.MultiSearchTest do
       assert {:ok, []} =
                MultiSearch.search_with_queries(document.id, ["q1", "q2", "q3"])
     end
+
+    test "returns ok with empty list for empty queries" do
+      document = create_document(status: "completed")
+
+      assert {:ok, []} = MultiSearch.search_with_queries(document.id, [])
+    end
+
+    test "deduplicates pages across queries" do
+      document = create_document(status: "completed")
+      insert_page_with_embedding(document, 1)
+
+      # Same query twice should still return the page once
+      assert {:ok, pages} =
+               MultiSearch.search_with_queries(document.id, ["test", "test"], limit: 5)
+
+      page_ids = Enum.map(pages, & &1.page_id)
+      assert page_ids == Enum.uniq(page_ids)
+    end
   end
 
   defp create_document(opts) do

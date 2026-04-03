@@ -132,7 +132,7 @@ defmodule Doctrans.Search.Chunker do
       # Long paragraph on its own: split at sentences
       para_words > @target_words and current == [] ->
         sentence_chunks = split_long_paragraph(para_text, para_start)
-        {sentence_chunks ++ chunks, []}
+        {Enum.reverse(sentence_chunks) ++ chunks, []}
 
       # Adding this paragraph would exceed target and we have content: emit current, start new
       current != [] and current_word_count(current) + para_words > @target_words ->

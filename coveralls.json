@@ -14,6 +14,7 @@
     "test/support/pdf_extractor_stub.ex",
     "test/support/ollama_stub.ex",
     "test/support/worker_helpers.ex",
-    "lib/mix/"
+    "lib/mix/",
+    "deps/"
   ]
 }
