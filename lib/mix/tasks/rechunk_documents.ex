@@ -103,8 +103,14 @@ defmodule Mix.Tasks.RechunkDocuments do
   end
 
   defp embed_chunks(chunks) do
+    # Compute chunk data for overlap context, matching production embedding behavior
+    chunk_data =
+      Enum.map(chunks, fn c -> %{chunk_index: c.chunk_index, content: c.content} end)
+
     Enum.map(chunks, fn chunk ->
-      case embedding_module().generate(chunk.content, []) do
+      embed_content = Chunker.content_for_embedding(chunk_data, chunk.chunk_index)
+
+      case embedding_module().generate(embed_content, []) do
         {:ok, embedding} ->
           chunk
           |> Chunk.embedding_changeset(%{embedding: embedding, embedding_status: "completed"})

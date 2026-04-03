@@ -42,14 +42,20 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
   @impl true
   def handle_cast({:generate, page_id}, state) do
-    task =
-      Task.Supervisor.async_nolink(
-        Doctrans.TaskSupervisor,
-        fn -> do_generate_embedding(page_id) end
-      )
+    # Skip if this page already has an in-flight embedding task
+    if page_id in Map.values(state.tasks) do
+      Logger.debug("Skipping duplicate embedding request for page #{page_id}")
+      {:noreply, state}
+    else
+      task =
+        Task.Supervisor.async_nolink(
+          Doctrans.TaskSupervisor,
+          fn -> do_generate_embedding(page_id) end
+        )
 
-    tasks = Map.put(state.tasks, task.ref, page_id)
-    {:noreply, %{state | tasks: tasks}}
+      tasks = Map.put(state.tasks, task.ref, page_id)
+      {:noreply, %{state | tasks: tasks}}
+    end
   end
 
   @impl true
@@ -186,11 +192,20 @@ defmodule Doctrans.Search.EmbeddingWorker do
   defp create_chunks(page) do
     chunk_data = Chunker.chunk(page.original_markdown)
 
-    Enum.map(chunk_data, fn data ->
+    Enum.each(chunk_data, fn data ->
       %Chunk{page_id: page.id}
       |> Chunk.changeset(data)
-      |> Repo.insert!()
+      |> Repo.insert!(
+        on_conflict: :nothing,
+        conflict_target: [:page_id, :chunk_index]
+      )
     end)
+
+    # Re-fetch to get actual records (on_conflict: :nothing may return empty struct)
+    Chunk
+    |> where([c], c.page_id == ^page.id)
+    |> order_by([c], c.chunk_index)
+    |> Repo.all()
   end
 
   @doc """
