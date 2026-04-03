@@ -146,7 +146,8 @@ Configuration in `config/config.exs`:
 config :doctrans, :ollama,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
   vision_model: "qwen3.5:9b",
-  text_model: "translategemma:12b",
+  translation_model: "qwen3.5:27b",
+  chat_model: "qwen3.5:27b",
   timeout: 300_000
 
 # Embedding settings

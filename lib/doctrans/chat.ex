@@ -6,6 +6,8 @@ defmodule Doctrans.Chat do
   via Ollama's /api/chat endpoint.
   """
 
+  alias Doctrans.Chat.MultiSearch
+  alias Doctrans.Chat.QueryExpander
   alias Doctrans.Search
 
   require Logger
@@ -29,9 +31,9 @@ defmodule Doctrans.Chat do
 
   ## Options
 
-  - `:context_limit` - Number of pages to use for context (default: 3)
+  - `:context_limit` - Number of pages to use for context (default: 5)
   - `:min_similarity` - Minimum similarity threshold for search results (default: none)
-  - `:model` - Override the default text model
+  - `:model` - Override the default chat model
 
   ## Returns
 
@@ -54,12 +56,15 @@ defmodule Doctrans.Chat do
     if trimmed_question == "" do
       {:error, :empty_question}
     else
-      context_limit = Keyword.get(opts, :context_limit, 3)
+      context_limit = Keyword.get(opts, :context_limit, 5)
       min_similarity = Keyword.get(opts, :min_similarity)
 
       Logger.info(
         "Processing chat question for document #{document.id}: #{String.slice(trimmed_question, 0, 100)}"
       )
+
+      # Expand the query: reformulate with chat context + generate alternative phrasings
+      {standalone_question, queries} = QueryExpander.expand(trimmed_question, chat_history, opts)
 
       search_opts =
         [limit: context_limit]
@@ -67,13 +72,27 @@ defmodule Doctrans.Chat do
           if min_similarity, do: Keyword.put(o, :min_similarity, min_similarity), else: o
         end)
 
-      case Search.search_in_document(document.id, trimmed_question, search_opts) do
+      # Search with all query variants and merge via RRF
+      search_result =
+        if length(queries) > 1 do
+          MultiSearch.search_with_queries(document.id, queries, search_opts)
+        else
+          Search.search_in_document(document.id, standalone_question, search_opts)
+        end
+
+      case search_result do
         {:ok, pages} ->
           log_search_results(pages, document.id)
 
           context = build_context(pages)
+
+          Logger.debug(
+            "Chat context (#{String.length(context)} chars):\n#{String.slice(context, 0, 500)}..."
+          )
+
           system_prompt = build_system_prompt(document.title, context)
-          messages = build_messages(system_prompt, chat_history, trimmed_question)
+          # Use the standalone question so the LLM sees a clear, contextual question
+          messages = build_messages(system_prompt, chat_history, standalone_question)
 
           case ollama_module().chat(messages, opts) do
             {:ok, response} ->
@@ -107,19 +126,30 @@ defmodule Doctrans.Chat do
   end
 
   @doc """
-  Builds a context string from a list of pages.
+  Builds a context string from a list of search results (chunks or pages).
 
-  Each page is formatted with its page number for reference.
+  Groups results by page number and formats each page section with its
+  page number for citation. When multiple chunks come from the same page,
+  they are sorted by chunk_index and joined together.
   """
   def build_context([]), do: ""
 
-  def build_context(pages) do
-    pages
-    |> Enum.map(fn page ->
-      content = page.translated_markdown || page.original_markdown || ""
+  def build_context(results) do
+    results
+    |> Enum.group_by(& &1.page_number)
+    |> Enum.sort_by(fn {page_num, _} -> page_num end)
+    |> Enum.map(fn {page_number, items} ->
+      content =
+        items
+        |> Enum.sort_by(&(Map.get(&1, :chunk_index) || 0))
+        |> Enum.map(fn item ->
+          String.trim(item.translated_markdown || item.original_markdown || "")
+        end)
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.join("\n\n")
 
       if content != "" do
-        "[Page #{page.page_number}]\n#{String.trim(content)}"
+        "[Page #{page_number}]\n#{content}"
       else
         nil
       end
@@ -129,21 +159,35 @@ defmodule Doctrans.Chat do
   end
 
   @doc """
-  Checks if a document has any pages with embeddings ready for chat.
+  Checks if a document has any chunks or pages with embeddings ready for chat.
 
-  Returns true if at least one page has an embedding, false otherwise.
+  Prefers chunks (fine-grained), falls back to page-level embeddings.
   """
   def embeddings_ready?(document) do
     import Ecto.Query
 
-    count =
-      Doctrans.Documents.Page
-      |> where([p], p.document_id == ^document.id)
-      |> where([p], p.embedding_status == "completed")
-      |> where([p], not is_nil(p.embedding))
+    # Check for chunk-level embeddings first
+    chunk_count =
+      Doctrans.Documents.Chunk
+      |> join(:inner, [c], p in assoc(c, :page))
+      |> where([c, p], p.document_id == ^document.id)
+      |> where([c], c.embedding_status == "completed")
+      |> where([c], not is_nil(c.embedding))
       |> Doctrans.Repo.aggregate(:count)
 
-    count > 0
+    if chunk_count > 0 do
+      true
+    else
+      # Fall back to page-level embeddings
+      page_count =
+        Doctrans.Documents.Page
+        |> where([p], p.document_id == ^document.id)
+        |> where([p], p.embedding_status == "completed")
+        |> where([p], not is_nil(p.embedding))
+        |> Doctrans.Repo.aggregate(:count)
+
+      page_count > 0
+    end
   end
 
   # Private functions

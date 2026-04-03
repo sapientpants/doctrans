@@ -12,6 +12,9 @@
     "lib/doctrans/resilience/health_check_worker.ex",
     "test/support/embedding_stub.ex",
     "test/support/pdf_extractor_stub.ex",
-    "test/support/ollama_stub.ex"
+    "test/support/ollama_stub.ex",
+    "test/support/worker_helpers.ex",
+    "lib/mix/",
+    "deps/"
   ]
 }

@@ -1,9 +1,9 @@
 defmodule Doctrans.Search.EmbeddingWorker do
   @moduledoc """
-  Background worker for generating page embeddings.
+  Background worker for generating chunk embeddings.
 
-  Listens for page translation completion and generates embeddings
-  for the translated content.
+  Listens for page extraction completion, splits page content into chunks,
+  and generates embeddings for each chunk individually.
   """
 
   use GenServer
@@ -11,13 +11,15 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
   use Gettext, backend: DoctransWeb.Gettext
 
-  alias Doctrans.Documents.Page
+  alias Doctrans.Documents.{Chunk, Page}
   alias Doctrans.Repo
   alias Doctrans.Resilience.{Backoff, CircuitBreaker, ErrorClassifier}
+  alias Doctrans.Search.Chunker
+
+  import Ecto.Query
 
   @max_retries 3
 
-  # Allow embedding module to be configured for testing
   defp embedding_module do
     Application.get_env(:doctrans, :embedding_module, Doctrans.Search.Embedding)
   end
@@ -27,7 +29,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
   end
 
   @doc """
-  Queue a page for embedding generation.
+  Queue a page for chunk creation and embedding generation.
   """
   def generate_embedding(page_id) do
     GenServer.cast(__MODULE__, {:generate, page_id})
@@ -40,15 +42,20 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
   @impl true
   def handle_cast({:generate, page_id}, state) do
-    task =
-      Task.Supervisor.async_nolink(
-        Doctrans.TaskSupervisor,
-        fn -> do_generate_embedding(page_id) end
-      )
+    # Skip if this page already has an in-flight embedding task
+    if page_id in Map.values(state.tasks) do
+      Logger.debug("Skipping duplicate embedding request for page #{page_id}")
+      {:noreply, state}
+    else
+      task =
+        Task.Supervisor.async_nolink(
+          Doctrans.TaskSupervisor,
+          fn -> do_generate_embedding(page_id) end
+        )
 
-    # Track task with page_id for better error reporting
-    tasks = Map.put(state.tasks, task.ref, page_id)
-    {:noreply, %{state | tasks: tasks}}
+      tasks = Map.put(state.tasks, task.ref, page_id)
+      {:noreply, %{state | tasks: tasks}}
+    end
   end
 
   @impl true
@@ -92,86 +99,234 @@ defmodule Doctrans.Search.EmbeddingWorker do
   defp do_generate_embedding(page_id, attempt \\ 0) do
     page = Repo.get!(Page, page_id)
 
-    # Only generate embedding if extraction is completed
     if page.extraction_status != "completed" do
       Logger.debug("Skipping embedding for page #{page_id} - extraction not completed")
       {:ok, page_id}
     else
-      # Update status to processing
       {:ok, page} =
         page
         |> Page.embedding_changeset(%{embedding_status: "processing"})
         |> Repo.update()
 
-      # Use circuit breaker for embedding API calls
-      result =
-        CircuitBreaker.call(:embedding_api, fn ->
-          embedding_module().generate(page.original_markdown, [])
-        end)
+      # Create chunks from page content
+      chunks = ensure_chunks(page)
 
-      case result do
-        {:ok, embedding} ->
+      if chunks == [] do
+        Logger.info("No chunks to embed for page #{page_id} (empty content)")
+
+        page
+        |> Page.embedding_changeset(%{embedding_status: "completed"})
+        |> Repo.update!()
+
+        {:ok, page_id}
+      else
+        # Build chunk data for overlap computation
+        chunk_data = Chunker.chunk(page.original_markdown)
+
+        # Embed each chunk (with overlap context for embedding quality)
+        results =
+          Enum.map(chunks, fn chunk ->
+            embed_content = Chunker.content_for_embedding(chunk_data, chunk.chunk_index)
+            embed_chunk(chunk, embed_content, attempt)
+          end)
+
+        if Enum.all?(results, &match?({:ok, _}, &1)) do
+          # Also generate page-level embedding for hybrid search fallback
+          generate_page_embedding(page)
+
           page
-          |> Page.embedding_changeset(%{
-            embedding: embedding,
-            embedding_status: "completed"
-          })
+          |> Page.embedding_changeset(%{embedding_status: "completed"})
           |> Repo.update!()
 
-          Logger.info("Generated embedding for page #{page_id}")
+          Logger.info("Generated embeddings for #{length(chunks)} chunks on page #{page_id}")
           {:ok, page_id}
+        else
+          failed_count = Enum.count(results, &match?({:error, _}, &1))
 
-        {:error, :circuit_open} ->
-          Logger.warning("Embedding circuit breaker open for page #{page_id}")
+          Logger.error(
+            "#{failed_count}/#{length(chunks)} chunk embeddings failed for page #{page_id}"
+          )
+
           mark_embedding_error(page)
-          {:error, :circuit_open}
-
-        {:error, reason} ->
-          handle_embedding_error(page, reason, attempt)
+          {:error, :chunk_embedding_failed}
+        end
       end
     end
   end
 
-  defp handle_embedding_error(page, reason, attempt) do
+  defp ensure_chunks(page) do
+    existing =
+      Chunk
+      |> where([c], c.page_id == ^page.id)
+      |> order_by([c], c.chunk_index)
+      |> Repo.all()
+
+    cond do
+      existing == [] ->
+        create_chunks(page)
+
+      chunks_match_page_content?(existing, page.original_markdown) ->
+        existing
+
+      true ->
+        recreate_chunks(page.id)
+    end
+  end
+
+  defp chunks_match_page_content?(existing_chunks, original_markdown) do
+    current_chunk_data =
+      original_markdown
+      |> Chunker.chunk()
+      |> Enum.map(fn data ->
+        %{chunk_index: data.chunk_index, content: data.content}
+      end)
+
+    existing_chunk_data =
+      Enum.map(existing_chunks, fn chunk ->
+        %{chunk_index: chunk.chunk_index, content: chunk.content}
+      end)
+
+    current_chunk_data == existing_chunk_data
+  end
+
+  defp create_chunks(page) do
+    chunk_data = Chunker.chunk(page.original_markdown)
+
+    Enum.each(chunk_data, fn data ->
+      %Chunk{page_id: page.id}
+      |> Chunk.changeset(data)
+      |> Repo.insert!(
+        on_conflict: :nothing,
+        conflict_target: [:page_id, :chunk_index]
+      )
+    end)
+
+    # Re-fetch to get actual records (on_conflict: :nothing may return empty struct)
+    Chunk
+    |> where([c], c.page_id == ^page.id)
+    |> order_by([c], c.chunk_index)
+    |> Repo.all()
+  end
+
+  @doc """
+  Recreates chunks for a page, deleting any existing ones.
+  Used when page content changes (e.g., re-extraction).
+  """
+  def recreate_chunks(page_id) do
+    Chunk |> where([c], c.page_id == ^page_id) |> Repo.delete_all()
+    page = Repo.get!(Page, page_id)
+    create_chunks(page)
+  end
+
+  @doc """
+  Updates translated content on existing chunks after translation completes.
+  Re-chunks the translated text and matches by chunk_index.
+  """
+  def update_chunk_translations(page) do
+    chunks =
+      Chunk
+      |> where([c], c.page_id == ^page.id)
+      |> order_by([c], c.chunk_index)
+      |> Repo.all()
+
+    if chunks != [] and page.translated_markdown do
+      translated_chunks = Chunker.chunk(page.translated_markdown)
+
+      Enum.each(chunks, fn chunk ->
+        translated_data = Enum.find(translated_chunks, &(&1.chunk_index == chunk.chunk_index))
+
+        if translated_data do
+          chunk
+          |> Chunk.changeset(%{translated_content: translated_data.content})
+          |> Repo.update!()
+        end
+      end)
+    end
+  end
+
+  defp embed_chunk(chunk, embed_content, attempt) do
+    chunk =
+      chunk
+      |> Chunk.embedding_changeset(%{embedding_status: "processing"})
+      |> Repo.update!()
+
+    result =
+      CircuitBreaker.call(:embedding_api, fn ->
+        embedding_module().generate(embed_content, [])
+      end)
+
+    case result do
+      {:ok, embedding} ->
+        chunk
+        |> Chunk.embedding_changeset(%{embedding: embedding, embedding_status: "completed"})
+        |> Repo.update!()
+
+        {:ok, chunk.id}
+
+      {:error, :circuit_open} ->
+        Logger.warning("Embedding circuit breaker open for chunk #{chunk.id}")
+        mark_chunk_error(chunk)
+        {:error, :circuit_open}
+
+      {:error, reason} ->
+        handle_chunk_error(chunk, embed_content, reason, attempt)
+    end
+  end
+
+  defp generate_page_embedding(page) do
+    result =
+      CircuitBreaker.call(:embedding_api, fn ->
+        embedding_module().generate(page.original_markdown, [])
+      end)
+
+    case result do
+      {:ok, embedding} ->
+        page
+        |> Page.embedding_changeset(%{embedding: embedding})
+        |> Repo.update!()
+
+      {:error, reason} ->
+        Logger.warning("Page-level embedding failed for page #{page.id}: #{inspect(reason)}")
+    end
+  end
+
+  defp handle_chunk_error(chunk, embed_content, reason, attempt) do
     classification = ErrorClassifier.classify(reason)
 
     cond do
-      # Permanent error - don't retry
       classification == :permanent ->
-        Logger.error("Permanent embedding error for page #{page.id}: #{inspect(reason)}")
-        mark_embedding_error(page)
+        Logger.error("Permanent embedding error for chunk #{chunk.id}: #{inspect(reason)}")
+        mark_chunk_error(chunk)
         {:error, reason}
 
-      # Retryable error and we have retries left
       attempt < @max_retries ->
         delay = Backoff.calculate(attempt, base: 1_000, max: 10_000)
 
         Logger.warning(
-          "Embedding failed for page #{page.id}, retrying in #{delay}ms (#{attempt + 1}/#{@max_retries})"
+          "Embedding failed for chunk #{chunk.id}, retrying in #{delay}ms (#{attempt + 1}/#{@max_retries})"
         )
 
         :telemetry.execute(
           [:doctrans, :retry, :attempt],
           %{count: 1, delay_ms: delay},
-          %{type: :embedding, page_id: page.id, attempt: attempt + 1}
+          %{type: :embedding, chunk_id: chunk.id, attempt: attempt + 1}
         )
 
         Process.sleep(delay)
-        do_generate_embedding(page.id, attempt + 1)
+        embed_chunk(chunk, embed_content, attempt + 1)
 
-      # Max retries exceeded
       true ->
         Logger.error(
-          "Embedding failed for page #{page.id} after #{@max_retries} retries: #{inspect(reason)}"
+          "Embedding failed for chunk #{chunk.id} after #{@max_retries} retries: #{inspect(reason)}"
         )
 
         :telemetry.execute(
           [:doctrans, :retry, :exhausted],
           %{count: 1},
-          %{type: :embedding, page_id: page.id}
+          %{type: :embedding, chunk_id: chunk.id}
         )
 
-        mark_embedding_error(page)
+        mark_chunk_error(chunk)
         {:error, reason}
     end
   end
@@ -179,6 +334,12 @@ defmodule Doctrans.Search.EmbeddingWorker do
   defp mark_embedding_error(page) do
     page
     |> Page.embedding_changeset(%{embedding_status: "error"})
+    |> Repo.update!()
+  end
+
+  defp mark_chunk_error(chunk) do
+    chunk
+    |> Chunk.embedding_changeset(%{embedding_status: "error"})
     |> Repo.update!()
   end
 end

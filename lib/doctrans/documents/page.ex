@@ -36,6 +36,7 @@ defmodule Doctrans.Documents.Page do
     # included in the schema since they're only accessed via raw SQL queries.
 
     belongs_to :document, Doctrans.Documents.Document
+    has_many :chunks, Doctrans.Documents.Chunk
 
     timestamps()
   end

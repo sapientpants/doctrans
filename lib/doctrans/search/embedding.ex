@@ -2,7 +2,9 @@ defmodule Doctrans.Search.Embedding do
   @moduledoc """
   Generates text embeddings using Ollama's embedding API.
 
-  Uses qwen3-embedding:0.6b model which outputs 1024-dimensional vectors.
+  Uses qwen3-embedding:8b which outputs 4096-dimensional vectors natively.
+  Output is truncated to 1024 dimensions using Matryoshka Representation
+  Learning (MRL) — the first N dimensions carry the most information.
 
   ## I18n Note
 
@@ -11,6 +13,8 @@ defmodule Doctrans.Search.Embedding do
   messages from this module will use the default locale, not the user's browser locale.
   This is acceptable as these errors are primarily logged and displayed as system status.
   """
+
+  @embedding_dimensions 1024
 
   @behaviour Doctrans.Search.EmbeddingBehaviour
 
@@ -42,7 +46,24 @@ defmodule Doctrans.Search.Embedding do
 
     case Req.post(url, json: body, receive_timeout: timeout) do
       {:ok, %{status: 200, body: %{"embeddings" => [embedding | _]}}} ->
-        {:ok, Pgvector.new(embedding)}
+        if length(embedding) >= @embedding_dimensions do
+          # Truncate to @embedding_dimensions for Matryoshka models that output
+          # more dimensions than we store (e.g., 4096 -> 1024)
+          truncated = Enum.take(embedding, @embedding_dimensions)
+          {:ok, Pgvector.new(truncated)}
+        else
+          Logger.error(
+            "Ollama embedding too short: expected at least #{@embedding_dimensions} dimensions, got #{length(embedding)}"
+          )
+
+          {:error,
+           dgettext(
+             "errors",
+             "Ollama embedding too short: expected at least %{expected} dimensions, got %{actual}",
+             expected: @embedding_dimensions,
+             actual: length(embedding)
+           )}
+        end
 
       {:ok, %{status: status, body: body}} ->
         Logger.error("Ollama embedding error (#{status}): #{inspect(body)}")

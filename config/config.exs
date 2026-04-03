@@ -16,7 +16,8 @@ config :doctrans,
 config :doctrans, :ollama,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
   vision_model: "qwen3.5:9b",
-  text_model: "translategemma:12b",
+  translation_model: "qwen3.5:27b",
+  chat_model: "qwen3.5:27b",
   timeout: 300_000
 
 # Circuit breaker configuration for resilience
@@ -70,7 +71,7 @@ config :doctrans, DoctransWeb.Gettext,
 # Embedding configuration for semantic search
 config :doctrans, :embedding,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
-  model: "qwen3-embedding:0.6b",
+  model: "qwen3-embedding:8b",
   timeout: 60_000
 
 # Oban configuration for persistent job queuing
