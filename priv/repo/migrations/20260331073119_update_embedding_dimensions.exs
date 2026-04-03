@@ -12,6 +12,10 @@ defmodule Doctrans.Repo.Migrations.UpdateEmbeddingDimensions do
     # This migration clears old embeddings from the previous model so they
     # can be regenerated, and recreates HNSW indexes.
 
+    # Drop HNSW indexes first to avoid index maintenance overhead during mass updates
+    execute "DROP INDEX CONCURRENTLY IF EXISTS pages_embedding_idx;"
+    execute "DROP INDEX CONCURRENTLY IF EXISTS chunks_embedding_idx;"
+
     # Clear old embeddings (incompatible with new model)
     execute "UPDATE pages SET embedding = NULL, embedding_status = 'pending';"
     execute "UPDATE chunks SET embedding = NULL, embedding_status = 'pending';"
@@ -21,15 +25,11 @@ defmodule Doctrans.Repo.Migrations.UpdateEmbeddingDimensions do
     execute "ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(1024);"
 
     # Recreate HNSW indexes
-    execute "DROP INDEX CONCURRENTLY IF EXISTS pages_embedding_idx;"
-
     execute """
     CREATE INDEX CONCURRENTLY pages_embedding_idx
     ON pages USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
     """
-
-    execute "DROP INDEX CONCURRENTLY IF EXISTS chunks_embedding_idx;"
 
     execute """
     CREATE INDEX CONCURRENTLY chunks_embedding_idx

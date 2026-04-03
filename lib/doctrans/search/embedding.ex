@@ -46,10 +46,24 @@ defmodule Doctrans.Search.Embedding do
 
     case Req.post(url, json: body, receive_timeout: timeout) do
       {:ok, %{status: 200, body: %{"embeddings" => [embedding | _]}}} ->
-        # Truncate to @embedding_dimensions for Matryoshka models that output
-        # more dimensions than we store (e.g., 4096 -> 1024)
-        truncated = Enum.take(embedding, @embedding_dimensions)
-        {:ok, Pgvector.new(truncated)}
+        if length(embedding) >= @embedding_dimensions do
+          # Truncate to @embedding_dimensions for Matryoshka models that output
+          # more dimensions than we store (e.g., 4096 -> 1024)
+          truncated = Enum.take(embedding, @embedding_dimensions)
+          {:ok, Pgvector.new(truncated)}
+        else
+          Logger.error(
+            "Ollama embedding too short: expected at least #{@embedding_dimensions} dimensions, got #{length(embedding)}"
+          )
+
+          {:error,
+           dgettext(
+             "errors",
+             "Ollama embedding too short: expected at least %{expected} dimensions, got %{actual}",
+             expected: @embedding_dimensions,
+             actual: length(embedding)
+           )}
+        end
 
       {:ok, %{status: status, body: body}} ->
         Logger.error("Ollama embedding error (#{status}): #{inspect(body)}")

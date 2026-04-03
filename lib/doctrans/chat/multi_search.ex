@@ -25,7 +25,11 @@ defmodule Doctrans.Chat.MultiSearch do
   - `:limit` - Maximum number of pages to return (default: 3)
   - `:min_similarity` - Minimum cosine similarity threshold (default: Search default)
   """
-  def search_with_queries(document_id, queries, opts \\ []) do
+  def search_with_queries(document_id, queries, opts \\ [])
+
+  def search_with_queries(_document_id, [], _opts), do: {:ok, []}
+
+  def search_with_queries(document_id, queries, opts) when is_list(queries) do
     limit = Keyword.get(opts, :limit, 3)
     # Fetch more per-query so RRF has enough candidates to rank
     per_query_limit = limit + 2

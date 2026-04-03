@@ -13,14 +13,17 @@ defmodule Doctrans.Search.Chunker do
   @overlap_words 50
 
   @doc """
-  Splits text into chunks with overlap.
+  Splits text into chunks without overlap.
 
   Returns a list of maps with:
   - `:chunk_index` - 0-based position
-  - `:content` - the chunk text
-  - `:start_offset` - character offset in the original text
-  - `:end_offset` - character offset end (exclusive)
+  - `:content` - the raw chunk text (no overlap)
+  - `:start_offset` - byte offset in the original text
+  - `:end_offset` - byte offset end (exclusive)
   - `:word_count` - number of words in the chunk
+
+  Use `content_for_embedding/2` to get content with overlap prepended,
+  suitable for generating embeddings with surrounding context.
   """
   def chunk(nil), do: []
   def chunk(""), do: []
@@ -33,12 +36,43 @@ defmodule Doctrans.Search.Chunker do
     else
       paragraphs = split_paragraphs(text)
       raw_chunks = build_raw_chunks(paragraphs)
-      add_overlap_and_index(raw_chunks)
+      index_chunks(raw_chunks)
     end
   end
 
-  # Split text into paragraphs tracking character offsets.
-  # Returns [{content, start_offset, end_offset}]
+  @doc """
+  Returns chunk content with overlap from the previous chunk prepended.
+
+  This is used for embedding generation so that each chunk has surrounding
+  context, improving retrieval quality. The stored `content` field remains
+  overlap-free to avoid duplication when building chat context.
+  """
+  def content_for_embedding(chunks, chunk_index) when chunk_index == 0 do
+    case Enum.at(chunks, 0) do
+      nil -> ""
+      chunk -> chunk.content
+    end
+  end
+
+  def content_for_embedding(chunks, chunk_index) do
+    chunk = Enum.at(chunks, chunk_index)
+    prev = Enum.at(chunks, chunk_index - 1)
+
+    if chunk && prev do
+      overlap = tail_words(prev.content, @overlap_words)
+
+      if overlap != "" do
+        overlap <> "\n\n" <> chunk.content
+      else
+        chunk.content
+      end
+    else
+      if chunk, do: chunk.content, else: ""
+    end
+  end
+
+  # Split text into paragraphs tracking byte offsets.
+  # Returns [{content, start_byte_offset, end_byte_offset}]
   defp split_paragraphs(text) do
     parts = String.split(text, ~r/\n\n+/)
 
@@ -50,7 +84,7 @@ defmodule Doctrans.Search.Chunker do
           {acc, search_from}
         else
           start_offset = find_offset(text, trimmed, search_from)
-          end_offset = start_offset + String.length(trimmed)
+          end_offset = start_offset + byte_size(trimmed)
           {[{trimmed, start_offset, end_offset} | acc], end_offset}
         end
       end)
@@ -111,36 +145,11 @@ defmodule Doctrans.Search.Chunker do
     end
   end
 
-  # Pass 2: add overlap between consecutive chunks and assign indexes
-  defp add_overlap_and_index([]), do: []
-  defp add_overlap_and_index([single]), do: [to_chunk_map(single, 0)]
-
-  defp add_overlap_and_index(raw_chunks) do
+  # Assign indexes to raw chunks
+  defp index_chunks(raw_chunks) do
     raw_chunks
     |> Enum.with_index()
-    |> Enum.map(fn {{content, start_offset, end_offset}, index} ->
-      content_with_overlap =
-        if index > 0 do
-          {prev_content, _, _} = Enum.at(raw_chunks, index - 1)
-          overlap = tail_words(prev_content, @overlap_words)
-
-          if overlap != "" do
-            overlap <> "\n\n" <> content
-          else
-            content
-          end
-        else
-          content
-        end
-
-      %{
-        chunk_index: index,
-        content: content_with_overlap,
-        start_offset: start_offset,
-        end_offset: end_offset,
-        word_count: word_count(content_with_overlap)
-      }
-    end)
+    |> Enum.map(fn {raw, index} -> to_chunk_map(raw, index) end)
   end
 
   defp to_chunk_map({content, start_offset, end_offset}, index) do
@@ -153,15 +162,10 @@ defmodule Doctrans.Search.Chunker do
     }
   end
 
-  # Get the last N words of a text
+  # Get the last N words of a text (returns up to n words)
   defp tail_words(text, n) do
     words = String.split(text, ~r/\s+/, trim: true)
-
-    if length(words) <= n do
-      ""
-    else
-      words |> Enum.take(-n) |> Enum.join(" ")
-    end
+    words |> Enum.take(-n) |> Enum.join(" ")
   end
 
   defp finalize_paras(paras) do
@@ -179,24 +183,27 @@ defmodule Doctrans.Search.Chunker do
   defp split_long_paragraph(text, base_offset) do
     sentences = split_sentences(text)
 
-    {chunks, current_sentences, _current_words} =
-      Enum.reduce(sentences, {[], [], 0}, fn sentence, {completed, current, current_words} ->
+    {chunks, current_sentences, _current_words, current_offset} =
+      Enum.reduce(sentences, {[], [], 0, base_offset}, fn sentence,
+                                                          {completed, current, current_words,
+                                                           offset} ->
         sentence_words = word_count(sentence)
         new_words = current_words + sentence_words
 
         if new_words >= @target_words and current != [] do
           chunk_text = Enum.join(Enum.reverse(current), " ")
-          chunk = {chunk_text, base_offset, base_offset + String.length(chunk_text)}
-          {[chunk | completed], [sentence], sentence_words}
+          chunk = {chunk_text, offset, offset + byte_size(chunk_text)}
+          next_offset = offset + byte_size(chunk_text)
+          {[chunk | completed], [sentence], sentence_words, next_offset}
         else
-          {completed, [sentence | current], new_words}
+          {completed, [sentence | current], new_words, offset}
         end
       end)
 
     all_chunks =
       if current_sentences != [] do
         chunk_text = Enum.join(Enum.reverse(current_sentences), " ")
-        chunk = {chunk_text, base_offset, base_offset + String.length(chunk_text)}
+        chunk = {chunk_text, current_offset, current_offset + byte_size(chunk_text)}
         [chunk | chunks]
       else
         chunks

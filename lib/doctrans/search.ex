@@ -104,7 +104,7 @@ defmodule Doctrans.Search do
   - `:min_similarity` - Minimum similarity threshold (default: #{@chat_similarity_threshold})
   """
   def search_by_embedding(document_id, query_embedding, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 5)
+    limit = Keyword.get(opts, :limit, 3)
     min_similarity = Keyword.get(opts, :min_similarity, @chat_similarity_threshold)
 
     # Try chunk-level search first, fall back to page-level if no chunks exist

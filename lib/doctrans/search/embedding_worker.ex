@@ -114,8 +114,15 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
         {:ok, page_id}
       else
-        # Embed each chunk
-        results = Enum.map(chunks, fn chunk -> embed_chunk(chunk, attempt) end)
+        # Build chunk data for overlap computation
+        chunk_data = Chunker.chunk(page.original_markdown)
+
+        # Embed each chunk (with overlap context for embedding quality)
+        results =
+          Enum.map(chunks, fn chunk ->
+            embed_content = Chunker.content_for_embedding(chunk_data, chunk.chunk_index)
+            embed_chunk(chunk, embed_content, attempt)
+          end)
 
         if Enum.all?(results, &match?({:ok, _}, &1)) do
           # Also generate page-level embedding for hybrid search fallback
@@ -148,11 +155,32 @@ defmodule Doctrans.Search.EmbeddingWorker do
       |> order_by([c], c.chunk_index)
       |> Repo.all()
 
-    if existing == [] do
-      create_chunks(page)
-    else
-      existing
+    cond do
+      existing == [] ->
+        create_chunks(page)
+
+      chunks_match_page_content?(existing, page.original_markdown) ->
+        existing
+
+      true ->
+        recreate_chunks(page.id)
     end
+  end
+
+  defp chunks_match_page_content?(existing_chunks, original_markdown) do
+    current_chunk_data =
+      original_markdown
+      |> Chunker.chunk()
+      |> Enum.map(fn data ->
+        %{chunk_index: data.chunk_index, content: data.content}
+      end)
+
+    existing_chunk_data =
+      Enum.map(existing_chunks, fn chunk ->
+        %{chunk_index: chunk.chunk_index, content: chunk.content}
+      end)
+
+    current_chunk_data == existing_chunk_data
   end
 
   defp create_chunks(page) do
@@ -201,7 +229,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
     end
   end
 
-  defp embed_chunk(chunk, attempt) do
+  defp embed_chunk(chunk, embed_content, attempt) do
     chunk =
       chunk
       |> Chunk.embedding_changeset(%{embedding_status: "processing"})
@@ -209,7 +237,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
     result =
       CircuitBreaker.call(:embedding_api, fn ->
-        embedding_module().generate(chunk.content, [])
+        embedding_module().generate(embed_content, [])
       end)
 
     case result do
@@ -226,7 +254,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
         {:error, :circuit_open}
 
       {:error, reason} ->
-        handle_chunk_error(chunk, reason, attempt)
+        handle_chunk_error(chunk, embed_content, reason, attempt)
     end
   end
 
@@ -247,7 +275,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
     end
   end
 
-  defp handle_chunk_error(chunk, reason, attempt) do
+  defp handle_chunk_error(chunk, embed_content, reason, attempt) do
     classification = ErrorClassifier.classify(reason)
 
     cond do
@@ -270,7 +298,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
         )
 
         Process.sleep(delay)
-        embed_chunk(chunk, attempt + 1)
+        embed_chunk(chunk, embed_content, attempt + 1)
 
       true ->
         Logger.error(

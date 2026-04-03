@@ -17,12 +17,12 @@ defmodule Doctrans.Chat.QueryExpander do
   Expands a user question into multiple search queries.
 
   When chat history is present, reformulates the question to be standalone and generates
-  alternative phrasings. When there's no history, generates alternatives for the original
-  question directly.
+  alternative phrasings. When there's no history, returns the original question as the
+  standalone question and only query.
 
   Returns `{standalone_question, queries}` where `standalone_question` is the reformulated
-  question (or the original if no history) and `queries` is a list of all query variants
-  to search with.
+  question (or the original if no history) and `queries` is a list of query variants to
+  search with.
 
   On any LLM failure, gracefully falls back to `{question, [question]}`.
   """
@@ -55,7 +55,7 @@ defmodule Doctrans.Chat.QueryExpander do
 
     case ollama_module().chat(messages, chat_opts(opts)) do
       {:ok, response} ->
-        Logger.info("Query expansion raw response:\n#{response}")
+        Logger.debug("Query expansion raw response:\n#{String.slice(response, 0, 500)}")
         parse_expansion(response, question)
 
       {:error, reason} ->

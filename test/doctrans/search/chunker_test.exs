@@ -48,7 +48,7 @@ defmodule Doctrans.Search.ChunkerTest do
       assert Enum.all?(chunks, &(&1.word_count > 0))
     end
 
-    test "adds overlap from previous chunk" do
+    test "content_for_embedding includes overlap from previous chunk" do
       # Create enough text to force multiple chunks
       para1 = String.duplicate("alpha ", 160) |> String.trim()
       para2 = String.duplicate("beta ", 160) |> String.trim()
@@ -59,12 +59,22 @@ defmodule Doctrans.Search.ChunkerTest do
 
       assert length(chunks) > 1
 
-      # Second chunk should contain overlap words from first chunk
-      if length(chunks) > 1 do
-        second = Enum.at(chunks, 1)
-        # The overlap should add words from the previous chunk
-        assert second.word_count > 0
-      end
+      # Raw content should NOT contain overlap
+      second = Enum.at(chunks, 1)
+      refute String.contains?(second.content, "alpha")
+
+      # But content_for_embedding should include overlap from previous chunk
+      embed_content = Chunker.content_for_embedding(chunks, 1)
+      first = Enum.at(chunks, 0)
+
+      overlap_suffix =
+        first.content
+        |> String.split()
+        |> Enum.take(-10)
+        |> Enum.join(" ")
+
+      assert overlap_suffix != ""
+      assert String.contains?(embed_content, overlap_suffix)
     end
 
     test "preserves start and end offsets" do
