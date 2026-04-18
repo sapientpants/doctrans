@@ -185,17 +185,25 @@ defmodule DoctransWeb.DocumentLive.Index do
   def handle_event("cancel_upload", %{"ref" => ref}, socket),
     do: {:noreply, cancel_upload(socket, :document, ref)}
 
+  @allowed_sort_fields ~w(inserted_at title)a
+  @allowed_sort_dirs ~w(asc desc)a
+
   @impl true
   def handle_event("sort", %{"field" => field, "dir" => dir}, socket) do
     sort_by = String.to_existing_atom(field)
     sort_dir = String.to_existing_atom(dir)
-    documents = Documents.list_documents_with_progress(sort_by: sort_by, sort_dir: sort_dir)
 
-    {:noreply,
-     socket
-     |> assign(:sort_by, sort_by)
-     |> assign(:sort_dir, sort_dir)
-     |> assign(:documents, documents)}
+    if sort_by in @allowed_sort_fields and sort_dir in @allowed_sort_dirs do
+      documents = Documents.list_documents_with_progress(sort_by: sort_by, sort_dir: sort_dir)
+
+      {:noreply,
+       socket
+       |> assign(:sort_by, sort_by)
+       |> assign(:sort_dir, sort_dir)
+       |> assign(:documents, documents)}
+    else
+      {:noreply, socket}
+    end
   end
 
   @impl true
@@ -235,45 +243,81 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   # Private function to handle document upload with validated language
   defp upload_documents_with_validated_language(socket, target_language) do
-    # Consume all uploaded files
     uploaded_files =
       consume_uploaded_entries(socket, :document, fn %{path: path}, entry ->
+        consume_upload_entry(path, entry)
+      end)
+
+    {valid_files, rejected} =
+      Enum.split_with(uploaded_files, fn
+        {:ok, _, _, _} -> true
+        _ -> false
+      end)
+
+    handle_upload_results(socket, valid_files, rejected, target_language)
+  end
+
+  defp consume_upload_entry(path, entry) do
+    extension = entry.client_name |> Path.extname() |> String.downcase()
+
+    case Validation.validate_file_content(path, extension) do
+      :ok ->
         document_id = Uniq.UUID.uuid7()
         dest_dir = Documents.document_upload_dir(document_id)
         File.mkdir_p!(dest_dir)
 
-        # Preserve the original file extension for proper processing
-        extension = entry.client_name |> Path.extname() |> String.downcase()
         dest_path = Path.join(dest_dir, "original#{extension}")
         File.cp!(path, dest_path)
-        {:ok, {document_id, entry.client_name, dest_path}}
-      end)
+        {:ok, {:ok, document_id, entry.client_name, dest_path}}
 
-    case uploaded_files do
-      [] ->
-        {:noreply, put_flash(socket, :error, gettext("No files were uploaded"))}
-
-      files ->
-        # Create a document for each uploaded file
-        Enum.each(files, fn file_info ->
-          create_and_process_document(file_info, target_language)
-        end)
-
-        file_count = length(files)
-
-        message =
-          ngettext(
-            "Document uploaded! Processing will begin shortly.",
-            "%{count} documents uploaded! Processing will begin shortly.",
-            file_count
-          )
-
-        {:noreply,
-         socket
-         |> assign(:show_upload_modal, false)
-         |> assign(:documents, Documents.list_documents_with_progress())
-         |> put_flash(:info, message)}
+      {:error, reason} ->
+        Logger.warning("File content validation failed for #{entry.client_name}: #{reason}")
+        {:ok, {:error, entry.client_name, reason}}
     end
+  end
+
+  defp handle_upload_results(socket, [], [_ | _], _target_language) do
+    {:noreply,
+     put_flash(socket, :error, gettext("No valid files were uploaded. Check file formats."))}
+  end
+
+  defp handle_upload_results(socket, [], [], _target_language) do
+    {:noreply, put_flash(socket, :error, gettext("No files were uploaded"))}
+  end
+
+  defp handle_upload_results(socket, valid_files, rejected, target_language) do
+    Enum.each(valid_files, fn {:ok, document_id, client_name, dest_path} ->
+      create_and_process_document({document_id, client_name, dest_path}, target_language)
+    end)
+
+    message =
+      ngettext(
+        "Document uploaded! Processing will begin shortly.",
+        "%{count} documents uploaded! Processing will begin shortly.",
+        length(valid_files)
+      )
+
+    socket =
+      socket
+      |> assign(:show_upload_modal, false)
+      |> assign(:documents, Documents.list_documents_with_progress())
+      |> put_flash(:info, message)
+
+    socket =
+      if rejected != [] do
+        rejected_names =
+          Enum.map_join(rejected, ", ", fn {:error, name, _reason} -> name end)
+
+        put_flash(
+          socket,
+          :warning,
+          gettext("Some files were rejected: %{names}", names: rejected_names)
+        )
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   # Helper to create a document and start processing

@@ -144,18 +144,14 @@ defmodule Doctrans.Validation do
     trimmed = String.trim(query)
 
     cond do
-      String.length(trimmed) < 3 ->
-        {:error, "Query too short (minimum 3 characters)"}
+      String.length(trimmed) < 1 ->
+        {:error, "Query too short"}
 
       String.length(trimmed) > 500 ->
         {:error, "Query too long (max 500 characters)"}
 
-      String.contains?(trimmed, "<script>") or String.contains?(trimmed, "</script>") ->
-        {:error, "Query contains invalid characters"}
-
       true ->
-        sanitized = String.slice(trimmed, 0, 500)
-        {:ok, sanitized}
+        {:ok, String.slice(trimmed, 0, 500)}
     end
   end
 
@@ -183,6 +179,48 @@ defmodule Doctrans.Validation do
   end
 
   def validate_language(_), do: {:error, "Language code must be a string"}
+
+  @doc """
+  Validates that a file's content matches its claimed extension by checking magic bytes.
+
+  ## Parameters
+  - `file_path` - Path to the file on disk
+  - `extension` - The claimed file extension (e.g., ".pdf")
+
+  ## Returns
+  - :ok if the magic bytes match the extension
+  - {:error, reason} if they don't match or the file can't be read
+  """
+  def validate_file_content(file_path, extension) when is_binary(file_path) do
+    case File.read(file_path) do
+      {:ok, <<header::binary-size(8), _rest::binary>>} ->
+        if magic_bytes_match?(header, String.downcase(extension)) do
+          :ok
+        else
+          {:error, "File content does not match its extension"}
+        end
+
+      {:ok, _too_small} ->
+        {:error, "File is too small to be a valid document"}
+
+      {:error, _} ->
+        {:error, "Could not read file for validation"}
+    end
+  end
+
+  defp magic_bytes_match?(header, ".pdf"),
+    do: binary_part(header, 0, 5) == "%PDF-"
+
+  defp magic_bytes_match?(header, ext) when ext in [".docx", ".odt"],
+    do: binary_part(header, 0, 4) == <<0x50, 0x4B, 0x03, 0x04>>
+
+  defp magic_bytes_match?(header, ".doc"),
+    do: binary_part(header, 0, 4) == <<0xD0, 0xCF, 0x11, 0xE0>>
+
+  defp magic_bytes_match?(header, ".rtf"),
+    do: binary_part(header, 0, 5) == "{\\rtf"
+
+  defp magic_bytes_match?(_header, _ext), do: true
 
   # Private validation functions
 
@@ -392,7 +430,7 @@ defmodule Doctrans.Validation do
     # Remove javascript: protocols
     |> String.replace(~r/javascript:/i, "")
     # Remove data: URLs
-    |> String.replace(~r/data:[^"\s]*]/i, "")
+    |> String.replace(~r/data:[^"\s]*/i, "")
     # Limit length
     |> String.slice(0, 50_000)
   end

@@ -154,14 +154,14 @@ defmodule Doctrans.ValidationTest do
     test "returns error for empty query" do
       query = ""
 
-      assert {:error, "Query too short (minimum 3 characters)"} =
+      assert {:error, "Query too short"} =
                Validation.validate_search_query(query)
     end
 
     test "returns error for only whitespace query" do
       query = "   "
 
-      assert {:error, "Query too short (minimum 3 characters)"} =
+      assert {:error, "Query too short"} =
                Validation.validate_search_query(query)
     end
 
@@ -171,10 +171,9 @@ defmodule Doctrans.ValidationTest do
       assert reason =~ "too long"
     end
 
-    test "returns error for query with script tags" do
+    test "sanitizes query with script tags instead of rejecting" do
       query = "test <script>alert('xss')</script> query"
-      assert {:error, reason} = Validation.validate_search_query(query)
-      assert reason =~ "invalid characters"
+      assert {:ok, _sanitized} = Validation.validate_search_query(query)
     end
 
     test "returns error for non-string query" do

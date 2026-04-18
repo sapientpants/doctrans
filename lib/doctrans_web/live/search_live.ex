@@ -5,6 +5,7 @@ defmodule DoctransWeb.SearchLive do
   use DoctransWeb, :live_view
 
   alias Doctrans.Search
+  alias Doctrans.Validation
 
   require Logger
 
@@ -28,42 +29,58 @@ defmodule DoctransWeb.SearchLive do
 
   @impl true
   def handle_params(%{"q" => query} = params, _uri, socket) when query != "" do
-    page = parse_page(params["page"])
-    offset = max(0, (page - 1) * @per_page)
-
-    socket =
-      socket
-      |> assign(:query, query)
-      |> assign(:page, page)
-      |> assign(:searching, true)
-      |> assign(:search_error, false)
-
-    # Get total count and search results
-    with {:ok, total_count} <- Search.count_results(query),
-         {:ok, results} <- Search.search(query, limit: @per_page, offset: offset) do
-      {:noreply,
-       assign(socket,
-         results: results,
-         total_count: total_count,
-         searching: false,
-         searched: true
-       )}
-    else
-      {:error, reason} ->
-        Logger.warning("Search failed: #{inspect(reason)}")
+    case Validation.validate_search_query(query) do
+      {:ok, validated_query} ->
+        page = parse_page(params["page"])
+        offset = max(0, (page - 1) * @per_page)
 
         socket =
           socket
-          |> assign(
-            results: [],
-            total_count: 0,
-            searching: false,
-            searched: true,
-            search_error: true
-          )
-          |> put_flash(:error, gettext("Search is temporarily unavailable. Please try again."))
+          |> assign(:query, validated_query)
+          |> assign(:page, page)
+          |> assign(:searching, true)
+          |> assign(:search_error, false)
 
-        {:noreply, socket}
+        # Get total count and search results
+        with {:ok, total_count} <- Search.count_results(validated_query),
+             {:ok, results} <-
+               Search.search(validated_query, limit: @per_page, offset: offset) do
+          {:noreply,
+           assign(socket,
+             results: results,
+             total_count: total_count,
+             searching: false,
+             searched: true
+           )}
+        else
+          {:error, reason} ->
+            Logger.warning("Search failed: #{inspect(reason)}")
+
+            socket =
+              socket
+              |> assign(
+                results: [],
+                total_count: 0,
+                searching: false,
+                searched: true,
+                search_error: true
+              )
+              |> put_flash(
+                :error,
+                gettext("Search is temporarily unavailable. Please try again.")
+              )
+
+            {:noreply, socket}
+        end
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:query, query)
+         |> assign(:searched, true)
+         |> assign(:results, [])
+         |> assign(:total_count, 0)
+         |> put_flash(:error, reason)}
     end
   end
 
