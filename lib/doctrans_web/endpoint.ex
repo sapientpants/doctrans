@@ -8,7 +8,9 @@ defmodule DoctransWeb.Endpoint do
     store: :cookie,
     key: "_doctrans_key",
     signing_salt: "Qr5ZNHs0",
-    same_site: "Lax"
+    same_site: "Lax",
+    secure: Application.compile_env(:doctrans, :env) == :prod,
+    http_only: true
   ]
 
   socket "/live", Phoenix.LiveView.Socket,

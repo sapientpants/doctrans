@@ -7,7 +7,12 @@ defmodule DoctransWeb.Router do
     plug :fetch_live_flash
     plug :put_root_layout, html: {DoctransWeb.Layouts, :root}
     plug :protect_from_forgery
-    plug :put_secure_browser_headers
+
+    plug :put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    }
+
     plug DoctransWeb.Plugs.SetLocale
   end
 
