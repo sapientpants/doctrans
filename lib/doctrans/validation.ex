@@ -191,7 +191,8 @@ defmodule Doctrans.Validation do
   - :ok if the magic bytes match the extension
   - {:error, reason} if they don't match or the file can't be read
   """
-  def validate_file_content(file_path, extension) when is_binary(file_path) do
+  def validate_file_content(file_path, extension)
+      when is_binary(file_path) and is_binary(extension) do
     case read_header(file_path, 8) do
       {:ok, header} when byte_size(header) == 8 ->
         if magic_bytes_match?(header, String.downcase(extension)) do
@@ -207,6 +208,9 @@ defmodule Doctrans.Validation do
         {:error, "Could not read file for validation"}
     end
   end
+
+  def validate_file_content(_file_path, _extension),
+    do: {:error, "File path and extension must be strings"}
 
   defp read_header(file_path, bytes) do
     case File.open(file_path, [:read, :binary]) do
@@ -447,8 +451,8 @@ defmodule Doctrans.Validation do
     |> String.replace(~r/<\/script>/i, "")
     # Remove javascript: protocols
     |> String.replace(~r/javascript:/i, "")
-    # Remove data: URLs
-    |> String.replace(~r/data:[^"\s]*/i, "")
+    # Remove data: URLs (word-boundary to avoid matching `metadata:` etc.)
+    |> String.replace(~r/\bdata:[^"\s]*/i, "")
     # Limit length
     |> String.slice(0, 50_000)
   end

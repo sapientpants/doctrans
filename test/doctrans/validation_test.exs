@@ -146,6 +146,21 @@ defmodule Doctrans.ValidationTest do
     end
   end
 
+  describe "sanitize_markdown/1" do
+    test "strips data: URLs without corrupting embedded words like metadata:" do
+      input = "metadata: still here\n![bad](data:text/html;base64,PHNjcmlwdD4=)\nend"
+      result = Validation.sanitize_markdown(input)
+
+      assert String.contains?(result, "metadata:")
+      refute String.contains?(result, "data:text/html")
+    end
+
+    test "strips bare data: URLs at the start of input" do
+      result = Validation.sanitize_markdown("data:image/png;base64,iVBOR rest")
+      refute String.contains?(result, "data:")
+    end
+  end
+
   describe "validate_search_query/1" do
     test "returns valid query for normal text" do
       query = "test search query"
@@ -251,6 +266,17 @@ defmodule Doctrans.ValidationTest do
       path = Path.join(dir, "missing.pdf")
       assert {:error, reason} = Validation.validate_file_content(path, ".pdf")
       assert reason =~ "Could not read"
+    end
+
+    test "returns error when extension is not a string", %{dir: dir} do
+      path = write_file!(dir, "doc.pdf", "%PDF-1.4\nrest")
+      assert {:error, reason} = Validation.validate_file_content(path, nil)
+      assert reason =~ "must be strings"
+    end
+
+    test "returns error when file path is not a string" do
+      assert {:error, reason} = Validation.validate_file_content(nil, ".pdf")
+      assert reason =~ "must be strings"
     end
   end
 
