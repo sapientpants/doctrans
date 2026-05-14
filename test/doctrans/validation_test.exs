@@ -3,6 +3,12 @@ defmodule Doctrans.ValidationTest do
 
   alias Doctrans.Validation
 
+  defp write_file!(dir, name, content) do
+    path = Path.join(dir, name)
+    File.write!(path, content)
+    path
+  end
+
   describe "validate_document_attrs/1" do
     test "returns valid attrs when all fields are present and valid" do
       attrs = %{
@@ -171,14 +177,80 @@ defmodule Doctrans.ValidationTest do
       assert reason =~ "too long"
     end
 
-    test "sanitizes query with script tags instead of rejecting" do
+    test "accepts query containing HTML/script tags without transformation" do
       query = "test <script>alert('xss')</script> query"
-      assert {:ok, _sanitized} = Validation.validate_search_query(query)
+      assert {:ok, ^query} = Validation.validate_search_query(query)
     end
 
     test "returns error for non-string query" do
       query = 123
       assert {:error, "Search query must be a string"} = Validation.validate_search_query(query)
+    end
+  end
+
+  describe "validate_file_content/2" do
+    setup do
+      dir =
+        System.tmp_dir!()
+        |> Path.join("doctrans_validation_test_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+      {:ok, dir: dir}
+    end
+
+    test "accepts a valid PDF header", %{dir: dir} do
+      path = write_file!(dir, "doc.pdf", "%PDF-1.4\nrest of file")
+      assert :ok = Validation.validate_file_content(path, ".pdf")
+    end
+
+    test "rejects a PDF extension whose content is not a PDF", %{dir: dir} do
+      path = write_file!(dir, "fake.pdf", "not a pdf at all, just text")
+      assert {:error, reason} = Validation.validate_file_content(path, ".pdf")
+      assert reason =~ "does not match"
+    end
+
+    test "accepts a valid DOCX (ZIP) header", %{dir: dir} do
+      path = write_file!(dir, "doc.docx", <<0x50, 0x4B, 0x03, 0x04>> <> "trailing bytes")
+      assert :ok = Validation.validate_file_content(path, ".docx")
+    end
+
+    test "accepts a valid ODT (ZIP) header", %{dir: dir} do
+      path = write_file!(dir, "doc.odt", <<0x50, 0x4B, 0x03, 0x04>> <> "trailing bytes")
+      assert :ok = Validation.validate_file_content(path, ".odt")
+    end
+
+    test "accepts a valid legacy DOC (OLE) header", %{dir: dir} do
+      path = write_file!(dir, "doc.doc", <<0xD0, 0xCF, 0x11, 0xE0>> <> "trailing bytes")
+      assert :ok = Validation.validate_file_content(path, ".doc")
+    end
+
+    test "accepts a valid RTF header", %{dir: dir} do
+      path = write_file!(dir, "doc.rtf", "{\\rtf1\\ansi rest")
+      assert :ok = Validation.validate_file_content(path, ".rtf")
+    end
+
+    test "is case-insensitive on extension", %{dir: dir} do
+      path = write_file!(dir, "doc.PDF", "%PDF-1.4\ncontent")
+      assert :ok = Validation.validate_file_content(path, ".PDF")
+    end
+
+    test "rejects unknown extensions", %{dir: dir} do
+      path = write_file!(dir, "doc.xyz", "arbitrary content over 8 bytes")
+      assert {:error, reason} = Validation.validate_file_content(path, ".xyz")
+      assert reason =~ "does not match"
+    end
+
+    test "returns error for files smaller than the magic-byte window", %{dir: dir} do
+      path = write_file!(dir, "tiny.pdf", "%PD")
+      assert {:error, reason} = Validation.validate_file_content(path, ".pdf")
+      assert reason =~ "too small"
+    end
+
+    test "returns error when file does not exist", %{dir: dir} do
+      path = Path.join(dir, "missing.pdf")
+      assert {:error, reason} = Validation.validate_file_content(path, ".pdf")
+      assert reason =~ "Could not read"
     end
   end
 

@@ -185,26 +185,25 @@ defmodule DoctransWeb.DocumentLive.Index do
   def handle_event("cancel_upload", %{"ref" => ref}, socket),
     do: {:noreply, cancel_upload(socket, :document, ref)}
 
-  @allowed_sort_fields ~w(inserted_at title)a
-  @allowed_sort_dirs ~w(asc desc)a
+  @allowed_sort_fields ~w(inserted_at title)
+  @allowed_sort_dirs ~w(asc desc)
 
   @impl true
-  def handle_event("sort", %{"field" => field, "dir" => dir}, socket) do
+  def handle_event("sort", %{"field" => field, "dir" => dir}, socket)
+      when field in @allowed_sort_fields and dir in @allowed_sort_dirs do
     sort_by = String.to_existing_atom(field)
     sort_dir = String.to_existing_atom(dir)
+    documents = Documents.list_documents_with_progress(sort_by: sort_by, sort_dir: sort_dir)
 
-    if sort_by in @allowed_sort_fields and sort_dir in @allowed_sort_dirs do
-      documents = Documents.list_documents_with_progress(sort_by: sort_by, sort_dir: sort_dir)
-
-      {:noreply,
-       socket
-       |> assign(:sort_by, sort_by)
-       |> assign(:sort_dir, sort_dir)
-       |> assign(:documents, documents)}
-    else
-      {:noreply, socket}
-    end
+    {:noreply,
+     socket
+     |> assign(:sort_by, sort_by)
+     |> assign(:sort_dir, sort_dir)
+     |> assign(:documents, documents)}
   end
+
+  @impl true
+  def handle_event("sort", _params, socket), do: {:noreply, socket}
 
   @impl true
   def handle_event("upload_document", params, socket) do

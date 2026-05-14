@@ -192,8 +192,8 @@ defmodule Doctrans.Validation do
   - {:error, reason} if they don't match or the file can't be read
   """
   def validate_file_content(file_path, extension) when is_binary(file_path) do
-    case File.read(file_path) do
-      {:ok, <<header::binary-size(8), _rest::binary>>} ->
+    case read_header(file_path, 8) do
+      {:ok, header} when byte_size(header) == 8 ->
         if magic_bytes_match?(header, String.downcase(extension)) do
           :ok
         else
@@ -205,6 +205,24 @@ defmodule Doctrans.Validation do
 
       {:error, _} ->
         {:error, "Could not read file for validation"}
+    end
+  end
+
+  defp read_header(file_path, bytes) do
+    case File.open(file_path, [:read, :binary]) do
+      {:ok, io} ->
+        try do
+          case IO.binread(io, bytes) do
+            data when is_binary(data) -> {:ok, data}
+            :eof -> {:ok, ""}
+            {:error, _} = err -> err
+          end
+        after
+          File.close(io)
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -220,7 +238,7 @@ defmodule Doctrans.Validation do
   defp magic_bytes_match?(header, ".rtf"),
     do: binary_part(header, 0, 5) == "{\\rtf"
 
-  defp magic_bytes_match?(_header, _ext), do: true
+  defp magic_bytes_match?(_header, _ext), do: false
 
   # Private validation functions
 
