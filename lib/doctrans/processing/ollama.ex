@@ -80,6 +80,11 @@ defmodule Doctrans.Processing.Ollama do
           prompt: prompt,
           images: [image_base64],
           stream: false,
+          # Vision models in the Qwen3 family are thinking-enabled by default.
+          # OCR/extraction gains nothing from chain-of-thought, and reasoning can
+          # exhaust the num_predict budget before any text reaches the `response`
+          # field, yielding an empty extraction. Disable it for this task.
+          think: false,
           options: %{
             num_ctx: 16_384,
             num_predict: 8_192
@@ -128,6 +133,10 @@ defmodule Doctrans.Processing.Ollama do
       model: model,
       messages: [%{role: "user", content: prompt}],
       stream: false,
+      # Translation is a direct transformation, not a reasoning task. Thinking adds
+      # latency and risks burning the num_predict budget before the translation is
+      # emitted (same empty-response failure as extraction). Keep it off.
+      think: false,
       options: %{
         num_ctx: 16_384,
         num_predict: 8_192
@@ -209,8 +218,7 @@ defmodule Doctrans.Processing.Ollama do
             result = content |> String.trim() |> strip_code_fences()
 
             if result == "" do
-              Logger.warning("Ollama chat returned empty response")
-              {:error, dgettext("errors", "Model returned empty response")}
+              empty_response_error(response_body, "the request")
             else
               Logger.debug("Ollama chat returned #{String.length(result)} chars")
               {:ok, result}
@@ -309,11 +317,7 @@ defmodule Doctrans.Processing.Ollama do
             result = response |> String.trim() |> strip_code_fences()
 
             if result == "" do
-              Logger.warning(
-                "Ollama returned empty response - model may have failed to process the image"
-              )
-
-              {:error, dgettext("errors", "Model returned empty response")}
+              empty_response_error(response_body, "the image")
             else
               Logger.debug("Ollama returned #{String.length(result)} chars")
               {:ok, result}
@@ -341,6 +345,38 @@ defmodule Doctrans.Processing.Ollama do
       {:error, reason} ->
         Logger.error("Ollama request failed: #{inspect(reason)}")
         {:error, dgettext("errors", "Request failed: %{reason}", reason: inspect(reason))}
+    end
+  end
+
+  # Builds a descriptive error for an empty model response. Qwen3 models are
+  # thinking-enabled; when reasoning consumes the entire num_predict budget the
+  # text field comes back empty with done_reason "length". Surface that case
+  # explicitly so it is distinguishable from a genuine processing failure.
+  # `thinking` lives at the top level for /api/generate and under "message" for
+  # /api/chat.
+  defp empty_response_error(response_body, subject) do
+    done_reason = response_body["done_reason"]
+
+    thinking =
+      response_body["thinking"] || get_in(response_body, ["message", "thinking"]) || ""
+
+    thinking_chars = String.length(thinking)
+
+    Logger.warning(
+      "Ollama returned empty response (done_reason=#{inspect(done_reason)}, thinking_chars=#{thinking_chars})"
+    )
+
+    if done_reason == "length" and thinking_chars > 0 do
+      {:error,
+       dgettext(
+         "errors",
+         "Model used its entire output budget while thinking and returned no text. Disable thinking for this model or increase num_predict."
+       )}
+    else
+      {:error,
+       dgettext("errors", "Model returned empty response while processing %{subject}",
+         subject: subject
+       )}
     end
   end
 
