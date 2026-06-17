@@ -22,6 +22,7 @@ config :doctrans, :ollama,
   vision_model: "qwen3.5:9b",
   translation_model: "qwen3.6:35b-a3b-q4_K_M",
   chat_model: "qwen3.6:35b-a3b-q4_K_M",
+  embedding_model: "qwen3-embedding:8b",
   timeout: 300_000
 
 # Unsloth configuration for AI models
@@ -31,6 +32,7 @@ config :doctrans, :unsloth,
   vision_model: "unsloth/Qwen3.5-9B-MTP-GGUF",
   translation_model: "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
   chat_model: "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+  embedding_model: "unsloth/Qwen3-Embedding-8B",
   timeout: 300_000
 
 # Circuit breaker configuration for resilience
@@ -84,18 +86,6 @@ config :doctrans, :defaults,
 config :doctrans, DoctransWeb.Gettext,
   default_locale: "en",
   locales: ~w(da de en es fr it nl no pl pt sv)
-
-# Embedding configuration for semantic search
-config :doctrans, :embedding,
-  base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
-  model: "qwen3-embedding:8b",
-  timeout: 60_000
-
-# Unsloth embedding configuration
-config :doctrans, :unsloth_embedding,
-  base_url: System.get_env("UNSLOTH_HOST", "http://localhost:8888"),
-  model: "unsloth/Qwen3-Embedding-8B",
-  timeout: 60_000
 
 # Oban configuration for persistent job queuing
 #
