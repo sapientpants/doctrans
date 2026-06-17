@@ -14,11 +14,13 @@ defmodule Doctrans.Processing.Ollama do
   This is acceptable as these errors are primarily logged and displayed as system status.
   """
 
-  @behaviour Doctrans.Processing.OllamaBehaviour
+  @behaviour Doctrans.Processing.ProviderBehaviour
 
   require Logger
 
   use Gettext, backend: DoctransWeb.Gettext
+
+  import Doctrans.Processing.LlmUtils, only: [strip_code_fences: 1, language_name: 1]
 
   @doc """
   Extracts markdown text from an image using the vision model.
@@ -394,35 +396,5 @@ defmodule Doctrans.Processing.Ollama do
     Logger.info(
       "Ollama request: model=#{body[:model]}, prompt_length=#{String.length(body[:prompt] || "")}, image_base64_bytes=#{image_bytes}"
     )
-  end
-
-  # Strip markdown code fences that LLMs sometimes wrap their output in
-  def strip_code_fences(text) do
-    text
-    |> String.replace(~r/\A```[^\n]*\n/, "")
-    |> String.replace(~r/\n?```\s*\z/, "")
-    |> String.trim()
-  end
-
-  defp language_name(code) do
-    languages = %{
-      "de" => "German",
-      "en" => "English",
-      "fr" => "French",
-      "es" => "Spanish",
-      "it" => "Italian",
-      "pt" => "Portuguese",
-      "nl" => "Dutch",
-      "pl" => "Polish",
-      "ru" => "Russian",
-      "zh" => "Chinese",
-      "ja" => "Japanese",
-      "ko" => "Korean",
-      "da" => "Danish",
-      "no" => "Norwegian",
-      "sv" => "Swedish"
-    }
-
-    Map.get(languages, code, code)
   end
 end

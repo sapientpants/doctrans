@@ -1,8 +1,9 @@
 defmodule Doctrans.Processing.OllamaBehaviour do
   @moduledoc """
-  Behaviour for Ollama API interactions.
+  Legacy alias for ProviderBehaviour.
 
-  This allows mocking the Ollama service in tests.
+  Kept for backward compatibility with existing test mocks. New code should
+  use `Doctrans.Processing.ProviderBehaviour` directly.
   """
 
   @callback extract_markdown(image_path :: String.t(), opts :: keyword()) ::

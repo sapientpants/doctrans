@@ -15,11 +15,13 @@ defmodule Doctrans.Processing.Unsloth do
   This is acceptable as these errors are primarily logged and displayed as system status.
   """
 
-  @behaviour Doctrans.Processing.UnslothBehaviour
+  @behaviour Doctrans.Processing.ProviderBehaviour
 
   require Logger
 
   use Gettext, backend: DoctransWeb.Gettext
+
+  import Doctrans.Processing.LlmUtils, only: [strip_code_fences: 1, language_name: 1]
 
   @doc """
   Extracts markdown text from an image using the vision model.
@@ -81,6 +83,11 @@ defmodule Doctrans.Processing.Unsloth do
           prompt: prompt,
           images: [image_base64],
           stream: false,
+          # Vision models in the Qwen3 family are thinking-enabled by default.
+          # OCR/extraction gains nothing from chain-of-thought, and reasoning can
+          # exhaust the num_predict budget before any text reaches the `response`
+          # field, yielding an empty extraction. Disable it for this task.
+          think: false,
           options: %{
             num_ctx: 16_384,
             num_predict: 8_192
@@ -127,6 +134,10 @@ defmodule Doctrans.Processing.Unsloth do
       model: model,
       messages: [%{role: "user", content: prompt}],
       stream: false,
+      # Translation is a direct transformation, not a reasoning task. Thinking adds
+      # latency and risks burning the num_predict budget before the translation is
+      # emitted (same empty-response failure as extraction). Keep it off.
+      think: false,
       options: %{
         num_ctx: 16_384,
         num_predict: 8_192
@@ -382,35 +393,5 @@ defmodule Doctrans.Processing.Unsloth do
     Logger.info(
       "Unsloth request: model=#{body[:model]}, prompt_length=#{String.length(body[:prompt] || "")}, image_base64_bytes=#{image_bytes}"
     )
-  end
-
-  # Strip markdown code fences that LLMs sometimes wrap their output in
-  def strip_code_fences(text) do
-    text
-    |> String.replace(~r/\A```[^\n]*\n/, "")
-    |> String.replace(~r/\n?```\s*\z/, "")
-    |> String.trim()
-  end
-
-  defp language_name(code) do
-    languages = %{
-      "de" => "German",
-      "en" => "English",
-      "fr" => "French",
-      "es" => "Spanish",
-      "it" => "Italian",
-      "pt" => "Portuguese",
-      "nl" => "Dutch",
-      "pl" => "Polish",
-      "ru" => "Russian",
-      "zh" => "Chinese",
-      "ja" => "Japanese",
-      "ko" => "Korean",
-      "da" => "Danish",
-      "no" => "Norwegian",
-      "sv" => "Swedish"
-    }
-
-    Map.get(languages, code, code)
   end
 end

@@ -19,6 +19,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   alias Doctrans.Documents
   alias Doctrans.Processing.DocumentOrchestrator
+  alias Doctrans.Processing.ProviderResolver
   alias Doctrans.Resilience.{Backoff, ErrorClassifier}
   alias Doctrans.Search.EmbeddingWorker
 
@@ -35,8 +36,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   end
 
   # Allow provider module to be configured for testing
-  defp provider_module,
-    do: Application.get_env(:doctrans, :provider_module, Doctrans.Processing.Ollama)
+  defp provider_module, do: ProviderResolver.resolve()
 
   @doc """
   Processes a single page through the LLM pipeline (extraction + translation).

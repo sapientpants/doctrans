@@ -1,9 +1,9 @@
-defmodule Doctrans.Processing.UnslothBehaviour do
+defmodule Doctrans.Processing.ProviderBehaviour do
   @moduledoc """
-  Legacy alias for ProviderBehaviour.
+  Shared behaviour for LLM provider modules.
 
-  Kept for backward compatibility. New code should use
-  `Doctrans.Processing.ProviderBehaviour` directly.
+  Both Ollama and Unsloth implement this contract, allowing callers to work
+  with either provider through a single interface.
   """
 
   @callback extract_markdown(image_path :: String.t(), opts :: keyword()) ::

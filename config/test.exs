@@ -39,6 +39,7 @@ config :phoenix_live_view,
 
 # Use mocks for external services in tests
 config :doctrans, :embedding_module, Doctrans.Search.EmbeddingMock
+config :doctrans, :provider, :ollama
 config :doctrans, :provider_module, Doctrans.Processing.OllamaStub
 config :doctrans, :pdf_extractor_module, Doctrans.Processing.PdfExtractorMock
 

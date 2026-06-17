@@ -27,24 +27,34 @@ defmodule Doctrans.Resilience.HealthCheck do
 
   @doc """
   Runs all health checks and returns results.
+
+  Only checks the active provider (from `:provider_module` config). The
+  inactive provider is marked as `:skipped` so that a down non-active
+  provider does not cause `healthy?/0` to return false.
   """
   @spec check_all() :: %{
-          ollama: {:ok, map()} | {:error, term()},
-          unsloth: {:ok, map()} | {:error, term()},
+          ollama: {:ok, map()} | {:error, term()} | :skipped,
+          unsloth: {:ok, map()} | {:error, term()} | :skipped,
           database: :ok | {:error, term()},
           filesystem: :ok | {:error, term()}
         }
   def check_all do
+    active = active_provider()
+
     %{
-      ollama: check_ollama(),
-      unsloth: check_unsloth(),
+      ollama: if(active == :ollama, do: check_ollama(), else: :skipped),
+      unsloth: if(active == :unsloth, do: check_unsloth(), else: :skipped),
       database: check_database(),
       filesystem: check_filesystem()
     }
   end
 
+  defp active_provider do
+    Application.get_env(:doctrans, :provider, :ollama)
+  end
+
   @doc """
-  Returns true if all health checks pass.
+  Returns true if all non-skipped health checks pass.
   """
   @spec healthy?() :: boolean()
   def healthy? do
@@ -53,6 +63,7 @@ defmodule Doctrans.Resilience.HealthCheck do
     Enum.all?(results, fn
       {_name, :ok} -> true
       {_name, {:ok, _}} -> true
+      {_name, :skipped} -> true
       {_name, {:error, _}} -> false
     end)
   end

@@ -13,7 +13,7 @@ config :doctrans,
   generators: [timestamp_type: :utc_datetime]
 
 # Provider module configuration (Ollama or Unsloth)
-config :doctrans, :provider_module, Doctrans.Processing.Ollama
+config :doctrans, :provider, :ollama
 
 # Ollama configuration for AI models
 # OLLAMA_HOST env var allows overriding for Docker (e.g., http://host.docker.internal:11434)
@@ -41,13 +41,17 @@ config :doctrans, :circuit_breakers,
     strategy: {:standard, 5, 60_000},
     refresh: 30_000
   ],
-  embedding_api: [
+  ollama_embedding_api: [
     strategy: {:standard, 3, 30_000},
     refresh: 15_000
   ],
   unsloth_api: [
     strategy: {:standard, 5, 60_000},
     refresh: 30_000
+  ],
+  unsloth_embedding_api: [
+    strategy: {:standard, 3, 30_000},
+    refresh: 15_000
   ]
 
 # Retry configuration for exponential backoff

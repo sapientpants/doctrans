@@ -125,6 +125,9 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
 
       {name, {:ok, _}} ->
         Logger.debug("Health check passed: #{name}")
+
+      {name, :skipped} ->
+        Logger.debug("Health check skipped: #{name}")
     end)
 
     # Auto-reset circuit breakers if services recovered
@@ -157,12 +160,18 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
     maybe_reset_provider(
       :ollama,
       "Ollama",
-      [:ollama_api, :embedding_api],
+      [:ollama_api, :ollama_embedding_api],
       current_results,
       previous_results
     )
 
-    maybe_reset_provider(:unsloth, "Unsloth", [:unsloth_api], current_results, previous_results)
+    maybe_reset_provider(
+      :unsloth,
+      "Unsloth",
+      [:unsloth_api, :unsloth_embedding_api],
+      current_results,
+      previous_results
+    )
   end
 
   defp maybe_reset_circuits(_current, _previous), do: :ok
@@ -182,6 +191,7 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   defp failing?(_), do: false
 
   defp healthy?({:ok, _}), do: true
+  defp healthy?(:skipped), do: false
   defp healthy?(_), do: false
 
   defp get_config do

@@ -10,6 +10,8 @@ defmodule Doctrans.Chat.QueryExpander do
 
   require Logger
 
+  alias Doctrans.Processing.ProviderResolver
+
   @expansion_timeout 30_000
   @max_predict 256
 
@@ -115,6 +117,5 @@ defmodule Doctrans.Chat.QueryExpander do
     if model, do: Keyword.put(base, :model, model), else: base
   end
 
-  defp provider_module,
-    do: Application.get_env(:doctrans, :provider_module, Doctrans.Processing.Ollama)
+  defp provider_module, do: ProviderResolver.resolve()
 end

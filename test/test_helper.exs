@@ -3,7 +3,8 @@ Ecto.Adapters.SQL.Sandbox.mode(Doctrans.Repo, :manual)
 
 # Define mocks for external services
 Mox.defmock(Doctrans.Search.EmbeddingMock, for: Doctrans.Search.EmbeddingBehaviour)
-Mox.defmock(Doctrans.Processing.OllamaMock, for: Doctrans.Processing.OllamaBehaviour)
+Mox.defmock(Doctrans.Processing.OllamaMock, for: Doctrans.Processing.ProviderBehaviour)
+Mox.defmock(Doctrans.Processing.UnslothMock, for: Doctrans.Processing.ProviderBehaviour)
 Mox.defmock(Doctrans.Processing.PdfExtractorMock, for: Doctrans.Processing.PdfExtractorBehaviour)
 
 # Set global mode so stubs work across process boundaries (LiveView tests)

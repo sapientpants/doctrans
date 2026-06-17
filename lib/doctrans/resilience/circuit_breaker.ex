@@ -7,8 +7,10 @@ defmodule Doctrans.Resilience.CircuitBreaker do
 
   ## Fuse Names
 
-  - `:ollama_api` - Protects Ollama API calls (extraction, translation)
-  - `:embedding_api` - Protects embedding generation calls
+  - `:ollama_api` - Protects Ollama API calls (extraction, translation, chat)
+  - `:ollama_embedding_api` - Protects Ollama embedding generation calls
+  - `:unsloth_api` - Protects Unsloth API calls (extraction, translation, chat)
+  - `:unsloth_embedding_api` - Protects Unsloth embedding generation calls
 
   ## Configuration
 
@@ -32,14 +34,22 @@ defmodule Doctrans.Resilience.CircuitBreaker do
 
   require Logger
 
-  @fuse_names [:ollama_api, :embedding_api]
+  @fuse_names [:ollama_api, :ollama_embedding_api, :unsloth_api, :unsloth_embedding_api]
 
   @default_config %{
     ollama_api: [
       strategy: {:standard, 5, 60_000},
       refresh: 30_000
     ],
-    embedding_api: [
+    ollama_embedding_api: [
+      strategy: {:standard, 3, 30_000},
+      refresh: 15_000
+    ],
+    unsloth_api: [
+      strategy: {:standard, 5, 60_000},
+      refresh: 30_000
+    ],
+    unsloth_embedding_api: [
       strategy: {:standard, 3, 30_000},
       refresh: 15_000
     ]

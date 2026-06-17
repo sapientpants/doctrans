@@ -24,6 +24,16 @@ defmodule Doctrans.Search.EmbeddingWorker do
     Application.get_env(:doctrans, :embedding_module, Doctrans.Search.Embedding)
   end
 
+  defp embedding_circuit_key do
+    provider = Application.get_env(:doctrans, :provider, :ollama)
+
+    case provider do
+      :ollama -> :ollama_embedding_api
+      :unsloth -> :unsloth_embedding_api
+      _ -> :ollama_embedding_api
+    end
+  end
+
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -250,8 +260,10 @@ defmodule Doctrans.Search.EmbeddingWorker do
       |> Chunk.embedding_changeset(%{embedding_status: "processing"})
       |> Repo.update!()
 
+    circuit_key = embedding_circuit_key()
+
     result =
-      CircuitBreaker.call(:embedding_api, fn ->
+      CircuitBreaker.call(circuit_key, fn ->
         embedding_module().generate(embed_content, [])
       end)
 
@@ -274,8 +286,10 @@ defmodule Doctrans.Search.EmbeddingWorker do
   end
 
   defp generate_page_embedding(page) do
+    circuit_key = embedding_circuit_key()
+
     result =
-      CircuitBreaker.call(:embedding_api, fn ->
+      CircuitBreaker.call(circuit_key, fn ->
         embedding_module().generate(page.original_markdown, [])
       end)
 

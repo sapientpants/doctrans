@@ -82,12 +82,7 @@ defmodule Doctrans.Search.Embedding do
   end
 
   defp provider_embedding_config do
-    provider_module = Application.get_env(:doctrans, :provider_module, Doctrans.Processing.Ollama)
-    config_key = provider_to_config_key(provider_module)
-    Application.get_env(:doctrans, config_key, [])
+    provider = Application.get_env(:doctrans, :provider, :ollama)
+    Application.get_env(:doctrans, provider, [])
   end
-
-  defp provider_to_config_key(Doctrans.Processing.Ollama), do: :ollama
-  defp provider_to_config_key(Doctrans.Processing.Unsloth), do: :unsloth
-  defp provider_to_config_key(_), do: :ollama
 end

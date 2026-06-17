@@ -8,6 +8,7 @@ defmodule Doctrans.Chat do
 
   alias Doctrans.Chat.MultiSearch
   alias Doctrans.Chat.QueryExpander
+  alias Doctrans.Processing.ProviderResolver
   alias Doctrans.Search
 
   require Logger
@@ -192,8 +193,7 @@ defmodule Doctrans.Chat do
 
   # Private functions
 
-  defp provider_module,
-    do: Application.get_env(:doctrans, :provider_module, Doctrans.Processing.Ollama)
+  defp provider_module, do: ProviderResolver.resolve()
 
   defp build_system_prompt(document_title, context) when context == "" do
     """
