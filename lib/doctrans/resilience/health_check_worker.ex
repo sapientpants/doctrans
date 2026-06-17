@@ -154,27 +154,35 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   end
 
   defp maybe_reset_circuits(current_results, previous_results) when is_map(previous_results) do
-    # Check if Ollama recovered (was failing, now healthy)
-    ollama_was_failing =
-      case previous_results[:ollama] do
-        {:error, _} -> true
-        _ -> false
-      end
+    maybe_reset_provider(
+      :ollama,
+      "Ollama",
+      [:ollama_api, :embedding_api],
+      current_results,
+      previous_results
+    )
 
-    ollama_now_healthy =
-      case current_results[:ollama] do
-        {:ok, _} -> true
-        _ -> false
-      end
-
-    if ollama_was_failing and ollama_now_healthy do
-      Logger.info("Ollama recovered, resetting circuit breakers")
-      CircuitBreaker.reset(:ollama_api)
-      CircuitBreaker.reset(:embedding_api)
-    end
+    maybe_reset_provider(:unsloth, "Unsloth", [:unsloth_api], current_results, previous_results)
   end
 
   defp maybe_reset_circuits(_current, _previous), do: :ok
+
+  defp maybe_reset_provider(key, name, circuits, current, previous) do
+    if recovered?(key, current, previous) do
+      Logger.info("#{name} recovered, resetting circuit breakers")
+      Enum.each(circuits, &CircuitBreaker.reset/1)
+    end
+  end
+
+  defp recovered?(key, current, previous) do
+    failing?(Map.get(previous, key)) and healthy?(Map.get(current, key))
+  end
+
+  defp failing?({:error, _}), do: true
+  defp failing?(_), do: false
+
+  defp healthy?({:ok, _}), do: true
+  defp healthy?(_), do: false
 
   defp get_config do
     config = Application.get_env(:doctrans, __MODULE__, [])

@@ -1,0 +1,416 @@
+defmodule Doctrans.Processing.Unsloth do
+  @moduledoc """
+  Client for the Unsloth API.
+
+  Provides functions for:
+  - Extracting markdown from page images using a vision model
+  - Translating markdown using a text model
+  - Chat completions for RAG queries
+
+  ## I18n Note
+
+  This module runs in background GenServer processes (document processing workers),
+  not in the web request process. Since Gettext locales are process-specific, error
+  messages from this module will use the default locale, not the user's browser locale.
+  This is acceptable as these errors are primarily logged and displayed as system status.
+  """
+
+  @behaviour Doctrans.Processing.UnslothBehaviour
+
+  require Logger
+
+  use Gettext, backend: DoctransWeb.Gettext
+
+  @doc """
+  Extracts markdown text from an image using the vision model.
+
+  ## Options
+
+  - `:model` - Override the default vision model
+  - `:timeout` - Override the default timeout
+  """
+  def extract_markdown(image_path), do: extract_markdown(image_path, [])
+
+  def extract_markdown(image_path, opts) do
+    config = unsloth_config()
+    model = Keyword.get(opts, :model, config[:vision_model])
+    timeout = Keyword.get(opts, :timeout, config[:timeout])
+
+    Logger.info("Extracting markdown from #{image_path} using #{model}")
+
+    # Read and encode the image as base64
+    case File.read(image_path) do
+      {:ok, image_data} ->
+        image_base64 = Base.encode64(image_data)
+
+        prompt = """
+        Extract ALL text from this document image as Markdown, preserving the visual formatting as closely as possible.
+
+        CRITICAL - EXTRACT EVERYTHING:
+        - Extract text from EVERY region: main content, headers, footers, margins, sidebars
+        - Include ALL captions, labels, footnotes, and annotations
+        - Extract text from within figures, diagrams, and charts
+        - Do NOT skip any text, no matter how small or seemingly unimportant
+        - Read the ENTIRE page from top to bottom, left to right
+
+        FORMATTING - MIRROR THE SOURCE LAYOUT:
+        - The Markdown output should visually resemble the original document when rendered
+        - Use # ## ### for headings - match the visual hierarchy (larger/bolder = higher level)
+        - Use **bold** for any bold or heavy-weight text
+        - Use *italic* for any italicized or slanted text
+        - Use `code` for monospace, typewriter, or code-styled text
+        - Use > for blockquotes, pull quotes, or visually indented sections
+        - Use - or * for bullet lists, 1. 2. 3. for numbered lists
+        - Preserve nested list indentation exactly as shown
+        - Use | for tables - maintain column alignment with |---|
+        - Use --- for horizontal lines or section dividers
+        - Preserve paragraph spacing - use blank lines where the source has visual breaks
+        - Keep line breaks within addresses, poems, signatures, or multi-line formatted blocks
+        - Preserve any special formatting like centered text or right-aligned content
+
+        OUTPUT RULES:
+        - Output ONLY the extracted Markdown, nothing else
+        - Do NOT wrap output in code fences (```)
+        - Do NOT add introductions like "Here is the extracted text"
+        - Do NOT add explanations or commentary
+        - Do NOT describe images - extract the TEXT within them
+        """
+
+        body = %{
+          model: model,
+          prompt: prompt,
+          images: [image_base64],
+          stream: false,
+          options: %{
+            num_ctx: 16_384,
+            num_predict: 8_192
+          }
+        }
+
+        make_request("/api/generate", body, timeout)
+
+      {:error, reason} ->
+        {:error, dgettext("errors", "Failed to read image: %{reason}", reason: inspect(reason))}
+    end
+  end
+
+  @doc """
+  Translates markdown text from the source language to the target language.
+
+  ## Options
+
+  - `:model` - Override the default text model
+  - `:timeout` - Override the default timeout
+  """
+  def translate(markdown, source_language, target_language),
+    do: translate(markdown, source_language, target_language, [])
+
+  def translate(markdown, source_language, target_language, opts) do
+    config = unsloth_config()
+    model = Keyword.get(opts, :model, config[:translation_model])
+    timeout = Keyword.get(opts, :timeout, config[:timeout])
+
+    source_name = language_name(source_language)
+    target_name = language_name(target_language)
+
+    Logger.info("Translating from #{source_name} to #{target_name} using #{model}")
+
+    prompt =
+      "You are a professional #{source_name} (#{source_language}) to #{target_name} (#{target_language}) translator. " <>
+        "Your goal is to accurately convey the meaning and nuances of the original #{source_name} text " <>
+        "while adhering to #{target_name} grammar, vocabulary, and cultural sensitivities.\n" <>
+        "Produce only the #{target_name} translation, without any additional explanations or commentary. " <>
+        "Please translate the following #{source_name} text into #{target_name}:\n\n\n" <>
+        markdown
+
+    body = %{
+      model: model,
+      messages: [%{role: "user", content: prompt}],
+      stream: false,
+      options: %{
+        num_ctx: 16_384,
+        num_predict: 8_192
+      }
+    }
+
+    make_chat_request("/api/chat", body, timeout)
+  end
+
+  @doc """
+  Sends a chat completion request to Unsloth.
+
+  Uses the /api/chat endpoint for multi-turn conversations.
+
+  ## Parameters
+
+  - `messages` - List of message maps with `:role` and `:content` keys.
+    Roles can be "system", "user", or "assistant".
+  - `opts` - Options (see below)
+
+  ## Options
+
+  - `:model` - Override the default text model
+  - `:timeout` - Override the default timeout (default: 120_000 for chat)
+  - `:num_predict` - Override the default max tokens (default: 4096)
+
+  ## Returns
+
+  - `{:ok, response_text}` on success
+  - `{:error, reason}` on failure
+
+  ## Examples
+
+      messages = [
+        %{role: "system", content: "You are a helpful assistant."},
+        %{role: "user", content: "What is 2+2?"}
+      ]
+      {:ok, response} = Unsloth.chat(messages)
+  """
+  def chat(messages, opts \\ []) do
+    config = unsloth_config()
+    model = Keyword.get(opts, :model, config[:chat_model])
+    # Use shorter timeout for chat (2 minutes) for better UX
+    timeout = Keyword.get(opts, :timeout, 120_000)
+    num_predict = Keyword.get(opts, :num_predict, 4_096)
+
+    Logger.info("Sending chat request with #{length(messages)} messages using #{model}")
+
+    body = %{
+      model: model,
+      messages: messages,
+      stream: false,
+      options: %{
+        num_ctx: 16_384,
+        num_predict: num_predict
+      }
+    }
+
+    make_chat_request("/api/chat", body, timeout)
+  end
+
+  defp make_chat_request(path, body, timeout) do
+    alias Doctrans.Resilience.CircuitBreaker
+
+    CircuitBreaker.call(:unsloth_api, fn ->
+      do_make_chat_request(path, body, timeout)
+    end)
+  end
+
+  defp do_make_chat_request(path, body, timeout) do
+    config = unsloth_config()
+    url = "#{config[:base_url]}#{path}"
+
+    Logger.info(
+      "Unsloth chat request: model=#{body[:model]}, messages=#{length(body[:messages])}"
+    )
+
+    case Req.post(url, json: body, receive_timeout: timeout) do
+      {:ok, %{status: 200, body: response_body}} ->
+        case response_body do
+          %{"message" => %{"content" => content}} ->
+            result = content |> String.trim() |> strip_code_fences()
+
+            if result == "" do
+              empty_response_error(response_body, "the request")
+            else
+              Logger.debug("Unsloth chat returned #{String.length(result)} chars")
+              {:ok, result}
+            end
+
+          other ->
+            Logger.warning("Unexpected chat response format: #{inspect(other)}")
+            {:error, dgettext("errors", "Unexpected response format from Unsloth")}
+        end
+
+      {:ok, %{status: status, body: response_body}} ->
+        error_msg = get_in(response_body, ["error"]) || inspect(response_body)
+        Logger.error("Unsloth chat request failed with status #{status}: #{error_msg}")
+
+        {:error,
+         dgettext("errors", "Unsloth error (%{status}): %{error}",
+           status: status,
+           error: error_msg
+         )}
+
+      {:error, %Req.TransportError{reason: :timeout}} ->
+        Logger.error("Unsloth chat request timed out after #{timeout}ms")
+        {:error, dgettext("errors", "Request timed out")}
+
+      {:error, reason} ->
+        Logger.error("Unsloth chat request failed: #{inspect(reason)}")
+        {:error, dgettext("errors", "Request failed: %{reason}", reason: inspect(reason))}
+    end
+  end
+
+  @doc """
+  Checks if Unsloth is running and accessible.
+  """
+  def available? do
+    config = unsloth_config()
+    url = "#{config[:base_url]}/api/tags"
+
+    case Req.get(url, receive_timeout: 5_000) do
+      {:ok, %{status: 200}} -> true
+      _ -> false
+    end
+  end
+
+  @doc """
+  Lists available models from Unsloth.
+  """
+  def list_models do
+    config = unsloth_config()
+    url = "#{config[:base_url]}/api/tags"
+
+    case Req.get(url, receive_timeout: 10_000) do
+      {:ok, %{status: 200, body: body}} ->
+        models = get_in(body, ["models"]) || []
+        {:ok, Enum.map(models, & &1["name"])}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error,
+         dgettext("errors", "Unsloth returned status %{status}: %{body}",
+           status: status,
+           body: inspect(body)
+         )}
+
+      {:error, reason} ->
+        {:error,
+         dgettext("errors", "Failed to connect to Unsloth: %{reason}", reason: inspect(reason))}
+    end
+  end
+
+  # Private functions
+
+  defp make_request(path, body, timeout) do
+    alias Doctrans.Resilience.CircuitBreaker
+
+    CircuitBreaker.call(:unsloth_api, fn ->
+      do_make_request(path, body, timeout)
+    end)
+  end
+
+  defp do_make_request(path, body, timeout) do
+    config = unsloth_config()
+    url = "#{config[:base_url]}#{path}"
+
+    log_request(body)
+
+    case Req.post(url, json: body, receive_timeout: timeout) do
+      {:ok, %{status: 200, body: response_body}} ->
+        # Extract the response text from Unsloth's response
+        Logger.info("Unsloth raw response keys: #{inspect(Map.keys(response_body))}")
+
+        case response_body do
+          %{"response" => response} ->
+            Logger.info(
+              "Unsloth response length: #{String.length(response)}, first 500 chars: #{String.slice(response, 0, 500)}"
+            )
+
+            result = response |> String.trim() |> strip_code_fences()
+
+            if result == "" do
+              empty_response_error(response_body, "the image")
+            else
+              Logger.debug("Unsloth returned #{String.length(result)} chars")
+              {:ok, result}
+            end
+
+          other ->
+            Logger.warning("Unexpected response format: #{inspect(other)}")
+            {:error, dgettext("errors", "Unexpected response format from Unsloth")}
+        end
+
+      {:ok, %{status: status, body: response_body}} ->
+        error_msg = get_in(response_body, ["error"]) || inspect(response_body)
+        Logger.error("Unsloth request failed with status #{status}: #{error_msg}")
+
+        {:error,
+         dgettext("errors", "Unsloth error (%{status}): %{error}",
+           status: status,
+           error: error_msg
+         )}
+
+      {:error, %Req.TransportError{reason: :timeout}} ->
+        Logger.error("Unsloth request timed out after #{timeout}ms")
+        {:error, dgettext("errors", "Request timed out")}
+
+      {:error, reason} ->
+        Logger.error("Unsloth request failed: #{inspect(reason)}")
+        {:error, dgettext("errors", "Request failed: %{reason}", reason: inspect(reason))}
+    end
+  end
+
+  # Builds a descriptive error for an empty model response
+  defp empty_response_error(response_body, subject) do
+    done_reason = response_body["done_reason"]
+
+    thinking =
+      response_body["thinking"] || get_in(response_body, ["message", "thinking"]) || ""
+
+    thinking_chars = String.length(thinking)
+
+    Logger.warning(
+      "Unsloth returned empty response (done_reason=#{inspect(done_reason)}, thinking_chars=#{thinking_chars})"
+    )
+
+    if done_reason == "length" and thinking_chars > 0 do
+      {:error,
+       dgettext(
+         "errors",
+         "Model used its entire output budget while thinking and returned no text. Disable thinking for this model or increase num_predict."
+       )}
+    else
+      {:error,
+       dgettext("errors", "Model returned empty response while processing %{subject}",
+         subject: subject
+       )}
+    end
+  end
+
+  defp unsloth_config do
+    Application.get_env(:doctrans, :unsloth, [])
+  end
+
+  defp log_request(body) do
+    image_bytes =
+      case body[:images] do
+        [img | _] -> byte_size(img)
+        _ -> 0
+      end
+
+    Logger.info(
+      "Unsloth request: model=#{body[:model]}, prompt_length=#{String.length(body[:prompt] || "")}, image_base64_bytes=#{image_bytes}"
+    )
+  end
+
+  # Strip markdown code fences that LLMs sometimes wrap their output in
+  def strip_code_fences(text) do
+    text
+    |> String.replace(~r/\A```[^\n]*\n/, "")
+    |> String.replace(~r/\n?```\s*\z/, "")
+    |> String.trim()
+  end
+
+  defp language_name(code) do
+    languages = %{
+      "de" => "German",
+      "en" => "English",
+      "fr" => "French",
+      "es" => "Spanish",
+      "it" => "Italian",
+      "pt" => "Portuguese",
+      "nl" => "Dutch",
+      "pl" => "Polish",
+      "ru" => "Russian",
+      "zh" => "Chinese",
+      "ja" => "Japanese",
+      "ko" => "Korean",
+      "da" => "Danish",
+      "no" => "Norwegian",
+      "sv" => "Swedish"
+    }
+
+    Map.get(languages, code, code)
+  end
+end

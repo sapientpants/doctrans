@@ -94,7 +94,7 @@ defmodule Doctrans.Chat do
           # Use the standalone question so the LLM sees a clear, contextual question
           messages = build_messages(system_prompt, chat_history, standalone_question)
 
-          case ollama_module().chat(messages, opts) do
+          case provider_module().chat(messages, opts) do
             {:ok, response} ->
               {:ok, response}
 
@@ -192,9 +192,8 @@ defmodule Doctrans.Chat do
 
   # Private functions
 
-  defp ollama_module do
-    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
-  end
+  defp provider_module,
+    do: Application.get_env(:doctrans, :provider_module, Doctrans.Processing.Ollama)
 
   defp build_system_prompt(document_title, context) when context == "" do
     """

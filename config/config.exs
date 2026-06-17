@@ -12,10 +12,22 @@ config :doctrans,
   ecto_repos: [Doctrans.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Provider module configuration (Ollama or Unsloth)
+config :doctrans, :provider_module, Doctrans.Processing.Ollama
+
 # Ollama configuration for AI models
 # OLLAMA_HOST env var allows overriding for Docker (e.g., http://host.docker.internal:11434)
 config :doctrans, :ollama,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
+  vision_model: "qwen3.5:9b",
+  translation_model: "qwen3.6:35b-a3b-q4_K_M",
+  chat_model: "qwen3.6:35b-a3b-q4_K_M",
+  timeout: 300_000
+
+# Unsloth configuration for AI models
+# UNSLOTH_HOST env var allows overriding for Docker
+config :doctrans, :unsloth,
+  base_url: System.get_env("UNSLOTH_HOST", "http://localhost:11434"),
   vision_model: "qwen3.5:9b",
   translation_model: "qwen3.6:35b-a3b-q4_K_M",
   chat_model: "qwen3.6:35b-a3b-q4_K_M",
@@ -30,6 +42,10 @@ config :doctrans, :circuit_breakers,
   embedding_api: [
     strategy: {:standard, 3, 30_000},
     refresh: 15_000
+  ],
+  unsloth_api: [
+    strategy: {:standard, 5, 60_000},
+    refresh: 30_000
   ]
 
 # Retry configuration for exponential backoff

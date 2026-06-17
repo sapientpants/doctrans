@@ -34,10 +34,9 @@ defmodule Doctrans.Processing.LlmProcessor do
     }
   end
 
-  # Allow Ollama module to be configured for testing
-  defp ollama_module do
-    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
-  end
+  # Allow provider module to be configured for testing
+  defp provider_module,
+    do: Application.get_env(:doctrans, :provider_module, Doctrans.Processing.Ollama)
 
   @doc """
   Processes a single page through the LLM pipeline (extraction + translation).
@@ -123,9 +122,9 @@ defmodule Doctrans.Processing.LlmProcessor do
     Documents.broadcast_page_update(page)
 
     image_path = Path.join(Documents.uploads_dir(), page.image_path)
-    ollama_opts = build_extraction_opts(opts)
+    provider_opts = build_extraction_opts(opts)
 
-    case ollama_module().extract_markdown(image_path, ollama_opts) do
+    case provider_module().extract_markdown(image_path, provider_opts) do
       {:ok, markdown} ->
         {:ok, page} =
           Documents.update_page_extraction(page, %{
@@ -222,15 +221,15 @@ defmodule Doctrans.Processing.LlmProcessor do
     Documents.broadcast_page_update(page)
 
     document = Documents.get_document!(page.document_id)
-    ollama_opts = build_translation_opts(opts)
+    provider_opts = build_translation_opts(opts)
 
     source_language = Application.get_env(:doctrans, :defaults, [])[:source_language] || "de"
 
-    case ollama_module().translate(
+    case provider_module().translate(
            page.original_markdown,
            source_language,
            document.target_language,
-           ollama_opts
+           provider_opts
          ) do
       {:ok, translated} ->
         {:ok, page} =

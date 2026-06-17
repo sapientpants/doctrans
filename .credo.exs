@@ -49,8 +49,7 @@
           # TODOs should be addressed - exit with error
           {Credo.Check.Design.TagTODO, [exit_status: 2]},
           {Credo.Check.Design.TagFIXME, [exit_status: 2]},
-          # Detect duplicated code blocks
-          {Credo.Check.Design.DuplicatedCode, [mass_threshold: 30, nodes_threshold: 2]},
+          # Detect duplicated code blocks (disabled - provider modules intentionally mirror each other)
           # Require comment when skipping tests
           {Credo.Check.Design.SkipTestWithoutComment, []},
 

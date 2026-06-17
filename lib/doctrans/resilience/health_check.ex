@@ -30,12 +30,14 @@ defmodule Doctrans.Resilience.HealthCheck do
   """
   @spec check_all() :: %{
           ollama: {:ok, map()} | {:error, term()},
+          unsloth: {:ok, map()} | {:error, term()},
           database: :ok | {:error, term()},
           filesystem: :ok | {:error, term()}
         }
   def check_all do
     %{
       ollama: check_ollama(),
+      unsloth: check_unsloth(),
       database: check_database(),
       filesystem: check_filesystem()
     }
@@ -62,19 +64,28 @@ defmodule Doctrans.Resilience.HealthCheck do
   or `{:error, reason}` on failure.
   """
   @spec check_ollama() :: {:ok, map()} | {:error, term()}
-  def check_ollama do
+  def check_ollama, do: check_provider(:ollama, :ollama_api)
+
+  @doc """
+  Checks Unsloth API availability.
+
+  Returns `{:ok, %{available: true, models: [...]}}` on success,
+  or `{:error, reason}` on failure.
+  """
+  @spec check_unsloth() :: {:ok, map()} | {:error, term()}
+  def check_unsloth, do: check_provider(:unsloth, :unsloth_api)
+
+  defp check_provider(config_key, circuit_key) do
     start_time = System.monotonic_time(:millisecond)
 
     result =
       try do
-        # Check circuit breaker status first
-        circuit_status = CircuitBreaker.status(:ollama_api)
+        circuit_status = CircuitBreaker.status(circuit_key)
 
         if circuit_status == :blown do
           {:error, :circuit_open}
         else
-          # Actually check Ollama connectivity
-          config = Application.get_env(:doctrans, :ollama, [])
+          config = Application.get_env(:doctrans, config_key, [])
           url = "#{config[:base_url]}/api/tags"
 
           case Req.get(url, receive_timeout: 5_000) do
@@ -99,7 +110,7 @@ defmodule Doctrans.Resilience.HealthCheck do
     :telemetry.execute(
       [:doctrans, :health_check, :completed],
       %{duration_ms: duration},
-      %{check: :ollama, result: elem(result, 0)}
+      %{check: config_key, result: elem(result, 0)}
     )
 
     result

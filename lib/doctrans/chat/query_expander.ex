@@ -53,7 +53,7 @@ defmodule Doctrans.Chat.QueryExpander do
 
     messages = [%{role: "user", content: prompt}]
 
-    case ollama_module().chat(messages, chat_opts(opts)) do
+    case provider_module().chat(messages, chat_opts(opts)) do
       {:ok, response} ->
         Logger.debug("Query expansion raw response:\n#{String.slice(response, 0, 500)}")
         parse_expansion(response, question)
@@ -115,7 +115,6 @@ defmodule Doctrans.Chat.QueryExpander do
     if model, do: Keyword.put(base, :model, model), else: base
   end
 
-  defp ollama_module do
-    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
-  end
+  defp provider_module,
+    do: Application.get_env(:doctrans, :provider_module, Doctrans.Processing.Ollama)
 end
