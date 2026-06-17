@@ -27,10 +27,10 @@ config :doctrans, :ollama,
 # Unsloth configuration for AI models
 # UNSLOTH_HOST env var allows overriding for Docker
 config :doctrans, :unsloth,
-  base_url: System.get_env("UNSLOTH_HOST", "http://localhost:11434"),
-  vision_model: "qwen3.5:9b",
-  translation_model: "qwen3.6:35b-a3b-q4_K_M",
-  chat_model: "qwen3.6:35b-a3b-q4_K_M",
+  base_url: System.get_env("UNSLOTH_HOST", "http://localhost:8888"),
+  vision_model: "unsloth/Qwen3.5-9B-MTP-GGUF",
+  translation_model: "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+  chat_model: "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
   timeout: 300_000
 
 # Circuit breaker configuration for resilience
@@ -89,6 +89,12 @@ config :doctrans, DoctransWeb.Gettext,
 config :doctrans, :embedding,
   base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
   model: "qwen3-embedding:8b",
+  timeout: 60_000
+
+# Unsloth embedding configuration
+config :doctrans, :unsloth_embedding,
+  base_url: System.get_env("UNSLOTH_HOST", "http://localhost:8888"),
+  model: "unsloth/Qwen3-Embedding-8B",
   timeout: 60_000
 
 # Oban configuration for persistent job queuing
