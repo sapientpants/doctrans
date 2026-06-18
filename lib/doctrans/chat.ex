@@ -193,7 +193,7 @@ defmodule Doctrans.Chat do
 
   # Private functions
 
-  defp provider_module, do: ProviderResolver.resolve()
+  defp provider_module, do: ProviderResolver.resolve!()
 
   defp build_system_prompt(document_title, context) when context == "" do
     """

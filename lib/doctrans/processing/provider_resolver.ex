@@ -12,16 +12,39 @@ defmodule Doctrans.Processing.ProviderResolver do
 
   Checks `:provider_module` first (for test mocks), then falls back to
   `:provider` string config (for dev/prod).
+
+  Returns `{:ok, module}` on success or `{:error, reason}` on failure.
   """
-  @spec resolve() :: module()
+  @spec resolve() :: {:ok, module()} | {:error, term()}
   def resolve do
     case Application.get_env(:doctrans, :provider_module) do
-      nil -> resolve_by_name(Application.get_env(:doctrans, :provider, :ollama))
-      module -> module
+      nil ->
+        case Application.get_env(:doctrans, :provider, :ollama) do
+          provider when provider in [:ollama, :unsloth] ->
+            {:ok, resolve_by_name!(provider)}
+
+          other ->
+            {:error, "Unknown provider: #{inspect(other)}"}
+        end
+
+      module ->
+        {:ok, module}
     end
   end
 
-  defp resolve_by_name(:ollama), do: Doctrans.Processing.Ollama
-  defp resolve_by_name(:unsloth), do: Doctrans.Processing.Unsloth
-  defp resolve_by_name(other), do: raise("Unknown provider: #{inspect(other)}")
+  @doc """
+  Like `resolve/0` but raises on failure.
+
+  Use this at startup or in explicit crash-at-startup sites.
+  """
+  @spec resolve!() :: module()
+  def resolve! do
+    case resolve() do
+      {:ok, module} -> module
+      {:error, reason} -> raise ArgumentError, "Failed to resolve provider: #{reason}"
+    end
+  end
+
+  defp resolve_by_name!(:ollama), do: Doctrans.Processing.Ollama
+  defp resolve_by_name!(:unsloth), do: Doctrans.Processing.Unsloth
 end

@@ -1,6 +1,6 @@
 defmodule Doctrans.Processing.OllamaStub do
   @moduledoc """
-  Stub implementation of OllamaBehaviour for tests.
+  Stub implementation of ProviderBehaviour for tests.
 
   Returns fake responses that can be used in tests without
   requiring the actual Ollama service.
@@ -19,7 +19,7 @@ defmodule Doctrans.Processing.OllamaStub do
       Application.delete_env(:doctrans, :ollama_stub_extraction_error)
   """
 
-  @behaviour Doctrans.Processing.OllamaBehaviour
+  @behaviour Doctrans.Processing.ProviderBehaviour
 
   @impl true
   def extract_markdown(image_path, opts \\ [])

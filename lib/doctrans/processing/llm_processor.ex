@@ -36,7 +36,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   end
 
   # Allow provider module to be configured for testing
-  defp provider_module, do: ProviderResolver.resolve()
+  defp provider_module, do: ProviderResolver.resolve!()
 
   @doc """
   Processes a single page through the LLM pipeline (extraction + translation).

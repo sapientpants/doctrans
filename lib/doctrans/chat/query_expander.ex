@@ -117,5 +117,5 @@ defmodule Doctrans.Chat.QueryExpander do
     if model, do: Keyword.put(base, :model, model), else: base
   end
 
-  defp provider_module, do: ProviderResolver.resolve()
+  defp provider_module, do: ProviderResolver.resolve!()
 end

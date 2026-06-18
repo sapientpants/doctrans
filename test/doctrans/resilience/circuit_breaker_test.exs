@@ -40,7 +40,7 @@ defmodule Doctrans.Resilience.CircuitBreakerTest do
       status = CircuitBreaker.status_all()
 
       assert Map.has_key?(status, :ollama_api)
-      assert Map.has_key?(status, :embedding_api)
+      assert Map.has_key?(status, :ollama_embedding_api)
     end
   end
 
