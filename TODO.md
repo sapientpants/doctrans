@@ -1,49 +1,54 @@
-# TODO: feature/unsloth-provider fixes
+# TODO: feature/unsloth-provider — post-review tasks
 
-## Security (must fix before merge)
+## Security
 
-- [x] **1. Update Plug and cowlib dependencies** (High)
-  - ✅ plug 1.19.1 → 1.19.2
-  - ✅ cowlib 2.16.1 → 2.17.1
-  - ✅ `mix deps.audit` — no vulnerabilities
+- [ ] **1. Hardcoded session signing salt** (High)
+  - `endpoint.ex:10` uses a fixed `signing_salt: "Qr5ZNHs0"` that's committed to the repo.
+  - Replace with `System.get_env("PHX_SECRET_KEY_BASE")` or derive from `:secret_key_base` so
+    each deployment gets a unique salt.
 
-- [x] **2. Make ProviderResolver.resolve/1 fault-tolerant** (Medium)
-  - ✅ `resolve/0` now returns `{:ok, module}` | `{:error, reason}` tuple
-  - ✅ Added `resolve!/0` that raises for explicit crash-at-startup sites
-  - ✅ All callers updated to use `resolve!()` (hot paths where crash is desired)
+- [ ] **2. Document show LiveView still references `:ollama` config directly** (Medium)
+  - `book_live/show.ex:27` reads `Application.get_env(:doctrans, :ollama, [])` for default
+    model names and `book_live/show.ex:477` calls `Ollama.list_models()` directly instead of
+    going through `ProviderResolver`. If the active provider is Unsloth, the reprocess modal
+    will fetch Ollama models and show an Ollama-specific error message.
 
-- [x] **3. Downgrade verbose production logging to debug level** (Low-Medium)
-  - ✅ Both Ollama and Unsloth: raw response keys → `Logger.debug`
-  - ✅ Both Ollama and Unsloth: response length + first 500 chars → `Logger.debug`
+- [ ] **3. `ProviderResolver` silently accepts non-module values in `:provider_module`** (Medium)
+  - `provider_resolver.ex:29` returns `{:ok, module}` for any truthy `:provider_module` value
+    without verifying it is an actual module or implements `ProviderBehaviour`. A typo in test
+    config could surface as a runtime crash deep in a pipeline.
 
-- [x] **4. Sanitise inspect/1 in user-facing error strings** (Low)
-  - ✅ Replaced `inspect(reason)` with `HttpProvider.format_error/1` in all dgettext calls
-  - ✅ Handles exception structs, atoms, binaries, and fallback inspect
+- [ ] **4. `search_live.ex:225` — URL-encoded query in `push_patch`** (Low)
+  - The query string is interpolated directly into the patch URL without URI encoding.
+  - Use `URI.encode_query/1` or `Plug.Conn.Query.encode/1` to prevent issues with special
+    characters.
 
 ## Quality
 
-- [x] **5. Eliminate triple-duplicated behaviour modules** (High)
-  - ✅ Deleted `OllamaBehaviour` and `UnslothBehaviour`
-  - ✅ Updated `ollama_stub.ex` to use `ProviderBehaviour`
+- [ ] **5. Duplicate `language_name/1` map in `LlmUtils` and `HttpProvider`** (Medium)
+  - Both `llm_utils.ex:18` and `http_provider.ex:361` define the identical language map.
+  - Consolidate into a single `@languages` module attribute in `LlmUtils` and import it in
+    `HttpProvider`.
 
-- [x] **6. Extract shared HTTP provider logic** (Medium)
-  - ✅ Created `Doctrans.Processing.HttpProvider` with `HttpProvider.Config` struct
-  - ✅ Ollama and Unsloth are now thin wrappers (~45 lines each)
-  - ✅ ~700 lines of duplicated code eliminated
+- [ ] **6. `HttpProvider` top-level struct is unused** (Low)
+  - `http_provider.ex:11` defines `defstruct config_key, circuit_key, name, config` at the
+    module level but only the nested `Config` module struct is actually used. Remove the
+    top-level struct to avoid confusion.
 
-- [x] **7. Restore Credo DuplicatedCode check** (Medium)
-  - ✅ Re-enabled `Credo.Check.Design.DuplicatedCode` in `.credo.exs`
-  - ✅ Check passes (only test stubs have minor duplication, D-level only)
+- [ ] **7. `ProviderConfig.validate/0` doesn't validate `:timeout` key** (Low)
+  - The `@required_keys` list omits `:timeout`. If a provider config is missing `:timeout`,
+    `HttpProvider` will crash with a `KeyError` on `config[:timeout]`. Either add `:timeout`
+    to required keys or provide a sensible default in `HttpProvider`.
 
-- [x] **8. Fail application start on missing provider config in prod** (Low)
-  - ✅ Raises `ArgumentError` in `:prod` env when required keys are missing
-  - ✅ Uses `Application.get_env(:doctrans, :env, :dev)` instead of `Mix.env()`
+- [ ] **8. `HttpProvider.chat/3` has a different default timeout than other methods** (Low)
+  - `chat/3` defaults to `120_000ms` while `extract_markdown` and `translate` use the config
+    value. Consider aligning or documenting the discrepancy.
 
-- [x] **9. Add deprecation warning for old :embedding config** (Low)
-  - ✅ Warns if `:embedding` key is still set in config
+- [ ] **9. `book_live/show.ex` should use `ProviderResolver` for model list** (Medium)
+  - The `:fetch_available_models` handler calls `Ollama.list_models()` directly at line 477.
+  - Should call `ProviderResolver.resolve!().list_models()` so the modal works for Unsloth.
 
-- [x] **10. Run mix precommit and verify clean** (verification)
-  - ✅ `mix deps.audit` — no vulnerabilities
-  - ✅ `mix credo --strict` — no F/W-level issues
-  - ✅ `mix format --check-formatted` — passes
-  - ✅ 541 tests, 0 failures
+- [ ] **10. Add integration test for provider switch** (Medium)
+  - No test verifies that switching `:provider` from `:ollama` to `:unsloth` end-to-end
+    affects chat, extraction, translation, embedding, and health check paths. Add a test
+    that flips the config and asserts the correct provider module is called.
