@@ -24,9 +24,9 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpers do
   def render_markdown(""), do: ""
 
   def render_markdown(text) do
-    case Earmark.as_html(text) do
-      {:ok, html, _} -> sanitize_html(html)
-      {:error, html, _} -> sanitize_html(html)
+    case MDEx.to_html(text) do
+      {:ok, html} -> sanitize_html(html)
+      {:error, html} -> sanitize_html(html)
     end
   end
 
