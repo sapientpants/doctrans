@@ -5,6 +5,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   alias Doctrans.Chat
   alias Doctrans.Documents
   alias Doctrans.Processing.{Ollama, Worker}
+  alias DoctransWeb.DocumentLive.ChatSession
 
   import DoctransWeb.DocumentLive.Components,
     only: [status_color: 1, status_text: 1, language_name: 1]
@@ -49,6 +50,9 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:chat_history, [])
       |> assign(:chat_task_ref, nil)
       |> assign(:chat_last_question, nil)
+      |> assign(:chat_stage, nil)
+      |> assign(:chat_streaming_content, "")
+      |> assign(:chat_retrieved_context, [])
       |> assign(:embeddings_ready, Chat.embeddings_ready?(document))
       |> stream(:chat_messages, [])
 
@@ -217,6 +221,8 @@ defmodule DoctransWeb.DocumentLive.Show do
             :if={@chat_open}
             chat_messages={@streams.chat_messages}
             chat_loading={@chat_loading}
+            chat_stage={@chat_stage}
+            chat_streaming_content={@chat_streaming_content}
             embeddings_ready={@embeddings_ready}
           />
         </main>
@@ -430,16 +436,30 @@ defmodule DoctransWeb.DocumentLive.Show do
         socket
         |> stream_insert(:chat_messages, user_msg)
         |> assign(:chat_loading, true)
+        |> assign(:chat_stage, :understanding)
+        |> assign(:chat_streaming_content, "")
 
-      # Get existing chat history
+      # Get existing chat history and accumulated retrieval context
       chat_history = socket.assigns.chat_history
+      retrieved_context = socket.assigns.chat_retrieved_context
 
-      # Spawn async task for LLM call with monitoring
+      # Spawn async task running the agentic pipeline. Stage/token events are
+      # sent back to this LiveView process via the on_event callback; the task's
+      # return value carries the final answer + updated context for history and
+      # accumulation.
+      lv = self()
+
       task =
         Task.Supervisor.async_nolink(
           Doctrans.TaskSupervisor,
           fn ->
-            Chat.send_message(document, trimmed_message, chat_history)
+            Chat.Agent.run(
+              document,
+              trimmed_message,
+              chat_history,
+              [retrieved_context: retrieved_context],
+              fn event -> send(lv, {:chat_event, event}) end
+            )
           end
         )
 
@@ -515,46 +535,33 @@ defmodule DoctransWeb.DocumentLive.Show do
     {:noreply, socket}
   end
 
+  # Chat streaming/progress events from the agent pipeline
+
+  @impl true
+  def handle_info({:chat_event, {:stage, stage}}, socket) do
+    {:noreply, assign(socket, :chat_stage, stage)}
+  end
+
+  @impl true
+  def handle_info({:chat_event, {:delta, text}}, socket) do
+    {:noreply,
+     assign(socket, :chat_streaming_content, socket.assigns.chat_streaming_content <> text)}
+  end
+
   # Chat response handlers (async_nolink pattern)
 
   @impl true
-  def handle_info({ref, {:ok, response}}, socket) when socket.assigns.chat_task_ref == ref do
+  def handle_info({ref, {:ok, response, retrieved_context}}, socket)
+      when socket.assigns.chat_task_ref == ref do
     # Flush the :DOWN message
     Process.demonitor(ref, [:flush])
-
-    user_message = socket.assigns.chat_last_question
-
-    # Add assistant message to stream
-    assistant_msg = %{
-      id: "msg-#{System.unique_integer([:positive])}",
-      role: "assistant",
-      content: response
-    }
-
-    # Update chat history for context in future messages (keep last 16 messages = 8 exchanges)
-    updated_history =
-      (socket.assigns.chat_history ++
-         [
-           %{role: "user", content: user_message},
-           %{role: "assistant", content: response}
-         ])
-      |> Enum.take(-16)
-
-    socket =
-      socket
-      |> stream_insert(:chat_messages, assistant_msg)
-      |> assign(:chat_loading, false)
-      |> assign(:chat_task_ref, nil)
-      |> assign(:chat_last_question, nil)
-      |> assign(:chat_history, updated_history)
-
-    {:noreply, socket}
+    {:noreply, ChatSession.put_response(socket, response, retrieved_context)}
   end
 
   @impl true
   def handle_info({ref, {:error, reason}}, socket) when socket.assigns.chat_task_ref == ref do
     Process.demonitor(ref, [:flush])
-    {:noreply, handle_chat_error(socket, chat_error_message(reason))}
+    {:noreply, ChatSession.put_error(socket, ChatSession.error_message(reason))}
   end
 
   @impl true
@@ -563,7 +570,7 @@ defmodule DoctransWeb.DocumentLive.Show do
     # :normal = success (result already handled); only error on crashes
     if reason == :normal,
       do: {:noreply, socket},
-      else: {:noreply, handle_chat_error(socket, chat_error_message(:unknown))}
+      else: {:noreply, ChatSession.put_error(socket, ChatSession.error_message(:unknown))}
   end
 
   # Catch-all handlers for stale task refs
@@ -575,25 +582,4 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket), do: {:noreply, socket}
-
-  defp handle_chat_error(socket, message) do
-    error_msg = %{
-      id: "msg-#{System.unique_integer([:positive])}",
-      role: "error",
-      content: message
-    }
-
-    socket
-    |> stream_insert(:chat_messages, error_msg)
-    |> assign(:chat_loading, false)
-    |> assign(:chat_task_ref, nil)
-    |> assign(:chat_last_question, nil)
-  end
-
-  defp chat_error_message(:empty_question), do: gettext("Please enter a question.")
-
-  defp chat_error_message({:database_error, _}),
-    do: gettext("Failed to search the document. Please try again.")
-
-  defp chat_error_message(_), do: gettext("Sorry, I encountered an error. Please try again.")
 end

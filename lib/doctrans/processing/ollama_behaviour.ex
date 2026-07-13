@@ -22,4 +22,11 @@ defmodule Doctrans.Processing.OllamaBehaviour do
 
   @callback chat(messages :: [map()], opts :: keyword()) ::
               {:ok, String.t()} | {:error, term()}
+
+  @callback chat_stream(
+              messages :: [map()],
+              on_delta :: (String.t() -> any()),
+              opts :: keyword()
+            ) ::
+              {:ok, String.t()} | {:error, term()}
 end

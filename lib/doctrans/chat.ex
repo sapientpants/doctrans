@@ -73,12 +73,7 @@ defmodule Doctrans.Chat do
         end)
 
       # Search with all query variants and merge via RRF
-      search_result =
-        if length(queries) > 1 do
-          MultiSearch.search_with_queries(document.id, queries, search_opts)
-        else
-          Search.search_in_document(document.id, standalone_question, search_opts)
-        end
+      search_result = retrieve(document.id, standalone_question, queries, search_opts)
 
       case search_result do
         {:ok, pages} ->
@@ -158,6 +153,30 @@ defmodule Doctrans.Chat do
     |> Enum.join("\n\n---\n\n")
   end
 
+  @max_context_chunks 16
+
+  @doc """
+  Merges newly retrieved chunks into the prior accumulated conversation context.
+
+  Dedups by chunk identity `{page_id, chunk_index}` (chunk_index is nil for
+  page-level results), keeping the higher-`similarity` copy on collision, sorts
+  by similarity descending, and caps the result to `@max_context_chunks` so the
+  accumulated context cannot grow past the model's context budget.
+
+  Returns the merged chunk list, suitable for `build_context/1`.
+  """
+  def merge_context(prior_chunks, new_chunks, opts \\ []) do
+    max_chunks = Keyword.get(opts, :max_chunks, @max_context_chunks)
+
+    (prior_chunks ++ new_chunks)
+    |> Enum.group_by(&chunk_identity/1)
+    |> Enum.map(fn {_id, dupes} -> Enum.max_by(dupes, & &1.similarity) end)
+    |> Enum.sort_by(& &1.similarity, :desc)
+    |> Enum.take(max_chunks)
+  end
+
+  defp chunk_identity(chunk), do: {chunk.page_id, Map.get(chunk, :chunk_index)}
+
   @doc """
   Checks if a document has any chunks or pages with embeddings ready for chat.
 
@@ -196,38 +215,53 @@ defmodule Doctrans.Chat do
     Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
   end
 
-  defp build_system_prompt(document_title, context) when context == "" do
+  @doc """
+  Retrieves relevant document context for a set of search queries.
+
+  Runs multi-query search with RRF when there are multiple query variants,
+  otherwise a single semantic search. Returns `{:ok, pages}` or `{:error, reason}`.
+  Shared by `send_message/4` and `Doctrans.Chat.Agent`.
+  """
+  def retrieve(document_id, standalone_question, queries, search_opts) do
+    if length(queries) > 1 do
+      MultiSearch.search_with_queries(document_id, queries, search_opts)
+    else
+      Search.search_in_document(document_id, standalone_question, search_opts)
+    end
+  end
+
+  @doc false
+  def build_system_prompt(document_title, context) when context == "" do
     """
     You answer questions about the document "#{document_title}".
 
-    No relevant content was found in the document for this question.
+    The document was searched but no content relevant to this question was retrieved.
 
-    Respond with a brief, factual statement that the requested information was not found in the document. Do not apologize, do not offer suggestions, do not speculate. Simply state the fact.
-
-    Example response: "This information is not present in the document."
+    State briefly that the specific information needed to answer was not found in the retrieved content. Do not apologize or speculate.
     """
   end
 
-  defp build_system_prompt(document_title, context) do
+  @doc false
+  def build_system_prompt(document_title, context) do
     """
-    You answer questions about the document "#{document_title}" based strictly on the provided context.
+    You are an analyst answering questions about the document "#{document_title}" using the DOCUMENT CONTEXT below as your source of facts.
+
+    You may analyze, compare, evaluate, and draw conclusions from that information — including assessments, judgments, and opinions — when the question calls for it. An assessment is expected to reason over the available data, not to quote a ready-made conclusion.
 
     RULES:
-    - Answer ONLY using information explicitly stated in the context below
-    - If the context does not contain the answer, state clearly: "This information is not in the document."
-    - Do NOT speculate, infer, or provide information beyond what is in the context
-    - Do NOT use phrases like "I think", "probably", "might be", "it seems"
-    - Do NOT apologize or use filler phrases like "Great question!" or "I'd be happy to help"
-    - Be direct, factual, and concise
-    - Cite page numbers when referencing specific information (e.g., "Page 3 states...")
-    - If only partial information is available, state what is known and what is not
+    - Ground every fact and figure (numbers, dates, names) strictly in the context; never invent or assume figures that are not present
+    - When asked to assess, evaluate, or give an opinion, reason over the relevant data in the context (e.g., balance-sheet figures, ratios, trends) and explain the basis for your conclusion
+    - Cite page numbers and the specific figures you rely on (e.g., "equity of EUR 45m against total assets of EUR 120m (Page 12) implies an equity ratio of ~38%")
+    - If a specific figure needed for part of the answer is not in the context, say exactly what is missing — do NOT refuse the whole question when related data is available
+    - Be direct, concise, and analytical; avoid filler and hedging
 
     DOCUMENT CONTEXT:
     #{context}
     """
   end
 
-  defp build_messages(system_prompt, chat_history, question) do
+  @doc false
+  def build_messages(system_prompt, chat_history, question) do
     # Start with system prompt
     system_message = %{role: "system", content: system_prompt}
 

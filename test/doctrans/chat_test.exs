@@ -72,6 +72,69 @@ defmodule Doctrans.ChatTest do
     end
   end
 
+  describe "merge_context/3" do
+    defp chunk(page_id, chunk_index, similarity) do
+      %{
+        page_id: page_id,
+        page_number: 1,
+        chunk_index: chunk_index,
+        similarity: similarity,
+        translated_markdown: "content",
+        original_markdown: nil
+      }
+    end
+
+    test "dedups by chunk identity {page_id, chunk_index}" do
+      prior = [chunk("p1", 0, 0.9)]
+      new = [chunk("p1", 0, 0.8), chunk("p1", 1, 0.7)]
+
+      merged = Chat.merge_context(prior, new)
+
+      assert length(merged) == 2
+      assert Enum.map(merged, & &1.chunk_index) |> Enum.sort() == [0, 1]
+    end
+
+    test "keeps the higher-similarity copy on collision" do
+      prior = [chunk("p1", 0, 0.5)]
+      new = [chunk("p1", 0, 0.95)]
+
+      assert [%{similarity: 0.95}] = Chat.merge_context(prior, new)
+    end
+
+    test "treats nil chunk_index (page-level results) as an identity" do
+      prior = [chunk("p1", nil, 0.9)]
+      new = [chunk("p1", nil, 0.8)]
+
+      assert length(Chat.merge_context(prior, new)) == 1
+    end
+
+    test "caps the merged context and keeps the highest-similarity chunks" do
+      chunks = for i <- 1..20, do: chunk("p#{i}", 0, i / 100)
+
+      merged = Chat.merge_context([], chunks, max_chunks: 5)
+
+      assert length(merged) == 5
+      # The five highest similarities (0.16..0.20) survive.
+      assert Enum.map(merged, & &1.similarity) == [0.20, 0.19, 0.18, 0.17, 0.16]
+    end
+  end
+
+  describe "build_system_prompt/2" do
+    test "with context, allows analysis and does not hard-refuse" do
+      prompt = Chat.build_system_prompt("Report", "[Page 1] equity EUR 45m")
+
+      assert prompt =~ "analyze"
+      assert prompt =~ "[Page 1] equity EUR 45m"
+      refute prompt =~ "This information is not in the document."
+    end
+
+    test "with empty context, states the info was not found without a canned refusal" do
+      prompt = Chat.build_system_prompt("Report", "")
+
+      assert prompt =~ "not found"
+    end
+  end
+
   describe "embeddings_ready?/1" do
     test "returns false when no pages have embeddings" do
       document = create_document(status: "processing")

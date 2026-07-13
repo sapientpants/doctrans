@@ -55,6 +55,22 @@ const Hooks = {
     scrollToBottom() {
       this.el.scrollTop = this.el.scrollHeight
     }
+  },
+  // Keeps the chat input focused: on mount, and again whenever it re-enables
+  // after a question finishes streaming (the input is disabled while loading,
+  // which drops focus).
+  ChatInput: {
+    mounted() {
+      this.focusIfEnabled()
+    },
+    updated() {
+      this.focusIfEnabled()
+    },
+    focusIfEnabled() {
+      if (!this.el.disabled) {
+        this.el.focus()
+      }
+    }
   }
 }
 

@@ -12,6 +12,12 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpers do
   Returns an empty string for nil or empty input.
   Sanitizes the output HTML to prevent XSS attacks.
 
+  ## Options
+
+  - `:hardbreaks` - When `true`, single newlines render as `<br>` instead of being
+    collapsed into a space (CommonMark soft breaks). Useful for chat, where the LLM
+    separates lines with single newlines and expects them preserved. Defaults to `false`.
+
   ## Examples
 
       iex> render_markdown("**bold**")
@@ -20,13 +26,22 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpers do
       iex> render_markdown(nil)
       ""
   """
-  def render_markdown(nil), do: ""
-  def render_markdown(""), do: ""
+  def render_markdown(text, opts \\ [])
+  def render_markdown(nil, _opts), do: ""
+  def render_markdown("", _opts), do: ""
 
-  def render_markdown(text) do
-    case MDEx.to_html(text) do
+  def render_markdown(text, opts) do
+    case MDEx.to_html(text, mdex_options(opts)) do
       {:ok, html} -> sanitize_html(html)
       {:error, html} -> sanitize_html(html)
+    end
+  end
+
+  defp mdex_options(opts) do
+    if Keyword.get(opts, :hardbreaks, false) do
+      [render: [hardbreaks: true]]
+    else
+      []
     end
   end
 

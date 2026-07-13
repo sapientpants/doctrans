@@ -16,6 +16,10 @@ defmodule Doctrans.Processing.Ollama do
 
   @behaviour Doctrans.Processing.OllamaBehaviour
 
+  # Context window for chat/streaming. Larger than extraction/translation because
+  # the agent accumulates retrieved chunks across turns plus conversation history.
+  @chat_num_ctx 32_768
+
   require Logger
 
   use Gettext, backend: DoctransWeb.Gettext
@@ -181,6 +185,10 @@ defmodule Doctrans.Processing.Ollama do
     # Use shorter timeout for chat (2 minutes) for better UX
     timeout = Keyword.get(opts, :timeout, 120_000)
     num_predict = Keyword.get(opts, :num_predict, 4_096)
+    # Thinking is on by default for the Qwen3 chat model. Structured helper calls
+    # (query expansion, grading) pass `think: false` so their small num_predict
+    # budget is not consumed by reasoning, which yields an empty response.
+    think = Keyword.get(opts, :think, true)
 
     Logger.info("Sending chat request with #{length(messages)} messages using #{model}")
 
@@ -188,13 +196,171 @@ defmodule Doctrans.Processing.Ollama do
       model: model,
       messages: messages,
       stream: false,
+      think: think,
       options: %{
-        num_ctx: 16_384,
+        num_ctx: @chat_num_ctx,
         num_predict: num_predict
       }
     }
 
     make_chat_request("/api/chat", body, timeout)
+  end
+
+  @doc """
+  Streams a chat completion from Ollama, invoking `on_delta` for each text chunk.
+
+  Uses the /api/chat endpoint with `stream: true`. Thinking is disabled so only
+  the answer text is streamed (matching extraction/translation). `on_delta` is a
+  1-arity function called with each content delta (a binary) as it arrives.
+
+  ## Parameters
+
+  - `messages` - List of message maps with `:role` and `:content` keys
+  - `on_delta` - Function invoked with each content delta binary
+  - `opts` - Options (`:model`, `:timeout`, `:num_predict`)
+
+  ## Returns
+
+  - `{:ok, full_text}` with the complete accumulated response on success
+  - `{:error, reason}` on failure
+  """
+  def chat_stream(messages, on_delta, opts \\ []) when is_function(on_delta, 1) do
+    config = ollama_config()
+    model = Keyword.get(opts, :model, config[:chat_model])
+    timeout = Keyword.get(opts, :timeout, 120_000)
+    num_predict = Keyword.get(opts, :num_predict, 4_096)
+
+    Logger.info("Streaming chat request with #{length(messages)} messages using #{model}")
+
+    body = %{
+      model: model,
+      messages: messages,
+      stream: true,
+      # Answer generation is not a reasoning task for our purposes; hiding the
+      # chain-of-thought keeps streaming snappy and the output clean.
+      think: false,
+      options: %{
+        num_ctx: @chat_num_ctx,
+        num_predict: num_predict
+      }
+    }
+
+    make_streaming_request("/api/chat", body, on_delta, timeout)
+  end
+
+  defp make_streaming_request(path, body, on_delta, timeout) do
+    alias Doctrans.Resilience.CircuitBreaker
+
+    CircuitBreaker.call(:ollama_api, fn ->
+      do_make_streaming_request(path, body, on_delta, timeout)
+    end)
+  end
+
+  defp do_make_streaming_request(path, body, on_delta, timeout) do
+    config = ollama_config()
+    url = "#{config[:base_url]}#{path}"
+
+    Logger.info(
+      "Ollama streaming chat request: model=#{body[:model]}, messages=#{length(body[:messages])}"
+    )
+
+    url
+    |> Req.post(json: body, receive_timeout: timeout, into: stream_collector(on_delta))
+    |> handle_stream_response(on_delta, timeout)
+  end
+
+  # Builds the Req `:into` collector that parses NDJSON chunks, forwards content
+  # deltas, and accumulates buffer/full-text state in the response's private map.
+  defp stream_collector(on_delta) do
+    fn {:data, data}, {req, resp} ->
+      buffer = (resp.private[:ollama_buffer] || "") <> data
+      {lines, rest} = take_complete_lines(buffer)
+      acc = consume_stream_lines(lines, resp.private[:ollama_full] || "", on_delta)
+
+      resp =
+        resp
+        |> Req.Response.put_private(:ollama_buffer, rest)
+        |> Req.Response.put_private(:ollama_full, acc)
+
+      {:cont, {req, resp}}
+    end
+  end
+
+  defp handle_stream_response({:ok, %{status: 200} = resp}, on_delta, _timeout) do
+    # Flush any trailing buffered line (in case the stream did not end with "\n")
+    leftover = resp.private[:ollama_buffer] || ""
+    acc = consume_stream_lines([leftover], resp.private[:ollama_full] || "", on_delta)
+    result = acc |> String.trim() |> strip_code_fences()
+
+    if result == "" do
+      Logger.warning("Ollama streaming chat returned empty response")
+
+      {:error,
+       dgettext("errors", "Model returned empty response while processing %{subject}",
+         subject: "the request"
+       )}
+    else
+      Logger.debug("Ollama streaming chat returned #{String.length(result)} chars")
+      {:ok, result}
+    end
+  end
+
+  defp handle_stream_response({:ok, %{status: status, body: response_body}}, _on_delta, _timeout) do
+    error_msg = get_in(response_body, ["error"]) || inspect(response_body)
+    Logger.error("Ollama streaming chat failed with status #{status}: #{error_msg}")
+
+    {:error,
+     dgettext("errors", "Ollama error (%{status}): %{error}", status: status, error: error_msg)}
+  end
+
+  defp handle_stream_response({:error, %Req.TransportError{reason: :timeout}}, _on_delta, timeout) do
+    Logger.error("Ollama streaming chat timed out after #{timeout}ms")
+    {:error, dgettext("errors", "Request timed out")}
+  end
+
+  defp handle_stream_response({:error, reason}, _on_delta, _timeout) do
+    Logger.error("Ollama streaming chat failed: #{inspect(reason)}")
+    {:error, dgettext("errors", "Request failed: %{reason}", reason: inspect(reason))}
+  end
+
+  # Splits a buffer into complete lines and a trailing remainder (text after the
+  # last newline, which may be an incomplete JSON object spanning chunks).
+  defp take_complete_lines(buffer) do
+    parts = String.split(buffer, "\n")
+    {complete, [rest]} = Enum.split(parts, length(parts) - 1)
+    {complete, rest}
+  end
+
+  # Decodes each NDJSON line, forwards content deltas via on_delta, and returns
+  # the accumulated full text.
+  defp consume_stream_lines(lines, acc, on_delta) do
+    Enum.reduce(lines, acc, fn line, acc ->
+      case decode_stream_line(line) do
+        {:delta, delta} ->
+          on_delta.(delta)
+          acc <> delta
+
+        :skip ->
+          acc
+      end
+    end)
+  end
+
+  defp decode_stream_line(line) do
+    case String.trim(line) do
+      "" ->
+        :skip
+
+      trimmed ->
+        case Jason.decode(trimmed) do
+          {:ok, %{"message" => %{"content" => content}}}
+          when is_binary(content) and content != "" ->
+            {:delta, content}
+
+          _ ->
+            :skip
+        end
+    end
   end
 
   defp make_chat_request(path, body, timeout) do

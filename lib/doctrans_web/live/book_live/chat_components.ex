@@ -2,10 +2,12 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
   @moduledoc "Components for the document chat panel."
   use DoctransWeb, :html
 
-  import DoctransWeb.DocumentLive.MarkdownHelpers, only: [render_markdown: 1]
+  import DoctransWeb.DocumentLive.MarkdownHelpers, only: [render_markdown: 2]
 
   attr :chat_messages, :any, required: true
   attr :chat_loading, :boolean, required: true
+  attr :chat_stage, :atom, default: nil
+  attr :chat_streaming_content, :string, default: ""
   attr :embeddings_ready, :boolean, required: true
 
   def chat_panel(assigns) do
@@ -27,35 +29,49 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
         </button>
       </div>
 
-      <%!-- Messages area --%>
-      <div
-        id="chat-messages"
-        phx-update="stream"
-        class="flex-1 overflow-y-auto p-3 space-y-3"
-        phx-hook="ScrollToBottom"
-      >
-        <%!-- Empty state - shown when no messages --%>
-        <div
-          id="chat-empty-state"
-          class="hidden only:flex flex-col items-center justify-center h-full text-base-content/50 px-4"
-        >
-          <.icon name="hero-chat-bubble-left-right" class="w-12 h-12 mb-3" />
-          <p class="text-sm text-center">{gettext("Ask questions about this document")}</p>
-          <p class="text-xs text-center mt-2 text-base-content/40">
-            {gettext("I'll find relevant content and answer based on it.")}
-          </p>
+      <%!-- Messages area (scroll container) --%>
+      <div id="chat-scroll" class="flex-1 overflow-y-auto p-3 space-y-3" phx-hook="ScrollToBottom">
+        <%!-- Finalized messages (managed by LiveView streams) --%>
+        <div id="chat-messages" phx-update="stream" class="space-y-3">
+          <%!-- Empty state - shown when no messages --%>
+          <div
+            id="chat-empty-state"
+            class="hidden only:flex flex-col items-center justify-center h-full text-base-content/50 px-4"
+          >
+            <.icon name="hero-chat-bubble-left-right" class="w-12 h-12 mb-3" />
+            <p class="text-sm text-center">{gettext("Ask questions about this document")}</p>
+            <p class="text-xs text-center mt-2 text-base-content/40">
+              {gettext("I'll find relevant content and answer based on it.")}
+            </p>
+          </div>
+          <%!-- Messages --%>
+          <div :for={{id, msg} <- @chat_messages} id={id}>
+            <.chat_message message={msg} />
+          </div>
         </div>
-        <%!-- Messages --%>
-        <div :for={{id, msg} <- @chat_messages} id={id}>
-          <.chat_message message={msg} />
+
+        <%!-- Live streaming answer, shown outside the stream until finalized. Must
+             be a sibling of (not inside) the phx-update="stream" container, or
+             LiveView will not remove it when it is cleared, doubling the answer. --%>
+        <div
+          :if={@chat_streaming_content != ""}
+          id="chat-streaming"
+          class="max-w-[95%] rounded-lg p-2.5 text-sm bg-base-200"
+        >
+          <div class="prose prose-sm max-w-none">
+            <.markdown_content content={@chat_streaming_content} />
+          </div>
         </div>
       </div>
 
-      <%!-- Loading indicator --%>
-      <div :if={@chat_loading} class="px-3 py-2 border-t border-base-300 bg-base-200/50">
+      <%!-- Loading indicator - shown while working, hidden once tokens stream in --%>
+      <div
+        :if={@chat_loading and @chat_streaming_content == ""}
+        class="px-3 py-2 border-t border-base-300 bg-base-200/50"
+      >
         <div class="flex items-center gap-2 text-sm text-base-content/70">
           <span class="loading loading-dots loading-sm"></span>
-          <span>{gettext("Thinking...")}</span>
+          <span>{stage_label(@chat_stage)}</span>
         </div>
       </div>
 
@@ -86,6 +102,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
             disabled={@chat_loading}
             autocomplete="off"
             id="chat-input"
+            phx-hook="ChatInput"
           />
           <button
             type="submit"
@@ -125,10 +142,19 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
     """
   end
 
+  # Stage-aware status text shown in the loading indicator.
+  defp stage_label(:understanding), do: gettext("Understanding your question...")
+  defp stage_label(:retrieving), do: gettext("Searching the document...")
+  defp stage_label(:assessing), do: gettext("Checking the sources...")
+  defp stage_label(:generating), do: gettext("Writing the answer...")
+  defp stage_label(_), do: gettext("Thinking...")
+
   attr :content, :string, default: nil
 
   defp markdown_content(assigns) do
-    html = render_markdown(assigns.content || "")
+    # Chat answers separate lines with single newlines; render them as hard breaks
+    # so the layout is preserved instead of collapsing into run-on text.
+    html = render_markdown(assigns.content || "", hardbreaks: true)
     assigns = assign(assigns, :html, html)
     ~H"<div>{raw(@html)}</div>"
   end
