@@ -80,7 +80,6 @@ config :doctrans, :embedding,
 # Queue concurrency values:
 # - pdf_extraction: 1 - Sequential extraction to ensure pages are processed in order
 # - llm_processing: 1 - Sequential processing to process pages in order (one at a time)
-# - embedding_generation: 5 - Moderate concurrency for embedding API calls
 # - health_check: 1 - Single worker for periodic health checks (cron job)
 config :doctrans, Oban,
   repo: Doctrans.Repo,
@@ -91,7 +90,6 @@ config :doctrans, Oban,
   queues: [
     pdf_extraction: 1,
     llm_processing: 1,
-    embedding_generation: 5,
     health_check: 1
   ]
 
