@@ -90,4 +90,21 @@ defmodule Doctrans.Processing.OllamaStub do
         {:error, error}
     end
   end
+
+  @impl true
+  def chat_stream(messages, on_delta, opts \\ [])
+
+  def chat_stream(messages, on_delta, opts) do
+    case chat(messages, opts) do
+      {:ok, response} ->
+        # Emit the mock response in a couple of chunks to exercise streaming.
+        {first, second} = String.split_at(response, div(String.length(response), 2))
+        on_delta.(first)
+        on_delta.(second)
+        {:ok, response}
+
+      error ->
+        error
+    end
+  end
 end

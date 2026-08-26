@@ -62,5 +62,8 @@
   {"lib/doctrans/processing/document_processor.ex", :unmatched_return},
 
   # Document converter uses File.rm and mkdir_p for fire-and-forget operations
-  {"lib/doctrans/processing/document_converter.ex", :unmatched_return}
+  {"lib/doctrans/processing/document_converter.ex", :unmatched_return},
+
+  # HtmlSanitizeEx.basic_html/1 type mismatch - returns string wrapped in Dialyzer incompatible type
+  {"lib/doctrans_web/live/book_live/markdown_helpers.ex", :call}
 ]

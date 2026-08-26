@@ -3,49 +3,95 @@ defmodule Doctrans.Chat.QueryExpanderTest do
 
   alias Doctrans.Chat.QueryExpander
 
-  describe "expand/3" do
-    test "returns original question with no chat history" do
-      {standalone, queries} = QueryExpander.expand("What is this book about?", [])
+  # Test-only Ollama module returning a planner response configured via app env.
+  defmodule FakeOllama do
+    def chat(_messages, _opts) do
+      case Application.get_env(:doctrans, :planner_fake_response) do
+        {:error, reason} -> {:error, reason}
+        response when is_binary(response) -> {:ok, response}
+        _ -> {:ok, ""}
+      end
+    end
+  end
 
-      assert standalone == "What is this book about?"
-      assert queries == ["What is this book about?"]
+  setup do
+    original = Application.get_env(:doctrans, :ollama_module)
+    Application.put_env(:doctrans, :ollama_module, FakeOllama)
+
+    on_exit(fn ->
+      Application.put_env(:doctrans, :ollama_module, original)
+      Application.delete_env(:doctrans, :planner_fake_response)
+    end)
+
+    :ok
+  end
+
+  describe "expand/3" do
+    test "plans multiple targeted queries even without chat history" do
+      response = """
+      Standalone: What is the assessed quality of the balance sheet?
+      Query 1: total assets and equity
+      Query 2: total liabilities and debt
+      Query 3: cash and liquidity
+      """
+
+      Application.put_env(:doctrans, :planner_fake_response, response)
+
+      {standalone, queries} =
+        QueryExpander.expand("assess the balance sheet", [])
+
+      assert standalone == "What is the assessed quality of the balance sheet?"
+      # Standalone + 3 decomposed sub-queries.
+      assert length(queries) == 4
+      assert "total liabilities and debt" in queries
+      assert "cash and liquidity" in queries
     end
 
-    test "calls LLM when chat history exists" do
+    test "reformulates using chat history and plans sub-queries" do
       history = [
         %{role: "user", content: "What are the main themes?"},
         %{role: "assistant", content: "The main themes are X, Y, and Z."}
       ]
 
-      # The OllamaStub returns a generic response that won't match the expected format,
-      # so QueryExpander should fall back to the original question as standalone
+      response = """
+      Standalone: Tell me more about theme Y.
+      Query 1: details about Y
+      Query 2: examples of Y
+      """
+
+      Application.put_env(:doctrans, :planner_fake_response, response)
+
       {standalone, queries} = QueryExpander.expand("Tell me more about Y", history)
 
-      assert is_binary(standalone)
-      assert queries != []
+      assert standalone == "Tell me more about theme Y."
+      assert length(queries) >= 2
     end
 
-    test "falls back to original question on LLM error" do
-      history = [
-        %{role: "user", content: "Hello"},
-        %{role: "assistant", content: "Hi there"}
-      ]
+    test "caps the number of queries" do
+      response = """
+      Standalone: q0
+      Query 1: q1
+      Query 2: q2
+      Query 3: q3
+      Query 4: q4
+      Query 5: q5
+      """
 
-      Application.put_env(:doctrans, :ollama_stub_chat_error, "timeout")
+      Application.put_env(:doctrans, :planner_fake_response, response)
 
-      {standalone, queries} = QueryExpander.expand("What about chapter 2?", history)
+      {_standalone, queries} = QueryExpander.expand("something", [])
+
+      # Standalone + 5 sub-queries = 6, at the cap.
+      assert length(queries) == 6
+    end
+
+    test "falls back to the original question on LLM error" do
+      Application.put_env(:doctrans, :planner_fake_response, {:error, :timeout})
+
+      {standalone, queries} = QueryExpander.expand("What about chapter 2?", [])
 
       assert standalone == "What about chapter 2?"
       assert queries == ["What about chapter 2?"]
-    after
-      Application.delete_env(:doctrans, :ollama_stub_chat_error)
-    end
-
-    test "returns empty history same as no expansion" do
-      {standalone, queries} = QueryExpander.expand("Simple question", [])
-
-      assert standalone == "Simple question"
-      assert queries == ["Simple question"]
     end
   end
 end

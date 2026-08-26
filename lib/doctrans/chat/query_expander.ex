@@ -1,103 +1,135 @@
 defmodule Doctrans.Chat.QueryExpander do
   @moduledoc """
-  Expands user queries for improved RAG retrieval.
+  Plans document retrieval by turning a user message into a set of targeted
+  vector-store search queries.
 
-  Performs two tasks in a single LLM call:
-  1. Contextual reformulation - rewrites the user's message as a standalone question
-     using chat history (critical for follow-up questions like "tell me more about that")
-  2. Multi-query expansion - generates alternative phrasings to catch vocabulary mismatches
+  In a single LLM call it:
+  1. Understands + reformulates the latest message into a standalone question
+     using chat history (critical for follow-ups like "tell me more about that").
+  2. Decomposes the request into multiple concrete sub-queries that each retrieve
+     a distinct piece of the information needed to answer — for analytical or
+     assessment questions ("assess the balance sheet"), the component facts
+     (assets, equity, liabilities, liquidity, debt, trends), not mere synonyms.
+
+  Runs on every turn (including the first). The returned queries are fed to
+  `Doctrans.Chat.MultiSearch`, which searches them in parallel and fuses results
+  via RRF.
   """
+
+  alias Doctrans.Chat.LineParser
 
   require Logger
 
   @expansion_timeout 30_000
-  @max_predict 256
+  @max_predict 512
+  @max_queries 6
 
   @doc """
-  Expands a user question into multiple search queries.
+  Plans the retrieval queries for `question`.
 
-  When chat history is present, reformulates the question to be standalone and generates
-  alternative phrasings. When there's no history, returns the original question as the
-  standalone question and only query.
-
-  Returns `{standalone_question, queries}` where `standalone_question` is the reformulated
-  question (or the original if no history) and `queries` is a list of query variants to
-  search with.
+  Returns `{standalone_question, queries}` where `standalone_question` is the
+  reformulated question and `queries` is the standalone plus targeted sub-queries
+  (deduped, capped at #{@max_queries}).
 
   On any LLM failure, gracefully falls back to `{question, [question]}`.
   """
   def expand(question, chat_history, opts \\ [])
 
-  def expand(question, [], _opts) do
-    {question, [question]}
-  end
-
   def expand(question, chat_history, opts) do
-    history_text = format_history(chat_history)
-
-    prompt = """
-    Given the conversation and the user's latest message, do the following:
-    1. Rewrite the message as a standalone question with full context from the conversation
-    2. Generate 2 alternative phrasings that use different words but preserve the meaning
-
-    Conversation:
-    #{history_text}
-
-    User's message: #{question}
-
-    Respond in exactly this format with no other text:
-    Standalone: <rewritten question>
-    Alt 1: <alternative phrasing>
-    Alt 2: <alternative phrasing>
-    """
-
+    prompt = build_prompt(question, chat_history)
     messages = [%{role: "user", content: prompt}]
 
     case ollama_module().chat(messages, chat_opts(opts)) do
       {:ok, response} ->
-        Logger.debug("Query expansion raw response:\n#{String.slice(response, 0, 500)}")
-        parse_expansion(response, question)
+        Logger.debug("Query planner raw response:\n#{String.slice(response, 0, 500)}")
+        parse_plan(response, question)
 
       {:error, reason} ->
-        Logger.warning("Query expansion failed, using original query: #{inspect(reason)}")
+        Logger.warning("Query planning failed, using original query: #{inspect(reason)}")
         {question, [question]}
     end
   end
 
-  defp parse_expansion(response, original_question) do
-    lines =
-      response
-      |> String.split("\n")
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
+  defp build_prompt(question, []) do
+    """
+    Understand the user's question about a document, then plan how to retrieve the
+    information needed to answer it thoroughly.
 
-    standalone = extract_field(lines, "Standalone:")
-    alt1 = extract_field(lines, "Alt 1:")
-    alt2 = extract_field(lines, "Alt 2:")
+    Do the following:
+    1. Restate the question as a clear standalone question.
+    2. Break it into up to 5 targeted search queries, each retrieving a distinct
+       piece of information needed to answer. For analytical or assessment
+       questions, decompose into the specific facts and figures required (for a
+       balance-sheet assessment: total assets, equity, liabilities, liquidity/cash,
+       debt, year-over-year changes) rather than rephrasings of the same query.
 
+    User's question: #{question}
+
+    Respond in exactly this format with no other text:
+    Standalone: <standalone question>
+    Query 1: <targeted search query>
+    Query 2: <targeted search query>
+    Query 3: <targeted search query>
+    Query 4: <targeted search query>
+    Query 5: <targeted search query>
+    """
+  end
+
+  defp build_prompt(question, chat_history) do
+    """
+    Understand the user's latest message in the conversation, then plan how to
+    retrieve the information needed to answer it thoroughly.
+
+    Do the following:
+    1. Rewrite the latest message as a standalone question with full context from
+       the conversation.
+    2. Break it into up to 5 targeted search queries, each retrieving a distinct
+       piece of information needed to answer. For analytical or assessment
+       questions, decompose into the specific facts and figures required (for a
+       balance-sheet assessment: total assets, equity, liabilities, liquidity/cash,
+       debt, year-over-year changes) rather than rephrasings of the same query.
+
+    Conversation:
+    #{format_history(chat_history)}
+
+    User's message: #{question}
+
+    Respond in exactly this format with no other text:
+    Standalone: <standalone question>
+    Query 1: <targeted search query>
+    Query 2: <targeted search query>
+    Query 3: <targeted search query>
+    Query 4: <targeted search query>
+    Query 5: <targeted search query>
+    """
+  end
+
+  defp parse_plan(response, original_question) do
+    lines = LineParser.lines(response)
+
+    standalone = LineParser.extract_field(lines, "Standalone:")
     standalone_q = standalone || original_question
 
+    sub_queries =
+      1..5
+      |> Enum.map(fn i -> LineParser.extract_field(lines, "Query #{i}:") end)
+      |> Enum.reject(&(is_nil(&1) or &1 == ""))
+
     queries =
-      [standalone_q, alt1, alt2]
+      [standalone_q | sub_queries]
       |> Enum.reject(&(is_nil(&1) or &1 == ""))
       |> Enum.uniq()
+      |> Enum.take(@max_queries)
 
     queries = if queries == [], do: [original_question], else: queries
 
     Logger.info(
-      "Query expansion: #{length(queries)} variants from \"#{String.slice(original_question, 0, 80)}\"" <>
+      "Query plan: #{length(queries)} queries from \"#{String.slice(original_question, 0, 80)}\"" <>
         "\n  Standalone: #{standalone_q}" <>
         Enum.map_join(queries, "", fn q -> "\n  Query: #{q}" end)
     )
 
     {standalone_q, queries}
-  end
-
-  defp extract_field(lines, prefix) do
-    case Enum.find(lines, &String.starts_with?(&1, prefix)) do
-      nil -> nil
-      line -> line |> String.replace_prefix(prefix, "") |> String.trim()
-    end
   end
 
   defp format_history(chat_history) do
@@ -111,7 +143,10 @@ defmodule Doctrans.Chat.QueryExpander do
 
   defp chat_opts(opts) do
     model = Keyword.get(opts, :model)
-    base = [timeout: @expansion_timeout, num_predict: @max_predict]
+    # Query planning is a structured transform, not a reasoning task; disable
+    # thinking so the num_predict budget is not consumed producing an empty
+    # (thinking-only) response.
+    base = [timeout: @expansion_timeout, num_predict: @max_predict, think: false]
     if model, do: Keyword.put(base, :model, model), else: base
   end
 

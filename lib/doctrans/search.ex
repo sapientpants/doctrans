@@ -49,8 +49,9 @@ defmodule Doctrans.Search do
   # Minimum cosine similarity threshold for chat context
   # Pages below this threshold are considered irrelevant
   # Cosine similarity: 0 = unrelated, 1 = identical
-  # 0.35 is a reasonable threshold to filter out noise while keeping relevant content
-  @chat_similarity_threshold 0.35
+  # 0.30 keeps recall high for abstract/analytical queries (e.g. "assess the
+  # balance sheet") while still filtering clear noise
+  @chat_similarity_threshold 0.30
 
   @doc """
   Performs semantic search within a specific document.
