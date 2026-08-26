@@ -47,6 +47,7 @@
   {"lib/doctrans/processing/page_processor.ex", :contract_supertype},
   {"lib/doctrans/processing/page_processor.ex", :unmatched_return},
   {"lib/doctrans/processing/page_processor.ex", :unknown_type},
+  {"lib/doctrans/processing/page_processor.ex", :contract_with_opaque},
 
   # Queue manager uses broad specs for state management
   {"lib/doctrans/processing/queue_manager.ex", :contract_supertype},
@@ -65,5 +66,16 @@
   {"lib/doctrans/processing/document_converter.ex", :unmatched_return},
 
   # HtmlSanitizeEx.basic_html/1 type mismatch - returns string wrapped in Dialyzer incompatible type
-  {"lib/doctrans_web/live/book_live/markdown_helpers.ex", :call}
+  {"lib/doctrans_web/live/book_live/markdown_helpers.ex", :call},
+
+  # Gettext.Plural.plural/3 opaque type mismatch (OTP 29/Expo library change)
+  {"lib/doctrans_web/gettext.ex", :call_without_opaque},
+
+  # ErrorClassifier.classify/1 - clauses never match due to OTP 29 FileSystem.chroot/2 reason type change
+  {"lib/doctrans/resilience/error_classifier.ex", :unmatched_return},
+  {"lib/doctrans/resilience/error_classifier.ex", :unused},
+
+  # Ecto.Adapters.SQL.Sandbox.mode/2 second argument type changed in OTP 29 (expects {:shared, pid(), ...})
+  {"test/support/data_case.ex", :contract_supertype},
+  {"test/support/worker_helpers.ex", :contract_supertype}
 ]

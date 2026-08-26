@@ -1,5 +1,5 @@
 # Development Dockerfile for Phoenix LiveView with hot reload
-FROM elixir:1.18-otp-27
+FROM elixir:1.20.3-otp-29
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
