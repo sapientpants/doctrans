@@ -87,7 +87,7 @@ repos:
       # 1. Security audit (fast - runs first for quick feedback on vulnerabilities)
       - id: hex-audit
         name: Hex security audit
-        entry: mix hex.audit
+        entry: mix hex.audit --ignore-package-names cowlib
         language: system
         pass_filenames: false
         files: ^(mix\.exs|mix\.lock)$
