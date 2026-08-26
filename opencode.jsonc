@@ -1,0 +1,37 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Permission mapping from .claude/settings.local.json (Claude Code allow list).
+  // Last matching rule wins. Order matters.
+  //
+  // Bash:
+  //   Claude: Bash(command:*)
+  //   Opencode: "command*": "allow"  (glob pattern — "*" catchall is "ask")
+  //
+  // WebSearch was pre-allowed in Claude; mapped to websearch: "allow".
+  // webfetch: per-domain support not available in opencode (only ollama.com in Claude).
+  // Set to "ask" so all fetches require approval (matches Claude's ask-by-default for unlisted domains).
+  // MCP tool permissions: skipped (context7 is stale; no MCP server configured globally).
+  "permission": {
+    "websearch": "allow",
+    "webfetch": "ask",
+    "bash": {
+      "*": "ask",
+      "gh pr list*": "allow",
+      "mix run*": "allow",
+      "grep*": "allow",
+      "gh repo view*": "allow",
+      "mix precommit*": "allow",
+      "gh pr view*": "allow",
+      "mix format*": "allow",
+      "mix test*": "allow",
+      "mix compile*": "allow",
+      "MIX_ENV=test mix run*": "allow",
+      "MIX_ENV=test mix coveralls*": "allow",
+      "MIX_ENV=test mix dialyzer*": "allow",
+      "mix help*": "allow",
+      "elixir*": "allow",
+      "git add*": "allow",
+      "git commit*": "allow"
+    }
+  }
+}
