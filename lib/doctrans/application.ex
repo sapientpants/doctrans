@@ -9,6 +9,8 @@ defmodule Doctrans.Application do
 
   @impl true
   def start(_type, _args) do
+    load_dotenv()
+
     # Install circuit breakers before starting workers
     CircuitBreaker.install_fuses()
 
@@ -37,6 +39,66 @@ defmodule Doctrans.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Doctrans.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  defp load_dotenv() do
+    Path.join(__DIR__, "../../.env")
+    |> File.read()
+    |> case do
+      {:ok, contents} ->
+        contents
+        |> String.split(~r/\r?\n/, trim: true)
+        |> Enum.reject(&(String.starts_with?(&1, "#") or String.trim(&1) == ""))
+        |> Enum.each(fn line ->
+          case String.split(line, "=", parts: 2) do
+            [key, value] -> System.put_env(key, String.trim(value))
+            [key] -> System.put_env(key, "")
+            _ -> :ok
+          end
+        end)
+
+      _ ->
+        :ok
+    end
+
+    # Apply OpenAI config from .env directly
+    case System.get_env("OPENAI_API_KEY") do
+      nil ->
+        :ok
+
+      key ->
+        current = Application.get_env(:doctrans, :openai, [])
+        Application.put_env(:doctrans, :openai, Keyword.put(current, :api_key, key))
+    end
+
+    case System.get_env("OPENAI_HOST") do
+      nil ->
+        :ok
+
+      host ->
+        current = Application.get_env(:doctrans, :openai, [])
+        Application.put_env(:doctrans, :openai, Keyword.put(current, :base_url, host))
+    end
+
+    case System.get_env("OPENAI_API_KEY") do
+      nil ->
+        :ok
+
+      key ->
+        current = Application.get_env(:doctrans, :embedding, [])
+        Application.put_env(:doctrans, :embedding, Keyword.put(current, :api_key, key))
+    end
+
+    case System.get_env("OPENAI_HOST") do
+      nil ->
+        :ok
+
+      host ->
+        current = Application.get_env(:doctrans, :embedding, [])
+        Application.put_env(:doctrans, :embedding, Keyword.put(current, :base_url, host))
+    end
+
+    :ok
   end
 
   # Tell Phoenix to update the endpoint configuration

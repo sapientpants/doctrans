@@ -2,7 +2,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   @moduledoc """
   Handles LLM-based processing of individual pages.
 
-  Performs markdown extraction and translation using Ollama models.
+  Performs markdown extraction and translation using an OpenAI-compatible API models.
   Each page is processed independently: first extraction, then translation.
 
   ## I18n Note
@@ -34,9 +34,9 @@ defmodule Doctrans.Processing.LlmProcessor do
     }
   end
 
-  # Allow Ollama module to be configured for testing
-  defp ollama_module do
-    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
+  # Allow OpenAI module to be configured for testing
+  defp openai_module do
+    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
   end
 
   @doc """
@@ -123,9 +123,9 @@ defmodule Doctrans.Processing.LlmProcessor do
     Documents.broadcast_page_update(page)
 
     image_path = Path.join(Documents.uploads_dir(), page.image_path)
-    ollama_opts = build_extraction_opts(opts)
+    openai_opts = build_extraction_opts(opts)
 
-    case ollama_module().extract_markdown(image_path, ollama_opts) do
+    case openai_module().extract_markdown(image_path, openai_opts) do
       {:ok, markdown} ->
         {:ok, page} =
           Documents.update_page_extraction(page, %{
@@ -222,15 +222,15 @@ defmodule Doctrans.Processing.LlmProcessor do
     Documents.broadcast_page_update(page)
 
     document = Documents.get_document!(page.document_id)
-    ollama_opts = build_translation_opts(opts)
+    openai_opts = build_translation_opts(opts)
 
     source_language = Application.get_env(:doctrans, :defaults, [])[:source_language] || "de"
 
-    case ollama_module().translate(
+    case openai_module().translate(
            page.original_markdown,
            source_language,
            document.target_language,
-           ollama_opts
+           openai_opts
          ) do
       {:ok, translated} ->
         {:ok, page} =

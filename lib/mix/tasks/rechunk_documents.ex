@@ -5,7 +5,7 @@ defmodule Mix.Tasks.RechunkDocuments do
   This task is used after adding sub-page chunking support to process
   documents that were originally embedded at the page level.
 
-  Processes pages sequentially to avoid overwhelming Ollama.
+  Processes pages sequentially to avoid overwhelming the API.
 
   ## Usage
 

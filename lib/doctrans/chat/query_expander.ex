@@ -20,7 +20,6 @@ defmodule Doctrans.Chat.QueryExpander do
 
   require Logger
 
-  @expansion_timeout 30_000
   @max_predict 512
   @max_queries 6
 
@@ -39,7 +38,7 @@ defmodule Doctrans.Chat.QueryExpander do
     prompt = build_prompt(question, chat_history)
     messages = [%{role: "user", content: prompt}]
 
-    case ollama_module().chat(messages, chat_opts(opts)) do
+    case openai_module().chat(messages, chat_opts(opts)) do
       {:ok, response} ->
         Logger.debug("Query planner raw response:\n#{String.slice(response, 0, 500)}")
         parse_plan(response, question)
@@ -144,13 +143,13 @@ defmodule Doctrans.Chat.QueryExpander do
   defp chat_opts(opts) do
     model = Keyword.get(opts, :model)
     # Query planning is a structured transform, not a reasoning task; disable
-    # thinking so the num_predict budget is not consumed producing an empty
+    # thinking so the max_tokens budget is not consumed producing an empty
     # (thinking-only) response.
-    base = [timeout: @expansion_timeout, num_predict: @max_predict, think: false]
+    base = [max_tokens: @max_predict, think: false]
     if model, do: Keyword.put(base, :model, model), else: base
   end
 
-  defp ollama_module do
-    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
+  defp openai_module do
+    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
   end
 end

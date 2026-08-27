@@ -147,7 +147,7 @@ defmodule Doctrans.Chat.Agent do
   defp stream_answer(document, messages, opts, on_event) do
     on_delta = fn delta -> on_event.({:delta, delta}) end
 
-    case ollama_module().chat_stream(messages, on_delta, opts) do
+    case openai_module().chat_stream(messages, on_delta, opts) do
       {:ok, response} ->
         {:ok, response}
 
@@ -157,7 +157,7 @@ defmodule Doctrans.Chat.Agent do
     end
   end
 
-  defp ollama_module do
-    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
+  defp openai_module do
+    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
   end
 end

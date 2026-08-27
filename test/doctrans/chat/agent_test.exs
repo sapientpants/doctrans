@@ -56,8 +56,8 @@ defmodule Doctrans.Chat.AgentTest do
     end
 
     test "surfaces generation errors", %{document: document} do
-      Application.put_env(:doctrans, :ollama_stub_chat_error, "boom")
-      on_exit(fn -> Application.delete_env(:doctrans, :ollama_stub_chat_error) end)
+      Application.put_env(:doctrans, :openai_stub_chat_error, "boom")
+      on_exit(fn -> Application.delete_env(:doctrans, :openai_stub_chat_error) end)
 
       assert {:error, "boom"} =
                Agent.run(document, "What is this about?", [], [], fn _ -> :ok end)

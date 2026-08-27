@@ -5,7 +5,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
   alias Doctrans.Resilience.HealthCheck
 
   setup do
-    CircuitBreaker.reset(:ollama_api)
+    CircuitBreaker.reset(:openai_api)
     :ok
   end
 
@@ -21,21 +21,22 @@ defmodule Doctrans.Resilience.HealthCheckTest do
     end
   end
 
-  describe "check_ollama/0" do
+  describe "check_openai/0" do
     test "returns error when circuit is blown" do
       # Blow the circuit
       for _ <- 1..6 do
-        CircuitBreaker.melt(:ollama_api)
+        CircuitBreaker.melt(:openai_api)
       end
 
-      result = HealthCheck.check_ollama()
+      result = HealthCheck.check_openai()
       assert result == {:error, :circuit_open}
     end
 
     test "returns result when circuit is closed" do
-      CircuitBreaker.reset(:ollama_api)
-      # Without real Ollama, this will return error, but at least we're testing the function
-      result = HealthCheck.check_ollama()
+      CircuitBreaker.reset(:openai_api)
+
+      # Without a running API server, this will return error, but at least we're testing the function
+      result = HealthCheck.check_openai()
 
       case result do
         {:ok, _} -> assert true
@@ -48,7 +49,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
     test "returns map with all health check results" do
       results = HealthCheck.check_all()
 
-      assert Map.has_key?(results, :ollama)
+      assert Map.has_key?(results, :openai)
       assert Map.has_key?(results, :database)
       assert Map.has_key?(results, :filesystem)
 
@@ -60,9 +61,9 @@ defmodule Doctrans.Resilience.HealthCheckTest do
 
   describe "healthy?/0" do
     test "returns false when any check fails" do
-      # Blow the circuit to make ollama check fail
+      # Blow the circuit to make the openai check fail
       for _ <- 1..6 do
-        CircuitBreaker.melt(:ollama_api)
+        CircuitBreaker.melt(:openai_api)
       end
 
       refute HealthCheck.healthy?()
@@ -74,25 +75,25 @@ defmodule Doctrans.Resilience.HealthCheckTest do
       status = HealthCheck.circuit_breaker_status()
 
       assert is_map(status)
-      assert Map.has_key?(status, :ollama_api)
+      assert Map.has_key?(status, :openai_api)
     end
 
     test "returns ok status for healthy circuits" do
-      CircuitBreaker.reset(:ollama_api)
+      CircuitBreaker.reset(:openai_api)
       status = HealthCheck.circuit_breaker_status()
 
-      assert status.ollama_api == :ok
+      assert status.openai_api == :ok
     end
 
     test "returns blown status for open circuits" do
       # Blow the circuit
       for _ <- 1..6 do
-        CircuitBreaker.melt(:ollama_api)
+        CircuitBreaker.melt(:openai_api)
       end
 
       status = HealthCheck.circuit_breaker_status()
 
-      assert status.ollama_api == :blown
+      assert status.openai_api == :blown
     end
   end
 end

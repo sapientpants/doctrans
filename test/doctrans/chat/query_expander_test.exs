@@ -3,8 +3,8 @@ defmodule Doctrans.Chat.QueryExpanderTest do
 
   alias Doctrans.Chat.QueryExpander
 
-  # Test-only Ollama module returning a planner response configured via app env.
-  defmodule FakeOllama do
+  # Test-only OpenAI module returning a planner response configured via :openai_stub_chat_error.
+  defmodule FakeOpenAI do
     def chat(_messages, _opts) do
       case Application.get_env(:doctrans, :planner_fake_response) do
         {:error, reason} -> {:error, reason}
@@ -15,11 +15,11 @@ defmodule Doctrans.Chat.QueryExpanderTest do
   end
 
   setup do
-    original = Application.get_env(:doctrans, :ollama_module)
-    Application.put_env(:doctrans, :ollama_module, FakeOllama)
+    original = Application.get_env(:doctrans, :openai_module)
+    Application.put_env(:doctrans, :openai_module, FakeOpenAI)
 
     on_exit(fn ->
-      Application.put_env(:doctrans, :ollama_module, original)
+      Application.put_env(:doctrans, :openai_module, original)
       Application.delete_env(:doctrans, :planner_fake_response)
     end)
 

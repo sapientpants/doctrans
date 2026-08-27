@@ -3,7 +3,7 @@ defmodule Doctrans.Search.EmbeddingStub do
   Stub implementation of EmbeddingBehaviour for tests.
 
   Returns a fake embedding vector that can be used in tests without
-  requiring the actual Ollama service.
+  requiring the actual OpenAI service.
   """
 
   @behaviour Doctrans.Search.EmbeddingBehaviour

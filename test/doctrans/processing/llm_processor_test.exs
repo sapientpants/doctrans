@@ -86,8 +86,8 @@ defmodule Doctrans.Processing.LlmProcessorTest do
   describe "extraction error handling" do
     setup do
       on_exit(fn ->
-        Application.delete_env(:doctrans, :ollama_stub_extraction_error)
-        Application.delete_env(:doctrans, :ollama_stub_translation_error)
+        Application.delete_env(:doctrans, :openai_stub_extraction_error)
+        Application.delete_env(:doctrans, :openai_stub_translation_error)
       end)
 
       :ok
@@ -101,7 +101,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       setup_image_file(page)
 
       # Configure stub to return circuit open error
-      Application.put_env(:doctrans, :ollama_stub_extraction_error, :circuit_open)
+      Application.put_env(:doctrans, :openai_stub_extraction_error, :circuit_open)
 
       result = LlmProcessor.process_page(page.id, MapSet.new())
 
@@ -119,7 +119,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       setup_image_file(page)
 
       # Configure stub to return permanent error (404)
-      Application.put_env(:doctrans, :ollama_stub_extraction_error, "HTTP 404: Model not found")
+      Application.put_env(:doctrans, :openai_stub_extraction_error, "HTTP 404: Model not found")
 
       result = LlmProcessor.process_page(page.id, MapSet.new())
 
@@ -133,8 +133,8 @@ defmodule Doctrans.Processing.LlmProcessorTest do
   describe "translation error handling" do
     setup do
       on_exit(fn ->
-        Application.delete_env(:doctrans, :ollama_stub_extraction_error)
-        Application.delete_env(:doctrans, :ollama_stub_translation_error)
+        Application.delete_env(:doctrans, :openai_stub_extraction_error)
+        Application.delete_env(:doctrans, :openai_stub_translation_error)
       end)
 
       :ok
@@ -147,7 +147,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       setup_image_file(page)
 
       # Configure stub: extraction succeeds, translation fails
-      Application.put_env(:doctrans, :ollama_stub_translation_error, :circuit_open)
+      Application.put_env(:doctrans, :openai_stub_translation_error, :circuit_open)
 
       result = LlmProcessor.process_page(page.id, MapSet.new())
 
@@ -165,7 +165,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       setup_image_file(page)
 
       # Configure stub: extraction succeeds, translation returns permanent error
-      Application.put_env(:doctrans, :ollama_stub_translation_error, "HTTP 400: Invalid request")
+      Application.put_env(:doctrans, :openai_stub_translation_error, "HTTP 400: Invalid request")
 
       result = LlmProcessor.process_page(page.id, MapSet.new())
 

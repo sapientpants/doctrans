@@ -7,15 +7,15 @@ defmodule Doctrans.Resilience.CircuitBreaker do
 
   ## Fuse Names
 
-  - `:ollama_api` - Protects Ollama API calls (extraction, translation)
+  - `:openai_api` - Protects OpenAI API calls (extraction, translation, chat)
   - `:embedding_api` - Protects embedding generation calls
 
   ## Configuration
 
   Configure in `config/config.exs`:
 
-      config :doctrans, :circuit_breakers,
-        ollama_api: [
+       config :doctrans, :circuit_breakers,
+        openai_api: [
           strategy: {:standard, 5, 60_000},  # 5 failures in 60s = blown
           refresh: 30_000                     # Check recovery every 30s
         ],
@@ -32,10 +32,10 @@ defmodule Doctrans.Resilience.CircuitBreaker do
 
   require Logger
 
-  @fuse_names [:ollama_api, :embedding_api]
+  @fuse_names [:openai_api, :embedding_api]
 
   @default_config %{
-    ollama_api: [
+    openai_api: [
       strategy: {:standard, 5, 60_000},
       refresh: 30_000
     ],
@@ -84,14 +84,14 @@ defmodule Doctrans.Resilience.CircuitBreaker do
 
   ## Examples
 
-      iex> CircuitBreaker.call(:ollama_api, fn -> {:ok, "result"} end)
+      iex> CircuitBreaker.call(:openai_api, fn -> {:ok, "result"} end)
       {:ok, "result"}
 
-      iex> CircuitBreaker.call(:ollama_api, fn -> {:error, :timeout} end)
+      iex> CircuitBreaker.call(:openai_api, fn -> {:error, :timeout} end)
       {:error, :timeout}
 
       # After too many failures:
-      iex> CircuitBreaker.call(:ollama_api, fn -> :never_called end)
+      iex> CircuitBreaker.call(:openai_api, fn -> :never_called end)
       {:error, :circuit_open}
   """
   @spec call(atom(), (-> any())) :: any()

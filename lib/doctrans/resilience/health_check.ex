@@ -3,7 +3,7 @@ defmodule Doctrans.Resilience.HealthCheck do
   Health check functions for monitoring system dependencies.
 
   Provides functions to check the health of:
-  - Ollama API (AI model service)
+  - OpenAI API (AI model service)
   - Database connection
   - File system (uploads directory)
 
@@ -11,7 +11,7 @@ defmodule Doctrans.Resilience.HealthCheck do
 
       iex> HealthCheck.check_all()
       %{
-        ollama: {:ok, %{models: [...]}},
+        openai: {:ok, %{models: [...]}},
         database: :ok,
         filesystem: :ok
       }
@@ -20,8 +20,6 @@ defmodule Doctrans.Resilience.HealthCheck do
       true
   """
 
-  require Logger
-
   alias Doctrans.Repo
   alias Doctrans.Resilience.CircuitBreaker
 
@@ -29,13 +27,13 @@ defmodule Doctrans.Resilience.HealthCheck do
   Runs all health checks and returns results.
   """
   @spec check_all() :: %{
-          ollama: {:ok, map()} | {:error, term()},
+          openai: {:ok, map()} | {:error, term()},
           database: :ok | {:error, term()},
           filesystem: :ok | {:error, term()}
         }
   def check_all do
     %{
-      ollama: check_ollama(),
+      openai: check_openai(),
       database: check_database(),
       filesystem: check_filesystem()
     }
@@ -56,31 +54,31 @@ defmodule Doctrans.Resilience.HealthCheck do
   end
 
   @doc """
-  Checks Ollama API availability.
+  Checks OpenAI API availability.
 
   Returns `{:ok, %{available: true, models: [...]}}` on success,
   or `{:error, reason}` on failure.
   """
-  @spec check_ollama() :: {:ok, map()} | {:error, term()}
-  def check_ollama do
+  @spec check_openai() :: {:ok, map()} | {:error, term()}
+  def check_openai do
     start_time = System.monotonic_time(:millisecond)
 
     result =
       try do
         # Check circuit breaker status first
-        circuit_status = CircuitBreaker.status(:ollama_api)
+        circuit_status = CircuitBreaker.status(:openai_api)
 
         if circuit_status == :blown do
           {:error, :circuit_open}
         else
-          # Actually check Ollama connectivity
-          config = Application.get_env(:doctrans, :ollama, [])
-          url = "#{config[:base_url]}/api/tags"
+          # Actually check OpenAI connectivity
+          config = Application.get_env(:doctrans, :openai, [])
+          url = "#{config[:base_url]}/v1/models"
 
           case Req.get(url, receive_timeout: 5_000) do
             {:ok, %{status: 200, body: body}} ->
-              models = get_in(body, ["models"]) || []
-              model_names = Enum.map(models, & &1["name"])
+              models = get_in(body, ["data"]) || []
+              model_names = Enum.map(models, & &1["id"])
               {:ok, %{available: true, models: model_names, circuit: circuit_status}}
 
             {:ok, %{status: status}} ->
@@ -99,7 +97,7 @@ defmodule Doctrans.Resilience.HealthCheck do
     :telemetry.execute(
       [:doctrans, :health_check, :completed],
       %{duration_ms: duration},
-      %{check: :ollama, result: elem(result, 0)}
+      %{check: :openai, result: elem(result, 0)}
     )
 
     result

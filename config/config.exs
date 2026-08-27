@@ -12,18 +12,19 @@ config :doctrans,
   ecto_repos: [Doctrans.Repo],
   generators: [timestamp_type: :utc_datetime]
 
-# Ollama configuration for AI models
-# OLLAMA_HOST env var allows overriding for Docker (e.g., http://host.docker.internal:11434)
-config :doctrans, :ollama,
-  base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
-  vision_model: "qwen3.5:9b",
-  translation_model: "qwen3.6:35b-a3b-mtp-q4_K_M",
-  chat_model: "qwen3.6:35b-a3b-mtp-q4_K_M",
+# OpenAI configuration for AI models
+# OPENAI_HOST env var allows overriding for Docker (e.g., http://host.docker.internal:8000)
+config :doctrans, :openai,
+  base_url: "http://localhost:8000",
+  api_key: nil,
+  vision_model: "mlx-community/Qwen3.5-9B-MLX-4bit",
+  translation_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
+  chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
   timeout: 300_000
 
 # Circuit breaker configuration for resilience
 config :doctrans, :circuit_breakers,
-  ollama_api: [
+  openai_api: [
     strategy: {:standard, 5, 60_000},
     refresh: 30_000
   ],
@@ -71,8 +72,9 @@ config :doctrans, DoctransWeb.Gettext,
 
 # Embedding configuration for semantic search
 config :doctrans, :embedding,
-  base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
-  model: "qwen3-embedding:8b",
+  base_url: "http://localhost:8000",
+  api_key: nil,
+  model: "mlx-community/Qwen3-Embedding-8B-4bit-DWQ",
   timeout: 60_000
 
 # Oban configuration for persistent job queuing
@@ -80,7 +82,6 @@ config :doctrans, :embedding,
 # Queue concurrency values:
 # - pdf_extraction: 1 - Sequential extraction to ensure pages are processed in order
 # - llm_processing: 1 - Sequential processing to process pages in order (one at a time)
-# - embedding_generation: 5 - Moderate concurrency for embedding API calls
 # - health_check: 1 - Single worker for periodic health checks (cron job)
 config :doctrans, Oban,
   repo: Doctrans.Repo,
@@ -91,7 +92,6 @@ config :doctrans, Oban,
   queues: [
     pdf_extraction: 1,
     llm_processing: 1,
-    embedding_generation: 5,
     health_check: 1
   ]
 

@@ -1,8 +1,7 @@
 defmodule Doctrans.Search.Embedding do
   @moduledoc """
-  Generates text embeddings using Ollama's embedding API.
+  Generates text embeddings using an OpenAI-compatible embedding API.
 
-  Uses qwen3-embedding:8b which outputs 4096-dimensional vectors natively.
   Output is truncated to 1024 dimensions using Matryoshka Representation
   Learning (MRL) — the first N dimensions carry the most information.
 
@@ -36,16 +35,34 @@ defmodule Doctrans.Search.Embedding do
     config = embedding_config()
     model = Keyword.get(opts, :model, config[:model])
     timeout = Keyword.get(opts, :timeout, config[:timeout])
+    api_key = config[:api_key]
 
     body = %{
       model: model,
       input: text
     }
 
-    url = "#{config[:base_url]}/api/embed"
+    url = "#{config[:base_url]}/v1/embeddings"
 
-    case Req.post(url, json: body, receive_timeout: timeout) do
-      {:ok, %{status: 200, body: %{"embeddings" => [embedding | _]}}} ->
+    Logger.debug(
+      "Embedding POST #{url}, model: #{model}, api_key: #{if(api_key, do: String.slice(api_key, 0, 10) <> "...", else: false)}"
+    )
+
+    request =
+      case api_key do
+        nil ->
+          Req.post(url, json: body, receive_timeout: timeout)
+
+        key ->
+          Req.post(url,
+            json: body,
+            receive_timeout: timeout,
+            headers: [{"authorization", "Bearer #{key}"}]
+          )
+      end
+
+    case request do
+      {:ok, %{status: 200, body: %{"data" => [%{"embedding" => embedding}]}}} ->
         if length(embedding) >= @embedding_dimensions do
           # Truncate to @embedding_dimensions for Matryoshka models that output
           # more dimensions than we store (e.g., 4096 -> 1024)
@@ -53,23 +70,23 @@ defmodule Doctrans.Search.Embedding do
           {:ok, Pgvector.new(truncated)}
         else
           Logger.error(
-            "Ollama embedding too short: expected at least #{@embedding_dimensions} dimensions, got #{length(embedding)}"
+            "OpenAI embedding too short: expected at least #{@embedding_dimensions} dimensions, got #{length(embedding)}"
           )
 
           {:error,
            dgettext(
              "errors",
-             "Ollama embedding too short: expected at least %{expected} dimensions, got %{actual}",
+             "OpenAI embedding too short: expected at least %{expected} dimensions, got %{actual}",
              expected: @embedding_dimensions,
              actual: length(embedding)
            )}
         end
 
       {:ok, %{status: status, body: body}} ->
-        Logger.error("Ollama embedding error (#{status}): #{inspect(body)}")
+        Logger.error("OpenAI embedding error (#{status}): #{inspect(body)}")
 
         {:error,
-         dgettext("errors", "Ollama embedding error (%{status}): %{body}",
+         dgettext("errors", "OpenAI embedding error (%{status}): %{body}",
            status: status,
            body: inspect(body)
          )}

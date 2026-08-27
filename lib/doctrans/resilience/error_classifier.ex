@@ -70,15 +70,12 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   def classify({:error, :enotdir}), do: :permanent
 
   # Generic error tuples
-  def classify({:error, reason}) when is_atom(reason) do
-    case reason do
-      :timeout -> :retryable
+  def classify({:error, atom_reason}) when is_atom(atom_reason) do
+    case atom_reason do
       :econnrefused -> :retryable
       :econnreset -> :retryable
       :closed -> :retryable
       :nxdomain -> :retryable
-      :enoent -> :permanent
-      :eacces -> :permanent
       _ -> :unknown
     end
   end
