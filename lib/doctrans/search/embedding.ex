@@ -45,7 +45,7 @@ defmodule Doctrans.Search.Embedding do
     url = "#{config[:base_url]}/v1/embeddings"
 
     Logger.debug(
-      "Embedding POST #{url}, model: #{model}, api_key: #{if(api_key, do: String.slice(api_key, 0, 10) <> "...", else: false)}"
+      "Embedding POST #{url}, model: #{model}, api_key: #{if(api_key, do: "<set>", else: "<none>")}"
     )
 
     request =
