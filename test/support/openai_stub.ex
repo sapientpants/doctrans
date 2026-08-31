@@ -1,4 +1,4 @@
-defmodule Doctrans.Processing.OpenAIMock do
+defmodule Doctrans.Processing.OpenAIStub do
   @moduledoc """
   Mock implementation of OpenAIBehaviour for tests.
 
@@ -46,12 +46,12 @@ defmodule Doctrans.Processing.OpenAIMock do
   end
 
   @impl true
-  def available?() do
+  def available? do
     not Application.get_env(:doctrans, :openai_stub_unavailable, false)
   end
 
   @impl true
-  def list_models() do
+  def list_models do
     case Application.get_env(:doctrans, :openai_stub_models) do
       nil ->
         {:ok, ["mlx-community/Qwen3.6-35B-A3B-4bit", "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"]}
@@ -115,10 +115,9 @@ defmodule Doctrans.Processing.OpenAIMock do
     end
   end
 
-  @impl true
   def embed(_text, _opts) do
     # Return a vector of 1024 dimensions (truncated from native 4096)
-    vector = Enum.map(1..1024, fn _i -> :erlang.random(-1.0, 1.0) end)
+    vector = Enum.map(1..1024, fn _i -> :rand.uniform() * 2 - 1 end)
     {:ok, vector}
   end
 end

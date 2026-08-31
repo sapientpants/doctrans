@@ -14,7 +14,7 @@ defmodule Doctrans.TestSupport.WorkerHelpers do
   def setup_worker_sandbox(tags) do
     # For tests involving background processes, ensure shared mode
     if tags[:background_processes] do
-      :ok = Ecto.Adapters.SQL.Sandbox.mode(Doctrans.Repo, :shared)
+      :ok = Ecto.Adapters.SQL.Sandbox.mode(Doctrans.Repo, {:shared, self()})
 
       # Allow the Worker process to use the shared connection
       Ecto.Adapters.SQL.Sandbox.allow(Doctrans.Repo, self(), Worker)

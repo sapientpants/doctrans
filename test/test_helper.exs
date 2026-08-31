@@ -11,5 +11,5 @@ Mox.set_mox_global()
 
 # Set up default stubs for mocks
 Mox.stub_with(Doctrans.Search.EmbeddingMock, Doctrans.Search.EmbeddingStub)
-Mox.stub_with(Doctrans.Processing.OpenAIMock, Doctrans.Processing.OpenAIMock)
+Mox.stub_with(Doctrans.Processing.OpenAIMock, Doctrans.Processing.OpenAIStub)
 Mox.stub_with(Doctrans.Processing.PdfExtractorMock, Doctrans.Processing.PdfExtractorStub)

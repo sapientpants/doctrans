@@ -25,32 +25,39 @@ defmodule Doctrans.Processing.OpenAI do
     case File.read(path) do
       {:ok, image_data} ->
         content = build_multimodal_content(image_path, image_data, opts)
-        request_body = build_request_body(opts ++ [messages: [%{role: "user", content: content}]])
-        fuse = :openai_api
+        messages = [%{role: "user", content: content}]
+        request_body = build_request_body(Keyword.put(opts, :messages, messages))
 
-        case build_base_req()
-             |> Req.post(
-               url: api_url("/v1/chat/completions"),
-               json: request_body,
-               receive_timeout: @api_timeout,
-               retry: :safe_transient
-             ) do
-          {:ok, %Req.Response{status: 200, body: body}} ->
-            case parse_chat_response(body) do
-              {:ok, markdown} -> {:ok, markdown}
-              {:error, _} = error -> handle_api_error(fuse, error)
-            end
-
-          {:ok, %Req.Response{status: status} = resp} ->
-            handle_api_error(fuse, {:http_status, status, resp})
-
-          {:error, reason} ->
-            handle_api_error(fuse, reason)
-        end
+        post_chat_completion(request_body, opts)
+        |> resolve_extract_response(:openai_api)
 
       {:error, reason} ->
         {:error, "Could not read image file: #{inspect(reason)}"}
     end
+  end
+
+  defp resolve_extract_response({:ok, %Req.Response{status: 200, body: body}}, fuse) do
+    case parse_chat_response(body) do
+      {:ok, markdown} ->
+        result = markdown |> String.trim() |> strip_code_fences()
+
+        if result == "" do
+          {:error, "Model returned empty response for image"}
+        else
+          {:ok, result}
+        end
+
+      {:error, _} = error ->
+        handle_api_error(fuse, error)
+    end
+  end
+
+  defp resolve_extract_response({:ok, %Req.Response{status: status} = resp}, fuse) do
+    handle_api_error(fuse, {:http_status, status, resp})
+  end
+
+  defp resolve_extract_response({:error, reason}, fuse) do
+    handle_api_error(fuse, reason)
   end
 
   defp build_multimodal_content(image_path, image_data, opts) do
@@ -82,7 +89,7 @@ defmodule Doctrans.Processing.OpenAI do
   def chat(messages, opts \\ [])
 
   def chat(messages, opts) when is_list(messages) do
-    request_body = build_request_body(opts ++ [messages: messages])
+    request_body = build_request_body(Keyword.put(opts, :messages, messages))
     fuse = :openai_api
     url = api_url("/v1/chat/completions")
     key = api_key()
@@ -97,22 +104,42 @@ defmodule Doctrans.Processing.OpenAI do
       "OpenAI request: url=#{url}, headers=#{inspect(headers)}, body_keys=#{inspect(Map.keys(request_body))}"
     )
 
-    case build_base_req()
-         |> Req.post(
-           url: url,
-           json: request_body,
-           receive_timeout: Keyword.get(opts, :timeout, @api_timeout),
-           retry: :safe_transient
-         ) do
-      {:ok, %Req.Response{status: 200, body: body}} ->
-        parse_chat_response(body)
+    post_chat_completion(request_body, opts)
+    |> resolve_chat_response(fuse)
+  end
 
-      {:ok, %Req.Response{status: status} = resp} ->
-        handle_api_error(fuse, {:http_status, status, resp})
+  defp resolve_chat_response({:ok, %Req.Response{status: 200, body: body}}, _fuse) do
+    case parse_chat_response(body) do
+      {:ok, content} ->
+        result = content |> String.trim() |> strip_code_fences()
 
-      {:error, reason} ->
-        handle_api_error(fuse, reason)
+        if result == "" do
+          {:error, "Model returned empty response"}
+        else
+          {:ok, result}
+        end
+
+      {:error, _} = error ->
+        error
     end
+  end
+
+  defp resolve_chat_response({:ok, %Req.Response{status: status} = resp}, fuse) do
+    handle_api_error(fuse, {:http_status, status, resp})
+  end
+
+  defp resolve_chat_response({:error, reason}, fuse) do
+    handle_api_error(fuse, reason)
+  end
+
+  defp post_chat_completion(request_body, opts) do
+    build_base_req()
+    |> Req.post(
+      url: api_url("/v1/chat/completions"),
+      json: request_body,
+      receive_timeout: Keyword.get(opts, :timeout, @api_timeout),
+      retry: :safe_transient
+    )
   end
 
   defp parse_chat_response(%{
@@ -167,7 +194,8 @@ defmodule Doctrans.Processing.OpenAI do
     end
   end
 
-  defp parse_chat_response(%{"choices" => [_] = choices}) when length(choices) > 1 do
+  defp parse_chat_response(%{"choices" => choices})
+       when is_list(choices) and length(choices) > 1 do
     # Multiple choices: use the first one
     parse_chat_response(%{"choices" => [Enum.at(choices, 0)]})
   end
@@ -194,7 +222,6 @@ defmodule Doctrans.Processing.OpenAI do
          |> Req.post(
            url: api_url("/v1/chat/completions"),
            json: request_body,
-           into: "text/event-stream",
            receive_timeout: Keyword.get(opts, :timeout, @api_timeout)
          ) do
       {:ok, %{body: body, status: 200}} ->
@@ -226,8 +253,14 @@ defmodule Doctrans.Processing.OpenAI do
           []
       end)
       |> Enum.join()
+      |> String.trim()
+      |> strip_code_fences()
 
-    {:ok, content}
+    if content == "" do
+      {:error, "Model returned empty response"}
+    else
+      {:ok, content}
+    end
   end
 
   @impl true
@@ -266,26 +299,25 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp clean_response(response) do
-    # Remove any thinking blocks that may be in the response
+    # Remove any thinking blocks that may be in the response, then strip code fences
     response
     |> String.replace(~r/\<think\>[\s\S]*?<\/think\>/i, "")
     |> String.trim()
+    |> strip_code_fences()
   end
 
   @impl true
-  def available?() do
-    try do
-      case build_base_req() |> Req.get(url: api_url("/v1/models")) do
-        {:ok, %{status: 200}} -> true
-        _ -> false
-      end
-    rescue
+  def available? do
+    case build_base_req() |> Req.get(url: api_url("/v1/models")) do
+      {:ok, %{status: 200}} -> true
       _ -> false
     end
+  rescue
+    _ -> false
   end
 
   @impl true
-  def list_models() do
+  def list_models do
     fuse = :openai_api
 
     case build_base_req()
@@ -318,7 +350,8 @@ defmodule Doctrans.Processing.OpenAI do
   def embed(text, opts \\ [])
 
   def embed(text, opts) when is_binary(text) do
-    request = %{model: model(opts), input: text}
+    model = Keyword.get(opts, :model) || embed_config()[:model] || model(opts)
+    request = %{model: model, input: text}
     fuse = :embedding_api
 
     case build_embed_base_req()
@@ -347,10 +380,6 @@ defmodule Doctrans.Processing.OpenAI do
     {:ok, trunc}
   end
 
-  defp parse_embed_response(%{"data" => [%{"embedding" => embedding}]}) do
-    parse_embed_response(%{"data" => [%{"embedding" => embedding}]})
-  end
-
   defp parse_embed_response(_body), do: {:error, "Invalid embedding response from API"}
 
   defp model(opts) do
@@ -362,7 +391,7 @@ defmodule Doctrans.Processing.OpenAI do
 
   # Private helpers
 
-  defp openai_config() do
+  defp openai_config do
     Application.get_env(:doctrans, :openai, [])
   end
 
@@ -370,22 +399,22 @@ defmodule Doctrans.Processing.OpenAI do
     "#{base_url()}/#{String.trim_leading(path, "/")}"
   end
 
-  defp base_url() do
+  defp base_url do
     openai_config()[:base_url] || "http://localhost:8000"
   end
 
-  defp api_key() do
+  defp api_key do
     openai_config()[:api_key]
   end
 
-  defp build_base_req() do
+  defp build_base_req do
     case api_key() do
       nil -> Req.new()
       key -> Req.new(headers: [{"authorization", "Bearer #{key}"}])
     end
   end
 
-  defp embed_config() do
+  defp embed_config do
     Application.get_env(:doctrans, :embedding, [])
   end
 
@@ -393,15 +422,15 @@ defmodule Doctrans.Processing.OpenAI do
     "#{embed_base_url()}/#{String.trim_leading(path, "/")}"
   end
 
-  defp embed_base_url() do
+  defp embed_base_url do
     embed_config()[:base_url] || api_url("")
   end
 
-  defp embed_api_key() do
+  defp embed_api_key do
     embed_config()[:api_key]
   end
 
-  defp build_embed_base_req() do
+  defp build_embed_base_req do
     case embed_api_key() do
       nil -> Req.new()
       key -> Req.new(headers: [{"authorization", "Bearer #{key}"}])
@@ -436,11 +465,11 @@ defmodule Doctrans.Processing.OpenAI do
     end
   end
 
-  defp default_model() do
+  defp default_model do
     openai_config()[:chat_model] || openai_config()[:vision_model]
   end
 
-  defp default_max_tokens() do
+  defp default_max_tokens do
     # Larger context for chat, smaller for extraction/translation
     4096
   end
@@ -450,5 +479,13 @@ defmodule Doctrans.Processing.OpenAI do
 
     Logger.error("API call failed: #{inspect(reason)}")
     {:error, "API call failed: #{inspect(reason)}"}
+  end
+
+  # Strip markdown code fences that LLMs sometimes wrap their output in
+  def strip_code_fences(text) do
+    text
+    |> String.replace(~r/\A```[^\n]*\n/, "")
+    |> String.replace(~r/\n?```\s*\z/, "")
+    |> String.trim()
   end
 end
