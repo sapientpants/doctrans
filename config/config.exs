@@ -12,11 +12,12 @@ config :doctrans,
   ecto_repos: [Doctrans.Repo],
   generators: [timestamp_type: :utc_datetime]
 
-# OpenAI configuration for AI models
-# OPENAI_HOST env var allows overriding for Docker (e.g., http://host.docker.internal:8000)
+# OpenAI-compatible API configuration for AI models (OMLX).
+# OPENAI_HOST / OPENAI_API_KEY env vars allow overriding (e.g., Docker:
+# http://host.docker.internal:8000). Defaults match the local OMLX server.
 config :doctrans, :openai,
-  base_url: "http://localhost:8000",
-  api_key: nil,
+  base_url: System.get_env("OPENAI_HOST", "http://localhost:8000"),
+  api_key: System.get_env("OPENAI_API_KEY"),
   vision_model: "mlx-community/Qwen3.5-9B-MLX-4bit",
   translation_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
   chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
