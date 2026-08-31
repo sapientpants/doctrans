@@ -15,6 +15,9 @@ defmodule Doctrans.Processing.OpenAIStub do
       # Simulate translation error
       Application.put_env(:doctrans, :openai_stub_translation_error, :circuit_open)
 
+      # Stub a custom model list (a non-list value stubs an error instead)
+      Application.put_env(:doctrans, :openai_stub_models, ["my-model"])
+
       # Reset to default behavior
       Application.delete_env(:doctrans, :openai_stub_extraction_error)
   """
@@ -55,6 +58,9 @@ defmodule Doctrans.Processing.OpenAIStub do
     case Application.get_env(:doctrans, :openai_stub_models) do
       nil ->
         {:ok, ["mlx-community/Qwen3.6-35B-A3B-4bit", "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"]}
+
+      models when is_list(models) ->
+        {:ok, models}
 
       error ->
         {:error, error}
