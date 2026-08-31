@@ -524,7 +524,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:ok, result} = OpenAI.embed("some text")
-      assert length(result) == 1024
+      assert length(Pgvector.to_list(result)) == 1024
 
       assert_receive {:embed_request, headers, body}
       assert {"authorization", "Bearer sk-embed-456"} in headers
@@ -533,12 +533,29 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert request["input"] == "some text"
     end
 
-    test "prefers model from opts over config", %{bypass: bypass} do
+    test "prefers model from opts over config", %{bypass: bypass, test_pid: test_pid} do
+      vector = List.duplicate(0.1, 1024)
+
+      Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:embed_request, body})
+        json(conn, 200, %{"data" => [%{"embedding" => vector}]})
+      end)
+
+      assert {:ok, result} = OpenAI.embed("text", model: "custom-embed")
+      assert length(Pgvector.to_list(result)) == 1024
+
+      assert_receive {:embed_request, body}
+      assert Jason.decode!(body)["model"] == "custom-embed"
+    end
+
+    test "returns error when the vector is too short", %{bypass: bypass} do
       Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
         json(conn, 200, %{"data" => [%{"embedding" => [0.1, 0.2, 0.3]}]})
       end)
 
-      assert {:ok, [0.1, 0.2, 0.3]} = OpenAI.embed("text", model: "custom-embed")
+      assert {:error, reason} = OpenAI.embed("text")
+      assert reason =~ "too short"
     end
 
     test "returns error on non-200 status", %{bypass: bypass} do

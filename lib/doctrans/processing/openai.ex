@@ -6,6 +6,7 @@ defmodule Doctrans.Processing.OpenAI do
   model listing against OpenAI-compatible API endpoints.
   """
 
+  alias Doctrans.Processing.SSECollector
   alias Doctrans.Resilience.CircuitBreaker
   alias Doctrans.Resilience.ErrorClassifier
 
@@ -221,7 +222,7 @@ defmodule Doctrans.Processing.OpenAI do
   def chat_stream(messages, on_delta, opts) when is_list(messages) and is_function(on_delta, 1) do
     request_body = build_request_body(opts ++ [messages: messages, stream: true])
     fuse = :openai_api
-    collector = new_sse_collector(on_delta)
+    collector = SSECollector.new(on_delta)
 
     # Stream the response body chunk by chunk: each raw chunk is fed into the
     # SSE collector (kept in resp.body), which parses complete `data:` frames
@@ -229,7 +230,9 @@ defmodule Doctrans.Processing.OpenAI do
     into = fn
       {:data, data}, {req, resp} ->
         state =
-          if is_map(resp.body), do: feed_sse(resp.body, data), else: feed_sse(collector, data)
+          if is_map(resp.body),
+            do: SSECollector.feed(resp.body, data),
+            else: SSECollector.feed(collector, data)
 
         {:cont, {req, %{resp | body: state}}}
     end
@@ -249,7 +252,7 @@ defmodule Doctrans.Processing.OpenAI do
 
         content =
           state
-          |> finish_sse()
+          |> SSECollector.finish()
           |> String.trim()
           |> strip_code_fences()
 
@@ -265,59 +268,6 @@ defmodule Doctrans.Processing.OpenAI do
       {:error, reason} ->
         handle_api_error(fuse, reason)
     end
-  end
-
-  # SSE collector state. The buffer only ever holds the trailing incomplete
-  # line, so it stays small even for long responses.
-  defp new_sse_collector(on_delta) do
-    %{on_delta: on_delta, buffer: "", content: []}
-  end
-
-  defp feed_sse(state, chunk) when is_binary(chunk) do
-    parts = :binary.split(state.buffer <> chunk, "\n", [:global])
-
-    state
-    |> Map.put(:buffer, List.last(parts))
-    |> emit_lines(Enum.drop(parts, -1))
-  end
-
-  defp emit_lines(state, lines) do
-    Enum.reduce(lines, state, &emit_line/2)
-  end
-
-  defp emit_line(line, state) do
-    line =
-      try do
-        String.trim(line)
-      rescue
-        _ -> ""
-      end
-
-    if sse_data?(line) do
-      payload = line |> String.trim_leading("data:") |> String.trim()
-
-      case Jason.decode(payload) do
-        {:ok, %{"choices" => [%{"delta" => %{"content" => content}}]}}
-        when is_binary(content) and content != "" ->
-          state.on_delta.(content)
-          %{state | content: [content | state.content]}
-
-        _ ->
-          state
-      end
-    else
-      state
-    end
-  end
-
-  defp sse_data?(line) do
-    line != "data: [DONE]" and String.starts_with?(line, "data:")
-  end
-
-  # Flush any trailing line and join the accumulated deltas.
-  defp finish_sse(state) do
-    state = emit_line(state.buffer, state)
-    state.content |> Enum.reverse() |> :erlang.iolist_to_binary()
   end
 
   @impl true
@@ -407,16 +357,26 @@ defmodule Doctrans.Processing.OpenAI do
 
   def embed(text, opts \\ [])
 
+  def embed(nil, _opts), do: {:ok, nil}
+  def embed("", _opts), do: {:ok, nil}
+
   def embed(text, opts) when is_binary(text) do
-    model = Keyword.get(opts, :model) || embed_config()[:model] || model(opts)
-    request = %{model: model, input: text}
+    config = embed_config()
+    model = Keyword.get(opts, :model) || config[:model] || model(opts)
+    timeout = Keyword.get(opts, :timeout) || config[:timeout] || 120_000
     fuse = :embedding_api
+
+    Logger.debug(
+      "Embedding POST #{embed_url("/v1/embeddings")}, model: #{model}, api_key: #{if(embed_api_key(), do: "<set>", else: "<none>")}"
+    )
+
+    request = %{model: model, input: text}
 
     case build_embed_base_req()
          |> Req.post(
            url: embed_url("/v1/embeddings"),
            json: request,
-           receive_timeout: Keyword.get(opts, :timeout, 120_000),
+           receive_timeout: timeout,
            # Embedding POSTs are idempotent; replay them on transient failures
            retry: :transient
          ) do
@@ -435,8 +395,14 @@ defmodule Doctrans.Processing.OpenAI do
          "data" => [%{"embedding" => embedding}]
        })
        when is_list(embedding) do
-    trunc = Enum.take(embedding, @embedding_dimensions)
-    {:ok, trunc}
+    if length(embedding) >= @embedding_dimensions do
+      # Truncate to @embedding_dimensions for Matryoshka models that output
+      # more dimensions than we store (e.g., 4096 -> 1024)
+      {:ok, Pgvector.new(Enum.take(embedding, @embedding_dimensions))}
+    else
+      {:error,
+       "OpenAI embedding too short: expected at least #{@embedding_dimensions} dimensions, got #{length(embedding)}"}
+    end
   end
 
   defp parse_embed_response(_body), do: {:error, "Invalid embedding response from API"}
