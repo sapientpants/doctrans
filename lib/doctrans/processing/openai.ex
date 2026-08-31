@@ -138,7 +138,9 @@ defmodule Doctrans.Processing.OpenAI do
       url: api_url("/v1/chat/completions"),
       json: request_body,
       receive_timeout: Keyword.get(opts, :timeout, @api_timeout),
-      retry: :safe_transient
+      # :transient retries all methods (incl. POST) on 408/429/5xx and
+      # connection errors; chat-completion POSTs are safe to replay
+      retry: :transient
     )
   end
 
@@ -222,7 +224,8 @@ defmodule Doctrans.Processing.OpenAI do
          |> Req.post(
            url: api_url("/v1/chat/completions"),
            json: request_body,
-           receive_timeout: Keyword.get(opts, :timeout, @api_timeout)
+           receive_timeout: Keyword.get(opts, :timeout, @api_timeout),
+           retry: :transient
          ) do
       {:ok, %{body: body, status: 200}} ->
         collect_streamed_content(body, on_delta, fuse)
@@ -359,7 +362,8 @@ defmodule Doctrans.Processing.OpenAI do
            url: embed_url("/v1/embeddings"),
            json: request,
            receive_timeout: Keyword.get(opts, :timeout, 120_000),
-           retry: :safe_transient
+           # Embedding POSTs are idempotent; replay them on transient failures
+           retry: :transient
          ) do
       {:ok, %Req.Response{status: 200, body: body}} ->
         parse_embed_response(body)

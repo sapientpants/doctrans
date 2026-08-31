@@ -164,7 +164,8 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     end
 
     test "returns error and melts fuse on non-200 status", %{bypass: bypass} do
-      Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
+      # stub (not expect): :transient retries POSTs on 5xx, so the route may hit multiple times
+      Bypass.stub(bypass, "POST", "/v1/chat/completions", fn conn ->
         json(conn, 500, %{"error" => %{"message" => "boom"}})
       end)
 
@@ -265,7 +266,8 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     test "returns error on non-200 status", %{bypass: bypass} do
       path = write_tmp_image(".png")
 
-      Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
+      # stub (not expect): :transient retries POSTs on 5xx, so the route may hit multiple times
+      Bypass.stub(bypass, "POST", "/v1/chat/completions", fn conn ->
         json(conn, 503, %{"error" => "unavailable"})
       end)
 
@@ -390,7 +392,8 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     end
 
     test "returns error on non-200 status", %{bypass: bypass} do
-      Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
+      # stub (not expect): :transient retries POSTs on 5xx, so the route may hit multiple times
+      Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
         json(conn, 500, %{"error" => "boom"})
       end)
 
