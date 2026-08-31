@@ -56,6 +56,55 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     |> Plug.Conn.resp(status, Jason.encode!(payload))
   end
 
+  # Reads the request headers and body from a raw socket so the test server
+  # can answer. Keeps the socket sane before the response is written.
+  defp drain_request(sock) do
+    {headers, leftover} = read_headers(sock, "")
+    length = content_length(headers)
+    read_body(sock, length - byte_size(leftover), leftover)
+  end
+
+  defp read_headers(sock, acc) do
+    case :gen_tcp.recv(sock, 0, 10_000) do
+      {:ok, data} ->
+        acc = acc <> data
+
+        case :binary.match(acc, "\r\n\r\n") do
+          {offset, 4} ->
+            headers = binary_part(acc, 0, offset)
+            leftover = binary_part(acc, offset + 4, byte_size(acc) - offset - 4)
+            {headers, leftover}
+
+          :nomatch ->
+            read_headers(sock, acc)
+        end
+
+      {:error, reason} ->
+        raise "request header read failed: #{inspect(reason)}"
+    end
+  end
+
+  defp content_length(headers) do
+    case :binary.match(headers, "content-length: ") do
+      {start, _len} ->
+        line = binary_part(headers, start + 16, byte_size(headers) - start - 16)
+        [value | _] = String.split(line)
+        String.to_integer(value)
+
+      :nomatch ->
+        0
+    end
+  end
+
+  defp read_body(_sock, remaining, acc) when remaining <= 0, do: acc
+
+  defp read_body(sock, remaining, acc) do
+    case :gen_tcp.recv(sock, remaining, 10_000) do
+      {:ok, data} -> read_body(sock, remaining - byte_size(data), acc <> data)
+      {:error, reason} -> raise "request body read failed: #{inspect(reason)}"
+    end
+  end
+
   describe "chat/2" do
     test "sends request with configured model and returns content", %{
       bypass: bypass,
@@ -349,12 +398,92 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         |> Plug.Conn.resp(200, sse)
       end)
 
+      on_delta = fn piece -> send(test_pid, {:delta, piece}) end
+
       assert {:ok, "Hello"} =
-               OpenAI.chat_stream([%{role: "user", content: "hi"}], fn _piece -> :ok end)
+               OpenAI.chat_stream([%{role: "user", content: "hi"}], on_delta)
+
+      assert_receive {:delta, "Hel"}
+      assert_receive {:delta, "lo"}
 
       assert_receive {:stream_request, body}
       request = Jason.decode!(body)
       assert request["stream"] == true
+    end
+
+    test "invokes on_delta as SSE data arrives in fragments", %{test_pid: test_pid} do
+      payload =
+        Jason.encode!(%{
+          "choices" => [%{"delta" => %{"role" => "assistant", "content" => "hél"}}]
+        })
+
+      # Split the JSON frame mid-line, inside the multibyte "é", so the
+      # collector's line buffer must reassemble across TCP segments
+      {offset, 2} = :binary.match(payload, "é")
+      mid = offset + 1
+
+      frag1 = "data: " <> binary_part(payload, 0, mid)
+      frag2 = binary_part(payload, mid, byte_size(payload) - mid) <> "\n\n"
+
+      frag3 =
+        "data: " <>
+          Jason.encode!(%{"choices" => [%{"delta" => %{"content" => "lo"}}]}) <>
+          "\n\ndata: [DONE]\n\n"
+
+      body = frag1 <> frag2 <> frag3
+
+      parent = self()
+
+      server =
+        spawn(fn ->
+          {:ok, lsock} =
+            :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, nodelay: true])
+
+          {:ok, port} = :inet.port(lsock)
+          send(parent, {:sse_port, port})
+
+          {:ok, sock} = :gen_tcp.accept(lsock)
+          drain_request(sock)
+
+          headers =
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n" <>
+              "content-length: #{byte_size(body)}\r\n\r\n"
+
+          # nodelay is set on the socket, so each fragment is flushed as its
+          # own segment and the collector must reassemble the lines
+          :gen_tcp.send(sock, headers)
+          :gen_tcp.send(sock, frag1)
+          Process.sleep(50)
+          :gen_tcp.send(sock, frag2)
+          Process.sleep(50)
+          :gen_tcp.send(sock, frag3)
+          :gen_tcp.close(sock)
+        end)
+
+      on_exit(fn -> :erlang.exit(server, :kill) end)
+
+      port =
+        receive do
+          {:sse_port, port} -> port
+        after
+          5_000 -> flunk("SSE test server did not start")
+        end
+
+      Application.put_env(
+        :doctrans,
+        :openai,
+        base_url: "http://127.0.0.1:#{port}",
+        api_key: nil,
+        chat_model: "test-chat-model"
+      )
+
+      on_delta = fn piece -> send(test_pid, {:delta, piece}) end
+
+      assert {:ok, "héllo"} =
+               OpenAI.chat_stream([%{role: "user", content: "hi"}], on_delta)
+
+      assert_receive {:delta, "hél"}
+      assert_receive {:delta, "lo"}
     end
 
     test "returns error for non-200 status", %{bypass: bypass} do

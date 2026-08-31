@@ -221,16 +221,43 @@ defmodule Doctrans.Processing.OpenAI do
   def chat_stream(messages, on_delta, opts) when is_list(messages) and is_function(on_delta, 1) do
     request_body = build_request_body(opts ++ [messages: messages, stream: true])
     fuse = :openai_api
+    collector = new_sse_collector(on_delta)
+
+    # Stream the response body chunk by chunk: each raw chunk is fed into the
+    # SSE collector (kept in resp.body), which parses complete `data:` frames
+    # and invokes on_delta/1 as soon as content arrives.
+    into = fn
+      {:data, data}, {req, resp} ->
+        state =
+          if is_map(resp.body), do: feed_sse(resp.body, data), else: feed_sse(collector, data)
+
+        {:cont, {req, %{resp | body: state}}}
+    end
 
     case build_base_req()
          |> Req.post(
            url: api_url("/v1/chat/completions"),
            json: request_body,
            receive_timeout: Keyword.get(opts, :timeout, @api_timeout),
-           retry: :transient
+           retry: :transient,
+           into: into
          ) do
-      {:ok, %{body: body, status: 200}} ->
-        collect_streamed_content(body, on_delta, fuse)
+      {:ok, %Req.Response{status: 200} = resp} ->
+        # resp.body holds the collector state once any chunk arrived; it is
+        # still the default "" (not a map) if the stream had no data frames.
+        state = if is_map(resp.body), do: resp.body, else: collector
+
+        content =
+          state
+          |> finish_sse()
+          |> String.trim()
+          |> strip_code_fences()
+
+        if content == "" do
+          {:error, "Model returned empty response"}
+        else
+          {:ok, content}
+        end
 
       {:ok, %Req.Response{} = resp} ->
         handle_api_error(fuse, {:http_status, resp.status, resp})
@@ -240,32 +267,57 @@ defmodule Doctrans.Processing.OpenAI do
     end
   end
 
-  # SSE stream collector
-  defp collect_streamed_content(body, _on_delta, _fuse) when is_binary(body) do
-    content =
-      body
-      |> String.split("data: ", trim: true)
-      |> Enum.filter(&(String.trim(&1) != "" and String.trim(&1) != "[DONE]"))
-      |> Enum.map(&Jason.decode/1)
-      |> Enum.flat_map(fn
-        {:ok, %{"choices" => [%{"delta" => delta}]} = _chunk} when is_map(delta) ->
-          delta
-          |> Map.drop(["role", "finish_reason"])
-          |> Map.values()
-          |> Enum.reject(&is_nil/1)
+  # SSE collector state. The buffer only ever holds the trailing incomplete
+  # line, so it stays small even for long responses.
+  defp new_sse_collector(on_delta) do
+    %{on_delta: on_delta, buffer: "", content: []}
+  end
+
+  defp feed_sse(state, chunk) when is_binary(chunk) do
+    parts = :binary.split(state.buffer <> chunk, "\n", [:global])
+
+    state
+    |> Map.put(:buffer, List.last(parts))
+    |> emit_lines(Enum.drop(parts, -1))
+  end
+
+  defp emit_lines(state, lines) do
+    Enum.reduce(lines, state, &emit_line/2)
+  end
+
+  defp emit_line(line, state) do
+    line =
+      try do
+        String.trim(line)
+      rescue
+        _ -> ""
+      end
+
+    if sse_data?(line) do
+      payload = line |> String.trim_leading("data:") |> String.trim()
+
+      case Jason.decode(payload) do
+        {:ok, %{"choices" => [%{"delta" => %{"content" => content}}]}}
+        when is_binary(content) and content != "" ->
+          state.on_delta.(content)
+          %{state | content: [content | state.content]}
 
         _ ->
-          []
-      end)
-      |> Enum.join()
-      |> String.trim()
-      |> strip_code_fences()
-
-    if content == "" do
-      {:error, "Model returned empty response"}
+          state
+      end
     else
-      {:ok, content}
+      state
     end
+  end
+
+  defp sse_data?(line) do
+    line != "data: [DONE]" and String.starts_with?(line, "data:")
+  end
+
+  # Flush any trailing line and join the accumulated deltas.
+  defp finish_sse(state) do
+    state = emit_line(state.buffer, state)
+    state.content |> Enum.reverse() |> :erlang.iolist_to_binary()
   end
 
   @impl true
