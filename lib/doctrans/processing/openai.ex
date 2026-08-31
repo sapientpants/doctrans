@@ -27,6 +27,7 @@ defmodule Doctrans.Processing.OpenAI do
       {:ok, image_data} ->
         content = build_multimodal_content(image_path, image_data, opts)
         messages = [%{role: "user", content: content}]
+        opts = with_default_model(opts, vision_model_default())
         request_body = build_request_body(Keyword.put(opts, :messages, messages))
 
         post_chat_completion(request_body, opts)
@@ -273,6 +274,7 @@ defmodule Doctrans.Processing.OpenAI do
   def translate(markdown, source_language, target_language, opts)
       when is_binary(markdown) and is_binary(source_language) and is_binary(target_language) do
     prompt = build_translate_prompt(markdown, source_language, target_language)
+    opts = with_default_model(opts, translation_model_default())
 
     case chat(
            [%{role: "user", content: prompt}],
@@ -472,6 +474,25 @@ defmodule Doctrans.Processing.OpenAI do
 
   defp default_model do
     openai_config()[:chat_model] || openai_config()[:vision_model]
+  end
+
+  # Extraction requires image understanding, so prefer the vision model
+  # (matching the Ollama backend behaviour).
+  defp vision_model_default do
+    openai_config()[:vision_model] || openai_config()[:chat_model]
+  end
+
+  # Translation uses the dedicated translation model when configured.
+  defp translation_model_default do
+    openai_config()[:translation_model] || openai_config()[:chat_model]
+  end
+
+  defp with_default_model(opts, default) do
+    if Keyword.has_key?(opts, :model) do
+      opts
+    else
+      Keyword.put(opts, :model, default)
+    end
   end
 
   defp default_max_tokens do

@@ -227,7 +227,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
       assert_receive {:extract_body, body}
       request = Jason.decode!(body)
-      assert request["model"] == "test-chat-model"
+      assert request["model"] == "test-vision-model"
       content = Enum.at(request["messages"], 0)["content"]
       assert [%{"type" => "text"}, %{"type" => "image_url"}] = content
       image = Enum.find(content, fn part -> part["type"] == "image_url" end)
@@ -247,6 +247,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
       assert_receive {:extract_body, body}
       request = Jason.decode!(body)
+      assert request["model"] == "test-vision-model"
 
       content = Enum.at(request["messages"], 0)["content"]
       image = Enum.find(content, fn part -> part["type"] == "image_url" end)
@@ -288,8 +289,11 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
   end
 
   describe "translate/4" do
-    test "translates via chat and cleans response", %{bypass: bypass} do
+    test "translates via chat and cleans response", %{bypass: bypass, test_pid: test_pid} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:translate_body, body})
+
         json(conn, 200, %{
           "choices" => [
             %{"message" => %{"content" => "\nTranslated text\n"}}
@@ -298,6 +302,21 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:ok, "Translated text"} = OpenAI.translate("Original text", "de", "en")
+
+      assert_receive {:translate_body, body}
+      request = Jason.decode!(body)
+      assert request["model"] == "test-translation-model"
+      assert request["max_tokens"] == 8192
+      assert request["enable_thinking"] == false
+    end
+
+    test "honours explicit model override in translation", %{bypass: bypass} do
+      Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
+        json(conn, 200, %{"choices" => [%{"message" => %{"content" => "ok"}}]})
+      end)
+
+      assert {:ok, "ok"} =
+               OpenAI.translate("text", "de", "en", model: "my-translation-model")
     end
 
     test "propagates errors", %{bypass: bypass} do
