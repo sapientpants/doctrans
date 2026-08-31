@@ -16,6 +16,7 @@ defmodule Doctrans.Chat.Grader do
 
   require Logger
 
+  @grade_timeout 30_000
   @max_predict 256
 
   @doc """
@@ -82,7 +83,7 @@ defmodule Doctrans.Chat.Grader do
     # Grading is a structured classification, not a reasoning task; disable
     # thinking so the small max_tokens budget produces the verdict, not an
     # empty (thinking-only) response.
-    base = [max_tokens: @max_predict, think: false]
+    base = [timeout: @grade_timeout, max_tokens: @max_predict, think: false]
     if model, do: Keyword.put(base, :model, model), else: base
   end
 

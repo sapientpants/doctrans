@@ -20,6 +20,7 @@ defmodule Doctrans.Chat.QueryExpander do
 
   require Logger
 
+  @expansion_timeout 30_000
   @max_predict 512
   @max_queries 6
 
@@ -145,7 +146,7 @@ defmodule Doctrans.Chat.QueryExpander do
     # Query planning is a structured transform, not a reasoning task; disable
     # thinking so the max_tokens budget is not consumed producing an empty
     # (thinking-only) response.
-    base = [max_tokens: @max_predict, think: false]
+    base = [timeout: @expansion_timeout, max_tokens: @max_predict, think: false]
     if model, do: Keyword.put(base, :model, model), else: base
   end
 
