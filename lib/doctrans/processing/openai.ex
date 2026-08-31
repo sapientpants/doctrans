@@ -7,6 +7,7 @@ defmodule Doctrans.Processing.OpenAI do
   """
 
   alias Doctrans.Resilience.CircuitBreaker
+  alias Doctrans.Resilience.ErrorClassifier
 
   require Logger
 
@@ -230,8 +231,8 @@ defmodule Doctrans.Processing.OpenAI do
       {:ok, %{body: body, status: 200}} ->
         collect_streamed_content(body, on_delta, fuse)
 
-      {:ok, %Req.Response{status: status}} ->
-        {:error, "API returned status #{status}"}
+      {:ok, %Req.Response{} = resp} ->
+        handle_api_error(fuse, {:http_status, resp.status, resp})
 
       {:error, reason} ->
         handle_api_error(fuse, reason)
@@ -479,11 +480,28 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp handle_api_error(fuse, reason) do
-    CircuitBreaker.melt(fuse)
+    normalized = normalize_reason(reason)
+    classification = ErrorClassifier.classify(normalized)
 
-    Logger.error("API call failed: #{inspect(reason)}")
+    if classification == :retryable do
+      # Only transient/5xx/transport failures count against the circuit
+      # breaker; a single 401 or bad request must not push it toward blown.
+      CircuitBreaker.melt(fuse, reason)
+    else
+      Logger.debug(
+        "Not melting fuse #{to_string(fuse)} for #{classification} error: #{inspect(reason)}"
+      )
+    end
+
+    Logger.error("API call failed (#{classification}): #{inspect(reason)}")
     {:error, "API call failed: #{inspect(reason)}"}
   end
+
+  # ErrorClassifier keys HTTP failures as {:http_error, status}, so map our
+  # internal {:http_status, status, resp} tuple onto that shape.
+  defp normalize_reason({:http_status, status, _resp}), do: {:http_error, status}
+
+  defp normalize_reason(reason), do: reason
 
   # Strip markdown code fences that LLMs sometimes wrap their output in
   def strip_code_fences(text) do

@@ -343,8 +343,10 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 404, %{"error" => "nope"})
       end)
 
-      assert {:error, "API returned status 404"} =
+      assert {:error, reason} =
                OpenAI.chat_stream([%{role: "user", content: "hi"}], fn _ -> :ok end)
+
+      assert reason =~ "API call failed"
     end
 
     test "returns error on transport failure" do
