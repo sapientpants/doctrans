@@ -28,6 +28,7 @@
   {"test/support/fixtures.ex", :unmatched_return},
   {"test/support/data_case.ex", :call},
   {"test/support/worker_helpers.ex", :call},
+  {"test/support/worker_helpers.ex", :unmatched_return},
 
   # Resilience module specs are intentionally broad for flexibility
   # - contract_supertype: specs accept term() for error handling flexibility
