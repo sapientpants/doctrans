@@ -77,5 +77,9 @@
 
   # Ecto.Adapters.SQL.Sandbox.mode/2 second argument type changed in OTP 29 (expects {:shared, pid(), ...})
   {"test/support/data_case.ex", :contract_supertype},
-  {"test/support/worker_helpers.ex", :contract_supertype}
+  {"test/support/worker_helpers.ex", :contract_supertype},
+
+  # OTP 29 compatibility - expression produces multiple types from pattern match failures
+  # on union types (FileSystem.chroot reasons, Plug.Cowboy responses, etc)
+  {":none_matched_return", :all}
 ]
