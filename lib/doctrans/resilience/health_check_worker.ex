@@ -99,9 +99,12 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
     new_state = do_check(state)
 
     # Schedule next check
-    if state.enabled do
-      Process.send_after(self(), :check, state.interval_ms)
-    end
+    _ =
+      if state.enabled do
+        _ = Process.send_after(self(), :check, state.interval_ms)
+      else
+        :ok
+      end
 
     {:noreply, new_state}
   end

@@ -54,7 +54,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
 
       document ->
         {:ok, document} = Documents.update_document_status(document, "completed")
-        Documents.broadcast_document_update(document)
+        _ = Documents.broadcast_document_update(document)
         :ok
     end
   end
@@ -105,10 +105,13 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
         :ok
 
       document ->
-        if document.status in valid_from do
-          {:ok, document} = Documents.update_document_status(document, new_status)
-          Documents.broadcast_document_update(document)
-        end
+        _ =
+          if document.status in valid_from do
+            {:ok, document} = Documents.update_document_status(document, new_status)
+            _ = Documents.broadcast_document_update(document)
+          else
+            :ok
+          end
 
         :ok
     end

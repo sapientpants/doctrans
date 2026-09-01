@@ -17,9 +17,12 @@ defmodule DoctransWeb.DocumentLive.Show do
   def mount(%{"id" => id}, _session, socket) do
     document = Documents.get_document_with_pages!(id)
 
-    if connected?(socket) do
-      Documents.subscribe_document(document.id)
-    end
+    _ =
+      if connected?(socket) do
+        _ = Documents.subscribe_document(document.id)
+      else
+        :ok
+      end
 
     current_page_number = 1
     current_page = Documents.get_page_by_number(document.id, current_page_number)
@@ -382,12 +385,13 @@ defmodule DoctransWeb.DocumentLive.Show do
     else
       case Documents.reset_page_for_reprocessing(page) do
         {:ok, page} ->
-          Documents.broadcast_page_update(page)
+          _ = Documents.broadcast_page_update(page)
 
-          Worker.queue_page_reprocess(page.id,
-            extraction_model: extraction_model,
-            translation_model: translation_model
-          )
+          _ =
+            Worker.queue_page_reprocess(page.id,
+              extraction_model: extraction_model,
+              translation_model: translation_model
+            )
 
           socket =
             socket

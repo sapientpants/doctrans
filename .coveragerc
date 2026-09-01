@@ -1,0 +1,15 @@
+# Excluded from coverage checks
+# - Boilerplate/Phoenix-managed modules that require no tests
+# - Behaviour modules with no executable code
+# - Test support files (fixtures, data_case, worker_helpers)
+excludes = [
+  "lib/doctrans/search/embedding_behaviour.ex",
+  "lib/doctrans_web/endpoint.ex",
+  "lib/doctrans_web/gettext.ex",
+  "lib/doctrans_web.ex",
+  "test/support/conn_case.ex",
+  "test/support/data_case.ex",
+  "test/support/fixtures.ex",
+  "test/support/openai_stub.ex",
+  "test/support/worker_helpers.ex"
+]

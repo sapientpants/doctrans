@@ -11,7 +11,7 @@ defmodule Doctrans.Jobs.HealthCheckJob do
 
   @impl true
   def perform(%Oban.Job{}) do
-    HealthCheck.check_all()
+    _ = HealthCheck.check_all()
     :ok
   end
 end

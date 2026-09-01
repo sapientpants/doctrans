@@ -115,7 +115,7 @@ defmodule Doctrans.Resilience.HealthCheck do
     result =
       try do
         # Simple query to check connectivity
-        Repo.query!("SELECT 1")
+        _ = Repo.query!("SELECT 1")
         :ok
       rescue
         e -> {:error, Exception.message(e)}
@@ -155,7 +155,7 @@ defmodule Doctrans.Resilience.HealthCheck do
 
         case File.write(test_file, "health check") do
           :ok ->
-            File.rm(test_file)
+            _ = File.rm(test_file)
             :ok
 
           {:error, reason} ->

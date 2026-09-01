@@ -176,7 +176,7 @@ defmodule Doctrans.Resilience.CircuitBreaker do
   """
   @spec reset(atom()) :: :ok
   def reset(fuse_name) do
-    :fuse.reset(fuse_name)
+    _ = :fuse.reset(fuse_name)
     Logger.info("Circuit breaker #{fuse_name} has been reset")
 
     :telemetry.execute(

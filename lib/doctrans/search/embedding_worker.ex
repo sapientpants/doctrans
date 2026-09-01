@@ -126,7 +126,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
         if chunks == [] do
           Logger.info("No chunks to embed for page #{page_id} (empty content)")
 
-          safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}))
+          _ = safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}))
 
           {:ok, page_id}
         else
@@ -142,9 +142,9 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
           if Enum.all?(results, &match?({:ok, _}, &1)) do
             # Also generate page-level embedding for hybrid search fallback
-            generate_page_embedding(page)
+            _ = generate_page_embedding(page)
 
-            safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}))
+            _ = safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}))
 
             Logger.info("Generated embeddings for #{length(chunks)} chunks on page #{page_id}")
             {:ok, page_id}
@@ -155,7 +155,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
               "#{failed_count}/#{length(chunks)} chunk embeddings failed for page #{page_id}"
             )
 
-            mark_embedding_error(page)
+            _ = mark_embedding_error(page)
             {:error, :chunk_embedding_failed}
           end
         end
@@ -266,18 +266,19 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
         case result do
           {:ok, embedding} ->
-            safe_update!(
-              Chunk.embedding_changeset(chunk, %{
-                embedding: embedding,
-                embedding_status: "completed"
-              })
-            )
+            _ =
+              safe_update!(
+                Chunk.embedding_changeset(chunk, %{
+                  embedding: embedding,
+                  embedding_status: "completed"
+                })
+              )
 
             {:ok, chunk.id}
 
           {:error, :circuit_open} ->
             Logger.warning("Embedding circuit breaker open for chunk #{chunk.id}")
-            mark_chunk_error(chunk)
+            _ = mark_chunk_error(chunk)
             {:error, :circuit_open}
 
           {:error, reason} ->
@@ -294,7 +295,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
     case result do
       {:ok, embedding} ->
-        safe_update!(Page.embedding_changeset(page, %{embedding: embedding}))
+        _ = safe_update!(Page.embedding_changeset(page, %{embedding: embedding}))
 
       {:error, reason} ->
         Logger.warning("Page-level embedding failed for page #{page.id}: #{inspect(reason)}")
@@ -307,7 +308,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
     cond do
       classification == :permanent ->
         Logger.error("Permanent embedding error for chunk #{chunk.id}: #{inspect(reason)}")
-        mark_chunk_error(chunk)
+        _ = mark_chunk_error(chunk)
         {:error, reason}
 
       attempt < @max_retries ->
@@ -337,7 +338,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
           %{type: :embedding, chunk_id: chunk.id}
         )
 
-        mark_chunk_error(chunk)
+        _ = mark_chunk_error(chunk)
         {:error, reason}
     end
   end
