@@ -178,6 +178,30 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
                OpenAI.chat([%{role: "user", content: "x"}])
     end
 
+    test "returns reasoning content when content is missing", %{bypass: bypass} do
+      Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
+        json(
+          conn,
+          200,
+          %{"choices" => [%{"message" => %{"reasoning_content" => "Thought it through"}}]}
+        )
+      end)
+
+      assert {:ok, "Thought it through"} = OpenAI.chat([%{role: "user", content: "x"}])
+    end
+
+    test "returns reasoning content when content is blank", %{bypass: bypass} do
+      Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
+        json(
+          conn,
+          200,
+          %{"choices" => [%{"message" => %{"content" => "", "reasoning" => "hmm"}}]}
+        )
+      end)
+
+      assert {:ok, "hmm"} = OpenAI.chat([%{role: "user", content: "x"}])
+    end
+
     test "uses first choice when multiple are returned", %{bypass: bypass} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
         json(conn, 200, %{

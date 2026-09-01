@@ -147,55 +147,16 @@ defmodule Doctrans.Processing.OpenAI do
     )
   end
 
-  defp parse_chat_response(%{
-         "choices" => [
-           %{"message" => %{"content" => content}}
-         ]
-       })
-       when is_binary(content) do
-    {:ok, content}
-  end
-
-  defp parse_chat_response(%{
-         "choices" => [
-           %{"message" => message}
-         ]
-       })
+  defp parse_chat_response(%{"choices" => [%{"message" => message}]})
        when is_map(message) do
     case Map.get(message, "content") do
-      nil when map_size(message) == 0 ->
-        # Empty response — check for reasoning / finish_reason
-        check_for_reasoning(message)
-
-      nil ->
-        {:error, "Empty or missing response from API"}
-
-      content ->
-        {:ok, content}
-    end
-  end
-
-  defp parse_chat_response(%{
-         "choices" => [
-           %{"finish_reason" => "length", "message" => message}
-         ]
-       })
-       when is_map(message) do
-    case Map.get(message, "content") do
-      nil when map_size(message) == 0 ->
-        # Check if we got reasoning content even with empty regular content
-        reasoning = Map.get(message, "reasoning") || Map.get(message, "reasoning_content", "")
-
-        case String.trim(reasoning) do
-          "" -> {:error, "API returned empty response (possibly truncated)"}
-          _reasoning -> {:ok, reasoning}
-        end
-
       content when is_binary(content) and content != "" ->
         {:ok, content}
 
       _ ->
-        {:error, "Empty or missing response from API"}
+        # Missing or blank content — fall back to reasoning content if the
+        # model produced any (e.g. truncated or thinking-only responses)
+        check_for_reasoning(message)
     end
   end
 
@@ -207,6 +168,8 @@ defmodule Doctrans.Processing.OpenAI do
 
   defp parse_chat_response(_body), do: {:error, "Invalid response format from API"}
 
+  # Returns the trimmed reasoning content as the result, or an error when the
+  # response carried no usable content at all.
   defp check_for_reasoning(message) do
     reasoning = Map.get(message, "reasoning") || Map.get(message, "reasoning_content", "")
 
