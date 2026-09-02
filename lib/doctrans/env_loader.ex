@@ -44,19 +44,15 @@ defmodule Doctrans.EnvLoader do
 
   defp put_env_line(line) do
     case String.split(line, "=", parts: 2) do
-      [key, value] -> put_unless_set(key, String.trim(value))
-      [key] -> put_unless_set(key, "")
+      [key, value] -> put_env(key, String.trim(value))
+      [key] -> put_env(key, "")
       _ -> :ok
     end
   end
 
-  # The real environment wins over `.env` file values.
-  defp put_unless_set(key, value) do
-    if System.get_env(key) do
-      :ok
-    else
-      System.put_env(key, value)
-    end
+  # `.env` file values always win.
+  defp put_env(key, value) do
+    System.put_env(key, value)
   end
 
   defp apply_to(config_key) do

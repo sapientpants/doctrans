@@ -69,7 +69,7 @@ defmodule Doctrans.EnvLoaderTest do
            ]
   end
 
-  test "real environment variables win over file values", %{path: path} do
+  test ".env file values override real environment variables", %{path: path} do
     System.put_env("OPENAI_HOST", "http://from-real-env:9999")
     System.put_env("OPENAI_API_KEY", "sk-real")
 
@@ -80,12 +80,12 @@ defmodule Doctrans.EnvLoaderTest do
 
     assert :ok = EnvLoader.load(path)
 
-    assert System.get_env("OPENAI_HOST") == "http://from-real-env:9999"
-    assert System.get_env("OPENAI_API_KEY") == "sk-real"
+    assert System.get_env("OPENAI_HOST") == "http://from-file:1234"
+    assert System.get_env("OPENAI_API_KEY") == "sk-from-file"
 
     openai = Application.get_env(:doctrans, :openai)
-    assert Keyword.fetch!(openai, :base_url) == "http://from-real-env:9999"
-    assert Keyword.fetch!(openai, :api_key) == "sk-real"
+    assert Keyword.fetch!(openai, :base_url) == "http://from-file:1234"
+    assert Keyword.fetch!(openai, :api_key) == "sk-from-file"
   end
 
   test "a key-only line sets an empty value when the variable is unset", %{path: path} do
