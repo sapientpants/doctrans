@@ -129,7 +129,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert request["model"] == "test-chat-model"
       assert request["messages"] == [%{"role" => "user", "content" => "Hi"}]
       assert request["max_tokens"] == 4096
-      refute Map.has_key?(request, "enable_thinking")
+      assert request["enable_thinking"] == false
     end
 
     test "sends enable_thinking=false when think: false", %{

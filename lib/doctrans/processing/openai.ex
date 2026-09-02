@@ -430,7 +430,7 @@ defmodule Doctrans.Processing.OpenAI do
     max_tokens = Keyword.get(options, :max_tokens, default_max_tokens())
     messages = Keyword.fetch!(options, :messages)
     stream = Keyword.get(options, :stream, false)
-    think = Keyword.get(options, :think, true)
+    think = Keyword.get(options, :think, false)
 
     base = %{
       model: model,
