@@ -75,7 +75,10 @@ defmodule Doctrans.Resilience.HealthCheck do
           config = Application.get_env(:doctrans, :openai, [])
           url = "#{config[:base_url]}/v1/models"
 
-          case Req.get(url, receive_timeout: 5_000) do
+          case Req.get(url,
+                 receive_timeout: 5_000,
+                 headers: [{"authorization", "Bearer #{config[:api_key]}"}]
+               ) do
             {:ok, %{status: 200, body: body}} ->
               models = get_in(body, ["data"]) || []
               model_names = Enum.map(models, & &1["id"])
