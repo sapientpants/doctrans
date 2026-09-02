@@ -97,19 +97,20 @@ defmodule Doctrans.Processing.Worker do
     pages = Documents.list_pages(document_id)
     page_ids = Enum.map(pages, & &1.id)
 
-    case page_ids do
-      [] ->
-        :ok
+    _ =
+      case page_ids do
+        [] ->
+          :ok
 
-      active_page_ids ->
-        page_jobs_query =
-          from(j in Oban.Job,
-            where: fragment("args->>'page_id' = ANY(?)", ^active_page_ids),
-            where: j.state in ["available", "scheduled", "retryable"]
-          )
+        active_page_ids ->
+          page_jobs_query =
+            from(j in Oban.Job,
+              where: fragment("args->>'page_id' = ANY(?)", ^active_page_ids),
+              where: j.state in ["available", "scheduled", "retryable"]
+            )
 
-        _ = Oban.cancel_all_jobs(page_jobs_query)
-    end
+          Oban.cancel_all_jobs(page_jobs_query)
+      end
 
     :ok
   rescue
