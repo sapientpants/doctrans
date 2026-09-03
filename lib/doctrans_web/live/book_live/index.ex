@@ -41,7 +41,9 @@ defmodule DoctransWeb.DocumentLive.Index do
       |> allow_upload(:document,
         accept: ~w(.pdf .docx .doc .odt .rtf),
         max_entries: 10,
-        max_file_size: Application.get_env(:doctrans, :uploads)[:max_file_size] || 100_000_000
+        # max_file_size: client-side limit; the on-disk size is re-verified
+        # in consume_upload_entry/2 before the file is accepted
+        max_file_size: max_file_size()
       )
 
     {:ok, socket}
@@ -261,20 +263,40 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   defp consume_upload_entry(path, entry) do
     extension = entry.client_name |> Path.extname() |> String.downcase()
+    max_file_size = max_file_size()
 
-    case Validation.validate_file_content(path, extension) do
-      :ok ->
-        document_id = Uniq.UUID.uuid7()
-        dest_dir = Documents.document_upload_dir(document_id)
-        File.mkdir_p!(dest_dir)
+    with :ok <- validate_disk_size(path, max_file_size),
+         :ok <- Validation.validate_file_content(path, extension) do
+      document_id = Uniq.UUID.uuid7()
+      dest_dir = Documents.document_upload_dir(document_id)
+      File.mkdir_p!(dest_dir)
 
-        dest_path = Path.join(dest_dir, "original#{extension}")
-        File.cp!(path, dest_path)
-        {:ok, {:ok, document_id, entry.client_name, dest_path}}
-
+      dest_path = Path.join(dest_dir, "original#{extension}")
+      File.cp!(path, dest_path)
+      {:ok, {:ok, document_id, entry.client_name, dest_path}}
+    else
       {:error, reason} ->
-        Logger.warning("File content validation failed for #{entry.client_name}: #{reason}")
+        Logger.warning("Upload rejected for #{entry.client_name}: #{reason}")
         {:ok, {:error, entry.client_name, reason}}
+    end
+  end
+
+  defp max_file_size do
+    Application.get_env(:doctrans, :uploads, [])[:max_file_size] || 100_000_000
+  end
+
+  # The client-side allow_upload size limit is not a security boundary;
+  # verify the actual size of the file on disk before accepting it.
+  defp validate_disk_size(path, max_size) do
+    case File.stat(path, size: true) do
+      {:ok, %{size: size}} when size <= max_size ->
+        :ok
+
+      {:ok, %{size: size}} ->
+        {:error, "File too large (#{div(size, 1_000_000)}MB, max #{div(max_size, 1_000_000)}MB)"}
+
+      {:error, _} ->
+        {:error, "Could not read uploaded file"}
     end
   end
 

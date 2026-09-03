@@ -104,8 +104,7 @@ config :doctrans, DoctransWeb.Endpoint,
     formats: [html: DoctransWeb.ErrorHTML, json: DoctransWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: Doctrans.PubSub,
-  live_view: [signing_salt: "MtYXaIpH"]
+  pubsub_server: Doctrans.PubSub
 
 # Configures the mailer
 #

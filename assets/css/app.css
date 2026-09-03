@@ -132,3 +132,14 @@
 .prose tr:nth-child(odd) td {
   background-color: var(--color-base-200);
 }
+
+/* Discrete zoom levels for the document page viewer.
+   Rendered as classes (not inline styles) so the CSP can keep
+   style-src 'self' without 'unsafe-inline'. */
+.zoom-50 { transform: scale(0.5); transform-origin: top center; }
+.zoom-75 { transform: scale(0.75); transform-origin: top center; }
+.zoom-100 { transform: scale(1); transform-origin: top center; }
+.zoom-125 { transform: scale(1.25); transform-origin: top center; }
+.zoom-150 { transform: scale(1.5); transform-origin: top center; }
+.zoom-175 { transform: scale(1.75); transform-origin: top center; }
+.zoom-200 { transform: scale(2); transform-origin: top center; }
