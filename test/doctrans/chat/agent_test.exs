@@ -1,8 +1,10 @@
 defmodule Doctrans.Chat.AgentTest do
-  use Doctrans.DataCase, async: true
+  # async: false because one test swaps the global :openai_module to a probe.
+  use Doctrans.DataCase, async: false
 
   alias Doctrans.Chat.Agent
   alias Doctrans.Documents
+  alias Doctrans.Processing.OpenAIProbe
   alias Doctrans.Repo
 
   describe "run/5" do
@@ -61,6 +63,42 @@ defmodule Doctrans.Chat.AgentTest do
 
       assert {:error, "boom"} =
                Agent.run(document, "What is this about?", [], [], fn _ -> :ok end)
+    end
+
+    test "generates the final answer with thinking enabled, planning steps without", %{
+      document: document
+    } do
+      test_pid = self()
+      original_module = Application.get_env(:doctrans, :openai_module)
+
+      Application.put_env(:doctrans, :openai_module, OpenAIProbe)
+      Application.put_env(:doctrans, :openai_probe_pid, test_pid)
+
+      on_exit(fn ->
+        Application.put_env(:doctrans, :openai_module, original_module)
+        Application.delete_env(:doctrans, :openai_probe_pid)
+      end)
+
+      noop = fn _ -> :ok end
+
+      assert {:ok, "probe stream", _context} =
+               Agent.run(document, "What is this about?", [], [], noop)
+
+      calls = collect_probe_calls()
+      assert [{:chat, expander_opts}, {:chat, grader_opts}, {:chat_stream, stream_opts}] = calls
+
+      assert Keyword.get(expander_opts, :think) == false
+      assert Keyword.get(grader_opts, :think) == false
+      assert Keyword.get(stream_opts, :think) == true
+    end
+  end
+
+  # Drains {function, opts} messages queued by OpenAIProbe during Agent.run/5.
+  defp collect_probe_calls(acc \\ []) do
+    receive do
+      {func, opts} -> collect_probe_calls([{func, opts} | acc])
+    after
+      0 -> Enum.reverse(acc)
     end
   end
 
