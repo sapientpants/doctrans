@@ -19,7 +19,7 @@ defmodule Doctrans.SearchTest do
       # Create document but don't complete it (search only searches completed docs)
       _doc = document_fixture(%{status: "uploading"})
 
-      # This will fail to generate embedding (no Ollama in test) and return error
+      # This will fail to generate embedding (no OpenAI in test) and return error
       # or return empty results
       result = Search.search("test query")
       assert match?({:ok, _}, result) or match?({:error, _}, result)

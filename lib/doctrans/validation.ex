@@ -380,7 +380,7 @@ defmodule Doctrans.Validation do
     {:ok, Map.put(attrs, :title, sanitized)}
   end
 
-  defp sanitize_title(attrs), do: {:ok, attrs}
+  defp sanitize_title(%{} = attrs), do: {:ok, attrs}
 
   @doc """
   Sanitizes a filename string by removing dangerous characters.

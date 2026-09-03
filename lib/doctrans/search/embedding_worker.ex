@@ -97,60 +97,68 @@ defmodule Doctrans.Search.EmbeddingWorker do
   end
 
   defp do_generate_embedding(page_id, attempt \\ 0) do
-    page = Repo.get!(Page, page_id)
+    page = Repo.get(Page, page_id)
 
-    if page.extraction_status != "completed" do
-      Logger.debug("Skipping embedding for page #{page_id} - extraction not completed")
-      {:ok, page_id}
-    else
-      {:ok, page} =
-        page
-        |> Page.embedding_changeset(%{embedding_status: "processing"})
-        |> Repo.update()
-
-      # Create chunks from page content
-      chunks = ensure_chunks(page)
-
-      if chunks == [] do
-        Logger.info("No chunks to embed for page #{page_id} (empty content)")
-
-        page
-        |> Page.embedding_changeset(%{embedding_status: "completed"})
-        |> Repo.update!()
-
+    cond do
+      page == nil ->
+        Logger.debug("Embedding requested for deleted page #{page_id}; skipping")
         {:ok, page_id}
-      else
-        # Build chunk data for overlap computation
-        chunk_data = Chunker.chunk(page.original_markdown)
 
-        # Embed each chunk (with overlap context for embedding quality)
-        results =
-          Enum.map(chunks, fn chunk ->
-            embed_content = Chunker.content_for_embedding(chunk_data, chunk.chunk_index)
-            embed_chunk(chunk, embed_content, attempt)
-          end)
+      page.extraction_status != "completed" ->
+        Logger.debug("Skipping embedding for page #{page_id} - extraction not completed")
+        {:ok, page_id}
 
-        if Enum.all?(results, &match?({:ok, _}, &1)) do
-          # Also generate page-level embedding for hybrid search fallback
-          generate_page_embedding(page)
+      true ->
+        process_page_embedding(page, page_id, attempt)
+    end
+  end
 
-          page
-          |> Page.embedding_changeset(%{embedding_status: "completed"})
-          |> Repo.update!()
+  defp process_page_embedding(page, page_id, attempt) do
+    case safe_update!(Page.embedding_changeset(page, %{embedding_status: "processing"})) do
+      {:error, _} ->
+        Logger.debug("Page #{page_id} was deleted before embedding; skipping")
+        {:ok, page_id}
 
-          Logger.info("Generated embeddings for #{length(chunks)} chunks on page #{page_id}")
+      {:ok, page} ->
+        # Create chunks from page content
+        chunks = ensure_chunks(page)
+
+        if chunks == [] do
+          Logger.info("No chunks to embed for page #{page_id} (empty content)")
+
+          _ = safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}))
+
           {:ok, page_id}
         else
-          failed_count = Enum.count(results, &match?({:error, _}, &1))
+          # Build chunk data for overlap computation
+          chunk_data = Chunker.chunk(page.original_markdown)
 
-          Logger.error(
-            "#{failed_count}/#{length(chunks)} chunk embeddings failed for page #{page_id}"
-          )
+          # Embed each chunk (with overlap context for embedding quality)
+          results =
+            Enum.map(chunks, fn chunk ->
+              embed_content = Chunker.content_for_embedding(chunk_data, chunk.chunk_index)
+              embed_chunk(chunk, embed_content, attempt)
+            end)
 
-          mark_embedding_error(page)
-          {:error, :chunk_embedding_failed}
+          if Enum.all?(results, &match?({:ok, _}, &1)) do
+            # Also generate page-level embedding for hybrid search fallback
+            _ = generate_page_embedding(page)
+
+            _ = safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}))
+
+            Logger.info("Generated embeddings for #{length(chunks)} chunks on page #{page_id}")
+            {:ok, page_id}
+          else
+            failed_count = Enum.count(results, &match?({:error, _}, &1))
+
+            Logger.error(
+              "#{failed_count}/#{length(chunks)} chunk embeddings failed for page #{page_id}"
+            )
+
+            _ = mark_embedding_error(page)
+            {:error, :chunk_embedding_failed}
+          end
         end
-      end
     end
   end
 
@@ -245,31 +253,37 @@ defmodule Doctrans.Search.EmbeddingWorker do
   end
 
   defp embed_chunk(chunk, embed_content, attempt) do
-    chunk =
-      chunk
-      |> Chunk.embedding_changeset(%{embedding_status: "processing"})
-      |> Repo.update!()
-
-    result =
-      CircuitBreaker.call(:embedding_api, fn ->
-        embedding_module().generate(embed_content, [])
-      end)
-
-    case result do
-      {:ok, embedding} ->
-        chunk
-        |> Chunk.embedding_changeset(%{embedding: embedding, embedding_status: "completed"})
-        |> Repo.update!()
-
+    case safe_update!(Chunk.embedding_changeset(chunk, %{embedding_status: "processing"})) do
+      {:error, :stale_entry} ->
+        Logger.debug("Chunk #{chunk.id} was deleted before embedding; skipping")
         {:ok, chunk.id}
 
-      {:error, :circuit_open} ->
-        Logger.warning("Embedding circuit breaker open for chunk #{chunk.id}")
-        mark_chunk_error(chunk)
-        {:error, :circuit_open}
+      {:ok, chunk} ->
+        result =
+          CircuitBreaker.call(:embedding_api, fn ->
+            embedding_module().generate(embed_content, [])
+          end)
 
-      {:error, reason} ->
-        handle_chunk_error(chunk, embed_content, reason, attempt)
+        case result do
+          {:ok, embedding} ->
+            _ =
+              safe_update!(
+                Chunk.embedding_changeset(chunk, %{
+                  embedding: embedding,
+                  embedding_status: "completed"
+                })
+              )
+
+            {:ok, chunk.id}
+
+          {:error, :circuit_open} ->
+            Logger.warning("Embedding circuit breaker open for chunk #{chunk.id}")
+            _ = mark_chunk_error(chunk)
+            {:error, :circuit_open}
+
+          {:error, reason} ->
+            handle_chunk_error(chunk, embed_content, reason, attempt)
+        end
     end
   end
 
@@ -281,9 +295,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
     case result do
       {:ok, embedding} ->
-        page
-        |> Page.embedding_changeset(%{embedding: embedding})
-        |> Repo.update!()
+        _ = safe_update!(Page.embedding_changeset(page, %{embedding: embedding}))
 
       {:error, reason} ->
         Logger.warning("Page-level embedding failed for page #{page.id}: #{inspect(reason)}")
@@ -296,7 +308,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
     cond do
       classification == :permanent ->
         Logger.error("Permanent embedding error for chunk #{chunk.id}: #{inspect(reason)}")
-        mark_chunk_error(chunk)
+        _ = mark_chunk_error(chunk)
         {:error, reason}
 
       attempt < @max_retries ->
@@ -326,20 +338,25 @@ defmodule Doctrans.Search.EmbeddingWorker do
           %{type: :embedding, chunk_id: chunk.id}
         )
 
-        mark_chunk_error(chunk)
+        _ = mark_chunk_error(chunk)
         {:error, reason}
     end
   end
 
   defp mark_embedding_error(page) do
-    page
-    |> Page.embedding_changeset(%{embedding_status: "error"})
-    |> Repo.update!()
+    safe_update!(Page.embedding_changeset(page, %{embedding_status: "error"}))
   end
 
   defp mark_chunk_error(chunk) do
-    chunk
-    |> Chunk.embedding_changeset(%{embedding_status: "error"})
-    |> Repo.update!()
+    safe_update!(Chunk.embedding_changeset(chunk, %{embedding_status: "error"}))
+  end
+
+  # `Repo.update!` raises `Ecto.StaleEntryError` when the row is deleted while
+  # the task is in flight (e.g. the user removes the book mid-embedding). The
+  # row is gone, so there is nothing to update — treat it as a no-op.
+  defp safe_update!(changeset) do
+    {:ok, Repo.update!(changeset)}
+  rescue
+    Ecto.StaleEntryError -> {:error, :stale_entry}
   end
 end

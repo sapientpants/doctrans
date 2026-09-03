@@ -1,15 +1,15 @@
 defmodule Doctrans.Chat.AgentGatherTest do
   # Exercises the bounded gather-until-sufficient loop. async: false because it
-  # swaps the global :ollama_module to drive the grader deterministically.
+  # swaps the global :openai_module to drive the grader deterministically.
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Chat.Agent
   alias Doctrans.Documents
   alias Doctrans.Repo
 
-  # FakeOllama that always grades the context "insufficient" with a refined query,
+  # FakeOpenAI that always grades the context "insufficient" with a refined query,
   # forcing the refine loop to run to its bound; plans normally and streams a reply.
-  defmodule FakeOllama do
+  defmodule FakeOpenAI do
     def chat(messages, _opts) do
       content = messages |> List.last() |> Map.get(:content, "")
 
@@ -32,9 +32,9 @@ defmodule Doctrans.Chat.AgentGatherTest do
   end
 
   setup do
-    original = Application.get_env(:doctrans, :ollama_module)
-    Application.put_env(:doctrans, :ollama_module, FakeOllama)
-    on_exit(fn -> Application.put_env(:doctrans, :ollama_module, original) end)
+    original = Application.get_env(:doctrans, :openai_module)
+    Application.put_env(:doctrans, :openai_module, FakeOpenAI)
+    on_exit(fn -> Application.put_env(:doctrans, :openai_module, original) end)
     %{document: create_document_with_embeddings()}
   end
 

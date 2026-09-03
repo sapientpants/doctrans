@@ -53,7 +53,8 @@ defmodule Doctrans.Processing.DocumentProcessor do
   defp extract_convertible_document(document_id, file_path, cancelled_documents) do
     if MapSet.member?(cancelled_documents, document_id) do
       Logger.info("Document #{document_id} was cancelled, skipping conversion")
-      File.rm(file_path)
+      _ = File.rm(file_path)
+
       :cancelled
     else
       do_convert_and_extract(document_id, file_path, cancelled_documents)
@@ -68,7 +69,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
     case document_converter_module().convert_to_pdf(file_path, output_dir) do
       {:ok, pdf_path} ->
         # Delete the original document after successful conversion
-        File.rm(file_path)
+        _ = File.rm(file_path)
 
         # Process the converted PDF
         PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents)
@@ -76,7 +77,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
       {:error, reason} ->
         Logger.error("Failed to convert document #{document_id}: #{reason}")
         # Clean up the source file on failure to prevent storage leaks
-        File.rm(file_path)
+        _ = File.rm(file_path)
         {:error, reason}
     end
   end

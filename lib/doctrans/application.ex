@@ -9,6 +9,8 @@ defmodule Doctrans.Application do
 
   @impl true
   def start(_type, _args) do
+    Doctrans.EnvLoader.load()
+
     # Install circuit breakers before starting workers
     CircuitBreaker.install_fuses()
 

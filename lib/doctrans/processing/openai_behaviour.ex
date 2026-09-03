@@ -1,8 +1,8 @@
-defmodule Doctrans.Processing.OllamaBehaviour do
+defmodule Doctrans.Processing.OpenAIBehaviour do
   @moduledoc """
-  Behaviour for Ollama API interactions.
+  Behaviour for OpenAI-compatible API interactions.
 
-  This allows mocking the Ollama service in tests.
+  This allows mocking the API service in tests.
   """
 
   @callback extract_markdown(image_path :: String.t(), opts :: keyword()) ::

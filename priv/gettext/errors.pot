@@ -118,32 +118,6 @@ msgstr ""
 msgid "Document not found"
 msgstr ""
 
-#: lib/doctrans/processing/ollama.ex:277
-#, elixir-autogen, elixir-format
-msgid "Failed to connect to Ollama: %{reason}"
-msgstr ""
-
-#: lib/doctrans/processing/ollama.ex:92
-#, elixir-autogen, elixir-format
-msgid "Failed to read image: %{reason}"
-msgstr ""
-
-#: lib/doctrans/search/embedding.ex:51
-#, elixir-autogen, elixir-format
-msgid "Ollama embedding error (%{status}): %{body}"
-msgstr ""
-
-#: lib/doctrans/processing/ollama.ex:228
-#: lib/doctrans/processing/ollama.ex:331
-#, elixir-autogen, elixir-format
-msgid "Ollama error (%{status}): %{error}"
-msgstr ""
-
-#: lib/doctrans/processing/ollama.ex:270
-#, elixir-autogen, elixir-format
-msgid "Ollama returned status %{status}: %{body}"
-msgstr ""
-
 #: lib/doctrans/processing/pdf_extractor.ex:60
 #: lib/doctrans/processing/pdf_extractor.ex:108
 #, elixir-autogen, elixir-format
@@ -160,28 +134,14 @@ msgstr ""
 msgid "Page %{page_number} extraction failed: %{reason}"
 msgstr ""
 
-#: lib/doctrans/processing/llm_processor.ex:323
+#: lib/doctrans/processing/llm_processor.ex:326
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} translation failed: %{reason}"
 msgstr ""
 
-#: lib/doctrans/processing/ollama.ex:239
-#: lib/doctrans/processing/ollama.ex:342
-#: lib/doctrans/search/embedding.ex:58
+#: lib/doctrans/search/embedding.ex:78
 #, elixir-autogen, elixir-format
 msgid "Request failed: %{reason}"
-msgstr ""
-
-#: lib/doctrans/processing/ollama.ex:235
-#: lib/doctrans/processing/ollama.ex:338
-#, elixir-autogen, elixir-format
-msgid "Request timed out"
-msgstr ""
-
-#: lib/doctrans/processing/ollama.ex:220
-#: lib/doctrans/processing/ollama.ex:323
-#, elixir-autogen, elixir-format
-msgid "Unexpected response format from Ollama"
 msgstr ""
 
 #: lib/doctrans/processing/pdf_extractor.ex:128
@@ -209,12 +169,6 @@ msgstr ""
 msgid "LibreOffice is not installed"
 msgstr ""
 
-#: lib/doctrans/processing/ollama.ex:212
-#: lib/doctrans/processing/ollama.ex:315
-#, elixir-autogen, elixir-format
-msgid "Model returned empty response"
-msgstr ""
-
 #: lib/doctrans/processing/pdf_extractor.ex:100
 #, elixir-autogen, elixir-format
 msgid "Page image not found after extraction"
@@ -233,4 +187,14 @@ msgstr ""
 #: lib/doctrans/processing/document_processor.ex:49
 #, elixir-autogen, elixir-format
 msgid "Unsupported file format: %{format}"
+msgstr ""
+
+#: lib/doctrans/search/embedding.ex:71
+#, elixir-autogen, elixir-format
+msgid "OpenAI embedding error (%{status}): %{body}"
+msgstr ""
+
+#: lib/doctrans/search/embedding.ex:59
+#, elixir-autogen, elixir-format
+msgid "OpenAI embedding too short: expected at least %{expected} dimensions, got %{actual}"
 msgstr ""

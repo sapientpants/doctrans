@@ -106,15 +106,19 @@ defmodule Doctrans.Documents do
         %Document{}
         |> Document.changeset(validated_attrs)
         |> Repo.insert()
+        |> case do
+          {:ok, document} ->
+            {:ok, document}
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
 
       {:error, reason} when is_binary(reason) ->
         %Document{}
         |> Document.changeset(%{})
         |> Ecto.Changeset.add_error(:base, reason)
         |> Ecto.Changeset.apply_action(:insert)
-
-      {:error, changeset} ->
-        {:error, changeset}
     end
   end
 
@@ -148,10 +152,13 @@ defmodule Doctrans.Documents do
     # Delete files first
     document_dir = document_upload_dir(document.id)
 
-    if File.exists?(document_dir) do
-      Logger.info("Deleting document files at #{document_dir}")
-      File.rm_rf!(document_dir)
-    end
+    _ =
+      if File.exists?(document_dir) do
+        Logger.info("Deleting document files at #{document_dir}")
+        File.rm_rf!(document_dir)
+      else
+        :ok
+      end
 
     # Delete from database (pages cascade automatically)
     Repo.delete(document)
@@ -255,14 +262,15 @@ defmodule Doctrans.Documents do
     Logger.debug("Broadcasting document_updated for #{document.id} to documents topic")
 
     # Broadcast to specific document topic (for document viewer)
-    Phoenix.PubSub.broadcast(
-      Doctrans.PubSub,
-      "document:#{document.id}",
-      {:document_updated, document}
-    )
+    _ =
+      Phoenix.PubSub.broadcast(
+        Doctrans.PubSub,
+        "document:#{document.id}",
+        {:document_updated, document}
+      )
 
     # Also broadcast to general documents topic (for dashboard)
-    Phoenix.PubSub.broadcast(Doctrans.PubSub, "documents", {:document_updated, document})
+    _ = Phoenix.PubSub.broadcast(Doctrans.PubSub, "documents", {:document_updated, document})
   end
 
   @doc """

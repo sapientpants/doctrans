@@ -22,8 +22,8 @@ defmodule Doctrans.Search.EmbeddingTest do
 
     test "returns error or result for non-empty text" do
       # This test exercises the code path for non-empty text
-      # In CI without Ollama, this will return an error
-      # Locally with Ollama, this will return a valid embedding
+      # In CI without the API server, this will return an error
+      # Locally with the API server, this will return a valid embedding
       result = Embedding.generate("test text")
 
       assert match?({:ok, _}, result) or match?({:error, _}, result)

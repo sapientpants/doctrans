@@ -18,7 +18,7 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
         })
 
       result = perform_job(LlmProcessingJob, %{"page_id" => page.id})
-      # Result depends on Ollama availability and file existence
+      # Result depends on the API availability and file existence
       assert result == :ok or match?({:error, _}, result)
     end
 

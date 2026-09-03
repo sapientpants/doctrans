@@ -50,7 +50,7 @@ defmodule Doctrans.Chat.Grader do
 
     messages = [%{role: "user", content: prompt}]
 
-    case ollama_module().chat(messages, chat_opts(opts)) do
+    case openai_module().chat(messages, chat_opts(opts)) do
       {:ok, response} ->
         Logger.debug("Grader raw response:\n#{String.slice(response, 0, 300)}")
         {:ok, parse_grade(response)}
@@ -81,13 +81,13 @@ defmodule Doctrans.Chat.Grader do
   defp chat_opts(opts) do
     model = Keyword.get(opts, :model)
     # Grading is a structured classification, not a reasoning task; disable
-    # thinking so the small num_predict budget produces the verdict, not an
+    # thinking so the small max_tokens budget produces the verdict, not an
     # empty (thinking-only) response.
-    base = [timeout: @grade_timeout, num_predict: @max_predict, think: false]
+    base = [timeout: @grade_timeout, max_tokens: @max_predict, think: false]
     if model, do: Keyword.put(base, :model, model), else: base
   end
 
-  defp ollama_module do
-    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
+  defp openai_module do
+    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
   end
 end

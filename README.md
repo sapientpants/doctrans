@@ -1,7 +1,7 @@
 # Doctrans
 
 A privacy-first Phoenix LiveView application for translating documents using local AI
-models via Ollama. Upload a PDF, Word, OpenDocument, or RTF file, and Doctrans will extract
+models with oMLX (an OpenAI-compatible API server). Upload a PDF, Word, OpenDocument, or RTF file, and Doctrans will extract
 each page as an image, use a vision model to extract text as Markdown, and then translate it
 to your target language. All processing happens on your device — no data is ever sent to
 external services.
@@ -28,7 +28,7 @@ external services.
 - **PostgreSQL** 14+ with pgvector extension
 - **poppler-utils** - for PDF page extraction (`pdftoppm`)
 - **LibreOffice** (optional) - for DOCX, DOC, ODT, and RTF conversion
-- **Ollama** - local AI model server
+- **oMLX** - local inference server (OpenAI-compatible API)
 
 ### Installing poppler-utils
 
@@ -58,28 +58,28 @@ sudo apt-get install libreoffice-writer-nogui
 sudo dnf install libreoffice-writer
 ```
 
-### Installing Ollama
+### Installing oMLX (OpenAI-compatible API Server)
 
 ```bash
 # macOS
-brew install ollama
+brew install jundot/omlx
 
 # Linux
-curl -fsSL https://ollama.com/install.sh | sh
+# Build from source: https://github.com/jundot/omlx
 ```
 
-### Required Ollama Models
+### Pull Required Models
 
 ```bash
-ollama pull qwen3.5:9b           # Vision model for OCR and text extraction
-ollama pull translategemma:12b   # Text model for translation
-ollama pull qwen3-embedding:0.6b # Embedding model for search and chat
+omlx serve --model qwen3.5:9b           # Vision model for OCR and text extraction
+omlx serve --model translategemma:12b   # Text model for translation
+omlx serve --model qwen3-embedding:0.6b # Embedding model for search and chat
 ```
 
-Ensure Ollama is running before starting Doctrans:
+Ensure oMLX is running before starting Doctrans:
 
 ```bash
-ollama serve
+omlx serve
 ```
 
 ## Getting Started
@@ -95,11 +95,11 @@ Visit [http://localhost:4000](http://localhost:4000) in your browser.
 
 ## Docker Setup
 
-Run the app with Docker Compose while using Ollama on your host machine:
+Run the app with Docker Compose while using oMLX on your host machine:
 
 ```bash
-# Ensure Ollama is running on your host
-ollama serve
+# Ensure oMLX is running on your host
+omlx serve
 
 # Start PostgreSQL and the app (migrations run automatically)
 docker compose up
@@ -107,7 +107,7 @@ docker compose up
 
 Visit [http://localhost:4000](http://localhost:4000) in your browser.
 
-The app connects to Ollama via `host.docker.internal:11434`. For Linux, the `extra_hosts`
+The app connects to oMLX at `host.docker.internal:8000`. For Linux, the `extra_hosts`
 directive in `docker-compose.yml` maps this automatically.
 
 To customize environment variables, copy `.env.example` to `.env`:
@@ -142,23 +142,23 @@ using the AI model. Chat is available once page embeddings have been generated.
 Configuration in `config/config.exs`:
 
 ```elixir
-# Ollama settings (OLLAMA_HOST env var overrides base_url)
-config :doctrans, :ollama,
-  base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
-  vision_model: "qwen3.5:9b",
-  translation_model: "qwen3.5:27b",
-  chat_model: "qwen3.5:27b",
+# API server settings (OPENAI_HOST env var overrides base_url)
+config :doctrans, :openai,
+  base_url: System.get_env("OPENAI_HOST", "http://localhost:8000"),
+  vision_model: "mlx-community/Qwen3.5-9B-MLX-4bit",
+  translation_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
+  chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
   timeout: 300_000
 
 # Embedding settings
 config :doctrans, :embedding,
-  base_url: System.get_env("OLLAMA_HOST", "http://localhost:11434"),
-  model: "qwen3-embedding:0.6b",
+  base_url: System.get_env("OPENAI_HOST", "http://localhost:8000"),
+  model: "mlx-community/Qwen3-Embedding-8B-4bit-DWQ",
   timeout: 60_000
 
 # Circuit breaker configuration for resilience
 config :doctrans, :circuit_breakers,
-  ollama_api: [strategy: {:standard, 5, 60_000}, refresh: 30_000],
+  openai_api: [strategy: {:standard, 5, 60_000}, refresh: 30_000],
   embedding_api: [strategy: {:standard, 3, 30_000}, refresh: 15_000]
 
 # Retry configuration for exponential backoff
@@ -188,7 +188,7 @@ config :doctrans, :defaults,
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API URL |
+| `OPENAI_HOST` | `http://localhost:8000` | OpenAI-compatible API URL |
 | `DATABASE_HOST` | `localhost` | PostgreSQL hostname (dev/test) |
 | `DATABASE_URL` | - | Full database URL (required in production) |
 | `PORT` | `4000` | Phoenix server port |
@@ -278,27 +278,27 @@ GitHub Actions runs on every push and PR to `main`:
 
 ## Troubleshooting
 
-### Ollama connection refused
+### API server connection refused
 
 ```text
 ** (Req.TransportError) connection refused
 ```
 
-Ensure Ollama is running (`ollama serve`) and accessible at the configured `OLLAMA_HOST`.
+Ensure oMLX is running (`omlx serve`) and accessible at the configured `OPENAI_HOST`.
 For Docker, verify `host.docker.internal` resolves correctly.
 
-### Missing Ollama models
+### Model not found
 
 ```text
-model "qwen3.5:9b" not found
+model "mlx-community/Qwen3.5-9B-MLX-4bit" not found
 ```
 
 Pull the required models before starting:
 
 ```bash
-ollama pull qwen3.5:9b
-ollama pull translategemma:12b
-ollama pull qwen3-embedding:0.6b
+omlx serve --model mlx-community/Qwen3.5-9B-MLX-4bit
+omlx serve --model mlx-community/Qwen3.6-35B-A3B-4bit
+omlx serve --model mlx-community/Qwen3-Embedding-8B-4bit-DWQ
 ```
 
 ### PDF processing fails

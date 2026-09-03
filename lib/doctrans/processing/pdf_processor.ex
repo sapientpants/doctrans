@@ -29,7 +29,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   def extract_document(document_id, pdf_path, cancelled_documents) do
     if MapSet.member?(cancelled_documents, document_id) do
       Logger.info("Document #{document_id} was cancelled, skipping PDF extraction")
-      File.rm(pdf_path)
+      _ = File.rm(pdf_path)
       :cancelled
     else
       do_extract(document_id, pdf_path)
@@ -90,7 +90,7 @@ defmodule Doctrans.Processing.PdfProcessor do
       Logger.info("Extracted #{page_count} pages for document #{document.id}")
 
       # Delete the original PDF to save space
-      File.rm(pdf_path)
+      _ = File.rm(pdf_path)
 
       :ok
     else
@@ -102,7 +102,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp set_total_pages(document, page_count) do
     case Documents.update_document(document, %{total_pages: page_count}) do
       {:ok, updated_document} ->
-        Documents.broadcast_document_update(updated_document)
+        _ = Documents.broadcast_document_update(updated_document)
         {:ok, updated_document}
 
       error ->
@@ -116,7 +116,7 @@ defmodule Doctrans.Processing.PdfProcessor do
         case extract_and_create_page(document, pdf_path, pages_dir, page_number) do
           {:ok, page} ->
             # Queue page for LLM processing immediately
-            queue_page_for_processing(page)
+            _ = queue_page_for_processing(page)
             {:cont, :ok}
 
           {:error, reason} ->
@@ -125,7 +125,7 @@ defmodule Doctrans.Processing.PdfProcessor do
       end)
 
     # Final broadcast after all pages are extracted
-    Documents.broadcast_document_update(document)
+    _ = Documents.broadcast_document_update(document)
 
     result
   end

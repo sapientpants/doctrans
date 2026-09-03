@@ -7,7 +7,7 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
   # The worker is disabled in test config, so we test static status responses.
 
   setup do
-    CircuitBreaker.reset(:ollama_api)
+    CircuitBreaker.reset(:openai_api)
     CircuitBreaker.reset(:embedding_api)
     :ok
   end

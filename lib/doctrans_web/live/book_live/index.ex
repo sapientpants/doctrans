@@ -15,17 +15,20 @@ defmodule DoctransWeb.DocumentLive.Index do
     documents = Documents.list_documents_with_progress()
     defaults = Application.get_env(:doctrans, :defaults, [])
 
-    if connected?(socket) do
-      # Subscribe to the general documents topic
-      Logger.info("Dashboard subscribing to documents topic")
-      Phoenix.PubSub.subscribe(Doctrans.PubSub, "documents")
+    _ =
+      if connected?(socket) do
+        # Subscribe to the general documents topic
+        Logger.info("Dashboard subscribing to documents topic")
+        _ = Phoenix.PubSub.subscribe(Doctrans.PubSub, "documents")
 
-      # Also subscribe to each individual document's topic for progress updates
-      for doc <- documents do
-        Logger.info("Dashboard subscribing to document:#{doc.id}")
-        Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{doc.id}")
+        # Also subscribe to each individual document's topic for progress updates
+        for doc <- documents do
+          Logger.info("Dashboard subscribing to document:#{doc.id}")
+          _ = Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{doc.id}")
+        end
+      else
+        :ok
       end
-    end
 
     socket =
       socket
@@ -337,7 +340,7 @@ defmodule DoctransWeb.DocumentLive.Index do
     case Documents.create_document(attrs) do
       {:ok, document} ->
         Logger.info("Subscribing to new document:#{document.id}")
-        Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document.id}")
+        _ = Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document.id}")
         Worker.process_document(document.id, pdf_path)
 
       {:error, changeset} ->

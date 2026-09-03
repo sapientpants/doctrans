@@ -147,7 +147,18 @@ defmodule Doctrans.Chat.Agent do
   defp stream_answer(document, messages, opts, on_event) do
     on_delta = fn delta -> on_event.({:delta, delta}) end
 
-    case ollama_module().chat_stream(messages, on_delta, opts) do
+    # The final user-facing answer is the one stage where reasoning pays off;
+    # the small structured steps (expansion, grading) keep thinking disabled.
+    # Thinking tokens count against the completion budget, so raise the ceiling
+    # for the answer unless the caller set one explicitly.
+    opts =
+      opts
+      |> Keyword.put(:think, true)
+      |> then(fn o ->
+        if Keyword.has_key?(o, :max_tokens), do: o, else: Keyword.put(o, :max_tokens, 8192)
+      end)
+
+    case openai_module().chat_stream(messages, on_delta, opts) do
       {:ok, response} ->
         {:ok, response}
 
@@ -157,7 +168,7 @@ defmodule Doctrans.Chat.Agent do
     end
   end
 
-  defp ollama_module do
-    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
+  defp openai_module do
+    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
   end
 end

@@ -22,7 +22,7 @@ services:
     environment:
       DATABASE_URL: ecto://postgres:postgres@db/doctrans_dev
       DATABASE_HOST: db
-      OLLAMA_HOST: http://host.docker.internal:11434
+      OPENAI_HOST: http://host.docker.internal:8000
       PHX_HOST: localhost
       PORT: 4000
     ports:

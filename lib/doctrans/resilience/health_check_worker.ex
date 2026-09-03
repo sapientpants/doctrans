@@ -99,9 +99,12 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
     new_state = do_check(state)
 
     # Schedule next check
-    if state.enabled do
-      Process.send_after(self(), :check, state.interval_ms)
-    end
+    _ =
+      if state.enabled do
+        _ = Process.send_after(self(), :check, state.interval_ms)
+      else
+        :ok
+      end
 
     {:noreply, new_state}
   end
@@ -154,22 +157,22 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   end
 
   defp maybe_reset_circuits(current_results, previous_results) when is_map(previous_results) do
-    # Check if Ollama recovered (was failing, now healthy)
-    ollama_was_failing =
-      case previous_results[:ollama] do
+    # Check if OpenAI recovered (was failing, now healthy)
+    openai_was_failing =
+      case previous_results[:openai] do
         {:error, _} -> true
         _ -> false
       end
 
-    ollama_now_healthy =
-      case current_results[:ollama] do
+    openai_now_healthy =
+      case current_results[:openai] do
         {:ok, _} -> true
         _ -> false
       end
 
-    if ollama_was_failing and ollama_now_healthy do
-      Logger.info("Ollama recovered, resetting circuit breakers")
-      CircuitBreaker.reset(:ollama_api)
+    if openai_was_failing and openai_now_healthy do
+      Logger.info("OpenAI recovered, resetting circuit breakers")
+      CircuitBreaker.reset(:openai_api)
       CircuitBreaker.reset(:embedding_api)
     end
   end

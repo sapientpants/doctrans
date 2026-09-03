@@ -3,7 +3,7 @@ defmodule Doctrans.Chat do
   Chat functionality for document Q&A using RAG (Retrieval-Augmented Generation).
 
   Provides semantic search within a single document and chat completions
-  via Ollama's /api/chat endpoint.
+  falling back to the API's /api/chat endpoint.
   """
 
   alias Doctrans.Chat.MultiSearch
@@ -19,7 +19,7 @@ defmodule Doctrans.Chat do
   1. Searches document pages for relevant context using semantic search
   2. Builds a context string from the top-k pages
   3. Creates a system prompt with the document context
-  4. Calls Ollama chat endpoint with the conversation history
+  4. calls the API chat endpoint with the conversation history
   5. Returns the response
 
   ## Parameters
@@ -89,7 +89,7 @@ defmodule Doctrans.Chat do
           # Use the standalone question so the LLM sees a clear, contextual question
           messages = build_messages(system_prompt, chat_history, standalone_question)
 
-          case ollama_module().chat(messages, opts) do
+          case openai_module().chat(messages, opts) do
             {:ok, response} ->
               {:ok, response}
 
@@ -211,8 +211,8 @@ defmodule Doctrans.Chat do
 
   # Private functions
 
-  defp ollama_module do
-    Application.get_env(:doctrans, :ollama_module, Doctrans.Processing.Ollama)
+  defp openai_module do
+    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
   end
 
   @doc """

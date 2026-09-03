@@ -39,7 +39,7 @@ config :phoenix_live_view,
 
 # Use mocks for external services in tests
 config :doctrans, :embedding_module, Doctrans.Search.EmbeddingMock
-config :doctrans, :ollama_module, Doctrans.Processing.OllamaStub
+config :doctrans, :openai_module, Doctrans.Processing.OpenAIStub
 config :doctrans, :pdf_extractor_module, Doctrans.Processing.PdfExtractorMock
 
 # Use isolated upload directory for tests to avoid conflicts with development

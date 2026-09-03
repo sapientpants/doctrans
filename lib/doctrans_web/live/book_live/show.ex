@@ -4,7 +4,7 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   alias Doctrans.Chat
   alias Doctrans.Documents
-  alias Doctrans.Processing.{Ollama, Worker}
+  alias Doctrans.Processing.{OpenAI, Worker}
   alias DoctransWeb.DocumentLive.ChatSession
 
   import DoctransWeb.DocumentLive.Components,
@@ -17,15 +17,18 @@ defmodule DoctransWeb.DocumentLive.Show do
   def mount(%{"id" => id}, _session, socket) do
     document = Documents.get_document_with_pages!(id)
 
-    if connected?(socket) do
-      Documents.subscribe_document(document.id)
-    end
+    _ =
+      if connected?(socket) do
+        _ = Documents.subscribe_document(document.id)
+      else
+        :ok
+      end
 
     current_page_number = 1
     current_page = Documents.get_page_by_number(document.id, current_page_number)
 
     # Get default models from config
-    ollama_config = Application.get_env(:doctrans, :ollama, [])
+    openai_config = Application.get_env(:doctrans, :openai, [])
 
     socket =
       socket
@@ -42,8 +45,14 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:available_models, [])
       |> assign(:models_loading, false)
       |> assign(:model_fetch_error, nil)
-      |> assign(:extraction_model, ollama_config[:vision_model] || "gemma3:27b")
-      |> assign(:translation_model, ollama_config[:translation_model] || "gemma3:27b")
+      |> assign(
+        :extraction_model,
+        openai_config[:vision_model] || "mlx-community/Qwen3.5-9B-MLX-4bit"
+      )
+      |> assign(
+        :translation_model,
+        openai_config[:chat_model] || "mlx-community/Qwen3.6-35B-A3B-4bit"
+      )
       # Chat state
       |> assign(:chat_open, false)
       |> assign(:chat_loading, false)
@@ -376,12 +385,13 @@ defmodule DoctransWeb.DocumentLive.Show do
     else
       case Documents.reset_page_for_reprocessing(page) do
         {:ok, page} ->
-          Documents.broadcast_page_update(page)
+          _ = Documents.broadcast_page_update(page)
 
-          Worker.queue_page_reprocess(page.id,
-            extraction_model: extraction_model,
-            translation_model: translation_model
-          )
+          _ =
+            Worker.queue_page_reprocess(page.id,
+              extraction_model: extraction_model,
+              translation_model: translation_model
+            )
 
           socket =
             socket
@@ -494,9 +504,9 @@ defmodule DoctransWeb.DocumentLive.Show do
   @impl true
   def handle_info(:fetch_available_models, socket) do
     {models, error} =
-      case Ollama.list_models() do
+      case OpenAI.list_models() do
         {:ok, models} -> {models, nil}
-        {:error, _} -> {[], gettext("Failed to fetch models from Ollama")}
+        {:error, _} -> {[], gettext("Failed to fetch models from OpenAI")}
       end
 
     socket =

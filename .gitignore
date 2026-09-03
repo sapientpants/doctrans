@@ -55,3 +55,4 @@ npm-debug.log
 # Environment files (may contain secrets)
 .env
 .env.local
+.env.gpg

@@ -91,21 +91,26 @@ defmodule Doctrans.Processing.Worker do
         where: j.state in ["available", "scheduled", "retryable"]
       )
 
-    Oban.cancel_all_jobs(document_jobs_query)
+    _ = Oban.cancel_all_jobs(document_jobs_query)
 
     # Also cancel page jobs
     pages = Documents.list_pages(document_id)
     page_ids = Enum.map(pages, & &1.id)
 
-    unless Enum.empty?(page_ids) do
-      page_jobs_query =
-        from(j in Oban.Job,
-          where: fragment("args->>'page_id' = ANY(?)", ^page_ids),
-          where: j.state in ["available", "scheduled", "retryable"]
-        )
+    _ =
+      case page_ids do
+        [] ->
+          :ok
 
-      Oban.cancel_all_jobs(page_jobs_query)
-    end
+        active_page_ids ->
+          page_jobs_query =
+            from(j in Oban.Job,
+              where: fragment("args->>'page_id' = ANY(?)", ^active_page_ids),
+              where: j.state in ["available", "scheduled", "retryable"]
+            )
+
+          Oban.cancel_all_jobs(page_jobs_query)
+      end
 
     :ok
   rescue
