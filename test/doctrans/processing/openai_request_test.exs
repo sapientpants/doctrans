@@ -129,10 +129,10 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert request["model"] == "test-chat-model"
       assert request["messages"] == [%{"role" => "user", "content" => "Hi"}]
       assert request["max_tokens"] == 4096
-      assert request["enable_thinking"] == false
+      assert request["chat_template_kwargs"] == %{"enable_thinking" => false}
     end
 
-    test "sends enable_thinking=false when think: false", %{
+    test "sends enable_thinking=false via chat_template_kwargs when think: false", %{
       bypass: bypass,
       test_pid: test_pid
     } do
@@ -148,7 +148,27 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert_receive {:chat_body, body}
       request = Jason.decode!(body)
       assert request["model"] == "custom"
-      assert request["enable_thinking"] == false
+      assert request["chat_template_kwargs"] == %{"enable_thinking" => false}
+      refute Map.has_key?(request, "enable_thinking")
+    end
+
+    test "omits the thinking toggle when think: true", %{
+      bypass: bypass,
+      test_pid: test_pid
+    } do
+      Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:chat_body, body})
+        json(conn, 200, %{"choices" => [%{"message" => %{"content" => "ok"}}]})
+      end)
+
+      assert {:ok, "ok"} =
+               OpenAI.chat([%{role: "user", content: "x"}], think: true, model: "custom")
+
+      assert_receive {:chat_body, body}
+      request = Jason.decode!(body)
+      assert request["model"] == "custom"
+      refute Map.has_key?(request, "chat_template_kwargs")
     end
 
     test "returns error when content is empty", %{bypass: bypass} do
@@ -380,7 +400,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       request = Jason.decode!(body)
       assert request["model"] == "test-translation-model"
       assert request["max_tokens"] == 8192
-      assert request["enable_thinking"] == false
+      assert request["chat_template_kwargs"] == %{"enable_thinking" => false}
     end
 
     test "honours explicit model override in translation", %{bypass: bypass} do

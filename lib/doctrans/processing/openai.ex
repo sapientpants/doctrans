@@ -97,14 +97,8 @@ defmodule Doctrans.Processing.OpenAI do
     url = api_url("/v1/chat/completions")
     key = api_key()
 
-    headers =
-      case key do
-        nil -> []
-        k -> [{"authorization", "Bearer #{k}"}]
-      end
-
     Logger.debug(
-      "OpenAI request: url=#{url}, headers=#{inspect(headers)}, body_keys=#{inspect(Map.keys(request_body))}"
+      "OpenAI request: url=#{url}, auth=#{if key, do: "<set>", else: "<none>"}, body_keys=#{inspect(Map.keys(request_body))}"
     )
 
     post_chat_completion(request_body, opts)
@@ -438,12 +432,17 @@ defmodule Doctrans.Processing.OpenAI do
       max_tokens: max_tokens
     }
 
-    # Only send enable_thinking when it's false (default is true / not sent)
+    # Only send the thinking toggle when it's false (models default to
+    # thinking on). Qwen3.x chat templates applied by oMLX only suppress
+    # reasoning when `enable_thinking` is passed as a *chat template* kwarg;
+    # a top-level request field is not part of the OpenAI schema and is
+    # silently dropped by the server, so it must go inside
+    # `chat_template_kwargs` for the template to see it.
     body =
       if think do
         base
       else
-        Map.put(base, "enable_thinking", false)
+        Map.put(base, :chat_template_kwargs, %{"enable_thinking" => false})
       end
 
     if stream do
