@@ -503,10 +503,7 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def terminate(_reason, socket) do
-    if connected?(socket) do
-      Phoenix.PubSub.unsubscribe(Doctrans.PubSub, "document:#{socket.assigns.document.id}")
-    end
-
+    if connected?(socket), do: Documents.unsubscribe_document(socket.assigns.document.id)
     :ok
   end
 

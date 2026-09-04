@@ -303,6 +303,10 @@ defmodule Doctrans.Documents do
     Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document_id}")
   end
 
+  def unsubscribe_document(document_id) do
+    Phoenix.PubSub.unsubscribe(Doctrans.PubSub, "document:#{document_id}")
+  end
+
   @doc """
   Broadcasts a document update event.
   """
