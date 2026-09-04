@@ -83,13 +83,15 @@ defmodule Doctrans.Documents do
         query =
           from(p in Page,
             where: p.document_id in ^document_ids,
-            # Only the fields needed for progress; the rest are nil
+            # Only the fields needed for progress + the first-page thumbnail;
+            # the heavy markdown fields stay nil
             select: %Page{
               id: p.id,
               document_id: p.document_id,
               page_number: p.page_number,
               extraction_status: p.extraction_status,
-              translation_status: p.translation_status
+              translation_status: p.translation_status,
+              image_path: p.image_path
             },
             order_by: [p.document_id, p.page_number]
           )
