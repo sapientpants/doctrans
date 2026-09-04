@@ -200,11 +200,14 @@ defmodule Doctrans.Documents do
     if File.exists?(document_dir) do
       Logger.info("Deleting document files at #{document_dir}")
 
-      try do
-        File.rm_rf(document_dir)
-      rescue
-        e ->
-          Logger.error("Failed to delete document files at #{document_dir}: #{inspect(e)}")
+      # Best-effort: a failure here must not prevent the database row from
+      # being removed.
+      case File.rm_rf(document_dir) do
+        {:ok, _files} ->
+          :ok
+
+        {:error, reason, _path} ->
+          Logger.error("Failed to delete document files at #{document_dir}: #{inspect(reason)}")
       end
     end
 
@@ -334,13 +337,16 @@ defmodule Doctrans.Documents do
     )
 
     # Broadcast to specific document topic (for document viewer)
-    Phoenix.PubSub.broadcast(
-      Doctrans.PubSub,
-      "document:#{page.document_id}",
-      {:page_updated, page}
-    )
+    _ =
+      Phoenix.PubSub.broadcast(
+        Doctrans.PubSub,
+        "document:#{page.document_id}",
+        {:page_updated, page}
+      )
 
     # Also broadcast to general documents topic (for dashboard progress)
-    Phoenix.PubSub.broadcast(Doctrans.PubSub, "documents", {:page_updated, page})
+    _ = Phoenix.PubSub.broadcast(Doctrans.PubSub, "documents", {:page_updated, page})
+
+    :ok
   end
 end

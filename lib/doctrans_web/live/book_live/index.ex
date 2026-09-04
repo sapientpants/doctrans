@@ -237,7 +237,10 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   defp upload_documents_with_validated_language(socket, target_language) do
     uploaded_files =
-      consume_uploaded_entries(socket, :document, fn %{path: path}, entry ->
+      consume_uploaded_entries(socket, :document, fn meta, entry ->
+        # `meta` is an opaque map from LiveView; coerce the path to a string
+        # so the type stays concrete for downstream File calls.
+        path = to_string(Map.get(meta, :path, ""))
         consume_upload_entry(path, entry)
       end)
 
@@ -250,6 +253,8 @@ defmodule DoctransWeb.DocumentLive.Index do
     handle_upload_results(socket, valid_files, rejected, target_language)
   end
 
+  # The callback returns the per-file result; callers pattern match on it.
+  @spec consume_upload_entry(binary(), Phoenix.LiveView.UploadEntry.t()) :: {:ok, term()}
   defp consume_upload_entry(path, entry) do
     extension = entry.client_name |> Path.extname() |> String.downcase()
     max_file_size = max_file_size()
@@ -270,13 +275,18 @@ defmodule DoctransWeb.DocumentLive.Index do
     end
   end
 
+  @spec max_file_size() :: pos_integer()
   defp max_file_size do
-    Application.get_env(:doctrans, :uploads, [])[:max_file_size] || 100_000_000
+    size = Application.get_env(:doctrans, :uploads, [])[:max_file_size]
+    if is_integer(size) and size > 0, do: size, else: 100_000_000
   end
 
   # The client-side allow_upload size limit is not a security boundary;
   # verify the actual size of the file on disk before accepting it.
+  @spec validate_disk_size(binary(), pos_integer()) :: :ok | {:error, String.t()}
   defp validate_disk_size(path, max_size) do
+    path = to_string(path)
+
     case File.stat(path, size: true) do
       {:ok, %{size: size}} when size <= max_size ->
         :ok
@@ -351,8 +361,8 @@ defmodule DoctransWeb.DocumentLive.Index do
     case Documents.create_document(attrs) do
       {:ok, document} ->
         Logger.debug("Dashboard now tracking new document:#{document.id}")
-        subscribe_to_document_topic(document.id)
-        Worker.process_document(document.id, pdf_path)
+        _ = subscribe_to_document_topic(document.id)
+        _ = Worker.process_document(document.id, pdf_path)
 
       {:error, changeset} ->
         Logger.error("Failed to create document: #{inspect(changeset)}")
