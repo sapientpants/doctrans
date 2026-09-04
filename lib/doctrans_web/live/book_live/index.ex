@@ -235,6 +235,29 @@ defmodule DoctransWeb.DocumentLive.Index do
     end
   end
 
+  # --- Document deletion -----------------------------------------------------
+
+  @impl true
+  def handle_event("delete_document", %{"id" => id}, socket) do
+    document = Documents.get_document!(id)
+
+    # Cancel any in-progress processing
+    Worker.cancel_document(document.id)
+
+    case Documents.delete_document(document) do
+      {:ok, _} ->
+        socket =
+          socket
+          |> put_flash(:info, gettext("Document deleted successfully"))
+          |> refresh_list()
+
+        {:noreply, socket}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
+    end
+  end
+
   defp upload_documents_with_validated_language(socket, target_language) do
     uploaded_files =
       consume_uploaded_entries(socket, :document, fn meta, entry ->
@@ -367,29 +390,6 @@ defmodule DoctransWeb.DocumentLive.Index do
       {:error, changeset} ->
         Logger.error("Failed to create document: #{inspect(changeset)}")
         File.rm(pdf_path)
-    end
-  end
-
-  # --- Document deletion -----------------------------------------------------
-
-  @impl true
-  def handle_event("delete_document", %{"id" => id}, socket) do
-    document = Documents.get_document!(id)
-
-    # Cancel any in-progress processing
-    Worker.cancel_document(document.id)
-
-    case Documents.delete_document(document) do
-      {:ok, _} ->
-        socket =
-          socket
-          |> put_flash(:info, gettext("Document deleted successfully"))
-          |> refresh_list()
-
-        {:noreply, socket}
-
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
     end
   end
 
