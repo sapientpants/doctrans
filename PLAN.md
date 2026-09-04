@@ -6,32 +6,37 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ---
 
+> **Scope note:** Doctrans is a **local, single-user app** — authentication is **not
+> required** (see `AGENTS.md`). Items that previously assumed an exposed, shared
+> deployment (auth pipeline, per-request upload authorization) are reframed as
+> "bind to loopback by default / firewall the port" deployment guidance instead.
+
 ## P0 — Security
 
-### 1. No authentication in front of a "privacy-first" app
+### 1. Deployment exposure: endpoint binds all interfaces with no auth
 
-- **Problem:** The app is a single-user document vault, but the endpoint has **no auth
-  whatsoever**, and in production it binds `{0,0,0,0,0,0,0,0}` with a `:cookie` session
-  that is signed (readable) but not encrypted. Anyone who can reach the port can upload,
-  read, chat with, and delete all documents, and can browse page images under `/uploads`.
-- **Affected:** `lib/doctrans_web/endpoint.ex`, `lib/doctrans_web/router.ex`, `config/runtime.exs`.
+- **Problem:** No authentication is needed for a local app, but the production config
+  binds `{0,0,0,0,0,0,0,0}` in `config/runtime.exs`, so the default release is reachable
+  from the whole LAN. Since there is no auth, anyone on the network can upload, read,
+  chat with, and delete documents, and browse page images under `/uploads`. The session
+  cookie is also signed (readable) but not encrypted.
+- **Affected:** `config/runtime.exs`, `config/prod.exs`, `docker-compose.yml`.
 - **Fix:**
-  - Add an auth pipeline (at minimum `Plug.BasicAuth` or a bearer-token plug driven by an
-    env var like `DOCTRANS_AUTH_TOKEN`); require it for the entire `:browser` scope,
-    including the `/live` websocket `connect_info` and the `/uploads` static plug
-    (wrap uploads in a router-forwarded plug if keeping `Plug.Static` is easier).
+  - Default the prod bind address to loopback (`127.0.0.1`) and make all-interface binding
+    opt-in via an env var (e.g. `PHX_BIND_IP=0.0.0.0`), documented as "exposing to a
+    trusted LAN at your own risk".
+  - Do the same for the Docker setup: publish the port to `127.0.0.1` by default.
   - Add `:encryption_salt` to `@session_options` so the session cookie is encrypted, not
-    just signed.
-  - Document that deployment should firewall/LAN-restrict the port as a second layer.
+    just signed (defense in depth even for local use).
 
 ### 2. LibreOffice conversion can leak zombie processes (DoS vector)
 
 - **Problem:** `DocumentConverter.run_conversion/2` runs `System.cmd("soffice", ...)` in a
   `Task` and on timeout calls `Task.yield(task, timeout) || Task.shutdown(task)`.
   Killing the *task* does not reliably kill the *soffice OS child process* — each timed-out
-  upload can leave a headless soffice running, consuming CPU/IO. An attacker with upload
-  access (see item 1) can exhaust the machine by repeatedly triggering slow conversions.
-  Additionally, `get_soffice_path/0` falls through to the bare string `"soffice"` even when
+  upload can leave a headless soffice running, consuming CPU/IO (no auth is needed for a
+  local app, but the same machine — including other local users or a rogue document —
+  can exhaust it). Additionally, `get_soffice_path/0` falls through to the bare string `"soffice"` even when
   no executable exists, and `available?/0` / `get_soffice_path/0` duplicate path logic.
 - **Affected:** `lib/doctrans/processing/document_converter.ex`.
 - **Fix:**
@@ -43,6 +48,8 @@ by priority; each includes the problem, the affected code, and the proposed fix.
   - Pass an isolated `-env:UserInstallation=/tmp/...` profile to avoid profile-lock races
     between concurrent conversions and the user's running LibreOffice instance.
   - Add a test covering the timeout path asserting the child is reaped.
+  - (Even without auth, a user can trigger this via their own uploads, so the reaping
+    fix stands on its own.)
 
 ### 3. `.env` loader runs in every environment and *wins* over real env vars
 
@@ -55,15 +62,15 @@ by priority; each includes the problem, the affected code, and the proposed fix.
   flip precedence so real env vars win over the file. Keep the boot-time re-application of
   `:openai` / `:embedding` config, but only in dev.
 
-### 4. Unauthenticated static serving of document pages
+### 4. Static serving of document pages
 
-- **Problem:** `Plug.Static` serves `priv/static/uploads` (extracted page images of private
-  documents) to any client, and `image_path` values are predictable per document UUID7.
-  UUID7s are hard to guess, but combined with item 1 this still leaks documents to anyone
-  who can enumerate/reach the app.
-- **Fix:** Solve via item 1 (auth on uploads path), plus set `cache_control` metadata so
-  page images aren't aggressively cached/proxied, and consider serving images through the
-  LiveView with per-request authorization instead of a static plug.
+- **Problem:** `Plug.Static` serves `priv/static/uploads` (extracted page images of
+  private documents) to any client. UUID7 document ids are hard to guess, which is
+  acceptable for a local app, but the page *paths* are visible in DOM `<img>` tags and
+  browser history once a document is opened.
+- **Fix:** No auth needed (see scope note) — cover this with item 1's loopback-by-default
+  binding, and add `cache_control` metadata so page images aren't aggressively cached by
+  shared proxies.
 
 ### 5. Unbounded growth of accumulated chat retrieval context
 
@@ -201,7 +208,8 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 - **Problem:** `.sobelow-conf` ignores *all* file-traversal findings because "paths are
   constructed from trusted sources". Upload filenames are user-supplied (even after
-  `sanitize_filename_string`, traversal is a live attack class); blanket ignores rot.
+  `sanitize_filename_string`); even in a local app a malicious document can come from any
+  user of the machine, so traversal remains a live bug class and blanket ignores rot.
 - **Fix:** Replace the blanket ignore with targeted `ignore: [{:manual, ...}]` per call
   site after auditing each `File.cp`/`Path.join` involving user input; add a test that
   adversarial client filenames (`../../etc/x`, backslashes, nulls, unicode) land inside
@@ -252,7 +260,7 @@ Current suite is solid (components, LiveViews, processing, search, chat), but th
 - `Documents.Sweeper` grace-period behavior with a file being *concurrently served*.
 - `Worker.cancel_document` JSON-fragment queries (Postgres only — needs `@tag :postgres` or
   a test doubles path).
-- Security (P0): auth plug behavior + encrypted session.
+- Security (P0): encrypted session cookie (`:encryption_salt`).
 
 ### 22. Coverage gate exists (80%) but `mix cover` isn't in precommit/CI
 
@@ -267,10 +275,10 @@ Current suite is solid (components, LiveViews, processing, search, chat), but th
 |----|----------|
 | 1  | #7 rename `book_live/` → `document_live/` (pure move, low risk) |
 | 2  | #8 `Doctrans.Config` accessor module + replace magic strings |
-| 3  | #1 auth pipeline + session encryption + uploads auth |
+| 3  | #1 loopback-by-default bind + #3 env-loader prod gate + #4 upload serving hardening |
 | 4  | #2 soffice process reaping + #17 targeted sobelow ignores |
 | 5  | #5 chat context cap + #20 conversation persistence |
-| 6  | #3 env-loader prod gate + #4 upload serving hardening |
+| 6  | #6 i18n'd validation errors |
 | 7  | #13 error-atom convention + #6 i18n'd validation errors |
 | 8  | #10 split `Documents` + #9 split `Show` (two refactor PRs if large) |
 | 9  | #14 404 handling + #15 dialyzer in precommit/CI + #16 specs |
@@ -278,4 +286,5 @@ Current suite is solid (components, LiveViews, processing, search, chat), but th
 | 11 | #21/#22 test additions throughout (can land alongside 3–5) |
 
 Each PR is independently shippable; items marked P0 (1–6) are the priority if scope is
-limited.
+limited. (An auth pipeline was deliberately dropped: Doctrans is a local app — see
+`AGENTS.md`.)
