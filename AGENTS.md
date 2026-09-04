@@ -2,6 +2,9 @@ This is a web application written using the Phoenix web framework.
 
 ## Project guidelines
 
+- Doctrans is a **local, single-user app** — **do not add authentication/authorization**
+  (no auth plugs, login flows, or per-request access checks). Exposure is controlled at the
+  deployment level instead (loopback bind, LAN firewalling).
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid**
   `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP
