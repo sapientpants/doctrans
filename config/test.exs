@@ -19,6 +19,7 @@ config :doctrans, Doctrans.Repo,
 config :doctrans, DoctransWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "yQE0h1z67LKlhGkLxGWPowtcNLMp88M/P6ND2fngrV0or4J1rFf2nXFiR4ETm7GM",
+  live_view: [signing_salt: "P9wT4yH6jN2mV8kD0qL3xR7zB5cF1aG4"],
   server: false
 
 # In test we don't send emails

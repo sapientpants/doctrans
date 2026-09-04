@@ -29,6 +29,7 @@ config :doctrans, DoctransWeb.Endpoint,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "GYS0LjJXZ97Vk+1tcnCCkwCPuhjrtN19jjj+BykXjcyKpvk6d+jnv3uqJ8bXZ02v",
+  live_view: [signing_salt: "LkQv8tR2wXz0mB5nY6uP3fA7dJ1cE9gH"],
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:doctrans, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:doctrans, ~w(--watch)]}

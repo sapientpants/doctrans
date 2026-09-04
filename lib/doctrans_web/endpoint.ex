@@ -13,6 +13,16 @@ defmodule DoctransWeb.Endpoint do
     http_only: true
   ]
 
+  # Hard server-side limit for multipart bodies: the upload UI allows up to
+  # 10 files of `:max_file_size` each, so allow headroom above that.
+  # (`:uploads` is static config, never overridden at runtime.)
+  @multipart_length fn ->
+    max_file_size =
+      Application.compile_env(:doctrans, :uploads, [])[:max_file_size] || 100_000_000
+
+    10 * max_file_size + 1_000_000
+  end
+
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
@@ -28,7 +38,9 @@ defmodule DoctransWeb.Endpoint do
     gzip: not code_reloading?,
     only: DoctransWeb.static_paths()
 
-  # Serve uploaded files from priv/static/uploads
+  # Serve uploaded page images from priv/static/uploads.
+  # Original source files are deleted after extraction, so only derived
+  # page images are ever served from this directory.
   plug Plug.Static,
     at: "/uploads",
     from: {:doctrans, "priv/static/uploads"},
@@ -52,6 +64,7 @@ defmodule DoctransWeb.Endpoint do
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
+    length: @multipart_length.(),
     pass: ["*/*"],
     json_decoder: Phoenix.json_library()
 

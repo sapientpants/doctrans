@@ -3,11 +3,11 @@ defmodule Doctrans.EnvLoader do
   Loads variables from a `.env` file and applies the OpenAI/OMLX ones to
   the application config.
 
-  Real environment variables always win: a variable that is already present
-  in the environment is never overwritten by the file (standard dotenv
-  convention). The config defaults in `config/config.exs` are resolved from
-  the environment at boot, so this ordering keeps a stale `.env` from
-  clobbering variables set by the deploy environment.
+  `.env` file values always win over inherited environment variables
+  (the checked-in file is the source of truth for local development).
+  The config defaults in `config/config.exs` are resolved from the
+  environment at boot, and this loader re-applies the `OPENAI_HOST` /
+  `OPENAI_API_KEY` values it loads to the application config at startup.
 
   The same `OPENAI_HOST` / `OPENAI_API_KEY` pair is applied to both the
   `:openai` and `:embedding` config keys, which is fine for the single OMLX

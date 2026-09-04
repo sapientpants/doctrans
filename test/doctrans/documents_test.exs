@@ -57,6 +57,7 @@ defmodule Doctrans.DocumentsTest do
 
     test "calculates correct progress for completed pages" do
       doc = document_with_pages_fixture(%{}, 2)
+
       [page1 | _] = doc.pages
 
       # Complete extraction and translation for first page
@@ -75,6 +76,21 @@ defmodule Doctrans.DocumentsTest do
       [result] = Documents.list_documents_with_progress()
       # 2 steps completed out of 4 total (2 pages * 2 steps each)
       assert result.progress == 50.0
+    end
+
+    test "includes image_path on pages for dashboard thumbnails" do
+      doc = document_with_pages_fixture(%{}, 2)
+      [page1 | _] = doc.pages
+
+      [result] = Documents.list_documents_with_progress()
+
+      # The lightweight progress query still carries the first page's image
+      # path so the document card can render its thumbnail.
+      first_page = Enum.find(result.pages, &(&1.page_number == 1))
+      assert first_page.image_path == page1.image_path
+
+      # The heavy markdown fields stay unloaded.
+      assert Enum.all?(result.pages, &is_nil(&1.original_markdown))
     end
   end
 

@@ -502,6 +502,12 @@ defmodule DoctransWeb.DocumentLive.Show do
   # PubSub Handlers
 
   @impl true
+  def terminate(_reason, socket) do
+    if connected?(socket), do: Documents.unsubscribe_document(socket.assigns.document.id)
+    :ok
+  end
+
+  @impl true
   def handle_info(:fetch_available_models, socket) do
     {models, error} =
       case OpenAI.list_models() do
@@ -525,24 +531,22 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def handle_info({:page_updated, page}, socket) do
-    # Update the current page if it's the one that was updated
-    socket =
-      if socket.assigns.current_page && socket.assigns.current_page.id == page.id do
-        assign(socket, :current_page, page)
-      else
-        socket
-      end
+    # Ignore updates for other documents (the socket is subscribed to one).
+    if page.document_id != socket.assigns.document.id do
+      {:noreply, socket}
+    else
+      # Update the current page in place. No re-query of the document and its
+      # full page list is needed; document-level fields (title, status,
+      # total_pages) are kept fresh via :document_updated broadcasts.
+      socket =
+        if socket.assigns.current_page && socket.assigns.current_page.id == page.id do
+          assign(socket, :current_page, page)
+        else
+          socket
+        end
 
-    # Also refresh the document to update progress
-    document = Documents.get_document_with_pages!(socket.assigns.document.id)
-
-    # Also refresh embeddings status if chat is open
-    socket =
-      socket
-      |> assign(:document, document)
-      |> maybe_refresh_embeddings_status()
-
-    {:noreply, socket}
+      {:noreply, maybe_refresh_embeddings_status(socket)}
+    end
   end
 
   # Chat streaming/progress events from the agent pipeline

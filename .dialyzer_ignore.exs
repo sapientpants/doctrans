@@ -32,6 +32,15 @@
   {"lib/doctrans/validation.ex", :pattern_match},
   {"lib/doctrans/validation.ex", :pattern_match_cov},
 
+  # Upload handling: the LiveView upload callback is untyped, so the temp file
+  # path is inferred as binary(). Elixir 1.20 narrows File.stat/1 to String.t(),
+  # which dialyzer cannot verify through to_string/1. LiveView guarantees the
+  # path is a valid string at runtime.
+  {"lib/doctrans_web/live/book_live/index.ex", :call},
+  {"lib/doctrans_web/live/book_live/index.ex", :no_return},
+  {"lib/doctrans_web/live/book_live/index.ex", :unmatched_return},
+  {"lib/doctrans_web/live/book_live/index.ex", :invalid_contract},
+
   # Ecto Repo.insert/1 returns changeset on error — dialyzer doesn't track the type
   {"lib/doctrans/documents.ex", :pattern_match},
 

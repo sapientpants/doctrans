@@ -6,6 +6,10 @@ This is a web application written using the Phoenix web framework.
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid**
   `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP
   client for Phoenix apps
+- **NEVER change the git remote URL** (e.g. swapping between `git@github.com:...` SSH and
+  `https://github.com/...`). If a git operation such as `git push` fails with an access or
+  connection error, **stop and wait for the user to fix it** — do not work around it by
+  switching protocols, adding one-off remote URLs, or bypassing credentials
 
 ### Phoenix v1.8 guidelines
 

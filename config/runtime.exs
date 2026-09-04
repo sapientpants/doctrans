@@ -65,7 +65,8 @@ if config_env() == :prod do
       ip: {0, 0, 0, 0, 0, 0, 0, 0},
       port: port
     ],
-    secret_key_base: secret_key_base
+    secret_key_base: secret_key_base,
+    live_view: [signing_salt: secret_key_base]
 
   # ## SSL Support
   #

@@ -36,8 +36,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
       <img
         src={"/uploads/#{@page.image_path}"}
         alt="Page image"
-        class="shadow-lg rounded"
-        style={"transform: scale(#{@zoom_level / 100}); transform-origin: top center;"}
+        class={"shadow-lg rounded transition-transform zoom-#{@zoom_level}"}
       />
     </div>
     <div
