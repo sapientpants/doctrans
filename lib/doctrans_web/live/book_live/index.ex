@@ -10,34 +10,25 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   import DoctransWeb.DocumentLive.Components
 
+  # How long to wait after a page-level update before refreshing the list.
+  # Page updates arrive very frequently (one per page, per document); this
+  # coalesces bursts of messages into a single re-query.
+  @refresh_coalesce_ms 1_500
+
   @impl true
   def mount(_params, _session, socket) do
-    documents = Documents.list_documents_with_progress()
     defaults = Application.get_env(:doctrans, :defaults, [])
-
-    _ =
-      if connected?(socket) do
-        # Subscribe to the general documents topic
-        Logger.info("Dashboard subscribing to documents topic")
-        _ = Phoenix.PubSub.subscribe(Doctrans.PubSub, "documents")
-
-        # Also subscribe to each individual document's topic for progress updates
-        for doc <- documents do
-          Logger.info("Dashboard subscribing to document:#{doc.id}")
-          _ = Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{doc.id}")
-        end
-      else
-        :ok
-      end
 
     socket =
       socket
-      |> assign(:documents, documents)
+      |> assign(:document_topics, [])
+      |> assign(:refresh_scheduled?, false)
       |> assign(:show_upload_modal, false)
       |> assign(:target_language, defaults[:target_language] || "en")
-      # Sort state
       |> assign(:sort_by, :inserted_at)
       |> assign(:sort_dir, :desc)
+      |> assign(:documents_count, 0)
+      |> stream(:documents, [])
       |> allow_upload(:document,
         accept: ~w(.pdf .docx .doc .odt .rtf),
         max_entries: 10,
@@ -46,11 +37,23 @@ defmodule DoctransWeb.DocumentLive.Index do
         max_file_size: max_file_size()
       )
 
-    {:ok, socket}
+    if connected?(socket) do
+      subscribe_to_documents_topics(socket.assigns.document_topics)
+    end
+
+    {:ok, refresh_list(socket)}
   end
 
   @impl true
   def handle_params(_params, _uri, socket), do: {:noreply, socket}
+
+  @impl true
+  def terminate(_reason, socket) do
+    # Unsubscribe from the pubsub topics we registered for, so the client
+    # process doesn't accumulate subscriptions across visits.
+    unsubscribe_from_documents_topics(socket.assigns.document_topics)
+    :ok
+  end
 
   @impl true
   def render(assigns) do
@@ -145,21 +148,27 @@ defmodule DoctransWeb.DocumentLive.Index do
           </div>
         </div>
 
-        <div :if={@documents == []} class="text-center py-16">
-          <.icon name="hero-document-text" class="w-16 h-16 mx-auto text-base-content/30" />
-          <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No documents yet")}</h3>
-          <p class="mt-2 text-base-content/70">
-            {gettext(
-              "Upload a document to get started. All processing happens locally on your device."
-            )}
-          </p>
-        </div>
-
         <div
-          :if={@documents != []}
+          id="documents"
+          phx-update="stream"
           class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6"
         >
-          <.document_card :for={document <- @documents} document={document} />
+          <div
+            :if={@documents_count == 0}
+            id="documents-empty"
+            class="text-center py-16 col-span-full"
+          >
+            <.icon name="hero-document-text" class="w-16 h-16 mx-auto text-base-content/30" />
+            <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No documents yet")}</h3>
+            <p class="mt-2 text-base-content/70">
+              {gettext(
+                "Upload a document to get started. All processing happens locally on your device."
+              )}
+            </p>
+          </div>
+          <div :for={{id, document} <- @streams.documents} id={id}>
+            <.document_card document={document} />
+          </div>
         </div>
       </div>
 
@@ -171,6 +180,8 @@ defmodule DoctransWeb.DocumentLive.Index do
     </Layouts.app>
     """
   end
+
+  # --- Upload modal ----------------------------------------------------------
 
   @impl true
   def handle_event("show_upload_modal", _params, socket),
@@ -190,6 +201,8 @@ defmodule DoctransWeb.DocumentLive.Index do
   def handle_event("cancel_upload", %{"ref" => ref}, socket),
     do: {:noreply, cancel_upload(socket, :document, ref)}
 
+  # --- Sorting ---------------------------------------------------------------
+
   @allowed_sort_fields ~w(inserted_at title)
   @allowed_sort_dirs ~w(asc desc)
 
@@ -198,17 +211,15 @@ defmodule DoctransWeb.DocumentLive.Index do
       when field in @allowed_sort_fields and dir in @allowed_sort_dirs do
     sort_by = String.to_existing_atom(field)
     sort_dir = String.to_existing_atom(dir)
-    documents = Documents.list_documents_with_progress(sort_by: sort_by, sort_dir: sort_dir)
 
-    {:noreply,
-     socket
-     |> assign(:sort_by, sort_by)
-     |> assign(:sort_dir, sort_dir)
-     |> assign(:documents, documents)}
+    socket = assign(socket, :sort_by, sort_by) |> assign(:sort_dir, sort_dir)
+    {:noreply, refresh_list(socket)}
   end
 
   @impl true
   def handle_event("sort", _params, socket), do: {:noreply, socket}
+
+  # --- Document upload -------------------------------------------------------
 
   @impl true
   def handle_event("upload_document", params, socket) do
@@ -224,28 +235,6 @@ defmodule DoctransWeb.DocumentLive.Index do
     end
   end
 
-  @impl true
-  def handle_event("delete_document", %{"id" => id}, socket) do
-    document = Documents.get_document!(id)
-
-    # Cancel any in-progress processing
-    Worker.cancel_document(document.id)
-
-    case Documents.delete_document(document) do
-      {:ok, _} ->
-        socket =
-          socket
-          |> assign(:documents, Documents.list_documents_with_progress())
-          |> put_flash(:info, gettext("Document deleted successfully"))
-
-        {:noreply, socket}
-
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
-    end
-  end
-
-  # Private function to handle document upload with validated language
   defp upload_documents_with_validated_language(socket, target_language) do
     uploaded_files =
       consume_uploaded_entries(socket, :document, fn %{path: path}, entry ->
@@ -324,8 +313,8 @@ defmodule DoctransWeb.DocumentLive.Index do
     socket =
       socket
       |> assign(:show_upload_modal, false)
-      |> assign(:documents, Documents.list_documents_with_progress())
       |> put_flash(:info, message)
+      |> refresh_list()
 
     socket =
       if rejected != [] do
@@ -361,8 +350,8 @@ defmodule DoctransWeb.DocumentLive.Index do
 
     case Documents.create_document(attrs) do
       {:ok, document} ->
-        Logger.info("Subscribing to new document:#{document.id}")
-        _ = Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document.id}")
+        Logger.debug("Dashboard now tracking new document:#{document.id}")
+        subscribe_to_document_topic(document.id)
         Worker.process_document(document.id, pdf_path)
 
       {:error, changeset} ->
@@ -371,24 +360,96 @@ defmodule DoctransWeb.DocumentLive.Index do
     end
   end
 
+  # --- Document deletion -----------------------------------------------------
+
+  @impl true
+  def handle_event("delete_document", %{"id" => id}, socket) do
+    document = Documents.get_document!(id)
+
+    # Cancel any in-progress processing
+    Worker.cancel_document(document.id)
+
+    case Documents.delete_document(document) do
+      {:ok, _} ->
+        socket =
+          socket
+          |> put_flash(:info, gettext("Document deleted successfully"))
+          |> refresh_list()
+
+        {:noreply, socket}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
+    end
+  end
+
+  # --- PubSub: progress updates ----------------------------------------------
+
   @impl true
   def handle_info({:document_updated, document}, socket) do
-    Logger.info("Dashboard received document_updated for #{document.id}")
-    {:noreply, assign(socket, :documents, Documents.list_documents_with_progress())}
+    Logger.debug("Dashboard received document_updated for #{document.id}")
+    {:noreply, refresh_list(socket)}
   end
 
   @impl true
-  def handle_info({:page_updated, page}, socket) do
-    Logger.info(
-      "Dashboard received page_updated for page #{page.page_number} of document #{page.document_id}"
-    )
+  def handle_info({:page_updated, _page}, socket) do
+    # Coalesce bursts of them into a single list refresh.
+    if socket.assigns.refresh_scheduled? do
+      {:noreply, socket}
+    else
+      socket = assign(socket, :refresh_scheduled?, true)
+      Process.send_after(self(), :dashboard_refresh, @refresh_coalesce_ms)
+      {:noreply, refresh_list(socket)}
+    end
+  end
 
-    {:noreply, assign(socket, :documents, Documents.list_documents_with_progress())}
+  @impl true
+  def handle_info(:dashboard_refresh, socket) do
+    {:noreply, assign(socket, :refresh_scheduled?, false)}
   end
 
   @impl true
   def handle_info(msg, socket) do
     Logger.warning("Dashboard received unknown message: #{inspect(msg)}")
     {:noreply, socket}
+  end
+
+  # --- List refresh ----------------------------------------------------------
+
+  # Re-queries the document list, resets the stream, and keeps the socket
+  # subscribed to the (global) document topics it needs to receive updates.
+  defp refresh_list(socket) do
+    documents =
+      Documents.list_documents_with_progress(
+        sort_by: socket.assigns.sort_by,
+        sort_dir: socket.assigns.sort_dir
+      )
+
+    topics = Enum.map(documents, &"document:#{&1.id}")
+
+    if connected?(socket) do
+      subscribe_to_documents_topics(topics)
+    end
+
+    socket
+    |> assign(:document_topics, topics)
+    |> assign(:documents_count, length(documents))
+    |> stream(:documents, documents, reset: true)
+  end
+
+  defp subscribe_to_documents_topics(topics) do
+    Enum.each(topics, fn topic ->
+      Phoenix.PubSub.subscribe(Doctrans.PubSub, topic)
+    end)
+  end
+
+  defp unsubscribe_from_documents_topics(topics) do
+    Enum.each(topics, fn topic ->
+      Phoenix.PubSub.unsubscribe(Doctrans.PubSub, topic)
+    end)
+  end
+
+  defp subscribe_to_document_topic(document_id) do
+    Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document_id}")
   end
 end

@@ -56,12 +56,56 @@ defmodule Doctrans.Documents do
   @doc """
   Returns all documents with progress pre-calculated.
   Useful for dashboard views that need to display progress.
+
+  Only the page fields required for progress are loaded (in one query),
+  avoiding loading every page's markdown content into memory. Documents
+  with no pages yet are treated as 0% progress.
   """
   def list_documents_with_progress(opts \\ []) do
-    list_documents(opts)
-    |> Enum.map(fn doc ->
-      progress = calculate_progress_preloaded(doc)
-      Map.put(doc, :progress, progress)
+    sort_by = Keyword.get(opts, :sort_by, :inserted_at)
+    sort_dir = Keyword.get(opts, :sort_dir, :desc)
+
+    order = [{sort_dir, sort_by}]
+
+    documents =
+      Document
+      |> order_by(^order)
+      |> Repo.all()
+
+    document_ids = Enum.map(documents, & &1.id)
+
+    # Load only the page fields needed for progress, in a single query,
+    # instead of preloading every page's full markdown content.
+    pages =
+      if document_ids == [] do
+        []
+      else
+        query =
+          from(p in Page,
+            where: p.document_id in ^document_ids,
+            # Only the fields needed for progress; the rest are nil
+            select: %Page{
+              id: p.id,
+              document_id: p.document_id,
+              page_number: p.page_number,
+              extraction_status: p.extraction_status,
+              translation_status: p.translation_status
+            },
+            order_by: [p.document_id, p.page_number]
+          )
+
+        Repo.all(query)
+      end
+
+    pages_by_document = Enum.group_by(pages, & &1.document_id)
+
+    Enum.map(documents, fn document ->
+      pages = Map.get(pages_by_document, document.id, [])
+      progress = calculate_progress_preloaded(%{document | pages: pages})
+
+      document
+      |> Map.put(:pages, pages)
+      |> Map.put(:progress, progress)
     end)
   end
 
@@ -149,16 +193,20 @@ defmodule Doctrans.Documents do
   3. Delete the document record
   """
   def delete_document(%Document{} = document) do
-    # Delete files first
+    # Delete files first (best-effort; a failure here must not prevent the
+    # database row from being removed)
     document_dir = document_upload_dir(document.id)
 
-    _ =
-      if File.exists?(document_dir) do
-        Logger.info("Deleting document files at #{document_dir}")
-        File.rm_rf!(document_dir)
-      else
-        :ok
+    if File.exists?(document_dir) do
+      Logger.info("Deleting document files at #{document_dir}")
+
+      try do
+        File.rm_rf(document_dir)
+      rescue
+        e ->
+          Logger.error("Failed to delete document files at #{document_dir}: #{inspect(e)}")
       end
+    end
 
     # Delete from database (pages cascade automatically)
     Repo.delete(document)
@@ -277,23 +325,18 @@ defmodule Doctrans.Documents do
   Broadcasts a page update event.
   """
   def broadcast_page_update(%Page{} = page) do
-    Logger.info(
+    Logger.debug(
       "Broadcasting page_updated for page #{page.page_number} of document #{page.document_id}"
     )
 
     # Broadcast to specific document topic (for document viewer)
-    result1 =
-      Phoenix.PubSub.broadcast(
-        Doctrans.PubSub,
-        "document:#{page.document_id}",
-        {:page_updated, page}
-      )
+    Phoenix.PubSub.broadcast(
+      Doctrans.PubSub,
+      "document:#{page.document_id}",
+      {:page_updated, page}
+    )
 
     # Also broadcast to general documents topic (for dashboard progress)
-    result2 = Phoenix.PubSub.broadcast(Doctrans.PubSub, "documents", {:page_updated, page})
-
-    Logger.info(
-      "Broadcast results: document topic=#{inspect(result1)}, documents topic=#{inspect(result2)}"
-    )
+    Phoenix.PubSub.broadcast(Doctrans.PubSub, "documents", {:page_updated, page})
   end
 end
