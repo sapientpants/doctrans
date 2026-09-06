@@ -192,6 +192,7 @@ config :doctrans, :defaults,
 | `DATABASE_HOST` | `localhost` | PostgreSQL hostname (dev/test) |
 | `DATABASE_URL` | - | Full database URL (required in production) |
 | `PORT` | `4000` | Phoenix server port |
+| `PHX_BIND_IP` | `127.0.0.1` | Interface the production endpoint binds to (prod only). Doctrans has no authentication, so it defaults to loopback; set `PHX_BIND_IP=0.0.0.0` to expose it to a trusted LAN at your own risk |
 | `PHX_HOST` | `localhost` | Phoenix host for URL generation |
 | `SECRET_KEY_BASE` | - | Secret key for signing (required in production) |
 | `POOL_SIZE` | `10` | Database connection pool size |

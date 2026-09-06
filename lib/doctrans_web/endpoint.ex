@@ -1,13 +1,13 @@
 defmodule DoctransWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :doctrans
 
-  # The session will be stored in the cookie and signed,
-  # this means its contents can be read but not tampered with.
-  # Set :encryption_salt if you would also like to encrypt it.
+  # The session is stored in a cookie that is both signed and encrypted,
+  # so its contents cannot be read or tampered with.
   @session_options [
     store: :cookie,
     key: "_doctrans_key",
     signing_salt: "Qr5ZNHs0",
+    encryption_salt: "Zm5XkR8p",
     same_site: "Lax",
     secure: Application.compile_env(:doctrans, :env) == :prod,
     http_only: true

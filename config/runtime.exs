@@ -53,16 +53,22 @@ if config_env() == :prod do
   host = System.get_env("PHX_HOST") || "example.com"
   port = String.to_integer(System.get_env("PORT") || "4000")
 
+  # Doctrans is a local, single-user app with no authentication, so the
+  # endpoint defaults to binding on loopback only. Set PHX_BIND_IP to
+  # expose it to other interfaces, e.g. PHX_BIND_IP=0.0.0.0 to reach it
+  # from a trusted LAN (you do so at your own risk: there is no auth).
+  bind_ip = System.get_env("PHX_BIND_IP") || "127.0.0.1"
+
   config :doctrans, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :doctrans, DoctransWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
-      # Enable IPv6 and bind on all interfaces.
-      # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
+      # Bind on loopback by default (see PHX_BIND_IP above); exposing to a
+      # trusted LAN requires an explicit PHX_BIND_IP.
       # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
       # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-      ip: {0, 0, 0, 0, 0, 0, 0, 0},
+      ip: bind_ip,
       port: port
     ],
     secret_key_base: secret_key_base,
