@@ -320,18 +320,37 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       assert has_element?(view, "#upload-modal")
     end
 
-    test "delete document failure shows error flash", %{conn: conn} do
-      # Create and delete a document, then try to delete again
+    test "repeated deletes and invalid IDs are harmless", %{conn: conn} do
       doc = document_fixture(%{title: "Test Doc"})
+      other = document_fixture(%{title: "Keep Me"})
       {:ok, view, _html} = live(conn, ~p"/")
 
-      # Delete the document
       view
       |> element("button[phx-click='delete_document'][phx-value-id='#{doc.id}']")
       |> render_click()
 
-      # Verify document is deleted
-      refute has_element?(view, "h2", "Test Doc")
+      for id <- [doc.id, Uniq.UUID.uuid7(), "invalid"] do
+        render_click(view, "delete_document", %{"id" => id})
+        refute has_element?(view, "button[phx-click='delete_document'][phx-value-id='#{doc.id}']")
+
+        assert has_element?(
+                 view,
+                 "button[phx-click='delete_document'][phx-value-id='#{other.id}']"
+               )
+
+        refute has_element?(view, "#flash-error")
+      end
+    end
+
+    test "deleting an already removed document refreshes the stale card", %{conn: conn} do
+      doc = document_fixture()
+      {:ok, view, _html} = live(conn, ~p"/")
+      {:ok, _} = Doctrans.Documents.delete_document(doc)
+
+      selector = "button[phx-click='delete_document'][phx-value-id='#{doc.id}']"
+      view |> element(selector) |> render_click()
+      refute has_element?(view, selector)
+      refute has_element?(view, "#flash-error")
     end
 
     test "shows page count for document with zero pages", %{conn: conn} do
