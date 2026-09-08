@@ -100,7 +100,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       assert render(view) =~ "100%"
 
-      view |> element("button[phx-click='zoom_in']") |> render_click()
+      view |> element("#zoom-in") |> render_click()
 
       assert render(view) =~ "125%"
     end
@@ -111,7 +111,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       assert render(view) =~ "100%"
 
-      view |> element("button[phx-click='zoom_out']") |> render_click()
+      view |> element("#zoom-out") |> render_click()
 
       assert render(view) =~ "75%"
     end
@@ -122,12 +122,12 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       # Click zoom in 4 times (100 -> 125 -> 150 -> 175 -> 200)
       for _ <- 1..4 do
-        view |> element("button[phx-click='zoom_in']") |> render_click()
+        view |> element("#zoom-in") |> render_click()
       end
 
       assert render(view) =~ "200%"
       # Zoom in button should now be disabled
-      assert has_element?(view, "button[phx-click='zoom_in'][disabled]")
+      assert has_element?(view, "#zoom-in[disabled]")
     end
 
     test "zoom does not go below 50%", %{conn: conn} do
@@ -136,12 +136,12 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       # Click zoom out 2 times (100 -> 75 -> 50)
       for _ <- 1..2 do
-        view |> element("button[phx-click='zoom_out']") |> render_click()
+        view |> element("#zoom-out") |> render_click()
       end
 
       assert render(view) =~ "50%"
       # Zoom out button should now be disabled
-      assert has_element?(view, "button[phx-click='zoom_out'][disabled]")
+      assert has_element?(view, "#zoom-out[disabled]")
     end
 
     test "displays document status badge", %{conn: conn} do
