@@ -5,17 +5,11 @@ defmodule Doctrans.Processing.LlmProcessor do
   Performs markdown extraction and translation using an OpenAI-compatible API models.
   Each page is processed independently: first extraction, then translation.
 
-  ## I18n Note
-
-  This module runs in background GenServer processes (document processing pipeline),
-  not in the web request process. Since Gettext locales are process-specific, error
-  messages from this module will use the default locale, not the user's browser locale.
-  This is acceptable as these errors are primarily logged and displayed as system status.
+  Errors remain structured across background processes. The web layer translates
+  them using the viewing process's locale.
   """
 
   require Logger
-
-  use Gettext, backend: DoctransWeb.Gettext
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
@@ -53,7 +47,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   def process_page(page_id, cancelled_documents, opts \\ []) do
     case Documents.get_page(page_id) do
       nil ->
-        {:error, dgettext("errors", "Page not found")}
+        {:error, :page_not_found}
 
       page ->
         if MapSet.member?(cancelled_documents, page.document_id) do
@@ -209,11 +203,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
     Topics.broadcast_page_update(page)
 
-    {:error,
-     dgettext("errors", "Page %{page_number} extraction failed: %{reason}",
-       page_number: page.page_number,
-       reason: inspect(reason)
-     )}
+    {:error, {:page_extraction_failed, [page_number: page.page_number, reason: reason]}}
   end
 
   defp process_page_translation(page, retry_count, opts) do
@@ -323,10 +313,6 @@ defmodule Doctrans.Processing.LlmProcessor do
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "error"})
     Topics.broadcast_page_update(page)
 
-    {:error,
-     dgettext("errors", "Page %{page_number} translation failed: %{reason}",
-       page_number: page.page_number,
-       reason: inspect(reason)
-     )}
+    {:error, {:page_translation_failed, [page_number: page.page_number, reason: reason]}}
   end
 end

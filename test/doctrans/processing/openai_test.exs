@@ -8,7 +8,7 @@ defmodule Doctrans.Processing.OpenAITest do
       result = OpenAI.extract_markdown("/nonexistent/path/image.png")
 
       assert {:error, reason} = result
-      assert reason =~ "Could not read image"
+      assert {:image_unreadable, [reason: :enoent]} = reason
     end
   end
 
@@ -41,7 +41,7 @@ defmodule Doctrans.Processing.OpenAITest do
 
       case result do
         {:ok, models} -> assert is_list(models)
-        {:error, reason} -> assert is_binary(reason)
+        {:error, reason} -> assert reason == Doctrans.Errors.normalize(reason)
       end
     end
   end

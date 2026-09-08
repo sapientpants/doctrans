@@ -39,7 +39,9 @@ defmodule Doctrans.Processing.WorkerErrorsTest do
     log =
       capture_log(fn ->
         with_unavailable_table("pages", fn ->
-          assert {:error, %Postgrex.Error{} = error} = Worker.cancel_document(document.id)
+          assert {:error, {:database_error, [reason: %Postgrex.Error{} = error]}} =
+                   Worker.cancel_document(document.id)
+
           assert error.postgres.code == :undefined_table
         end)
       end)

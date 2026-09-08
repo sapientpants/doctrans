@@ -210,6 +210,11 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 13. Inconsistent error-surface conventions
 
+- **Status:** Implemented: domain errors use atoms or tagged bindings, including
+  wrapped changesets and dependency failures. `ErrorMessages.message/1` centralizes
+  UI translation; background processing stays locale-independent. The convention
+  is documented in `docs/CONTRIBUTING.md`, with locale and retry regression tests.
+
 - **Problem:** Some layers return `{:error, "english string"}`, others `{:error, reason_atom}`,
   others return a failed `Ecto.Changeset`, and LiveViews convert each differently.
   `LlmProcessor`'s moduledoc admits Gettext won't work in background processes — a good

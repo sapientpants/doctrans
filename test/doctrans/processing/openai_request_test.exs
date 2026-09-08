@@ -176,7 +176,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 200, %{"choices" => [%{"message" => %{"content" => "  "}}]})
       end)
 
-      assert {:error, "Model returned empty response"} =
+      assert {:error, :empty_response} =
                OpenAI.chat([%{role: "user", content: "x"}])
     end
 
@@ -185,7 +185,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 200, %{"choices" => [%{"message" => %{"role" => "assistant"}}]})
       end)
 
-      assert {:error, "Empty or missing response from API"} =
+      assert {:error, :missing_api_response} =
                OpenAI.chat([%{role: "user", content: "x"}])
     end
 
@@ -194,7 +194,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 200, %{"choices" => [%{"message" => %{}}]})
       end)
 
-      assert {:error, "Empty or missing response from API"} =
+      assert {:error, :missing_api_response} =
                OpenAI.chat([%{role: "user", content: "x"}])
     end
 
@@ -252,7 +252,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 200, %{"unexpected" => true})
       end)
 
-      assert {:error, "Invalid response format from API"} =
+      assert {:error, :invalid_api_response} =
                OpenAI.chat([%{role: "user", content: "x"}])
     end
 
@@ -263,7 +263,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:error, reason} = OpenAI.chat([%{role: "user", content: "x"}])
-      assert reason =~ "API call failed"
+      assert {:http_error, [status: 500]} = reason
     end
 
     test "returns error on transport failure" do
@@ -276,7 +276,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       )
 
       assert {:error, reason} = OpenAI.chat([%{role: "user", content: "x"}])
-      assert reason =~ "API call failed"
+      assert {:transport_error, [reason: :econnrefused]} = reason
     end
 
     test "omits authorization header when api key is nil", %{
@@ -354,7 +354,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 200, %{"choices" => [%{"message" => %{"content" => "   "}}]})
       end)
 
-      assert {:error, "Model returned empty response for image"} = OpenAI.extract_markdown(path)
+      assert {:error, :empty_image_response} = OpenAI.extract_markdown(path)
     end
 
     test "returns error on non-200 status", %{bypass: bypass} do
@@ -366,7 +366,9 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:error, reason} = OpenAI.extract_markdown(path)
-      assert reason =~ "API call failed"
+      assert {code, bindings} = reason
+      assert code in [:http_error, :transport_error, :operation_failed]
+      assert is_list(bindings)
     end
   end
 
@@ -418,7 +420,9 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:error, reason} = OpenAI.translate("Original text", "de", "en")
-      assert reason =~ "API call failed"
+      assert {code, bindings} = reason
+      assert code in [:http_error, :transport_error, :operation_failed]
+      assert is_list(bindings)
     end
   end
 
@@ -538,7 +542,9 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert {:error, reason} =
                OpenAI.chat_stream([%{role: "user", content: "hi"}], fn _ -> :ok end)
 
-      assert reason =~ "API call failed"
+      assert {code, bindings} = reason
+      assert code in [:http_error, :transport_error, :operation_failed]
+      assert is_list(bindings)
     end
 
     test "returns error on transport failure" do
@@ -553,7 +559,9 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert {:error, reason} =
                OpenAI.chat_stream([%{role: "user", content: "hi"}], fn _ -> :ok end)
 
-      assert reason =~ "API call failed"
+      assert {code, bindings} = reason
+      assert code in [:http_error, :transport_error, :operation_failed]
+      assert is_list(bindings)
     end
   end
 
@@ -609,7 +617,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:error, reason} = OpenAI.embed("text")
-      assert reason =~ "too short"
+      assert {:embedding_too_short, [expected: 1024, actual: _]} = reason
     end
 
     test "returns error on non-200 status", %{bypass: bypass} do
@@ -619,7 +627,9 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:error, reason} = OpenAI.embed("text")
-      assert reason =~ "API call failed"
+      assert {code, bindings} = reason
+      assert code in [:http_error, :transport_error, :operation_failed]
+      assert is_list(bindings)
     end
 
     test "returns error for invalid body", %{bypass: bypass} do
@@ -627,7 +637,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 200, %{"unexpected" => true})
       end)
 
-      assert {:error, "Invalid embedding response from API"} = OpenAI.embed("text")
+      assert {:error, :invalid_embedding_response} = OpenAI.embed("text")
     end
   end
 
@@ -647,7 +657,9 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:error, reason} = OpenAI.list_models()
-      assert reason =~ "API call failed"
+      assert {code, bindings} = reason
+      assert code in [:http_error, :transport_error, :operation_failed]
+      assert is_list(bindings)
     end
 
     test "returns error for invalid body", %{bypass: bypass} do
@@ -655,7 +667,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 200, %{"data" => "not-a-list"})
       end)
 
-      assert {:error, "Invalid response format from API"} = OpenAI.list_models()
+      assert {:error, :invalid_api_response} = OpenAI.list_models()
     end
   end
 

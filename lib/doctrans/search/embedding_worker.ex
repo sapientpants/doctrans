@@ -9,8 +9,6 @@ defmodule Doctrans.Search.EmbeddingWorker do
   use GenServer
   require Logger
 
-  use Gettext, backend: DoctransWeb.Gettext
-
   alias Doctrans.Documents.{Chunk, Page}
   alias Doctrans.Repo
   alias Doctrans.Resilience.{Backoff, CircuitBreaker, ErrorClassifier}

@@ -253,3 +253,15 @@ msgstr "Titeln är obligatorisk och måste vara en sträng"
 #, elixir-autogen, elixir-format
 msgid "Unsupported language: %{language}"
 msgstr "Språket stöds inte: %{language}"
+
+#, elixir-autogen, elixir-format
+msgid "Could not read uploaded file"
+msgstr "Kunde inte läsa den uppladdade filen"
+
+#, elixir-autogen, elixir-format
+msgid "LibreOffice process terminated unexpectedly"
+msgstr "LibreOffice-processen avslutades oväntat"
+
+#, elixir-autogen, elixir-format
+msgid "File too large (%{size}MB, max %{max}MB)"
+msgstr "Filen är för stor (%{size}MB, högst %{max}MB)"

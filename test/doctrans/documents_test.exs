@@ -179,8 +179,9 @@ defmodule Doctrans.DocumentsTest do
     end
 
     test "returns error changeset with invalid attrs" do
-      assert {:error, changeset} = Documents.create_document(%{})
-      assert %{title: ["can't be blank"]} = errors_on(changeset)
+      assert {:error,
+              {:missing_required_fields, [fields: "title, original_filename, target_language"]}} =
+               Documents.create_document(%{})
     end
 
     test "validates status is a valid value" do
@@ -191,7 +192,9 @@ defmodule Doctrans.DocumentsTest do
         status: "invalid"
       }
 
-      assert {:error, changeset} = Documents.create_document(attrs)
+      assert {:error, {:validation_failed, [changeset: changeset]}} =
+               Documents.create_document(attrs)
+
       assert %{status: ["is invalid"]} = errors_on(changeset)
     end
   end
@@ -205,12 +208,24 @@ defmodule Doctrans.DocumentsTest do
 
     test "returns error changeset with invalid attrs" do
       doc = document_fixture()
-      assert {:error, changeset} = Documents.update_document(doc, %{status: "invalid"})
+
+      assert {:error, {:validation_failed, [changeset: changeset]}} =
+               Documents.update_document(doc, %{status: "invalid"})
+
       assert %{status: ["is invalid"]} = errors_on(changeset)
     end
   end
 
   describe "update_document_status/3" do
+    test "stores structured failure diagnostics and clears them on recovery" do
+      doc = document_fixture()
+      reason = {:pdf_extraction_failed, [reason: :invalid_page_count]}
+      assert {:ok, updated} = Documents.update_document_status(doc, "error", reason)
+      assert updated.error_message == inspect(reason)
+      assert {:ok, recovered} = Documents.update_document_status(updated, "processing")
+      assert recovered.error_message == nil
+    end
+
     test "updates document status" do
       doc = document_fixture()
       assert {:ok, updated} = Documents.update_document_status(doc, "processing")
@@ -229,7 +244,10 @@ defmodule Doctrans.DocumentsTest do
 
     test "rejects invalid status" do
       doc = document_fixture()
-      assert {:error, changeset} = Documents.update_document_status(doc, "invalid_status")
+
+      assert {:error, {:validation_failed, [changeset: changeset]}} =
+               Documents.update_document_status(doc, "invalid_status")
+
       assert %{status: ["is invalid"]} = errors_on(changeset)
     end
   end

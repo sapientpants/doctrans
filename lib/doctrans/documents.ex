@@ -143,24 +143,11 @@ defmodule Doctrans.Documents do
   Creates a document with validation.
   """
   def create_document(attrs \\ %{}) do
-    case Validation.validate_document_attrs(attrs) do
-      {:ok, validated_attrs} ->
-        %Document{}
-        |> Document.changeset(validated_attrs)
-        |> Repo.insert()
-        |> case do
-          {:ok, document} ->
-            {:ok, document}
-
-          {:error, changeset} ->
-            {:error, changeset}
-        end
-
-      {:error, reason} when is_binary(reason) ->
-        %Document{}
-        |> Document.changeset(%{})
-        |> Ecto.Changeset.add_error(:base, reason)
-        |> Ecto.Changeset.apply_action(:insert)
+    with {:ok, validated_attrs} <- Validation.validate_document_attrs(attrs) do
+      %Document{}
+      |> Document.changeset(validated_attrs)
+      |> Repo.insert()
+      |> Doctrans.Errors.result()
     end
   end
 
@@ -171,6 +158,7 @@ defmodule Doctrans.Documents do
     document
     |> Document.changeset(attrs)
     |> Repo.update()
+    |> Doctrans.Errors.result()
   end
 
   @doc """
@@ -178,8 +166,9 @@ defmodule Doctrans.Documents do
   """
   def update_document_status(%Document{} = document, status, error_message \\ nil) do
     document
-    |> Document.status_changeset(status, error_message)
+    |> Document.status_changeset(status, Doctrans.Errors.diagnostic(error_message))
     |> Repo.update()
+    |> Doctrans.Errors.result()
   end
 
   @doc """
@@ -210,7 +199,7 @@ defmodule Doctrans.Documents do
     end
 
     # Delete from database (pages cascade automatically)
-    Repo.delete(document)
+    Repo.delete(document) |> Doctrans.Errors.result()
   end
 
   @doc """

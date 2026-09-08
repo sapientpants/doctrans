@@ -1,0 +1,38 @@
+# Error conventions
+
+Domain operations return `{:error, reason}`, where `reason` is an atom or
+`{atom, keyword_bindings}` (see `Doctrans.Errors.reason/0`). For example:
+
+```elixir
+{:error, :document_not_found}
+{:error, {:query_too_long, [max: 500]}}
+{:error, {:http_error, [status: 503]}}
+```
+
+Use stable codes for control flow and retry classification. Keep nested failures
+structured, for example `{:pdf_extraction_failed, [reason: reason]}`. Normalize
+third-party failures with `Doctrans.Errors.normalize/1` or normalize a result with
+`Doctrans.Errors.result/1`. Low-level dependency protocols (File, Repo, Oban,
+circuit-breaker callbacks) keep their native contracts internally.
+
+Context writes wrap failed Ecto changesets as
+`{:error, {:validation_failed, [changeset: changeset]}}`. This preserves field
+errors for `to_form/2` without making changesets a separate domain error shape.
+Schema changeset builders still return changesets; they are form-building APIs.
+
+Only the web layer turns reasons into user-facing text, using
+`DoctransWeb.ErrorMessages.message/1` in the viewing process. Add literal Gettext
+messages there, reusing existing message IDs and domains. Unknown reasons get a
+generic translated fallback; do not display inspected exceptions or API bodies.
+A form can unwrap its changeset and use the standard input error translation.
+
+Background jobs never call Gettext: process-local locales do not follow jobs.
+Log diagnostic details with `inspect/1`. The existing document `error_message`
+text column is diagnostic storage, populated through `Doctrans.Errors.diagnostic/1`;
+it is not displayed by templates and must not become a source of UI translations.
+Legacy strings remain readable in that column without a data migration.
+
+Test domain error codes and bindings, web translations (including an error from
+another process), and retry behavior when changing error shapes. Run
+`mix gettext.extract` after moving or adding messages and `mix precommit` before
+finishing a change.

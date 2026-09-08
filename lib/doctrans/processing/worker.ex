@@ -32,6 +32,7 @@ defmodule Doctrans.Processing.Worker do
     %{@document_id_key => document_id, "file_path" => file_path}
     |> DocumentExtractionJob.new()
     |> Oban.insert()
+    |> Doctrans.Errors.result()
   end
 
   @doc """
@@ -54,6 +55,7 @@ defmodule Doctrans.Processing.Worker do
     %{@page_id_key => page_id, "page_number" => page_number}
     |> LlmProcessingJob.new(priority: 2)
     |> Oban.insert()
+    |> Doctrans.Errors.result()
   end
 
   @doc """
@@ -82,16 +84,17 @@ defmodule Doctrans.Processing.Worker do
     args
     |> LlmProcessingJob.new(priority: 1)
     |> Oban.insert()
+    |> Doctrans.Errors.result()
   end
 
   @doc """
   Cancels processing for a specific document.
   Cancels all pending jobs for the document.
 
-  Returns `:ok` on success or `{:error, exception}` for database failures.
+  Returns `:ok` on success or `{:error, reason}` for database failures.
   Cancellation may be partial if a later query fails. Unexpected errors propagate.
   """
-  @spec cancel_document(Ecto.UUID.t()) :: :ok | {:error, Exception.t()}
+  @spec cancel_document(Ecto.UUID.t()) :: :ok | {:error, Doctrans.Errors.reason()}
   def cancel_document(document_id) do
     # Cancel all pending jobs for this document using Ecto query
     document_jobs_query =
@@ -128,7 +131,7 @@ defmodule Doctrans.Processing.Worker do
         "Failed to cancel jobs for document #{document_id}: #{Exception.message(error)}"
       )
 
-      {:error, error}
+      {:error, {:database_error, [reason: error]}}
   end
 
   @doc """

@@ -6,6 +6,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias DoctransWeb.DocumentLive.{ChatSession, PageViewer, ReprocessModal}
+  alias DoctransWeb.ErrorMessages
 
   import DoctransWeb.DocumentLive.Components,
     only: [status_color: 1, status_text: 1, language_name: 1]
@@ -233,7 +234,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   @impl true
   def handle_info({ref, {:error, reason}}, socket) when socket.assigns.chat_task_ref == ref do
     Process.demonitor(ref, [:flush])
-    {:noreply, ChatSession.put_error(socket, ChatSession.error_message(reason))}
+    {:noreply, ChatSession.put_error(socket, ErrorMessages.message(reason))}
   end
 
   @impl true
@@ -242,7 +243,7 @@ defmodule DoctransWeb.DocumentLive.Show do
     # :normal = success (result already handled); only error on crashes
     if reason == :normal,
       do: {:noreply, socket},
-      else: {:noreply, ChatSession.put_error(socket, ChatSession.error_message(:unknown))}
+      else: {:noreply, ChatSession.put_error(socket, ErrorMessages.message(:unknown))}
   end
 
   # Catch-all handlers for stale task refs

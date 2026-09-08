@@ -12,8 +12,6 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   import Phoenix.Component, only: [assign: 3]
   import Phoenix.LiveView, only: [stream_insert: 3]
 
-  use Gettext, backend: DoctransWeb.Gettext
-
   # Keep the last 8 exchanges (user + assistant) as history for future turns.
   @history_limit 16
 
@@ -51,14 +49,6 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
     |> stream_insert(:chat_messages, message(:error, message))
     |> reset_transient()
   end
-
-  @doc "Maps a failure reason to a user-facing, translated error message."
-  def error_message(:empty_question), do: gettext("Please enter a question.")
-
-  def error_message({:database_error, _}),
-    do: gettext("Failed to search the document. Please try again.")
-
-  def error_message(_), do: gettext("Sorry, I encountered an error. Please try again.")
 
   defp reset_transient(socket) do
     socket

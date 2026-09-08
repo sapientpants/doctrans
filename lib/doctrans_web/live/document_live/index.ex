@@ -7,6 +7,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   alias Doctrans.Documents.Topics
   alias Doctrans.Processing.Worker
   alias Doctrans.Validation
+  alias DoctransWeb.ErrorMessages
 
   require Logger
 
@@ -233,7 +234,7 @@ defmodule DoctransWeb.DocumentLive.Index do
         upload_documents_with_validated_language(socket, validated_language)
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, reason)}
+        {:noreply, put_flash(socket, :error, ErrorMessages.message(reason))}
     end
   end
 
@@ -253,7 +254,7 @@ defmodule DoctransWeb.DocumentLive.Index do
       {:noreply, socket}
     else
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
+        {:noreply, put_flash(socket, :error, ErrorMessages.message(:delete_failed))}
     end
   end
 
@@ -292,7 +293,7 @@ defmodule DoctransWeb.DocumentLive.Index do
       {:ok, {:ok, document_id, entry.client_name, dest_path}}
     else
       {:error, reason} ->
-        Logger.warning("Upload rejected for #{entry.client_name}: #{reason}")
+        Logger.warning("Upload rejected for #{entry.client_name}: #{inspect(reason)}")
         {:ok, {:error, entry.client_name, reason}}
     end
   end
@@ -304,7 +305,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   # The client-side allow_upload size limit is not a security boundary;
   # verify the actual size of the file on disk before accepting it.
-  @spec validate_disk_size(binary(), pos_integer()) :: :ok | {:error, String.t()}
+  @spec validate_disk_size(binary(), pos_integer()) :: :ok | {:error, Doctrans.Errors.reason()}
   defp validate_disk_size(path, max_size) do
     path = to_string(path)
 
@@ -313,10 +314,10 @@ defmodule DoctransWeb.DocumentLive.Index do
         :ok
 
       {:ok, %{size: size}} ->
-        {:error, "File too large (#{div(size, 1_000_000)}MB, max #{div(max_size, 1_000_000)}MB)"}
+        {:error, {:file_too_large, [size: div(size, 1_000_000), max: div(max_size, 1_000_000)]}}
 
       {:error, _} ->
-        {:error, "Could not read uploaded file"}
+        {:error, :upload_unreadable}
     end
   end
 

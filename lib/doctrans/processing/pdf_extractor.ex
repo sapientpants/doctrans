@@ -11,8 +11,6 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   require Logger
 
-  use Gettext, backend: DoctransWeb.Gettext
-
   @doc """
   Extracts all pages from a PDF file as PNG images.
 
@@ -56,8 +54,7 @@ defmodule Doctrans.Processing.PdfExtractor do
       {error_output, exit_code} ->
         Logger.error("pdftoppm failed with exit code #{exit_code}: #{error_output}")
 
-        {:error,
-         dgettext("errors", "PDF extraction failed: %{error}", error: String.trim(error_output))}
+        {:error, {:pdf_command_failed, [error: String.trim(error_output)]}}
     end
   end
 
@@ -97,15 +94,14 @@ defmodule Doctrans.Processing.PdfExtractor do
       {_output, 0} ->
         # Find the generated file for this page
         case page_image_path(output_dir, page_number) do
-          nil -> {:error, dgettext("errors", "Page image not found after extraction")}
+          nil -> {:error, :page_image_not_found}
           path -> {:ok, path}
         end
 
       {error_output, exit_code} ->
         Logger.error("pdftoppm failed with exit code #{exit_code}: #{error_output}")
 
-        {:error,
-         dgettext("errors", "PDF extraction failed: %{error}", error: String.trim(error_output))}
+        {:error, {:pdf_command_failed, [error: String.trim(error_output)]}}
     end
   end
 
@@ -121,11 +117,11 @@ defmodule Doctrans.Processing.PdfExtractor do
       {output, 0} ->
         case Regex.run(~r/Pages:\s*(\d+)/, output) do
           [_, count] -> {:ok, String.to_integer(count)}
-          _ -> {:error, dgettext("errors", "Could not parse page count from pdfinfo output")}
+          _ -> {:error, :invalid_page_count}
         end
 
       {error_output, _exit_code} ->
-        {:error, dgettext("errors", "pdfinfo failed: %{error}", error: String.trim(error_output))}
+        {:error, {:pdfinfo_failed, [error: String.trim(error_output)]}}
     end
   end
 

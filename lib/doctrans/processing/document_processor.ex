@@ -13,8 +13,6 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   require Logger
 
-  use Gettext, backend: DoctransWeb.Gettext
-
   alias Doctrans.Processing.PdfProcessor
 
   # Allow DocumentConverter module to be configured for testing
@@ -46,7 +44,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
       _ ->
         Logger.error("Unsupported file format: #{extension}")
-        {:error, dgettext("errors", "Unsupported file format: %{format}", format: extension)}
+        {:error, {:unsupported_format, [format: extension]}}
     end
   end
 
@@ -75,7 +73,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
         PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents)
 
       {:error, reason} ->
-        Logger.error("Failed to convert document #{document_id}: #{reason}")
+        Logger.error("Failed to convert document #{document_id}: #{inspect(reason)}")
         # Clean up the source file on failure to prevent storage leaks
         _ = File.rm(file_path)
         {:error, reason}

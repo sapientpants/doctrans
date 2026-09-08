@@ -12,5 +12,5 @@ defmodule Doctrans.Search.EmbeddingBehaviour do
   Returns `{:ok, nil}` for nil or empty text.
   """
   @callback generate(text :: String.t() | nil, opts :: keyword()) ::
-              {:ok, Pgvector.t() | nil} | {:error, term()}
+              {:ok, Pgvector.t() | nil} | {:error, Doctrans.Errors.reason()}
 end

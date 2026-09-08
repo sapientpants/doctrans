@@ -13,8 +13,6 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   @behaviour Doctrans.Processing.DocumentConverterBehaviour
 
-  use Gettext, backend: DoctransWeb.Gettext
-
   require Logger
 
   @default_timeout 120_000
@@ -40,10 +38,10 @@ defmodule Doctrans.Processing.DocumentConverter do
 
         {:error, _} ->
           Logger.error("LibreOffice is not installed")
-          {:error, dgettext("errors", "LibreOffice is not installed")}
+          {:error, :soffice_not_found}
       end
     else
-      {:error, dgettext("errors", "Source file not found: %{path}", path: source_path)}
+      {:error, {:source_file_not_found, [path: source_path]}}
     end
   end
 
@@ -98,14 +96,12 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   defp supervise_conversion(path, source_path, output_dir) do
     caller = self()
-    locale = Gettext.get_locale(DoctransWeb.Gettext)
     result_ref = make_ref()
 
     {pid, monitor} =
       spawn_monitor(fn ->
         Process.flag(:trap_exit, true)
         Process.monitor(caller)
-        _ = Gettext.put_locale(DoctransWeb.Gettext, locale)
         result = run_conversion(path, source_path, output_dir)
         send(caller, {result_ref, result})
       end)
@@ -214,7 +210,7 @@ defmodule Doctrans.Processing.DocumentConverter do
       Logger.info("Successfully converted to #{pdf_path}")
       {:ok, pdf_path}
     else
-      {:error, dgettext("errors", "Conversion completed but PDF file not found")}
+      {:error, :converted_pdf_not_found}
     end
   end
 
@@ -224,18 +220,15 @@ defmodule Doctrans.Processing.DocumentConverter do
         String.slice(output, 0, 500)
     )
 
-    {:error,
-     dgettext("errors", "Document conversion failed: %{error}", error: String.trim(output))}
+    {:error, {:conversion_failed, [error: String.trim(output)]}}
   end
 
   defp finalize({:start_error, reason}, _pdf_path, _timeout) do
-    {:error,
-     dgettext("errors", "Failed to start LibreOffice: %{error}", error: String.trim(reason))}
+    {:error, {:conversion_start_failed, [error: String.trim(reason)]}}
   end
 
   defp finalize({:error, reason}, _pdf_path, _timeout) do
-    {:error,
-     dgettext("errors", "Failed to start LibreOffice: %{error}", error: format_reason(reason))}
+    {:error, {:conversion_start_failed, [error: reason]}}
   end
 
   defp finalize({:timeout, output}, _pdf_path, timeout) do
@@ -243,12 +236,8 @@ defmodule Doctrans.Processing.DocumentConverter do
       "LibreOffice conversion timed out after #{timeout}ms: " <> String.slice(output, 0, 500)
     )
 
-    {:error, dgettext("errors", "Document conversion timed out")}
+    {:error, :conversion_timeout}
   end
-
-  defp format_reason(:port_died), do: "LibreOffice process terminated unexpectedly"
-
-  defp format_reason(reason), do: inspect(reason)
 
   # Keep the port open until SIGKILL is sent, then wait for OTP to reap its
   # child before closing. Negative PIDs address the isolated Unix process group.

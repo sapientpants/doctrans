@@ -100,7 +100,7 @@ defmodule Doctrans.Documents.PagesTest do
 
     test "returns error for missing page_number" do
       doc = document_fixture()
-      assert {:error, changeset} = Pages.create_page(doc, %{})
+      assert {:error, {:validation_failed, [changeset: changeset]}} = Pages.create_page(doc, %{})
       assert %{page_number: ["can't be blank"]} = errors_on(changeset)
     end
   end
@@ -147,7 +147,9 @@ defmodule Doctrans.Documents.PagesTest do
       doc = document_fixture()
       page = page_fixture(doc)
 
-      assert {:error, changeset} = Pages.update_page(page, %{extraction_status: "invalid"})
+      assert {:error, {:validation_failed, [changeset: changeset]}} =
+               Pages.update_page(page, %{extraction_status: "invalid"})
+
       assert %{extraction_status: ["is invalid"]} = errors_on(changeset)
     end
   end
@@ -171,7 +173,7 @@ defmodule Doctrans.Documents.PagesTest do
       doc = document_fixture()
       page = page_fixture(doc)
 
-      assert {:error, changeset} =
+      assert {:error, {:validation_failed, [changeset: changeset]}} =
                Pages.update_page_extraction(page, %{extraction_status: "invalid"})
 
       assert %{extraction_status: ["is invalid"]} = errors_on(changeset)
@@ -197,7 +199,7 @@ defmodule Doctrans.Documents.PagesTest do
       doc = document_fixture()
       page = page_fixture(doc)
 
-      assert {:error, changeset} =
+      assert {:error, {:validation_failed, [changeset: changeset]}} =
                Pages.update_page_translation(page, %{translation_status: "invalid"})
 
       assert %{translation_status: ["is invalid"]} = errors_on(changeset)

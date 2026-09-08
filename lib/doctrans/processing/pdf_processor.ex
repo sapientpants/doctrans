@@ -11,8 +11,6 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   require Logger
 
-  use Gettext, backend: DoctransWeb.Gettext
-
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
@@ -44,7 +42,7 @@ defmodule Doctrans.Processing.PdfProcessor do
       :ok
     else
       {:error, reason} ->
-        Logger.error("Failed to extract PDF for document #{document_id}: #{reason}")
+        Logger.error("Failed to extract PDF for document #{document_id}: #{inspect(reason)}")
         maybe_update_error(document_id, reason)
         {:error, reason}
     end
@@ -52,7 +50,7 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   defp fetch_document(document_id) do
     case Documents.get_document(document_id) do
-      nil -> {:error, dgettext("errors", "Document not found")}
+      nil -> {:error, :document_not_found}
       document -> {:ok, document}
     end
   end
@@ -95,7 +93,7 @@ defmodule Doctrans.Processing.PdfProcessor do
       :ok
     else
       {:error, reason} ->
-        {:error, dgettext("errors", "PDF extraction failed: %{reason}", reason: reason)}
+        {:error, {:pdf_extraction_failed, [reason: reason]}}
     end
   end
 
@@ -147,8 +145,8 @@ defmodule Doctrans.Processing.PdfProcessor do
             Topics.broadcast_page_update(page)
             {:ok, page}
 
-          {:error, changeset} ->
-            {:error, "Failed to create page record: #{inspect(changeset.errors)}"}
+          {:error, reason} ->
+            {:error, reason}
         end
 
       {:error, reason} ->

@@ -142,7 +142,7 @@ defmodule Doctrans.Search do
       {:error, error} ->
         require Logger
         Logger.error("Chunk search query failed: #{inspect(error)}")
-        {:error, {:database_error, error}}
+        {:error, {:database_error, [reason: error]}}
     end
   end
 
@@ -170,7 +170,7 @@ defmodule Doctrans.Search do
       {:error, error} ->
         require Logger
         Logger.error("Page search query failed: #{inspect(error)}")
-        {:error, {:database_error, error}}
+        {:error, {:database_error, [reason: error]}}
     end
   end
 
@@ -271,7 +271,7 @@ defmodule Doctrans.Search do
       {:error, error} ->
         require Logger
         Logger.error("Count query failed: #{inspect(error)}")
-        {:error, {:database_error, error}}
+        {:error, {:database_error, [reason: error]}}
     end
   end
 
@@ -384,7 +384,7 @@ defmodule Doctrans.Search do
       {:error, error} ->
         require Logger
         Logger.error("Hybrid search query failed: #{inspect(error)}")
-        {:error, {:database_error, error}}
+        {:error, {:database_error, [reason: error]}}
     end
   end
 

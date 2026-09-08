@@ -85,14 +85,14 @@ defmodule Doctrans.Resilience.HealthCheck do
               {:ok, %{available: true, models: model_names, circuit: circuit_status}}
 
             {:ok, %{status: status}} ->
-              {:error, "HTTP #{status}"}
+              {:error, {:http_error, [status: status]}}
 
             {:error, reason} ->
-              {:error, reason}
+              {:error, Doctrans.Errors.normalize(reason)}
           end
         end
       rescue
-        e -> {:error, Exception.message(e)}
+        e -> {:error, Doctrans.Errors.normalize(e)}
       end
 
     duration = System.monotonic_time(:millisecond) - start_time
@@ -121,7 +121,7 @@ defmodule Doctrans.Resilience.HealthCheck do
         _ = Repo.query!("SELECT 1")
         :ok
       rescue
-        e -> {:error, Exception.message(e)}
+        e -> {:error, Doctrans.Errors.normalize(e)}
       end
 
     duration = System.monotonic_time(:millisecond) - start_time
@@ -150,7 +150,7 @@ defmodule Doctrans.Resilience.HealthCheck do
 
         # Check directory exists
         unless File.dir?(uploads_dir) do
-          throw({:error, "Uploads directory does not exist: #{uploads_dir}"})
+          throw({:error, {:uploads_directory_missing, [path: uploads_dir]}})
         end
 
         # Try to write a test file
@@ -162,10 +162,10 @@ defmodule Doctrans.Resilience.HealthCheck do
             :ok
 
           {:error, reason} ->
-            {:error, "Cannot write to uploads directory: #{reason}"}
+            {:error, {:uploads_directory_unwritable, [reason: reason]}}
         end
       rescue
-        e -> {:error, Exception.message(e)}
+        e -> {:error, Doctrans.Errors.normalize(e)}
       catch
         {:error, reason} -> {:error, reason}
       end

@@ -44,6 +44,18 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   @spec classify(term()) :: classification()
   def classify(error)
 
+  def classify({:http_error, bindings}) when is_list(bindings),
+    do: classify({:http_error, Keyword.fetch!(bindings, :status)})
+
+  def classify({:transport_error, _}), do: :retryable
+  def classify(:conversion_timeout), do: :retryable
+  def classify({:image_unreadable, _}), do: :permanent
+  def classify({:validation_failed, _}), do: :permanent
+  def classify({:source_file_not_found, _}), do: :permanent
+  def classify(:document_not_found), do: :permanent
+  def classify(:page_not_found), do: :permanent
+  def classify(:soffice_not_found), do: :permanent
+
   # Explicit timeout atoms
   def classify(:timeout), do: :retryable
   def classify({:error, :timeout}), do: :retryable

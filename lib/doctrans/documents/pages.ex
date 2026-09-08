@@ -52,6 +52,7 @@ defmodule Doctrans.Documents.Pages do
     |> Page.changeset(attrs)
     |> Ecto.Changeset.put_assoc(:document, document)
     |> Repo.insert()
+    |> Doctrans.Errors.result()
   end
 
   @doc """
@@ -84,6 +85,7 @@ defmodule Doctrans.Documents.Pages do
     page
     |> Page.changeset(attrs)
     |> Repo.update()
+    |> Doctrans.Errors.result()
   end
 
   @doc """
@@ -93,6 +95,7 @@ defmodule Doctrans.Documents.Pages do
     page
     |> Page.extraction_changeset(attrs)
     |> Repo.update()
+    |> Doctrans.Errors.result()
   end
 
   @doc """
@@ -102,6 +105,7 @@ defmodule Doctrans.Documents.Pages do
     page
     |> Page.translation_changeset(attrs)
     |> Repo.update()
+    |> Doctrans.Errors.result()
   end
 
   @doc """
@@ -162,5 +166,6 @@ defmodule Doctrans.Documents.Pages do
       embedding_status: "pending"
     })
     |> Repo.update()
+    |> Doctrans.Errors.result()
   end
 end
