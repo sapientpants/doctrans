@@ -1,72 +1,53 @@
 defmodule Doctrans.EnvLoader do
   @moduledoc """
-  Loads variables from a `.env` file and applies the OpenAI/OMLX ones to
-  the application config.
+  Loads optional `.env` defaults before runtime configuration in every environment.
 
-  Only development loads `.env`; test and production leave the environment
-  and application config untouched. Inherited environment variables take
-  precedence over file values, including explicitly empty variables.
-  In development, the loader re-applies `OPENAI_HOST` / `OPENAI_API_KEY`
-  to the application config at startup. Releases use `config/runtime.exs`.
-
-  The same `OPENAI_HOST` / `OPENAI_API_KEY` pair is applied to both the
-  `:openai` and `:embedding` config keys, which is fine for the single OMLX
-  endpoint they both talk to.
+  Inherited variables take precedence, including empty values. The default file is
+  `.env` in the working directory; `DOCTRANS_ENV_FILE` selects another path.
+  API setting conflicts report the winning source without logging values.
   """
 
-  @env_path Path.join(__DIR__, "../../.env")
+  require Logger
 
-  def load(path \\ @env_path) do
-    if Application.get_env(:doctrans, :env) == :dev do
-      parse_env_file(path)
+  def load(path \\ System.get_env("DOCTRANS_ENV_FILE", ".env")) do
+    case File.read(path) do
+      {:ok, contents} ->
+        contents
+        |> String.split(~r/\r?\n/, trim: true)
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(String.starts_with?(&1, "#") or &1 == ""))
+        |> Enum.each(&put_env_line/1)
 
-      apply_to(:openai)
-      apply_to(:embedding)
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "read environment file", path: path
     end
 
     :ok
   end
 
-  defp parse_env_file(path) do
-    case File.read(path) do
-      {:ok, contents} ->
-        contents
-        |> String.split(~r/\r?\n/, trim: true)
-        |> Enum.reject(&blank_or_comment?/1)
-        |> Enum.each(&put_env_line/1)
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp blank_or_comment?(line) do
-    String.starts_with?(line, "#") or String.trim(line) == ""
-  end
-
   defp put_env_line(line) do
     case String.split(line, "=", parts: 2) do
-      [key, value] -> put_env(key, String.trim(value))
+      [key, value] -> put_env(String.trim(key), String.trim(value))
       [key] -> put_env(key, "")
-      _ -> :ok
     end
   end
 
   defp put_env(key, value) do
-    if is_nil(System.get_env(key)), do: System.put_env(key, value)
-  end
+    case System.get_env(key) do
+      nil ->
+        System.put_env(key, value)
 
-  defp apply_to(config_key) do
-    current = Application.get_env(:doctrans, config_key, [])
-    current = put_if_present(current, :api_key, "OPENAI_API_KEY")
-    current = put_if_present(current, :base_url, "OPENAI_HOST")
-    Application.put_env(:doctrans, config_key, current)
-  end
+      inherited when inherited != value and key in ["OPENAI_HOST", "OPENAI_API_KEY"] ->
+        Logger.warning(
+          "Inherited #{key} overrides a different value in the environment file. " <>
+            "Unset #{key} before starting Doctrans to use the file value."
+        )
 
-  defp put_if_present(keyword, key, env_var) do
-    case System.get_env(env_var) do
-      nil -> keyword
-      value -> Keyword.put(keyword, key, value)
+      _ ->
+        :ok
     end
   end
 end
