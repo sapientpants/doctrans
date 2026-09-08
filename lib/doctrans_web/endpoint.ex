@@ -41,10 +41,14 @@ defmodule DoctransWeb.Endpoint do
   # Serve uploaded page images from priv/static/uploads.
   # Original source files are deleted after extraction, so only derived
   # page images are ever served from this directory.
+  # These contain private document content: prevent browser/proxy storage,
+  # including requests with Plug.Static's versioned query strings.
   plug Plug.Static,
     at: "/uploads",
     from: {:doctrans, "priv/static/uploads"},
-    gzip: false
+    gzip: false,
+    cache_control_for_etags: "private, no-store",
+    cache_control_for_vsn_requests: "private, no-store"
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
