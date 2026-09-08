@@ -289,6 +289,8 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   # LiveView unwraps the outer :ok, leaving an upload_result for each consumed file.
   @spec consume_upload_entry(binary(), Phoenix.LiveView.UploadEntry.t()) :: {:ok, upload_result()}
+  # Source: LiveView temp metadata. Destination: generated UUID + original + magic-byte-validated extension.
+  # sobelow_skip ["Traversal.FileModule"]
   defp consume_upload_entry(path, entry) do
     extension = entry.client_name |> Path.extname() |> String.downcase()
     max_file_size = max_file_size()
@@ -377,7 +379,11 @@ defmodule DoctransWeb.DocumentLive.Index do
   end
 
   # Helper to create a document and start processing
+  # The cleanup path is returned by consume_upload_entry, never built from the display filename.
+  # sobelow_skip ["Traversal.FileModule"]
   defp create_and_process_document({document_id, original_filename, pdf_path}, target_language) do
+    original_filename = Validation.sanitize_filename_string(original_filename)
+
     title =
       original_filename
       |> Path.basename(".pdf")

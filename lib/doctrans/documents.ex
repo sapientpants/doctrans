@@ -195,6 +195,8 @@ defmodule Doctrans.Documents do
   2. Delete all page records (via cascade)
   3. Delete the document record
   """
+  # The directory comes from the persisted document UUID and configured upload root.
+  # sobelow_skip ["Traversal.FileModule"]
   def delete_document(%Document{} = document) do
     # Delete files first (best-effort; a failure here must not prevent the
     # database row from being removed)
@@ -242,6 +244,8 @@ defmodule Doctrans.Documents do
   @doc """
   Ensures the document's upload directories exist.
   """
+  # Callers supply generated or persisted document UUIDs; the only suffix is pages.
+  # sobelow_skip ["Traversal.FileModule"]
   def ensure_document_dirs!(document_id) do
     pages_dir = document_pages_dir(document_id)
     File.mkdir_p!(pages_dir)

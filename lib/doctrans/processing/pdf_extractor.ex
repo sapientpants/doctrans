@@ -20,6 +20,8 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   - `:dpi` - Resolution in DPI (default: from config, fallback 200)
   """
+  # output_dir is the generated document UUID/pages directory supplied by PdfProcessor.
+  # sobelow_skip ["Traversal.FileModule"]
   def extract_pages(pdf_path, output_dir, opts \\ []) do
     default_dpi = get_in(Application.get_env(:doctrans, :pdf_extraction, []), [:dpi]) || 200
     dpi = Keyword.get(opts, :dpi, default_dpi)
@@ -67,6 +69,8 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   - `:dpi` - Resolution in DPI (default: from config, fallback 200)
   """
+  # output_dir is the generated document UUID/pages directory; output names use a fixed page prefix.
+  # sobelow_skip ["Traversal.FileModule"]
   def extract_page(pdf_path, output_dir, page_number, opts \\ []) do
     default_dpi = get_in(Application.get_env(:doctrans, :pdf_extraction, []), [:dpi]) || 200
     dpi = Keyword.get(opts, :dpi, default_dpi)

@@ -132,6 +132,7 @@ defmodule Doctrans.Validation do
     # Replace .. with _
     |> String.replace(~r/\.\./, "_")
     |> String.replace("/", "_")
+    |> String.replace("\\", "_")
     # Remove null bytes completely
     |> String.replace("\0", "")
     |> String.replace(~r/[<>:"\/?*|\x01-\x1f]/, "_")
@@ -141,6 +142,8 @@ defmodule Doctrans.Validation do
 
   # Private helpers
 
+  # The path is Phoenix LiveView upload metadata; the client filename is never opened.
+  # sobelow_skip ["Traversal.FileModule"]
   defp read_header(file_path, bytes) do
     case File.open(file_path, [:read, :binary]) do
       {:ok, io} ->

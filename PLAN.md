@@ -270,6 +270,11 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 17. Sobelow config blanket-ignores `Traversal.FileModule`
 
+- **Status:** Implemented: audited file operations use documented function-local Sobelow
+  skips instead of a blanket ignore. LiveView upload tests verify adversarial filenames
+  stay in generated per-document directories. Filename sanitization also prevents
+  NUL bytes from reaching generated titles. See `docs/FILE_PATH_AUDIT.md`.
+
 - **Problem:** `.sobelow-conf` ignores *all* file-traversal findings because "paths are
   constructed from trusted sources". Upload filenames are user-supplied (even after
   `sanitize_filename_string`); even in a local app a malicious document can come from any

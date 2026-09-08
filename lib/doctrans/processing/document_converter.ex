@@ -116,6 +116,8 @@ defmodule Doctrans.Processing.DocumentConverter do
     end
   end
 
+  # The output directory comes from the stored upload path; profile_dir is created by mktemp.
+  # sobelow_skip ["Traversal.FileModule"]
   defp run_conversion(soffice_path, source_path, output_dir) do
     File.mkdir_p!(output_dir)
 
