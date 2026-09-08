@@ -272,6 +272,20 @@ defmodule Doctrans.DocumentsTest do
   end
 
   describe "delete_document/1" do
+    test "succeeds when another caller deletes the document after lookup" do
+      doc = document_with_pages_fixture(%{}, 2)
+      stale_doc = Documents.get_document(doc.id)
+      other = document_fixture()
+
+      assert {:ok, _} = Documents.delete_document(doc)
+      assert {:ok, deleted} = Documents.delete_document(stale_doc)
+
+      assert deleted.id == doc.id
+      assert is_nil(Documents.get_document(doc.id))
+      assert Documents.list_pages(doc.id) == []
+      assert Documents.get_document(other.id).id == other.id
+    end
+
     test "deletes document" do
       doc = document_fixture()
       assert {:ok, _} = Documents.delete_document(doc)

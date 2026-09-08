@@ -188,6 +188,8 @@ defmodule Doctrans.Documents do
   @doc """
   Deletes a document and all associated files.
 
+  Succeeds if the document was already removed after it was loaded.
+
   This will:
   1. Delete the document directory containing all page images
   2. Delete all page records (via cascade)
@@ -213,7 +215,7 @@ defmodule Doctrans.Documents do
     end
 
     # Delete from database (pages cascade automatically)
-    Repo.delete(document) |> Doctrans.Errors.result()
+    Repo.delete(document, allow_stale: true) |> Doctrans.Errors.result()
   end
 
   @doc """
