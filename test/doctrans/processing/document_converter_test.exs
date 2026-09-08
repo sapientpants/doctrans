@@ -295,12 +295,111 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     pid = File.read!(pid_file) |> String.trim()
     profile = File.read!(profile_file) |> String.trim() |> URI.decode()
     assert File.dir?(profile)
+    assert Bitwise.band(File.stat!(profile).mode, 0o777) == 0o700
     Process.exit(caller, :kill)
 
     eventually(fn ->
       {_output, status} = System.cmd("ps", ["-p", pid], env: [])
       status != 0 and not File.exists?(profile)
     end)
+  end
+
+  test "retains the launcher PID after exit and kills its surviving child" do
+    dir = tmp_dir()
+    ready = Path.join(dir, "ready")
+    release = Path.join(dir, "release")
+
+    fake =
+      make_fake_soffice(dir, """
+      #!/bin/sh
+      /bin/sleep 30 </dev/null >/dev/null 2>&1 &
+      echo $! > "#{dir}/child"
+      echo $$ > "#{ready}"
+      while [ ! -f "#{release}" ]; do /bin/sleep 0.02; done
+      exit 3
+      """)
+
+    put_config(soffice_path: fake, timeout: 10_000)
+    source = make_source(dir, "book.docx")
+    task = Task.async(fn -> DocumentConverter.convert_to_pdf(source, Path.join(dir, "out")) end)
+    eventually(fn -> File.exists?(ready) and File.read!(ready) != "" end)
+    launcher = File.read!(ready) |> String.trim() |> String.to_integer()
+    child = File.read!(Path.join(dir, "child")) |> String.trim()
+    {:monitors, [{:process, owner}]} = Process.info(task.pid, :monitors)
+    {:links, links} = Process.info(owner, :links)
+    port = Enum.find(links, &is_port/1)
+
+    # Hold the owner until the launcher has exited. PID lookup must still work
+    # at this point, even if the owner was descheduled immediately after open.
+    :erlang.suspend_process(owner)
+
+    try do
+      File.touch!(release)
+      eventually(fn -> process_gone?(Integer.to_string(launcher)) end)
+      refute process_gone?(child)
+      assert Port.info(port, :os_pid) == {:os_pid, launcher}
+    after
+      :erlang.resume_process(owner)
+    end
+
+    assert {:error, _message} = Task.await(task, 5_000)
+    eventually(fn -> process_gone?(child) end)
+  end
+
+  test "EOF without process exit still times out and cleans up" do
+    dir = tmp_dir()
+    fake = make_fake_soffice(dir, "#!/bin/sh\nexec 1>&- 2>&-\nexec /bin/sleep 30\n")
+    put_config(soffice_path: fake, timeout: 800)
+    source = make_source(dir, "book.docx")
+
+    assert {:error, message} = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
+    assert message =~ "timed out"
+  end
+
+  test "creates fresh profiles without reusing an existing template path" do
+    dir = tmp_dir()
+    original_tmpdir = System.get_env("TMPDIR")
+    System.put_env("TMPDIR", dir)
+
+    on_exit(fn ->
+      if original_tmpdir,
+        do: System.put_env("TMPDIR", original_tmpdir),
+        else: System.delete_env("TMPDIR")
+    end)
+
+    planted = Path.join(dir, "doctrans-soffice-XXXXXXXXXX")
+    File.mkdir!(planted)
+    marker = Path.join(planted, "marker")
+    File.write!(marker, "do not reuse")
+    profile_file = Path.join(dir, "profile")
+
+    fake =
+      make_fake_soffice(dir, """
+      #!/bin/sh
+      echo "${1#-env:UserInstallation=file://}" > "#{profile_file}"
+      #{fake_soffice_body()}
+      """)
+
+    put_config(soffice_path: fake, timeout: 10_000)
+    source = make_source(dir, "book.docx")
+
+    profiles =
+      for _ <- 1..2 do
+        assert {:ok, _} = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
+        profile = File.read!(profile_file) |> String.trim() |> URI.decode()
+        assert Path.dirname(profile) == dir
+        refute File.exists?(profile)
+        profile
+      end
+
+    assert length(Enum.uniq(profiles)) == 2
+    refute planted in profiles
+    assert File.read!(marker) == "do not reuse"
+  end
+
+  defp process_gone?(pid) do
+    {_output, status} = System.cmd("/bin/ps", ["-p", pid], env: [])
+    status != 0
   end
 
   test "reports a missing PDF after a successful process exit" do

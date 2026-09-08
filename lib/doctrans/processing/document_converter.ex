@@ -6,6 +6,9 @@ defmodule Doctrans.Processing.DocumentConverter do
   exits. On Unix, OTP starts port executables in their own process group; cleanup
   kills that group so launcher children cannot outlive a failed conversion.
   Captured diagnostic output is limited to 64 KiB.
+
+  Profiles are created privately and exclusively using `/usr/bin/mktemp`,
+  available on the supported macOS and Linux installations.
   """
 
   @behaviour Doctrans.Processing.DocumentConverterBehaviour
@@ -144,7 +147,8 @@ defmodule Doctrans.Processing.DocumentConverter do
         port =
           Port.open(
             {:spawn_executable, soffice_path},
-            [:binary, :exit_status, :stderr_to_stdout, args: args]
+            # Retain port metadata even if the launcher exits before PID lookup.
+            [:binary, :exit_status, :eof, :stderr_to_stdout, args: args]
           )
 
         os_pid = port_os_pid(port)
@@ -181,6 +185,11 @@ defmodule Doctrans.Processing.DocumentConverter do
 
         {^port, {:exit_status, status}} ->
           {:ok, {buffer, status}}
+
+        {^port, :eof} ->
+          # EOF and exit_status can arrive in either order. EOF alone does not
+          # mean the process has exited, so continue enforcing the same deadline.
+          run_port(port, deadline, buffer)
 
         {:DOWN, _monitor, :process, _caller, reason} ->
           {:error, {:caller_exited, reason}}
@@ -308,14 +317,15 @@ defmodule Doctrans.Processing.DocumentConverter do
   # conversions — or a conversion running while the user has LibreOffice
   # open — block on the profile lock. A per-run profile is always free.
   defp create_profile_dir! do
-    dir =
-      Path.join(
-        System.tmp_dir!(),
-        "doctrans-soffice-#{System.pid()}-#{System.unique_integer([:positive])}"
-      )
+    template = Path.join(System.tmp_dir!(), "doctrans-soffice-XXXXXXXXXX")
 
-    File.mkdir_p!(dir)
-    dir
+    # mktemp atomically creates a fresh mode-0700 directory on macOS and Linux.
+    # mkdir_p would accept an existing directory; mkdir followed by chmod would
+    # leave a permissions window when the application's umask is permissive.
+    case System.cmd("/usr/bin/mktemp", ["-d", template], stderr_to_stdout: true, env: []) do
+      {path, 0} -> String.trim_trailing(path, "\n")
+      {error, _status} -> raise "Failed to create LibreOffice profile: #{String.trim(error)}"
+    end
   end
 
   # Encodes the profile path as a file:// URI, escaping each path segment so
