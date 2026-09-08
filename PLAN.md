@@ -104,6 +104,9 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 6. Validation module returns hard-coded English error strings
 
+- **Status:** Implemented: validation errors use Gettext with interpolation bindings,
+  translated in all 11 locales. Tests cover localized validation and LiveView flashes.
+
 - **Problem:** `Doctrans.Validation` returns raw English strings ("Query too short",
   "Missing required fields: ...") while the rest of the app is gettext-i18n'd (11 locales).
   These strings surface in user-facing flashes, so non-English users see English errors.

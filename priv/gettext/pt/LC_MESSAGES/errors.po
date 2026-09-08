@@ -188,3 +188,68 @@ msgstr "Embedding do OpenAI muito curto: esperadas pelo menos %{expected} dimens
 #, elixir-autogen, elixir-format
 msgid "Failed to start LibreOffice: %{error}"
 msgstr "Não foi possível iniciar o LibreOffice: %{error}"
+
+#: lib/doctrans/validation.ex:111
+#, elixir-autogen, elixir-format
+msgid "Could not read file for validation"
+msgstr "Não foi possível ler o ficheiro para validação"
+
+#: lib/doctrans/validation.ex:104
+#, elixir-autogen, elixir-format
+msgid "File content does not match its extension"
+msgstr "O conteúdo do ficheiro não corresponde à sua extensão"
+
+#: lib/doctrans/validation.ex:108
+#, elixir-autogen, elixir-format
+msgid "File is too small to be a valid document"
+msgstr "O ficheiro é demasiado pequeno para ser um documento válido"
+
+#: lib/doctrans/validation.ex:116
+#, elixir-autogen, elixir-format
+msgid "File path and extension must be strings"
+msgstr "O caminho e a extensão do ficheiro devem ser cadeias de caracteres"
+
+#: lib/doctrans/validation.ex:84
+#, elixir-autogen, elixir-format
+msgid "Language code must be a string"
+msgstr "O código do idioma deve ser uma cadeia de caracteres"
+
+#: lib/doctrans/validation.ex:180
+#, elixir-autogen, elixir-format
+msgid "Missing required fields: %{fields}"
+msgstr "Campos obrigatórios em falta: %{fields}"
+
+#: lib/doctrans/validation.ex:54
+#, elixir-autogen, elixir-format
+msgid "Query too long (max %{max} characters)"
+msgstr "Consulta demasiado longa (máximo de %{max} caracteres)"
+
+#: lib/doctrans/validation.ex:51
+#, elixir-autogen, elixir-format
+msgid "Query too short"
+msgstr "Consulta demasiado curta"
+
+#: lib/doctrans/validation.ex:61
+#, elixir-autogen, elixir-format
+msgid "Search query must be a string"
+msgstr "A consulta de pesquisa deve ser uma cadeia de caracteres"
+
+#: lib/doctrans/validation.ex:207
+#, elixir-autogen, elixir-format
+msgid "Target language is required and must be a string"
+msgstr "O idioma de destino é obrigatório e deve ser uma cadeia de caracteres"
+
+#: lib/doctrans/validation.ex:192
+#, elixir-autogen, elixir-format
+msgid "Title cannot be empty"
+msgstr "O título não pode estar vazio"
+
+#: lib/doctrans/validation.ex:197
+#, elixir-autogen, elixir-format
+msgid "Title is required and must be a string"
+msgstr "O título é obrigatório e deve ser uma cadeia de caracteres"
+
+#: lib/doctrans/validation.ex:80
+#, elixir-autogen, elixir-format
+msgid "Unsupported language: %{language}"
+msgstr "Idioma não suportado: %{language}"

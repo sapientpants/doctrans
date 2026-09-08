@@ -189,3 +189,68 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Failed to start LibreOffice: %{error}"
 msgstr ""
+
+#: lib/doctrans/validation.ex:111
+#, elixir-autogen, elixir-format
+msgid "Could not read file for validation"
+msgstr ""
+
+#: lib/doctrans/validation.ex:104
+#, elixir-autogen, elixir-format
+msgid "File content does not match its extension"
+msgstr ""
+
+#: lib/doctrans/validation.ex:108
+#, elixir-autogen, elixir-format
+msgid "File is too small to be a valid document"
+msgstr ""
+
+#: lib/doctrans/validation.ex:116
+#, elixir-autogen, elixir-format
+msgid "File path and extension must be strings"
+msgstr ""
+
+#: lib/doctrans/validation.ex:84
+#, elixir-autogen, elixir-format
+msgid "Language code must be a string"
+msgstr ""
+
+#: lib/doctrans/validation.ex:180
+#, elixir-autogen, elixir-format
+msgid "Missing required fields: %{fields}"
+msgstr ""
+
+#: lib/doctrans/validation.ex:54
+#, elixir-autogen, elixir-format
+msgid "Query too long (max %{max} characters)"
+msgstr ""
+
+#: lib/doctrans/validation.ex:51
+#, elixir-autogen, elixir-format
+msgid "Query too short"
+msgstr ""
+
+#: lib/doctrans/validation.ex:61
+#, elixir-autogen, elixir-format
+msgid "Search query must be a string"
+msgstr ""
+
+#: lib/doctrans/validation.ex:207
+#, elixir-autogen, elixir-format
+msgid "Target language is required and must be a string"
+msgstr ""
+
+#: lib/doctrans/validation.ex:192
+#, elixir-autogen, elixir-format
+msgid "Title cannot be empty"
+msgstr ""
+
+#: lib/doctrans/validation.ex:197
+#, elixir-autogen, elixir-format
+msgid "Title is required and must be a string"
+msgstr ""
+
+#: lib/doctrans/validation.ex:80
+#, elixir-autogen, elixir-format
+msgid "Unsupported language: %{language}"
+msgstr ""
