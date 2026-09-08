@@ -105,7 +105,7 @@ defmodule Doctrans.Processing.DocumentConverter do
       spawn_monitor(fn ->
         Process.flag(:trap_exit, true)
         Process.monitor(caller)
-        Gettext.put_locale(DoctransWeb.Gettext, locale)
+        _ = Gettext.put_locale(DoctransWeb.Gettext, locale)
         result = run_conversion(path, source_path, output_dir)
         send(caller, {result_ref, result})
       end)
