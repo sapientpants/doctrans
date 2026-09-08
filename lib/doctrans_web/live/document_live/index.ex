@@ -13,6 +13,10 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   import DoctransWeb.DocumentLive.Components
 
+  @type upload_result ::
+          {:ok, document_id :: Ecto.UUID.t(), filename :: String.t(), path :: String.t()}
+          | {:error, filename :: String.t(), reason :: Doctrans.Errors.reason()}
+
   # How long to wait after a page-level update before refreshing the list.
   # Page updates arrive very frequently (one per page, per document); this
   # coalesces bursts of messages into a single re-query.
@@ -274,17 +278,17 @@ defmodule DoctransWeb.DocumentLive.Index do
         consume_upload_entry(path, entry)
       end)
 
-    {valid_files, rejected} =
-      Enum.split_with(uploaded_files, fn
-        {:ok, _, _, _} -> true
-        _ -> false
-      end)
+    {valid_files, rejected} = Enum.split_with(uploaded_files, &successful_upload?/1)
 
     handle_upload_results(socket, valid_files, rejected, target_language)
   end
 
-  # The callback returns the per-file result; callers pattern match on it.
-  @spec consume_upload_entry(binary(), Phoenix.LiveView.UploadEntry.t()) :: {:ok, term()}
+  @spec successful_upload?(upload_result()) :: boolean()
+  defp successful_upload?({:ok, _document_id, _filename, _path}), do: true
+  defp successful_upload?({:error, _filename, _reason}), do: false
+
+  # LiveView unwraps the outer :ok, leaving an upload_result for each consumed file.
+  @spec consume_upload_entry(binary(), Phoenix.LiveView.UploadEntry.t()) :: {:ok, upload_result()}
   defp consume_upload_entry(path, entry) do
     extension = entry.client_name |> Path.extname() |> String.downcase()
     max_file_size = max_file_size()
