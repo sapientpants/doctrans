@@ -151,6 +151,11 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 9. `show.ex` is a 599-line LiveView with ~25 assigns and 15+ handlers
 
+- **Status:** Implemented: reprocess state, handlers, and modal extracted to
+  `ReprocessModal`; page selection, zoom, and navigation controls extracted to
+  `PageViewer`. Show delegates these transitions and uses a separate HEEx template,
+  bringing the LiveView module below 350 lines.
+
 - **Problem:** `DocumentLive.Show` mixes: page viewer (zoom/pan/prev/next), document search,
   reprocess modal, chat panel, embedding-status polling, PubSub message routing. `ChatSession`
   was extracted (good), but the module remains the largest in the codebase and is the
