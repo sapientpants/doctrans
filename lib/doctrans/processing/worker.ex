@@ -13,6 +13,11 @@ defmodule Doctrans.Processing.Worker do
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
   import Ecto.Query
 
+  @document_id_key DocumentExtractionJob.document_id_key()
+  @page_id_key LlmProcessingJob.page_id_key()
+  @document_id_match "?->>'#{@document_id_key}' = ?"
+  @page_id_match "?->>'#{@page_id_key}' = ANY(?)"
+
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -24,7 +29,7 @@ defmodule Doctrans.Processing.Worker do
   Document extraction is queued as a job for better reliability and tracking.
   """
   def process_document(document_id, file_path) do
-    %{"document_id" => document_id, "file_path" => file_path}
+    %{@document_id_key => document_id, "file_path" => file_path}
     |> DocumentExtractionJob.new()
     |> Oban.insert()
   end
@@ -46,7 +51,7 @@ defmodule Doctrans.Processing.Worker do
     # Oban orders jobs by priority and scheduled_at timestamp.
     # Sequential processing is guaranteed by setting concurrency: 1 for the queue.
     # page_number is included for logging/debugging purposes only.
-    %{"page_id" => page_id, "page_number" => page_number}
+    %{@page_id_key => page_id, "page_number" => page_number}
     |> LlmProcessingJob.new(priority: 2)
     |> Oban.insert()
   end
@@ -62,7 +67,7 @@ defmodule Doctrans.Processing.Worker do
   - `:translation_model` - Override the default translation model
   """
   def queue_page_reprocess(page_id, opts \\ []) do
-    args = %{"page_id" => page_id}
+    args = %{@page_id_key => page_id}
 
     args =
       if opts[:extraction_model],
@@ -91,7 +96,7 @@ defmodule Doctrans.Processing.Worker do
     # Cancel all pending jobs for this document using Ecto query
     document_jobs_query =
       from(j in Oban.Job,
-        where: fragment("args->>'document_id' = ?", ^document_id),
+        where: fragment(@document_id_match, j.args, ^document_id),
         where: j.state in ["available", "scheduled", "retryable"]
       )
 
@@ -109,7 +114,7 @@ defmodule Doctrans.Processing.Worker do
         active_page_ids ->
           page_jobs_query =
             from(j in Oban.Job,
-              where: fragment("args->>'page_id' = ANY(?)", ^active_page_ids),
+              where: fragment(@page_id_match, j.args, ^active_page_ids),
               where: j.state in ["available", "scheduled", "retryable"]
             )
 

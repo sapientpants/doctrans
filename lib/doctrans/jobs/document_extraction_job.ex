@@ -12,13 +12,18 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   alias Doctrans.Documents
   alias Doctrans.Processing.DocumentProcessor
 
+  @document_id_key "document_id"
+
+  @doc false
+  def document_id_key, do: @document_id_key
+
   @impl true
-  def perform(%Oban.Job{args: %{"document_id" => document_id, "file_path" => file_path}}) do
+  def perform(%Oban.Job{args: %{@document_id_key => document_id, "file_path" => file_path}}) do
     DocumentProcessor.extract_document(document_id, file_path, MapSet.new())
   end
 
   @impl true
-  def perform(%Oban.Job{args: %{"document_id" => document_id}}) do
+  def perform(%Oban.Job{args: %{@document_id_key => document_id}}) do
     # For cases where file path is not provided (e.g., retries)
     # Try to find the original file in the document directory
     case Documents.get_document(document_id) do

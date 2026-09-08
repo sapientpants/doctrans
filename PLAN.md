@@ -195,6 +195,11 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 12. `cancel_document` uses Postgres-specific fragments tied to JSON arg shape
 
+- **Status:** Implemented: argument keys are owned by their job modules and shared
+  by producers, consumers, and cancellation queries. Partial expression indexes cover
+  pending document and page jobs without changing persisted arguments. Database tests
+  cover pending states, unrelated jobs, reprocessing, and running/terminal jobs.
+
 - **Problem:** `Worker.cancel_document/1` matches jobs via
   `fragment("args->>'document_id' = ?", ...)` — brittle to any key rename in job args and
   unindexed (sequential scan of `oban.jobs` per cancel).

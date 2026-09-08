@@ -10,13 +10,18 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
 
   alias Doctrans.Processing.LlmProcessor
 
+  @page_id_key "page_id"
+
+  @doc false
+  def page_id_key, do: @page_id_key
+
   @impl true
-  def perform(%Oban.Job{args: %{"page_id" => page_id, "opts" => opts}}) do
+  def perform(%Oban.Job{args: %{@page_id_key => page_id, "opts" => opts}}) do
     LlmProcessor.process_page(page_id, MapSet.new(), opts || [])
   end
 
   @impl true
-  def perform(%Oban.Job{args: %{"page_id" => page_id}}) do
+  def perform(%Oban.Job{args: %{@page_id_key => page_id}}) do
     LlmProcessor.process_page(page_id, MapSet.new(), [])
   end
 end
