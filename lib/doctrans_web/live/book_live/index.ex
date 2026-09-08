@@ -231,7 +231,7 @@ defmodule DoctransWeb.DocumentLive.Index do
         upload_documents_with_validated_language(socket, validated_language)
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Invalid language: #{reason}")}
+        {:noreply, put_flash(socket, :error, reason)}
     end
   end
 

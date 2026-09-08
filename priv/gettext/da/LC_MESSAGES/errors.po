@@ -188,3 +188,68 @@ msgstr "OpenAI embedding for kort: forventede mindst %{expected} dimensioner, fi
 #, elixir-autogen, elixir-format
 msgid "Failed to start LibreOffice: %{error}"
 msgstr "Kunne ikke starte LibreOffice: %{error}"
+
+#: lib/doctrans/validation.ex:111
+#, elixir-autogen, elixir-format
+msgid "Could not read file for validation"
+msgstr "Kunne ikke læse filen til validering"
+
+#: lib/doctrans/validation.ex:104
+#, elixir-autogen, elixir-format
+msgid "File content does not match its extension"
+msgstr "Filindholdet stemmer ikke overens med filtypen"
+
+#: lib/doctrans/validation.ex:108
+#, elixir-autogen, elixir-format
+msgid "File is too small to be a valid document"
+msgstr "Filen er for lille til at være et gyldigt dokument"
+
+#: lib/doctrans/validation.ex:116
+#, elixir-autogen, elixir-format
+msgid "File path and extension must be strings"
+msgstr "Filstien og filtypen skal være tekststrenge"
+
+#: lib/doctrans/validation.ex:84
+#, elixir-autogen, elixir-format
+msgid "Language code must be a string"
+msgstr "Sprogkoden skal være en tekststreng"
+
+#: lib/doctrans/validation.ex:180
+#, elixir-autogen, elixir-format
+msgid "Missing required fields: %{fields}"
+msgstr "Påkrævede felter mangler: %{fields}"
+
+#: lib/doctrans/validation.ex:54
+#, elixir-autogen, elixir-format
+msgid "Query too long (max %{max} characters)"
+msgstr "Søgningen er for lang (maks. %{max} tegn)"
+
+#: lib/doctrans/validation.ex:51
+#, elixir-autogen, elixir-format
+msgid "Query too short"
+msgstr "Søgningen er for kort"
+
+#: lib/doctrans/validation.ex:61
+#, elixir-autogen, elixir-format
+msgid "Search query must be a string"
+msgstr "Søgningen skal være en tekststreng"
+
+#: lib/doctrans/validation.ex:207
+#, elixir-autogen, elixir-format
+msgid "Target language is required and must be a string"
+msgstr "Målsproget er påkrævet og skal være en tekststreng"
+
+#: lib/doctrans/validation.ex:192
+#, elixir-autogen, elixir-format
+msgid "Title cannot be empty"
+msgstr "Titlen må ikke være tom"
+
+#: lib/doctrans/validation.ex:197
+#, elixir-autogen, elixir-format
+msgid "Title is required and must be a string"
+msgstr "Titlen er påkrævet og skal være en tekststreng"
+
+#: lib/doctrans/validation.ex:80
+#, elixir-autogen, elixir-format
+msgid "Unsupported language: %{language}"
+msgstr "Sproget understøttes ikke: %{language}"

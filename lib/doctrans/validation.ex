@@ -3,8 +3,11 @@ defmodule Doctrans.Validation do
   Input validation and sanitization utilities.
 
   Provides functions for validating and sanitizing user input
-  to ensure security and data integrity.
+  to ensure security and data integrity. Error messages use the calling process's
+  locale through DoctransWeb.Gettext.
   """
+
+  use Gettext, backend: DoctransWeb.Gettext
 
   @doc """
   Validates document creation/update parameters.
@@ -45,17 +48,17 @@ defmodule Doctrans.Validation do
 
     cond do
       String.length(trimmed) < 1 ->
-        {:error, "Query too short"}
+        {:error, dgettext("errors", "Query too short")}
 
       String.length(trimmed) > 500 ->
-        {:error, "Query too long (max 500 characters)"}
+        {:error, dgettext("errors", "Query too long (max %{max} characters)", max: 500)}
 
       true ->
         {:ok, String.slice(trimmed, 0, 500)}
     end
   end
 
-  def validate_search_query(_), do: {:error, "Search query must be a string"}
+  def validate_search_query(_), do: {:error, dgettext("errors", "Search query must be a string")}
 
   @doc """
   Validates language code.
@@ -74,11 +77,11 @@ defmodule Doctrans.Validation do
     if normalized_language in supported_languages do
       {:ok, normalized_language}
     else
-      {:error, "Unsupported language: #{language}"}
+      {:error, dgettext("errors", "Unsupported language: %{language}", language: language)}
     end
   end
 
-  def validate_language(_), do: {:error, "Language code must be a string"}
+  def validate_language(_), do: {:error, dgettext("errors", "Language code must be a string")}
 
   @doc """
   Validates that a file's content matches its claimed extension by checking magic bytes.
@@ -98,19 +101,19 @@ defmodule Doctrans.Validation do
         if magic_bytes_match?(header, String.downcase(extension)) do
           :ok
         else
-          {:error, "File content does not match its extension"}
+          {:error, dgettext("errors", "File content does not match its extension")}
         end
 
       {:ok, _too_small} ->
-        {:error, "File is too small to be a valid document"}
+        {:error, dgettext("errors", "File is too small to be a valid document")}
 
       {:error, _} ->
-        {:error, "Could not read file for validation"}
+        {:error, dgettext("errors", "Could not read file for validation")}
     end
   end
 
   def validate_file_content(_file_path, _extension),
-    do: {:error, "File path and extension must be strings"}
+    do: {:error, dgettext("errors", "File path and extension must be strings")}
 
   @doc """
   Sanitizes a filename string by removing dangerous characters.
@@ -173,7 +176,10 @@ defmodule Doctrans.Validation do
     if Enum.empty?(missing_fields) do
       {:ok, attrs}
     else
-      {:error, "Missing required fields: #{Enum.join(missing_fields, ", ")}"}
+      {:error,
+       dgettext("errors", "Missing required fields: %{fields}",
+         fields: Enum.join(missing_fields, ", ")
+       )}
     end
   end
 
@@ -183,11 +189,12 @@ defmodule Doctrans.Validation do
     if String.length(trimmed_title) >= 1 do
       {:ok, %{attrs | title: trimmed_title}}
     else
-      {:error, "Title cannot be empty"}
+      {:error, dgettext("errors", "Title cannot be empty")}
     end
   end
 
-  defp validate_title(_attrs), do: {:error, "Title is required and must be a string"}
+  defp validate_title(_attrs),
+    do: {:error, dgettext("errors", "Title is required and must be a string")}
 
   defp validate_target_language(%{target_language: language} = attrs) when is_binary(language) do
     case validate_language(language) do
@@ -197,7 +204,7 @@ defmodule Doctrans.Validation do
   end
 
   defp validate_target_language(_attrs),
-    do: {:error, "Target language is required and must be a string"}
+    do: {:error, dgettext("errors", "Target language is required and must be a string")}
 
   defp sanitize_filename(%{original_filename: filename} = attrs) when is_binary(filename) do
     sanitized = sanitize_filename_string(filename)

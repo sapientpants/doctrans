@@ -7,6 +7,16 @@ defmodule DoctransWeb.SearchLiveTest do
   alias Doctrans.Documents
 
   describe "Search LiveView" do
+    test "shows validation errors in the selected locale", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/search?lang=de")
+
+      view
+      |> element("#search-form")
+      |> render_submit(%{q: String.duplicate("a", 501)})
+
+      assert has_element?(view, "#flash-error", "Suchanfrage zu lang (maximal 500 Zeichen)")
+    end
+
     test "mounts with empty state", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search")
 

@@ -3,6 +3,15 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
 
   import Doctrans.Fixtures
 
+  test "shows upload language errors in the selected locale", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/?lang=de")
+
+    render_submit(view, "upload_document", %{"target_language" => "xx"})
+
+    assert has_element?(view, "#flash-error", "Nicht unterstützte Sprache: xx")
+    refute has_element?(view, "#flash-error", "Invalid language")
+  end
+
   describe "Index LiveView" do
     test "displays empty state when no documents", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/")
