@@ -53,6 +53,14 @@ config :doctrans, :pdf_extraction, dpi: 150
 # Requires LibreOffice to be installed:
 # - macOS: brew install --cask libreoffice
 # - Ubuntu: apt-get install libreoffice-writer-nogui
+#
+# Optional keys:
+# - timeout (default 120_000): milliseconds a conversion may take before
+#   the soffice process is killed
+# - soffice_path: explicit path to the soffice executable, e.g. an
+#   installation under a Nix store that is not on $PATH
+# - search_paths: extra absolute paths checked when soffice is not on
+#   $PATH (defaults cover Homebrew, macOS, and Debian/Ubuntu layouts)
 config :doctrans, :document_conversion, timeout: 120_000
 
 # Document sweeper configuration (cleans up orphaned directories)

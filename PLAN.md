@@ -15,6 +15,9 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 1. Deployment exposure: endpoint binds all interfaces with no auth
 
+- **Status:** Implemented: loopback binding by default, opt-in LAN exposure,
+  Docker ports published to loopback, and encrypted session cookies.
+
 - **Problem:** No authentication is needed for a local app, but the production config
   binds `{0,0,0,0,0,0,0,0}` in `config/runtime.exs`, so the default release is reachable
   from the whole LAN. Since there is no auth, anyone on the network can upload, read,
@@ -30,6 +33,10 @@ by priority; each includes the problem, the affected code, and the proposed fix.
     just signed (defense in depth even for local use).
 
 ### 2. LibreOffice conversion can leak zombie processes (DoS vector)
+
+- **Status:** Implemented: monitored port owner, process-group cleanup on timeout,
+  failure and caller exit, shared executable resolution, and isolated profiles.
+  Regression tests cover launcher children, cancellation, and partial-PDF timeouts.
 
 - **Problem:** `DocumentConverter.run_conversion/2` runs `System.cmd("soffice", ...)` in a
   `Task` and on timeout calls `Task.yield(task, timeout) || Task.shutdown(task)`.
