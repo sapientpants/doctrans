@@ -1,7 +1,27 @@
 defmodule DoctransWeb.DocumentLive.IndexTest do
   use DoctransWeb.ConnCase, async: true
 
+  alias Doctrans.Documents.Topics
+
   import Doctrans.Fixtures
+
+  test "summary cards render progress, thumbnails, and document links", %{conn: conn} do
+    document = document_with_pages_fixture(%{status: "processing"}, 2)
+    [first_page | _] = document.pages
+
+    {:ok, _} =
+      Doctrans.Documents.update_page_extraction(first_page, %{extraction_status: "completed"})
+
+    empty_document = document_fixture()
+    {:ok, view, _html} = live(conn, ~p"/")
+    card = "#documents-#{document.id}"
+
+    assert has_element?(view, "#{card} progress[value='25.0']")
+    assert has_element?(view, "#{card} img[src='/uploads/#{first_page.image_path}']")
+    assert has_element?(view, "#{card} a[href='/documents/#{document.id}']")
+    assert has_element?(view, "#{card} button[phx-value-id='#{document.id}']")
+    refute has_element?(view, "#documents-#{empty_document.id} img")
+  end
 
   test "shows upload language errors in the selected locale", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/?lang=de")
@@ -231,7 +251,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
 
       # Update and broadcast
       {:ok, updated} = Doctrans.Documents.update_document(doc, %{title: "Updated PubSub"})
-      Doctrans.Documents.broadcast_document_update(updated)
+      Topics.broadcast_document_update(updated)
 
       assert render(view) =~ "Updated PubSub"
     end
@@ -246,7 +266,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       {:ok, updated_page} =
         Doctrans.Documents.update_page_extraction(page, %{extraction_status: "completed"})
 
-      Doctrans.Documents.broadcast_page_update(updated_page)
+      Topics.broadcast_page_update(updated_page)
 
       # Just verify no crash
       assert render(view) =~ "Page Update Test"

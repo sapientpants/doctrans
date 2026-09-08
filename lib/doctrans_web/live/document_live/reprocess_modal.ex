@@ -5,6 +5,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   import Phoenix.LiveView, only: [put_flash: 3]
 
   alias Doctrans.{Config, Documents}
+  alias Doctrans.Documents.Topics
   alias Doctrans.Processing.{OpenAI, Worker}
 
   @doc "Initializes model selections and modal state."
@@ -74,7 +75,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     else
       case Documents.reset_page_for_reprocessing(page) do
         {:ok, page} ->
-          _ = Documents.broadcast_page_update(page)
+          _ = Topics.broadcast_page_update(page)
 
           _ =
             Worker.queue_page_reprocess(page.id,

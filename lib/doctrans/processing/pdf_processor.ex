@@ -15,6 +15,7 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
   alias Doctrans.Processing.Worker
 
   # Allow PdfExtractor module to be configured for testing
@@ -101,7 +102,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp set_total_pages(document, page_count) do
     case Documents.update_document(document, %{total_pages: page_count}) do
       {:ok, updated_document} ->
-        _ = Documents.broadcast_document_update(updated_document)
+        _ = Topics.broadcast_document_update(updated_document)
         {:ok, updated_document}
 
       error ->
@@ -124,7 +125,7 @@ defmodule Doctrans.Processing.PdfProcessor do
       end)
 
     # Final broadcast after all pages are extracted
-    _ = Documents.broadcast_document_update(document)
+    _ = Topics.broadcast_document_update(document)
 
     result
   end
@@ -143,7 +144,7 @@ defmodule Doctrans.Processing.PdfProcessor do
         case Documents.create_page(document, page_attrs) do
           {:ok, page} ->
             # Broadcast page creation for progressive UI updates
-            Documents.broadcast_page_update(page)
+            Topics.broadcast_page_update(page)
             {:ok, page}
 
           {:error, changeset} ->

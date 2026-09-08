@@ -4,6 +4,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
   alias Doctrans.Processing.Worker
   alias Doctrans.Validation
 
@@ -168,7 +169,7 @@ defmodule DoctransWeb.DocumentLive.Index do
             </p>
           </div>
           <div :for={{id, document} <- @streams.documents} id={id}>
-            <.document_card document={document} />
+            <.document_card summary={document} />
           </div>
         </div>
       </div>
@@ -435,7 +436,7 @@ defmodule DoctransWeb.DocumentLive.Index do
         sort_dir: socket.assigns.sort_dir
       )
 
-    topics = Enum.map(documents, &"document:#{&1.id}")
+    topics = Enum.map(documents, & &1.id)
 
     if connected?(socket) do
       subscribe_to_documents_topics(topics)
@@ -448,18 +449,18 @@ defmodule DoctransWeb.DocumentLive.Index do
   end
 
   defp subscribe_to_documents_topics(topics) do
-    Enum.each(topics, fn topic ->
-      Phoenix.PubSub.subscribe(Doctrans.PubSub, topic)
+    Enum.each(topics, fn document_id ->
+      Topics.subscribe_document(document_id)
     end)
   end
 
   defp unsubscribe_from_documents_topics(topics) do
-    Enum.each(topics, fn topic ->
-      Phoenix.PubSub.unsubscribe(Doctrans.PubSub, topic)
+    Enum.each(topics, fn document_id ->
+      Topics.unsubscribe_document(document_id)
     end)
   end
 
   defp subscribe_to_document_topic(document_id) do
-    Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document_id}")
+    Topics.subscribe_document(document_id)
   end
 end

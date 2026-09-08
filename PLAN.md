@@ -166,6 +166,10 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 10. `Documents` context is doing four jobs
 
+- **Status:** Implemented: pure `Documents.Progress` calculations, PubSub routing in
+  `Documents.Topics`, and explicit dashboard `Documents.Summary` structs. Summary
+  queries remain batched; progress helpers no longer implicitly preload pages.
+
 - **Problem:** `Doctrans.Documents` mixes CRUD, file-system path helpers, progress
   calculation (including a `calculate_progress/1` fallback that does a DB preload per
   document), and PubSub topics. `list_documents_with_progress/1` shadows `pages` and builds

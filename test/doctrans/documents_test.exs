@@ -2,7 +2,7 @@ defmodule Doctrans.DocumentsTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Document
+  alias Doctrans.Documents.{Document, Summary}
 
   import Doctrans.Fixtures
 
@@ -48,10 +48,43 @@ defmodule Doctrans.DocumentsTest do
   end
 
   describe "list_documents_with_progress/1" do
+    test "returns an empty list without documents" do
+      assert Documents.list_documents_with_progress() == []
+    end
+
+    test "summaries preserve sorting and use two queries for multiple documents" do
+      beta = document_with_pages_fixture(%{title: "Beta"}, 2)
+      alpha = document_fixture(%{title: "Alpha"})
+      owner = self()
+      handler_id = make_ref()
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:doctrans, :repo, :query],
+          fn _, _, _, _ ->
+            if self() == owner, do: send(owner, :summary_query)
+          end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      [first, second] = Documents.list_documents_with_progress(sort_by: :title, sort_dir: :asc)
+      assert first.id == alpha.id
+      assert first.document.title == "Alpha"
+      assert first.thumbnail_path == nil
+      assert first.progress == 0.0
+      assert second.id == beta.id
+      assert_receive :summary_query
+      assert_receive :summary_query
+      refute_receive :summary_query
+    end
+
     test "returns documents with progress field" do
       _doc = document_with_pages_fixture(%{}, 2)
       [result] = Documents.list_documents_with_progress()
-      assert Map.has_key?(result, :progress)
+      assert %Summary{} = result
       assert result.progress == 0.0
     end
 
@@ -78,19 +111,15 @@ defmodule Doctrans.DocumentsTest do
       assert result.progress == 50.0
     end
 
-    test "includes image_path on pages for dashboard thumbnails" do
+    test "includes the first-page thumbnail without retaining partial pages" do
       doc = document_with_pages_fixture(%{}, 2)
       [page1 | _] = doc.pages
 
       [result] = Documents.list_documents_with_progress()
 
-      # The lightweight progress query still carries the first page's image
-      # path so the document card can render its thumbnail.
-      first_page = Enum.find(result.pages, &(&1.page_number == 1))
-      assert first_page.image_path == page1.image_path
-
-      # The heavy markdown fields stay unloaded.
-      assert Enum.all?(result.pages, &is_nil(&1.original_markdown))
+      assert result.thumbnail_path == page1.image_path
+      refute Ecto.assoc_loaded?(result.document.pages)
+      refute Map.has_key?(result.document, :progress)
     end
   end
 
@@ -261,90 +290,6 @@ defmodule Doctrans.DocumentsTest do
     end
   end
 
-  describe "calculate_progress/1" do
-    test "returns 0.0 for document with no pages" do
-      doc = document_fixture(%{total_pages: 0})
-      assert Documents.calculate_progress(doc) == 0.0
-    end
-
-    test "returns 0.0 for document with nil total_pages" do
-      doc = document_fixture()
-      assert Documents.calculate_progress(doc) == 0.0
-    end
-
-    test "returns 0.0 for document with pending pages" do
-      doc = document_with_pages_fixture(%{}, 2)
-      assert Documents.calculate_progress(doc) == 0.0
-    end
-
-    test "returns 100.0 for fully completed document" do
-      doc = document_fixture(%{total_pages: 1})
-      page = page_fixture(doc, %{page_number: 1})
-
-      {:ok, page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "test"
-        })
-
-      {:ok, _page} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "test"
-        })
-
-      doc = Documents.get_document!(doc.id)
-      assert Documents.calculate_progress(doc) == 100.0
-    end
-  end
-
-  describe "calculate_progress_preloaded/1" do
-    test "calculates progress from preloaded pages" do
-      doc = document_with_pages_fixture(%{}, 2)
-      assert Documents.calculate_progress_preloaded(doc) == 0.0
-    end
-
-    test "falls back to calculate_progress if pages not preloaded" do
-      doc = document_fixture(%{total_pages: 0})
-      assert Documents.calculate_progress_preloaded(doc) == 0.0
-    end
-  end
-
-  describe "PubSub functions" do
-    test "subscribe_documents/0 subscribes to documents topic" do
-      assert :ok = Documents.subscribe_documents()
-    end
-
-    test "subscribe_document/1 subscribes to document topic" do
-      assert :ok = Documents.subscribe_document("test-id")
-    end
-
-    test "broadcast_document_update/1 broadcasts to subscribers" do
-      doc = document_fixture()
-      Documents.subscribe_document(doc.id)
-      Documents.subscribe_documents()
-
-      Documents.broadcast_document_update(doc)
-
-      # Should receive on document topic
-      assert_receive {:document_updated, ^doc}
-      # Should also receive on general documents topic
-      assert_receive {:document_updated, ^doc}
-    end
-
-    test "broadcast_page_update/1 broadcasts to subscribers" do
-      doc = document_fixture()
-      page = page_fixture(doc)
-      Documents.subscribe_document(doc.id)
-      Documents.subscribe_documents()
-
-      Documents.broadcast_page_update(page)
-
-      assert_receive {:page_updated, ^page}
-      assert_receive {:page_updated, ^page}
-    end
-  end
-
   describe "uploads_dir/0" do
     test "returns configured upload directory" do
       dir = Documents.uploads_dir()
@@ -358,7 +303,7 @@ defmodule Doctrans.DocumentsTest do
       doc = document_with_pages_fixture(%{status: "processing"}, 2)
       [result] = Documents.list_documents_with_progress()
       assert result.id == doc.id
-      assert Map.has_key?(result, :progress)
+      assert %Summary{} = result
       assert result.progress == 0.0
     end
   end

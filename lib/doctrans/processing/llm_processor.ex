@@ -18,6 +18,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   use Gettext, backend: DoctransWeb.Gettext
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
   alias Doctrans.Processing.DocumentOrchestrator
   alias Doctrans.Resilience.{Backoff, ErrorClassifier}
   alias Doctrans.Search.EmbeddingWorker
@@ -100,7 +101,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     # No content to translate - mark as completed with empty translation
     Logger.warning("Page #{page.page_number} has no content to translate, marking as completed")
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "completed"})
-    Documents.broadcast_page_update(page)
+    Topics.broadcast_page_update(page)
 
     # Check if all pages are complete and mark document as completed if so
     DocumentOrchestrator.check_document_completion(page.document_id)
@@ -120,7 +121,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     DocumentOrchestrator.update_document_status_to_processing(page.document_id)
 
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "processing"})
-    Documents.broadcast_page_update(page)
+    Topics.broadcast_page_update(page)
 
     image_path = Path.join(Documents.uploads_dir(), page.image_path)
     openai_opts = build_extraction_opts(opts)
@@ -133,7 +134,7 @@ defmodule Doctrans.Processing.LlmProcessor do
             extraction_status: "completed"
           })
 
-        Documents.broadcast_page_update(page)
+        Topics.broadcast_page_update(page)
         EmbeddingWorker.generate_embedding(page.id)
         :ok
 
@@ -206,7 +207,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   defp mark_extraction_failed(page, reason) do
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
-    Documents.broadcast_page_update(page)
+    Topics.broadcast_page_update(page)
 
     {:error,
      dgettext("errors", "Page %{page_number} extraction failed: %{reason}",
@@ -219,7 +220,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     Logger.info("Translating page #{page.page_number} of document #{page.document_id}")
 
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "processing"})
-    Documents.broadcast_page_update(page)
+    Topics.broadcast_page_update(page)
 
     document = Documents.get_document!(page.document_id)
     openai_opts = build_translation_opts(opts)
@@ -239,7 +240,7 @@ defmodule Doctrans.Processing.LlmProcessor do
             translation_status: "completed"
           })
 
-        Documents.broadcast_page_update(page)
+        Topics.broadcast_page_update(page)
 
         # Update chunk translated content
         EmbeddingWorker.update_chunk_translations(page)
@@ -320,7 +321,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   defp mark_translation_failed(page, reason) do
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "error"})
-    Documents.broadcast_page_update(page)
+    Topics.broadcast_page_update(page)
 
     {:error,
      dgettext("errors", "Page %{page_number} translation failed: %{reason}",

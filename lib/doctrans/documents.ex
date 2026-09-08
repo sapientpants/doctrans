@@ -10,7 +10,7 @@ defmodule Doctrans.Documents do
   import Ecto.Query
 
   alias Doctrans.Config.Uploads
-  alias Doctrans.Documents.{Document, Page, Pages}
+  alias Doctrans.Documents.{Document, Page, Pages, Summary}
   alias Doctrans.Repo
   alias Doctrans.Validation
 
@@ -55,7 +55,7 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
-  Returns all documents with progress pre-calculated.
+  Returns `Doctrans.Documents.Summary` structs with progress pre-calculated.
   Useful for dashboard views that need to display progress.
 
   Only the page fields required for progress are loaded (in one query),
@@ -85,8 +85,8 @@ defmodule Doctrans.Documents do
           from(p in Page,
             where: p.document_id in ^document_ids,
             # Only the fields needed for progress + the first-page thumbnail;
-            # the heavy markdown fields stay nil
-            select: %Page{
+            # the heavy markdown fields are not selected
+            select: %{
               id: p.id,
               document_id: p.document_id,
               page_number: p.page_number,
@@ -103,12 +103,7 @@ defmodule Doctrans.Documents do
     pages_by_document = Enum.group_by(pages, & &1.document_id)
 
     Enum.map(documents, fn document ->
-      pages = Map.get(pages_by_document, document.id, [])
-      progress = calculate_progress_preloaded(%{document | pages: pages})
-
-      document
-      |> Map.put(:pages, pages)
-      |> Map.put(:progress, progress)
+      Summary.new(document, Map.get(pages_by_document, document.id, []))
     end)
   end
 
@@ -246,109 +241,5 @@ defmodule Doctrans.Documents do
     pages_dir = document_pages_dir(document_id)
     File.mkdir_p!(pages_dir)
     pages_dir
-  end
-
-  @doc """
-  Calculates the progress percentage for a document.
-
-  Returns a float between 0.0 and 100.0.
-  """
-  def calculate_progress(%Document{} = document) do
-    document = Repo.preload(document, :pages)
-    calculate_progress_from_pages(document.pages, document.total_pages)
-  end
-
-  @doc """
-  Calculates progress from already-loaded pages (no DB query).
-  Use this when pages are already preloaded to avoid N+1 queries.
-  """
-  def calculate_progress_preloaded(%Document{pages: pages, total_pages: total_pages})
-      when is_list(pages) do
-    calculate_progress_from_pages(pages, total_pages)
-  end
-
-  def calculate_progress_preloaded(%Document{} = document) do
-    # Fallback if pages not preloaded
-    calculate_progress(document)
-  end
-
-  defp calculate_progress_from_pages([], _total), do: 0.0
-  defp calculate_progress_from_pages(_pages, nil), do: 0.0
-  defp calculate_progress_from_pages(_pages, 0), do: 0.0
-
-  defp calculate_progress_from_pages(pages, total_pages) do
-    # Each page has 2 steps: extraction and translation
-    total_steps = total_pages * 2
-
-    completed_steps =
-      Enum.reduce(pages, 0, fn page, acc ->
-        extraction_done = if page.extraction_status == "completed", do: 1, else: 0
-        translation_done = if page.translation_status == "completed", do: 1, else: 0
-        acc + extraction_done + translation_done
-      end)
-
-    completed_steps / total_steps * 100.0
-  end
-
-  # ============================================================================
-  # PubSub
-  # ============================================================================
-
-  @doc """
-  Subscribes to updates for all documents (for dashboard).
-  """
-  def subscribe_documents do
-    Phoenix.PubSub.subscribe(Doctrans.PubSub, "documents")
-  end
-
-  @doc """
-  Subscribes to updates for a specific document.
-  """
-  def subscribe_document(document_id) do
-    Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document_id}")
-  end
-
-  def unsubscribe_document(document_id) do
-    Phoenix.PubSub.unsubscribe(Doctrans.PubSub, "document:#{document_id}")
-  end
-
-  @doc """
-  Broadcasts a document update event.
-  """
-  def broadcast_document_update(%Document{} = document) do
-    Logger.debug("Broadcasting document_updated for #{document.id} to documents topic")
-
-    # Broadcast to specific document topic (for document viewer)
-    _ =
-      Phoenix.PubSub.broadcast(
-        Doctrans.PubSub,
-        "document:#{document.id}",
-        {:document_updated, document}
-      )
-
-    # Also broadcast to general documents topic (for dashboard)
-    _ = Phoenix.PubSub.broadcast(Doctrans.PubSub, "documents", {:document_updated, document})
-  end
-
-  @doc """
-  Broadcasts a page update event.
-  """
-  def broadcast_page_update(%Page{} = page) do
-    Logger.debug(
-      "Broadcasting page_updated for page #{page.page_number} of document #{page.document_id}"
-    )
-
-    # Broadcast to specific document topic (for document viewer)
-    _ =
-      Phoenix.PubSub.broadcast(
-        Doctrans.PubSub,
-        "document:#{page.document_id}",
-        {:page_updated, page}
-      )
-
-    # Also broadcast to general documents topic (for dashboard progress)
-    _ = Phoenix.PubSub.broadcast(Doctrans.PubSub, "documents", {:page_updated, page})
-
-    :ok
   end
 end

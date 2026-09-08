@@ -7,23 +7,22 @@ defmodule DoctransWeb.DocumentLive.Components do
   @doc """
   Renders a document card for the dashboard grid.
   """
-  attr :document, :map, required: true
+  attr :summary, Doctrans.Documents.Summary, required: true
 
   def document_card(assigns) do
-    progress = Map.get(assigns.document, :progress, 0.0)
-
     assigns =
       assigns
-      |> assign(:progress, progress)
-      |> assign(:status_color, status_color(assigns.document.status))
-      |> assign(:status_text, status_text(assigns.document.status))
+      |> assign(:document, assigns.summary.document)
+      |> assign(:progress, assigns.summary.progress)
+      |> assign(:status_color, status_color(assigns.summary.document.status))
+      |> assign(:status_text, status_text(assigns.summary.document.status))
 
     ~H"""
     <div class="card bg-base-200 shadow-lg hover:shadow-xl transition-shadow">
       <.link navigate={~p"/documents/#{@document.id}"} class="block">
         <figure class="px-4 pt-4">
           <div class="aspect-[3/4] bg-base-300 rounded-lg flex items-center justify-center overflow-hidden">
-            <.document_thumbnail document={@document} />
+            <.document_thumbnail document={@document} image_path={@summary.thumbnail_path} />
           </div>
         </figure>
       </.link>
@@ -75,28 +74,18 @@ defmodule DoctransWeb.DocumentLive.Components do
   """
   attr :document, :map, required: true
 
+  attr :image_path, :string, default: nil
+
   def document_thumbnail(assigns) do
-    document = assigns.document
-    pages = Map.get(document, :pages, [])
-    first_page = Enum.find(pages, &(&1.page_number == 1))
-
-    # Thumbnail is available when first page exists with an image path
-    has_thumbnail = first_page && first_page.image_path
-
-    assigns =
-      assigns
-      |> assign(:has_thumbnail, has_thumbnail)
-      |> assign(:first_page, first_page)
-
     ~H"""
     <img
-      :if={@has_thumbnail}
-      src={"/uploads/#{@first_page.image_path}"}
+      :if={@image_path}
+      src={"/uploads/#{@image_path}"}
       alt={"Thumbnail for #{@document.title}"}
       class="w-full h-full object-cover"
     />
     <.icon
-      :if={!@has_thumbnail}
+      :if={!@image_path}
       name="hero-document-text"
       class="w-16 h-16 text-base-content/30"
     />
