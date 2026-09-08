@@ -74,6 +74,9 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 4. Static serving of document pages
 
+- **Status:** Implemented: uploaded page images use `Cache-Control: private, no-store`
+  for ordinary and versioned requests, alongside item 1's loopback-by-default binding.
+
 - **Problem:** `Plug.Static` serves `priv/static/uploads` (extracted page images of
   private documents) to any client. UUID7 document ids are hard to guess, which is
   acceptable for a local app, but the page *paths* are visible in DOM `<img>` tags and
