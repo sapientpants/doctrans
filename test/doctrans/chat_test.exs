@@ -117,6 +117,37 @@ defmodule Doctrans.ChatTest do
       # The five highest similarities (0.16..0.20) survive.
       assert Enum.map(merged, & &1.similarity) == [0.20, 0.19, 0.18, 0.17, 0.16]
     end
+
+    test "enforces the exact byte boundary including both source fields and formatting" do
+      item = %{chunk("p1", 0, 0.9) | original_markdown: "日本語"}
+      budget = byte_size("日本語content[Page 1]\n\n\n---\n\n")
+
+      assert Chat.merge_context([], [item], max_bytes: budget) == [item]
+      assert Chat.merge_context([], [item], max_bytes: budget - 1) == []
+      assert Chat.merge_context([], [item], max_bytes: 0) == []
+    end
+
+    test "drops oversized chunks and keeps smaller chunks in similarity order" do
+      oversized = %{chunk("p1", nil, 1.0) | original_markdown: String.duplicate("x", 32_001)}
+      high = chunk("p2", 0, 0.9)
+      low = chunk("p3", 0, 0.8)
+
+      assert Chat.merge_context([low], [oversized, high]) == [high, low]
+    end
+
+    test "repeated turns stay within the byte budget even below the chunk limit" do
+      context =
+        Enum.reduce(1..40, [], fn i, prior ->
+          item = %{chunk("p#{i}", 0, i / 100) | translated_markdown: String.duplicate("é", 4000)}
+          merged = Chat.merge_context(prior, [item])
+
+          assert byte_size(Chat.build_context(merged)) <= 32_000
+          assert Enum.reduce(merged, 0, &(byte_size(&1.translated_markdown) + &2)) <= 32_000
+          merged
+        end)
+
+      assert Enum.map(context, & &1.page_id) == ["p40", "p39", "p38"]
+    end
   end
 
   describe "build_system_prompt/2" do
