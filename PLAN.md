@@ -183,6 +183,10 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 11. Over-broad `rescue` blocks in `Worker`
 
+- **Status:** Implemented: only database exceptions are rescued and logged; unexpected
+  errors propagate. Cancellation returns failures to the dashboard, which preserves
+  the document and shows an error. Regression tests cover failure and success paths.
+
 - **Problem:** `Worker.status/0` ends with a bare `rescue _ -> %{...zeros}` that masks
   *all* `RuntimeError`s (including real bugs) as "Oban not available". `cancel_document/1`
   likewise rescues and returns `:ok`, hiding failures of cancellation.

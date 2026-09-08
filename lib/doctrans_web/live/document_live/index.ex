@@ -243,18 +243,15 @@ defmodule DoctransWeb.DocumentLive.Index do
   def handle_event("delete_document", %{"id" => id}, socket) do
     document = Documents.get_document!(id)
 
-    # Cancel any in-progress processing
-    Worker.cancel_document(document.id)
+    with :ok <- Worker.cancel_document(document.id),
+         {:ok, _} <- Documents.delete_document(document) do
+      socket =
+        socket
+        |> put_flash(:info, gettext("Document deleted successfully"))
+        |> refresh_list()
 
-    case Documents.delete_document(document) do
-      {:ok, _} ->
-        socket =
-          socket
-          |> put_flash(:info, gettext("Document deleted successfully"))
-          |> refresh_list()
-
-        {:noreply, socket}
-
+      {:noreply, socket}
+    else
       {:error, _} ->
         {:noreply, put_flash(socket, :error, gettext("Failed to delete document"))}
     end

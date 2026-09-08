@@ -82,7 +82,11 @@ defmodule Doctrans.Processing.Worker do
   @doc """
   Cancels processing for a specific document.
   Cancels all pending jobs for the document.
+
+  Returns `:ok` on success or `{:error, exception}` for database failures.
+  Cancellation may be partial if a later query fails. Unexpected errors propagate.
   """
+  @spec cancel_document(Ecto.UUID.t()) :: :ok | {:error, Exception.t()}
   def cancel_document(document_id) do
     # Cancel all pending jobs for this document using Ecto query
     document_jobs_query =
@@ -114,15 +118,19 @@ defmodule Doctrans.Processing.Worker do
 
     :ok
   rescue
-    error in RuntimeError ->
-      Logger.warning("Failed to cancel document jobs: #{Exception.message(error)}")
-      :ok
+    error in [Ecto.NoResultsError, Postgrex.Error, DBConnection.ConnectionError] ->
+      Logger.warning(
+        "Failed to cancel jobs for document #{document_id}: #{Exception.message(error)}"
+      )
+
+      {:error, error}
   end
 
   @doc """
   Returns the current processing status from Oban queues.
 
-  Returns a map with job counts per queue, or zeros if Oban is not available.
+  Returns a map with job counts per queue, or zeros on database failures.
+  Database failures are logged; unexpected errors propagate.
   """
   def status do
     repo = Application.get_env(:doctrans, Oban)[:repo] || Doctrans.Repo
@@ -139,8 +147,9 @@ defmodule Doctrans.Processing.Worker do
       health_check: repo.aggregate(health_check_query, :count, :id)
     }
   rescue
-    _ ->
-      # Oban not available (likely in tests) - return zeros
+    error in [Ecto.NoResultsError, Postgrex.Error, DBConnection.ConnectionError] ->
+      Logger.warning("Failed to read Oban queue status: #{Exception.message(error)}")
+
       %{pdf_extraction: 0, llm_processing: 0, embedding_generation: 0, health_check: 0}
   end
 
