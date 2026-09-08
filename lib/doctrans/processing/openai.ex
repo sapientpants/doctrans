@@ -18,6 +18,8 @@ defmodule Doctrans.Processing.OpenAI do
   @embedding_dimensions 1024
 
   @impl true
+  @spec extract_markdown(String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def extract_markdown(image_path, opts \\ [])
 
   def extract_markdown(image_path, opts) when is_binary(image_path) do
@@ -88,6 +90,7 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   @impl true
+  @spec chat([map()], keyword()) :: {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def chat(messages, opts \\ [])
 
   def chat(messages, opts) when is_list(messages) do
@@ -173,6 +176,8 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   @impl true
+  @spec chat_stream([map()], (String.t() -> any()), keyword()) ::
+          {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def chat_stream(messages, on_delta, opts \\ [])
 
   def chat_stream(messages, on_delta, opts) when is_list(messages) and is_function(on_delta, 1) do
@@ -227,6 +232,8 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   @impl true
+  @spec translate(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def translate(markdown, source_language, target_language, opts \\ [])
 
   def translate(markdown, source_language, target_language, opts)
@@ -271,6 +278,7 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   @impl true
+  @spec available?() :: boolean()
   def available? do
     case build_base_req() |> Req.get(url: api_url("/v1/models")) do
       {:ok, %{status: 200}} -> true
@@ -281,6 +289,7 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   @impl true
+  @spec list_models() :: {:ok, [String.t()]} | {:error, Doctrans.Errors.reason()}
   def list_models do
     fuse = :openai_api
 
@@ -311,6 +320,8 @@ defmodule Doctrans.Processing.OpenAI do
 
   defp parse_list_models_response(_body), do: {:error, :invalid_api_response}
 
+  @spec embed(String.t() | nil, keyword()) ::
+          {:ok, Pgvector.t() | nil} | {:error, Doctrans.Errors.reason()}
   def embed(text, opts \\ [])
 
   def embed(nil, _opts), do: {:ok, nil}
@@ -475,6 +486,7 @@ defmodule Doctrans.Processing.OpenAI do
   defp normalize_reason(reason), do: reason
 
   # Strip markdown code fences that LLMs sometimes wrap their output in
+  @spec strip_code_fences(String.t()) :: String.t()
   def strip_code_fences(text) do
     text
     |> String.replace(~r/\A```[^\n]*\n/, "")

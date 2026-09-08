@@ -7,6 +7,26 @@ defmodule Doctrans.Search do
   Results are combined using Reciprocal Rank Fusion (RRF).
   """
 
+  @type hybrid_result :: %{
+          page_id: Ecto.UUID.t() | nil,
+          document_id: Ecto.UUID.t() | nil,
+          document_title: String.t(),
+          page_number: pos_integer(),
+          image_path: String.t() | nil,
+          score: float(),
+          snippet: String.t() | nil
+        }
+
+  @type document_result :: %{
+          :page_id => Ecto.UUID.t() | nil,
+          :page_number => pos_integer(),
+          :original_markdown => String.t() | nil,
+          :translated_markdown => String.t() | nil,
+          :similarity => float(),
+          optional(:chunk_id) => Ecto.UUID.t() | nil,
+          optional(:chunk_index) => non_neg_integer()
+        }
+
   alias Doctrans.Repo
 
   # Allow embedding module to be configured for testing
@@ -25,6 +45,8 @@ defmodule Doctrans.Search do
   - `:limit` - Maximum number of results (default: 20)
   - `:rrf_k` - RRF smoothing constant (default: 60, higher = smoother ranking)
   """
+  @spec search(String.t() | nil, keyword()) ::
+          {:ok, [hybrid_result()]} | {:error, Doctrans.Errors.reason()}
   def search(query, opts \\ [])
   def search("", _opts), do: {:ok, []}
   def search(nil, _opts), do: {:ok, []}
@@ -77,6 +99,8 @@ defmodule Doctrans.Search do
   - `:translated_markdown` - Translated text (if available)
   - `:similarity` - Cosine similarity score (0-1, higher is better)
   """
+  @spec search_in_document(Ecto.UUID.t(), String.t() | nil, keyword()) ::
+          {:ok, [document_result()]} | {:error, Doctrans.Errors.reason()}
   def search_in_document(document_id, query, opts \\ [])
   def search_in_document(_document_id, "", _opts), do: {:ok, []}
   def search_in_document(_document_id, nil, _opts), do: {:ok, []}
@@ -104,6 +128,8 @@ defmodule Doctrans.Search do
   - `:limit` - Maximum number of pages to return (default: 3)
   - `:min_similarity` - Minimum similarity threshold (default: #{@chat_similarity_threshold})
   """
+  @spec search_by_embedding(Ecto.UUID.t(), Pgvector.t() | nil, keyword()) ::
+          {:ok, [document_result()]} | {:error, Doctrans.Errors.reason()}
   def search_by_embedding(document_id, query_embedding, opts \\ []) do
     limit = Keyword.get(opts, :limit, 3)
     min_similarity = Keyword.get(opts, :min_similarity, @chat_similarity_threshold)
@@ -209,6 +235,8 @@ defmodule Doctrans.Search do
 
   - `:rrf_k` - RRF smoothing constant (default: 60)
   """
+  @spec count_results(String.t() | nil, keyword()) ::
+          {:ok, non_neg_integer()} | {:error, Doctrans.Errors.reason()}
   def count_results(query, opts \\ [])
   def count_results("", _opts), do: {:ok, 0}
   def count_results(nil, _opts), do: {:ok, 0}

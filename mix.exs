@@ -135,6 +135,7 @@ defmodule Doctrans.MixProject do
         "format --check-formatted",
         "credo --strict",
         "sobelow --config",
+        "dialyzer",
         "test"
       ]
     ]

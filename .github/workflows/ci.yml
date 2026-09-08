@@ -87,6 +87,9 @@ jobs:
       - name: Compile dependencies
         run: mix deps.compile
 
+      - name: Build Dialyzer PLT
+        run: mix dialyzer --plt
+
       - name: Run pre-commit hooks
         run: pre-commit run --all-files
 
