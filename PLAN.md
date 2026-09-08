@@ -97,7 +97,7 @@ by priority; each includes the problem, the affected code, and the proposed fix.
   slow responses, token-cost blowups, and the context is never pruned on client disconnect
   semantics. It is also all in-memory socket state, so it disappears on reload (fine), but
   grows without limit during a session.
-- **Affected:** `lib/doctrans/chat/agent.ex`, `lib/doctrans_web/live/book_live/chat_session.ex`.
+- **Affected:** `lib/doctrans/chat/agent.ex`, `lib/doctrans_web/live/document_live/chat_session.ex`.
 - **Fix:** Cap accumulated context by total characters/tokens (e.g. keep most recent N
   chunks or the highest-similarity chunks, trim oldest), and log/drop when the cap trips.
   Add a unit test that verifies the trim behavior.
@@ -120,6 +120,9 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 ## P1 — Maintainability
 
 ### 7. Directory/module mismatch: `book_live/` holds `DocumentLive` modules
+
+- **Status:** Implemented: LiveView modules and matching tests moved to `document_live/`,
+  with Gettext source references and Dialyzer paths updated.
 
 - **Problem:** `lib/doctrans_web/live/book_live/` contains modules named
   `DoctransWeb.DocumentLive.*` — a leftover from the Book→Document rename. New contributors
