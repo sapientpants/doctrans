@@ -18,8 +18,8 @@ defmodule Doctrans.Search.EmbeddingStub do
   def generate(nil, _opts), do: {:ok, nil}
   def generate("", _opts), do: {:ok, nil}
 
-  def generate(_text, _opts) do
-    stub_delay()
+  def generate(text, _opts) do
+    await_barrier(text)
 
     # Create a fake 1024-dimensional vector (same size as real embeddings)
     # Use deterministic values based on text hash for reproducibility
@@ -27,12 +27,23 @@ defmodule Doctrans.Search.EmbeddingStub do
     {:ok, Pgvector.new(fake_embedding)}
   end
 
-  # Optional artificial latency (via :embedding_stub_delay_ms) so tests can
-  # hold a background task mid-embedding, e.g. to exercise deletion races.
-  defp stub_delay do
-    case Application.get_env(:doctrans, :embedding_stub_delay_ms) do
-      ms when is_integer(ms) and ms > 0 ->
-        Process.sleep(ms)
+  # Only the selected input waits, so unrelated background embeddings keep
+  # using the ordinary stub. Monitoring the test prevents an abandoned barrier
+  # from leaking a blocked task when an assertion fails.
+  defp await_barrier(text) do
+    case Application.get_env(:doctrans, :embedding_stub_barrier) do
+      {^text, owner, barrier} ->
+        monitor = Process.monitor(owner)
+        send(owner, {:embedding_started, barrier, self()})
+
+        receive do
+          {:continue_embedding, ^barrier} ->
+            Process.demonitor(monitor, [:flush])
+            :ok
+
+          {:DOWN, ^monitor, :process, ^owner, _reason} ->
+            exit(:shutdown)
+        end
 
       _ ->
         :ok
