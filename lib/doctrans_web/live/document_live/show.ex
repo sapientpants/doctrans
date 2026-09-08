@@ -4,6 +4,7 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   alias Doctrans.Chat
   alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
   alias DoctransWeb.DocumentLive.{ChatSession, PageViewer, ReprocessModal}
 
   import DoctransWeb.DocumentLive.Components,
@@ -20,7 +21,7 @@ defmodule DoctransWeb.DocumentLive.Show do
 
     _ =
       if connected?(socket) do
-        _ = Documents.subscribe_document(document.id)
+        _ = Topics.subscribe_document(document.id)
       else
         :ok
       end
@@ -172,7 +173,7 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def terminate(_reason, socket) do
-    if connected?(socket), do: Documents.unsubscribe_document(socket.assigns.document.id)
+    if connected?(socket), do: Topics.unsubscribe_document(socket.assigns.document.id)
     :ok
   end
 

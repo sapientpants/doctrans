@@ -12,6 +12,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   require Logger
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
 
   @doc """
   Checks if the current document is complete and handles completion.
@@ -54,7 +55,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
 
       document ->
         {:ok, document} = Documents.update_document_status(document, "completed")
-        _ = Documents.broadcast_document_update(document)
+        _ = Topics.broadcast_document_update(document)
         :ok
     end
   end
@@ -108,7 +109,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
         _ =
           if document.status in valid_from do
             {:ok, document} = Documents.update_document_status(document, new_status)
-            _ = Documents.broadcast_document_update(document)
+            _ = Topics.broadcast_document_update(document)
           else
             :ok
           end
