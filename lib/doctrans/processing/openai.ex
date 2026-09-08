@@ -34,7 +34,7 @@ defmodule Doctrans.Processing.OpenAI do
         |> resolve_extract_response(:openai_api)
 
       {:error, reason} ->
-        {:error, "Could not read image file: #{inspect(reason)}"}
+        {:error, {:image_unreadable, [reason: reason]}}
     end
   end
 
@@ -44,7 +44,7 @@ defmodule Doctrans.Processing.OpenAI do
         result = markdown |> String.trim() |> strip_code_fences()
 
         if result == "" do
-          {:error, "Model returned empty response for image"}
+          {:error, :empty_image_response}
         else
           {:ok, result}
         end
@@ -110,7 +110,7 @@ defmodule Doctrans.Processing.OpenAI do
         result = content |> String.trim() |> strip_code_fences()
 
         if result == "" do
-          {:error, "Model returned empty response"}
+          {:error, :empty_response}
         else
           {:ok, result}
         end
@@ -159,7 +159,7 @@ defmodule Doctrans.Processing.OpenAI do
     parse_chat_response(%{"choices" => [Enum.at(choices, 0)]})
   end
 
-  defp parse_chat_response(_body), do: {:error, "Invalid response format from API"}
+  defp parse_chat_response(_body), do: {:error, :invalid_api_response}
 
   # Returns the trimmed reasoning content as the result, or an error when the
   # response carried no usable content at all.
@@ -167,7 +167,7 @@ defmodule Doctrans.Processing.OpenAI do
     reasoning = Map.get(message, "reasoning") || Map.get(message, "reasoning_content", "")
 
     case String.trim(to_string(reasoning)) do
-      "" -> {:error, "Empty or missing response from API"}
+      "" -> {:error, :missing_api_response}
       content -> {:ok, content}
     end
   end
@@ -213,7 +213,7 @@ defmodule Doctrans.Processing.OpenAI do
           |> strip_code_fences()
 
         if content == "" do
-          {:error, "Model returned empty response"}
+          {:error, :empty_response}
         else
           {:ok, content}
         end
@@ -309,7 +309,7 @@ defmodule Doctrans.Processing.OpenAI do
     parse_list_models_response(%{"data" => body["data"]})
   end
 
-  defp parse_list_models_response(_body), do: {:error, "Invalid response format from API"}
+  defp parse_list_models_response(_body), do: {:error, :invalid_api_response}
 
   def embed(text, opts \\ [])
 
@@ -356,11 +356,11 @@ defmodule Doctrans.Processing.OpenAI do
       {:ok, Pgvector.new(Enum.take(embedding, @embedding_dimensions))}
     else
       {:error,
-       "OpenAI embedding too short: expected at least #{@embedding_dimensions} dimensions, got #{length(embedding)}"}
+       {:embedding_too_short, [expected: @embedding_dimensions, actual: length(embedding)]}}
     end
   end
 
-  defp parse_embed_response(_body), do: {:error, "Invalid embedding response from API"}
+  defp parse_embed_response(_body), do: {:error, :invalid_embedding_response}
 
   # Private helpers
 
@@ -463,12 +463,14 @@ defmodule Doctrans.Processing.OpenAI do
     end
 
     Logger.error("API call failed (#{classification}): #{inspect(reason)}")
-    {:error, "API call failed: #{inspect(reason)}"}
+    {:error, Doctrans.Errors.normalize(normalized)}
   end
 
   # ErrorClassifier keys HTTP failures as {:http_error, status}, so map our
   # internal {:http_status, status, resp} tuple onto that shape.
   defp normalize_reason({:http_status, status, _resp}), do: {:http_error, status}
+
+  defp normalize_reason({:error, reason}), do: normalize_reason(reason)
 
   defp normalize_reason(reason), do: reason
 

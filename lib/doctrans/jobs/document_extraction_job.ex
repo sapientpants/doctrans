@@ -28,7 +28,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
     # Try to find the original file in the document directory
     case Documents.get_document(document_id) do
       nil ->
-        {:error, "Document not found"}
+        {:error, :document_not_found}
 
       doc ->
         file_path = find_document_file(document_id, doc.original_filename)
@@ -36,7 +36,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
         if file_path do
           DocumentProcessor.extract_document(document_id, file_path, MapSet.new())
         else
-          {:error, "Document file not found"}
+          {:error, :document_file_not_found}
         end
     end
   end

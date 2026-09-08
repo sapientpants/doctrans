@@ -6,12 +6,7 @@ defmodule Doctrans.Search.Embedding do
   `:embedding_api` circuit breaker, transient retries, and the 1024-dimension
   Matryoshka truncation shared with the rest of the OpenAI client.
 
-  ## I18n Note
-
-  This module runs in background GenServer processes (embedding workers),
-  not in the web request process. Since Gettext locales are process-specific, error
-  messages from this module will use the default locale, not the user's browser locale.
-  This is acceptable as these errors are primarily logged and displayed as system status.
+  Errors are locale-independent reasons, translated only by the web layer.
   """
 
   @behaviour Doctrans.Search.EmbeddingBehaviour

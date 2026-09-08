@@ -7,6 +7,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   alias Doctrans.{Config, Documents}
   alias Doctrans.Documents.Topics
   alias Doctrans.Processing.{OpenAI, Worker}
+  alias DoctransWeb.ErrorMessages
 
   @doc "Initializes model selections and modal state."
   def init(socket) do
@@ -68,7 +69,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     if extraction_model not in available_models or translation_model not in available_models do
       socket =
         socket
-        |> put_flash(:error, gettext("Invalid model selection"))
+        |> put_flash(:error, ErrorMessages.message(:invalid_model))
         |> assign(:show_reprocess_modal, false)
 
       {:noreply, socket}
@@ -94,7 +95,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
         {:error, _reason} ->
           socket =
             socket
-            |> put_flash(:error, gettext("Failed to reset page for reprocessing"))
+            |> put_flash(:error, ErrorMessages.message(:reprocess_failed))
             |> assign(:show_reprocess_modal, false)
 
           {:noreply, socket}
@@ -106,7 +107,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     {models, error} =
       case OpenAI.list_models() do
         {:ok, models} -> {models, nil}
-        {:error, _} -> {[], gettext("Failed to fetch models from OpenAI")}
+        {:error, _} -> {[], ErrorMessages.message(:models_unavailable)}
       end
 
     socket =

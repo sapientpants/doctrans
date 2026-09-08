@@ -28,7 +28,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       fake_document_id = Uniq.UUID.uuid7()
 
       result = perform_job(DocumentExtractionJob, %{"document_id" => fake_document_id})
-      assert {:error, "Document not found"} = result
+      assert {:error, :document_not_found} = result
     end
 
     test "returns error when document file not found" do

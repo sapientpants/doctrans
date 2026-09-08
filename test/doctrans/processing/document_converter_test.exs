@@ -139,7 +139,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
       result = DocumentConverter.convert_to_pdf("/nonexistent/file.docx", output_dir)
 
       assert {:error, message} = result
-      assert message =~ "not found"
+      assert {:source_file_not_found, [path: _]} = message
     end
 
     test "fails fast with a clear error when LibreOffice is not installed" do
@@ -153,7 +153,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
       result = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
 
       assert {:error, message} = result
-      assert message =~ "LibreOffice is not installed"
+      assert :soffice_not_found = message
     end
 
     test "returns {:ok, pdf_path} when the conversion succeeds" do
@@ -183,7 +183,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
       result = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
 
       assert {:error, message} = result
-      assert message =~ "boom: bad file"
+      assert {:conversion_failed, [error: "boom: bad file"]} = message
     end
 
     test "runs with an isolated profile that is removed afterwards" do
@@ -244,7 +244,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
       elapsed = System.monotonic_time(:millisecond) - start
 
       assert {:error, message} = result
-      assert message =~ "timed out"
+      assert :conversion_timeout = message
       assert elapsed >= 800
 
       pid = pid_file |> File.read!() |> String.trim() |> String.to_integer()
@@ -270,7 +270,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     started = System.monotonic_time(:millisecond)
 
     assert {:error, message} = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
-    assert message =~ "timed out"
+    assert :conversion_timeout = message
     assert System.monotonic_time(:millisecond) - started < 3_000
   end
 
@@ -353,7 +353,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     source = make_source(dir, "book.docx")
 
     assert {:error, message} = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
-    assert message =~ "timed out"
+    assert :conversion_timeout = message
   end
 
   test "creates fresh profiles without reusing an existing template path" do
@@ -408,7 +408,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     put_config(soffice_path: fake)
     source = make_source(dir, "book.docx")
     assert {:error, message} = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
-    assert message =~ "PDF file not found"
+    assert :converted_pdf_not_found = message
   end
 
   defp eventually(check, attempts \\ 100)

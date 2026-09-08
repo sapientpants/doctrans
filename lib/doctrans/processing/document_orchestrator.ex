@@ -182,7 +182,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   @doc """
   Fails document processing with an error message.
   """
-  @spec fail_document_processing(Doctrans.Documents.t(), String.t()) ::
+  @spec fail_document_processing(Doctrans.Documents.t(), Doctrans.Errors.reason() | String.t()) ::
           {:ok, :failed} | {:error, atom()}
   def fail_document_processing(document, error_message) do
     # First check if document exists

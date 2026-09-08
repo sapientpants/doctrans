@@ -262,3 +262,15 @@ msgstr "Tytuł jest wymagany i musi być ciągiem znaków"
 #, elixir-autogen, elixir-format
 msgid "Unsupported language: %{language}"
 msgstr "Nieobsługiwany język: %{language}"
+
+#, elixir-autogen, elixir-format
+msgid "Could not read uploaded file"
+msgstr "Nie można odczytać przesłanego pliku"
+
+#, elixir-autogen, elixir-format
+msgid "LibreOffice process terminated unexpectedly"
+msgstr "Proces LibreOffice został nieoczekiwanie zakończony"
+
+#, elixir-autogen, elixir-format
+msgid "File too large (%{size}MB, max %{max}MB)"
+msgstr "Plik jest zbyt duży (%{size}MB, maks. %{max}MB)"

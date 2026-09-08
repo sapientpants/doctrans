@@ -6,6 +6,7 @@ defmodule DoctransWeb.SearchLive do
 
   alias Doctrans.Search
   alias Doctrans.Validation
+  alias DoctransWeb.ErrorMessages
 
   require Logger
 
@@ -67,7 +68,7 @@ defmodule DoctransWeb.SearchLive do
               )
               |> put_flash(
                 :error,
-                gettext("Search is temporarily unavailable. Please try again.")
+                ErrorMessages.message(:search_failed)
               )
 
             {:noreply, socket}
@@ -80,7 +81,7 @@ defmodule DoctransWeb.SearchLive do
          |> assign(:searched, true)
          |> assign(:results, [])
          |> assign(:total_count, 0)
-         |> put_flash(:error, reason)}
+         |> put_flash(:error, ErrorMessages.message(reason))}
     end
   end
 

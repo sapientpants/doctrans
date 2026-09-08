@@ -9,63 +9,6 @@ defmodule Doctrans.ValidationTest do
     path
   end
 
-  describe "localized errors" do
-    test "translates errors in every supported non-English locale" do
-      translations = %{
-        "da" => "Søgningen er for kort",
-        "de" => "Suchanfrage zu kurz",
-        "es" => "Consulta demasiado corta",
-        "fr" => "Requête trop courte",
-        "it" => "Query troppo breve",
-        "nl" => "Zoekopdracht te kort",
-        "no" => "Søket er for kort",
-        "pl" => "Zapytanie jest zbyt krótkie",
-        "pt" => "Consulta demasiado curta",
-        "sv" => "Sökfrågan är för kort"
-      }
-
-      for {locale, expected} <- translations do
-        Gettext.with_locale(DoctransWeb.Gettext, locale, fn ->
-          assert {:error, ^expected} = Validation.validate_search_query("")
-        end)
-      end
-    end
-
-    test "translates document, query and language errors with bindings" do
-      Gettext.with_locale(DoctransWeb.Gettext, "de", fn ->
-        assert {:error, "Suchanfrage zu lang (maximal 500 Zeichen)"} =
-                 Validation.validate_search_query(String.duplicate("a", 501))
-
-        assert {:error, "Suchanfrage muss eine Zeichenkette sein"} =
-                 Validation.validate_search_query(nil)
-
-        assert {:error, "Nicht unterstützte Sprache: xx"} = Validation.validate_language("xx")
-
-        assert {:error, "Sprachcode muss eine Zeichenkette sein"} =
-                 Validation.validate_language(nil)
-
-        assert {:error, "Erforderliche Felder fehlen: original_filename, target_language"} =
-                 Validation.validate_document_attrs(%{title: "Test"})
-
-        attrs = %{title: "", original_filename: "test.pdf", target_language: "de"}
-
-        assert {:error, "Titel darf nicht leer sein"} = Validation.validate_document_attrs(attrs)
-
-        assert {:error, "Titel ist erforderlich und muss eine Zeichenkette sein"} =
-                 Validation.validate_document_attrs(%{attrs | title: nil})
-
-        assert {:error, "Zielsprache ist erforderlich und muss eine Zeichenkette sein"} =
-                 Validation.validate_document_attrs(%{
-                   attrs
-                   | title: "Test",
-                     target_language: nil
-                 })
-      end)
-
-      assert {:error, "Query too short"} = Validation.validate_search_query("")
-    end
-  end
-
   describe "validate_document_attrs/1" do
     test "returns valid attrs when all fields are present and valid" do
       attrs = %{
@@ -98,7 +41,7 @@ defmodule Doctrans.ValidationTest do
         target_language: "en"
       }
 
-      assert {:error, "Title cannot be empty"} = Validation.validate_document_attrs(attrs)
+      assert {:error, :empty_title} = Validation.validate_document_attrs(attrs)
     end
 
     test "returns error when title is only whitespace" do
@@ -108,20 +51,21 @@ defmodule Doctrans.ValidationTest do
         target_language: "en"
       }
 
-      assert {:error, "Title cannot be empty"} = Validation.validate_document_attrs(attrs)
+      assert {:error, :empty_title} = Validation.validate_document_attrs(attrs)
     end
 
     test "returns error when missing required fields" do
       attrs = %{}
 
-      assert {:error, "Missing required fields: title, original_filename, target_language"} =
+      assert {:error,
+              {:missing_required_fields, [fields: "title, original_filename, target_language"]}} =
                Validation.validate_document_attrs(attrs)
     end
 
     test "returns error when missing some required fields" do
       attrs = %{title: "Test"}
 
-      assert {:error, "Missing required fields: original_filename, target_language"} =
+      assert {:error, {:missing_required_fields, [fields: "original_filename, target_language"]}} =
                Validation.validate_document_attrs(attrs)
     end
 
@@ -132,7 +76,7 @@ defmodule Doctrans.ValidationTest do
         target_language: "en"
       }
 
-      assert {:error, "Title is required and must be a string"} =
+      assert {:error, :invalid_title} =
                Validation.validate_document_attrs(attrs)
     end
 
@@ -144,7 +88,7 @@ defmodule Doctrans.ValidationTest do
       }
 
       assert {:error, reason} = Validation.validate_document_attrs(attrs)
-      assert reason =~ "Unsupported language"
+      assert {:unsupported_language, [language: _]} = reason
     end
 
     test "returns error when target_language is not a string" do
@@ -154,7 +98,7 @@ defmodule Doctrans.ValidationTest do
         target_language: 123
       }
 
-      assert {:error, "Target language is required and must be a string"} =
+      assert {:error, :invalid_target_language} =
                Validation.validate_document_attrs(attrs)
     end
 
@@ -187,21 +131,21 @@ defmodule Doctrans.ValidationTest do
     test "returns error for empty query" do
       query = ""
 
-      assert {:error, "Query too short"} =
+      assert {:error, :query_too_short} =
                Validation.validate_search_query(query)
     end
 
     test "returns error for only whitespace query" do
       query = "   "
 
-      assert {:error, "Query too short"} =
+      assert {:error, :query_too_short} =
                Validation.validate_search_query(query)
     end
 
     test "returns error for query too long" do
       long_query = String.duplicate("a", 501)
       assert {:error, reason} = Validation.validate_search_query(long_query)
-      assert reason =~ "too long"
+      assert reason == {:query_too_long, [max: 500]}
     end
 
     test "accepts query containing HTML/script tags without transformation" do
@@ -211,7 +155,7 @@ defmodule Doctrans.ValidationTest do
 
     test "returns error for non-string query" do
       query = 123
-      assert {:error, "Search query must be a string"} = Validation.validate_search_query(query)
+      assert {:error, :invalid_query} = Validation.validate_search_query(query)
     end
   end
 
@@ -226,26 +170,6 @@ defmodule Doctrans.ValidationTest do
       {:ok, dir: dir}
     end
 
-    test "translates file validation failures", %{dir: dir} do
-      invalid = write_file!(dir, "invalid.pdf", "not a PDF document")
-      tiny = write_file!(dir, "tiny.pdf", "%PD")
-      missing = Path.join(dir, "missing.pdf")
-
-      Gettext.with_locale(DoctransWeb.Gettext, "de", fn ->
-        assert {:error, "Dateiinhalt stimmt nicht mit der Dateiendung überein"} =
-                 Validation.validate_file_content(invalid, ".pdf")
-
-        assert {:error, "Datei ist zu klein, um ein gültiges Dokument zu sein"} =
-                 Validation.validate_file_content(tiny, ".pdf")
-
-        assert {:error, "Datei konnte nicht zur Validierung gelesen werden"} =
-                 Validation.validate_file_content(missing, ".pdf")
-
-        assert {:error, "Dateipfad und Dateiendung müssen Zeichenketten sein"} =
-                 Validation.validate_file_content(nil, ".pdf")
-      end)
-    end
-
     test "accepts a valid PDF header", %{dir: dir} do
       path = write_file!(dir, "doc.pdf", "%PDF-1.4\nrest of file")
       assert :ok = Validation.validate_file_content(path, ".pdf")
@@ -254,7 +178,7 @@ defmodule Doctrans.ValidationTest do
     test "rejects a PDF extension whose content is not a PDF", %{dir: dir} do
       path = write_file!(dir, "fake.pdf", "not a pdf at all, just text")
       assert {:error, reason} = Validation.validate_file_content(path, ".pdf")
-      assert reason =~ "does not match"
+      assert reason == :file_content_mismatch
     end
 
     test "accepts a valid DOCX (ZIP) header", %{dir: dir} do
@@ -285,30 +209,30 @@ defmodule Doctrans.ValidationTest do
     test "rejects unknown extensions", %{dir: dir} do
       path = write_file!(dir, "doc.xyz", "arbitrary content over 8 bytes")
       assert {:error, reason} = Validation.validate_file_content(path, ".xyz")
-      assert reason =~ "does not match"
+      assert reason == :file_content_mismatch
     end
 
     test "returns error for files smaller than the magic-byte window", %{dir: dir} do
       path = write_file!(dir, "tiny.pdf", "%PD")
       assert {:error, reason} = Validation.validate_file_content(path, ".pdf")
-      assert reason =~ "too small"
+      assert reason == :file_too_small
     end
 
     test "returns error when file does not exist", %{dir: dir} do
       path = Path.join(dir, "missing.pdf")
       assert {:error, reason} = Validation.validate_file_content(path, ".pdf")
-      assert reason =~ "Could not read"
+      assert reason == :file_unreadable
     end
 
     test "returns error when extension is not a string", %{dir: dir} do
       path = write_file!(dir, "doc.pdf", "%PDF-1.4\nrest")
       assert {:error, reason} = Validation.validate_file_content(path, nil)
-      assert reason =~ "must be strings"
+      assert reason == :invalid_file_arguments
     end
 
     test "returns error when file path is not a string" do
       assert {:error, reason} = Validation.validate_file_content(nil, ".pdf")
-      assert reason =~ "must be strings"
+      assert reason == :invalid_file_arguments
     end
   end
 
@@ -323,17 +247,17 @@ defmodule Doctrans.ValidationTest do
 
     test "returns error for unsupported language" do
       assert {:error, reason} = Validation.validate_language("invalid")
-      assert reason =~ "Unsupported language"
+      assert {:unsupported_language, [language: _]} = reason
     end
 
     test "returns error for non-string language" do
       assert {:error, reason} = Validation.validate_language(123)
-      assert reason =~ "must be a string"
+      assert reason == :invalid_language
     end
 
     test "returns error for empty language" do
       assert {:error, reason} = Validation.validate_language("")
-      assert reason =~ "Unsupported language"
+      assert {:unsupported_language, [language: _]} = reason
     end
 
     test "normalizes language case" do

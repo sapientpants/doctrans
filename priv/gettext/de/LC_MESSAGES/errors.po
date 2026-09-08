@@ -260,3 +260,15 @@ msgstr "Titel ist erforderlich und muss eine Zeichenkette sein"
 #, elixir-autogen, elixir-format
 msgid "Unsupported language: %{language}"
 msgstr "Nicht unterstützte Sprache: %{language}"
+
+#, elixir-autogen, elixir-format
+msgid "Could not read uploaded file"
+msgstr "Hochgeladene Datei konnte nicht gelesen werden"
+
+#, elixir-autogen, elixir-format
+msgid "LibreOffice process terminated unexpectedly"
+msgstr "LibreOffice-Prozess wurde unerwartet beendet"
+
+#, elixir-autogen, elixir-format
+msgid "File too large (%{size}MB, max %{max}MB)"
+msgstr "Datei zu groß (%{size}MB, maximal %{max}MB)"

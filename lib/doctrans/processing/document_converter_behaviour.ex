@@ -6,7 +6,7 @@ defmodule Doctrans.Processing.DocumentConverterBehaviour do
   """
 
   @callback convert_to_pdf(source_path :: String.t(), output_dir :: String.t()) ::
-              {:ok, String.t()} | {:error, term()}
+              {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
 
   @callback available?() :: boolean()
 end

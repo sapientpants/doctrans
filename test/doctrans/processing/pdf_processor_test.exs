@@ -56,7 +56,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
 
       result = PdfProcessor.extract_document(fake_id, pdf_path, MapSet.new())
 
-      assert {:error, "Document not found"} = result
+      assert {:error, :document_not_found} = result
     end
   end
 

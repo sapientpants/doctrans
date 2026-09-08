@@ -253,3 +253,15 @@ msgstr "El título es obligatorio y debe ser una cadena de texto"
 #, elixir-autogen, elixir-format
 msgid "Unsupported language: %{language}"
 msgstr "Idioma no compatible: %{language}"
+
+#, elixir-autogen, elixir-format
+msgid "Could not read uploaded file"
+msgstr "No se pudo leer el archivo subido"
+
+#, elixir-autogen, elixir-format
+msgid "LibreOffice process terminated unexpectedly"
+msgstr "El proceso de LibreOffice terminó inesperadamente"
+
+#, elixir-autogen, elixir-format
+msgid "File too large (%{size}MB, max %{max}MB)"
+msgstr "Archivo demasiado grande (%{size}MB, máximo %{max}MB)"
