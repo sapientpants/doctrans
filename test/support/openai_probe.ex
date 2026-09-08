@@ -25,7 +25,7 @@ defmodule Doctrans.Processing.OpenAIProbe do
 
     response = "probe stream"
 
-    [first, rest] = [String.slice(response, 0, 5), String.slice(response, 5..-1)]
+    [first, rest] = [String.slice(response, 0, 5), String.slice(response, 5..-1//1)]
     on_delta.(first)
     on_delta.(rest)
 
@@ -48,7 +48,6 @@ defmodule Doctrans.Processing.OpenAIProbe do
   @impl true
   def list_models, do: {:ok, ["probe-model"]}
 
-  @impl true
   def embed(_text, _opts), do: {:ok, List.duplicate(0.1, 1024)}
 
   defp record(function, opts) do

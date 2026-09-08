@@ -139,32 +139,27 @@ msgstr ""
 msgid "Page %{page_number} translation failed: %{reason}"
 msgstr ""
 
-#: lib/doctrans/search/embedding.ex:78
-#, elixir-autogen, elixir-format
-msgid "Request failed: %{reason}"
-msgstr ""
-
 #: lib/doctrans/processing/pdf_extractor.ex:128
 #, elixir-autogen, elixir-format
 msgid "pdfinfo failed: %{error}"
 msgstr ""
 
-#: lib/doctrans/processing/document_converter.ex:88
+#: lib/doctrans/processing/document_converter.ex:208
 #, elixir-autogen, elixir-format
 msgid "Conversion completed but PDF file not found"
 msgstr ""
 
-#: lib/doctrans/processing/document_converter.ex:95
+#: lib/doctrans/processing/document_converter.ex:219
 #, elixir-autogen, elixir-format
 msgid "Document conversion failed: %{error}"
 msgstr ""
 
-#: lib/doctrans/processing/document_converter.ex:101
+#: lib/doctrans/processing/document_converter.ex:237
 #, elixir-autogen, elixir-format
 msgid "Document conversion timed out"
 msgstr ""
 
-#: lib/doctrans/processing/document_converter.ex:47
+#: lib/doctrans/processing/document_converter.ex:40
 #, elixir-autogen, elixir-format
 msgid "LibreOffice is not installed"
 msgstr ""
@@ -179,7 +174,7 @@ msgstr ""
 msgid "Page not found"
 msgstr ""
 
-#: lib/doctrans/processing/document_converter.ex:38
+#: lib/doctrans/processing/document_converter.ex:43
 #, elixir-autogen, elixir-format
 msgid "Source file not found: %{path}"
 msgstr ""
@@ -189,12 +184,8 @@ msgstr ""
 msgid "Unsupported file format: %{format}"
 msgstr ""
 
-#: lib/doctrans/search/embedding.ex:71
+#: lib/doctrans/processing/document_converter.ex:224
+#: lib/doctrans/processing/document_converter.ex:229
 #, elixir-autogen, elixir-format
-msgid "OpenAI embedding error (%{status}): %{body}"
-msgstr ""
-
-#: lib/doctrans/search/embedding.ex:59
-#, elixir-autogen, elixir-format
-msgid "OpenAI embedding too short: expected at least %{expected} dimensions, got %{actual}"
+msgid "Failed to start LibreOffice: %{error}"
 msgstr ""
