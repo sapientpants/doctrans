@@ -1,166 +1,137 @@
 defmodule Doctrans.EnvLoaderTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Doctrans.EnvLoader
 
-  @env_keys ["OPENAI_HOST", "OPENAI_API_KEY", "UNRELATED_VAR", "DATABASE_URL", "SECRET_KEY_BASE"]
+  @env_keys ~w(OPENAI_HOST OPENAI_API_KEY UNRELATED_VAR DATABASE_URL SECRET_KEY_BASE DOCTRANS_ENV_FILE)
 
   setup do
-    prev_env = Map.new(@env_keys, fn key -> {key, System.get_env(key)} end)
-
-    prev_config = %{
-      env: Application.get_env(:doctrans, :env),
-      openai: Application.get_env(:doctrans, :openai),
-      embedding: Application.get_env(:doctrans, :embedding)
-    }
-
-    Application.put_env(:doctrans, :env, :dev)
-
+    previous = Map.new(@env_keys, &{&1, System.get_env(&1)})
     for key <- @env_keys, do: System.delete_env(key)
-    Application.put_env(:doctrans, :openai, base_url: "http://config-default:8000", api_key: nil)
 
-    Application.put_env(:doctrans, :embedding,
-      base_url: "http://config-default:8000",
-      api_key: nil
-    )
-
-    tmp =
+    path =
       Path.join(System.tmp_dir!(), "env_loader_test_#{System.unique_integer([:positive])}.env")
 
+    System.put_env("DOCTRANS_ENV_FILE", path)
+
     on_exit(fn ->
-      for {key, value} <- prev_env do
+      for {key, value} <- previous do
         if value, do: System.put_env(key, value), else: System.delete_env(key)
       end
 
-      restore_config(:env, prev_config.env)
-      restore_config(:openai, prev_config.openai)
-      restore_config(:embedding, prev_config.embedding)
-      File.rm(tmp)
+      File.rm(path)
     end)
 
-    %{path: tmp}
+    %{path: path}
   end
 
-  defp restore_config(key, value) do
-    if value,
-      do: Application.put_env(:doctrans, key, value),
-      else: Application.delete_env(:doctrans, key)
-  end
-
-  test "applies file variables to the environment and config when not set", %{path: path} do
+  test "loads file defaults using the explicit environment file path", %{path: path} do
     File.write!(path, """
-    # a comment
+      # a comment
 
     OPENAI_HOST=http://from-file:1234
     OPENAI_API_KEY=sk-from-file
     UNRELATED_VAR=unrelated
     """)
 
-    assert :ok = EnvLoader.load(path)
-
+    assert :ok = EnvLoader.load()
     assert System.get_env("OPENAI_HOST") == "http://from-file:1234"
     assert System.get_env("OPENAI_API_KEY") == "sk-from-file"
     assert System.get_env("UNRELATED_VAR") == "unrelated"
-
-    assert Application.get_env(:doctrans, :openai) == [
-             base_url: "http://from-file:1234",
-             api_key: "sk-from-file"
-           ]
-
-    assert Application.get_env(:doctrans, :embedding) == [
-             base_url: "http://from-file:1234",
-             api_key: "sk-from-file"
-           ]
   end
 
-  test "real environment variables take precedence over file values", %{path: path} do
-    System.put_env("OPENAI_HOST", "http://from-real-env:9999")
-    System.put_env("OPENAI_API_KEY", "sk-real")
+  test "inherited settings win and conflicts never reveal values", %{path: path} do
+    System.put_env("OPENAI_HOST", "http://inherited:9999")
+    System.put_env("OPENAI_API_KEY", "sk-inherited-secret")
+    File.write!(path, "OPENAI_HOST=http://file:8000\nOPENAI_API_KEY=sk-file-secret\n")
 
-    File.write!(path, """
-    OPENAI_HOST=http://from-file:1234
-    OPENAI_API_KEY=sk-from-file
-    """)
+    log = capture_log(fn -> assert :ok = EnvLoader.load(path) end)
 
-    assert :ok = EnvLoader.load(path)
-
-    assert System.get_env("OPENAI_HOST") == "http://from-real-env:9999"
-    assert System.get_env("OPENAI_API_KEY") == "sk-real"
-
-    openai = Application.get_env(:doctrans, :openai)
-    assert Keyword.fetch!(openai, :base_url) == "http://from-real-env:9999"
-    assert Keyword.fetch!(openai, :api_key) == "sk-real"
+    assert System.get_env("OPENAI_HOST") == "http://inherited:9999"
+    assert System.get_env("OPENAI_API_KEY") == "sk-inherited-secret"
+    assert log =~ "Inherited OPENAI_HOST overrides"
+    assert log =~ "Inherited OPENAI_API_KEY overrides"
+    refute log =~ "sk-inherited-secret"
+    refute log =~ "sk-file-secret"
+    refute log =~ "http://inherited"
+    refute log =~ "http://file"
   end
 
-  test "explicitly empty environment variables take precedence", %{path: path} do
+  test "equal API settings do not warn", %{path: path} do
+    System.put_env("OPENAI_API_KEY", "sk-same")
+    File.write!(path, "OPENAI_API_KEY=sk-same\n")
+    assert capture_log(fn -> EnvLoader.load(path) end) == ""
+  end
+
+  test "explicitly empty inherited values win", %{path: path} do
     System.put_env("OPENAI_API_KEY", "")
-    File.write!(path, "OPENAI_API_KEY=sk-from-file\n")
-
-    assert :ok = EnvLoader.load(path)
+    File.write!(path, "OPENAI_API_KEY=sk-file\n")
+    capture_log(fn -> assert :ok = EnvLoader.load(path) end)
     assert System.get_env("OPENAI_API_KEY") == ""
-
-    for key <- [:openai, :embedding] do
-      assert Application.fetch_env!(:doctrans, key)[:api_key] == ""
-    end
   end
 
-  for env <- [:prod, :test] do
-    test "#{env} ignores files and does not re-apply config", %{path: path} do
-      Application.put_env(:doctrans, :env, unquote(env))
-      System.put_env("OPENAI_HOST", "http://inherited:8000")
-      File.write!(path, "OPENAI_HOST=http://file:8000\nUNRELATED_VAR=file\n")
-      previous = Application.get_all_env(:doctrans)
-
-      assert :ok = EnvLoader.load(path)
-      assert System.get_env("OPENAI_HOST") == "http://inherited:8000"
-      refute System.get_env("UNRELATED_VAR")
-      assert Application.get_all_env(:doctrans) == previous
-    end
-  end
-
-  test "missing file still applies inherited credentials to both clients", %{path: path} do
-    System.put_env("OPENAI_HOST", "http://inherited:8000")
+  test "empty file values do not replace inherited credentials", %{path: path} do
     System.put_env("OPENAI_API_KEY", "sk-inherited")
+    File.write!(path, "OPENAI_API_KEY=\n")
+    capture_log(fn -> assert :ok = EnvLoader.load(path) end)
+    assert System.get_env("OPENAI_API_KEY") == "sk-inherited"
+  end
 
+  test "variables absent from the file retain inherited values", %{path: path} do
+    System.put_env("OPENAI_HOST", "http://inherited:8000")
+    File.write!(path, "OPENAI_API_KEY=sk-file\n")
     assert :ok = EnvLoader.load(path)
+    assert System.get_env("OPENAI_HOST") == "http://inherited:8000"
+  end
 
-    for key <- [:openai, :embedding] do
-      config = Application.fetch_env!(:doctrans, key)
-      assert config[:base_url] == "http://inherited:8000"
-      assert config[:api_key] == "sk-inherited"
+  for env <- [:dev, :test, :prod] do
+    test "#{env} runtime settings use file defaults for both clients and inherited overrides",
+         %{path: path} do
+      System.put_env("OPENAI_API_KEY", "sk-inherited")
+
+      File.write!(path, """
+      OPENAI_HOST=http://file:8000
+      OPENAI_API_KEY=sk-file
+      DATABASE_URL=ecto://postgres:postgres@localhost/doctrans_test
+      SECRET_KEY_BASE=#{String.duplicate("a", 64)}
+      """)
+
+      capture_log(fn ->
+        config =
+          Config.Reader.read!(Path.expand("../../config/runtime.exs", __DIR__),
+            env: unquote(env)
+          )
+
+        for key <- [:openai, :embedding] do
+          assert config[:doctrans][key][:base_url] == "http://file:8000"
+          assert config[:doctrans][key][:api_key] == "sk-inherited"
+        end
+
+        if unquote(env) == :prod do
+          assert config[:doctrans][Doctrans.Repo][:url] ==
+                   "ecto://postgres:postgres@localhost/doctrans_test"
+
+          assert config[:doctrans][DoctransWeb.Endpoint][:secret_key_base] ==
+                   String.duplicate("a", 64)
+        end
+      end)
     end
   end
 
-  test "production runtime config uses release-time credentials for both clients" do
-    System.put_env("DATABASE_URL", "ecto://postgres:postgres@localhost/doctrans_test")
-    System.put_env("SECRET_KEY_BASE", String.duplicate("a", 64))
-    System.put_env("OPENAI_HOST", "http://release:8000")
-    System.put_env("OPENAI_API_KEY", "sk-release")
-
-    config =
-      Config.Reader.read!(Path.expand("../../config/runtime.exs", __DIR__), env: :prod)
-
-    for key <- [:openai, :embedding] do
-      assert config[:doctrans][key][:base_url] == "http://release:8000"
-      assert config[:doctrans][key][:api_key] == "sk-release"
-    end
-  end
-
-  test "a key-only line sets an empty value when the variable is unset", %{path: path} do
+  test "a key-only line sets an empty value", %{path: path} do
     File.write!(path, "OPENAI_API_KEY\n")
-
     assert :ok = EnvLoader.load(path)
     assert System.get_env("OPENAI_API_KEY") == ""
   end
 
-  test "a missing file is a no-op", %{path: path} do
+  test "a missing file is optional", %{path: path} do
     assert :ok = EnvLoader.load(path)
-    refute System.get_env("OPENAI_HOST")
     refute System.get_env("OPENAI_API_KEY")
+  end
 
-    assert Application.get_env(:doctrans, :openai, []) == [
-             base_url: "http://config-default:8000",
-             api_key: nil
-           ]
+  test "unreadable files report an error instead of silently ignoring configuration" do
+    assert_raise File.Error, fn -> EnvLoader.load(System.tmp_dir!()) end
   end
 end

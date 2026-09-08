@@ -1,5 +1,8 @@
 import Config
 
+# Load defaults before reading runtime settings, in every environment.
+Doctrans.EnvLoader.load()
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration
@@ -21,7 +24,6 @@ if System.get_env("PHX_SERVER") do
 end
 
 # Resolve credentials when the release starts, for both API clients.
-# Development re-applies these after loading optional .env defaults.
 for config_key <- [:openai, :embedding] do
   config :doctrans, config_key,
     base_url: System.get_env("OPENAI_HOST", "http://localhost:8000"),

@@ -116,12 +116,20 @@ To customize environment variables, copy `.env.example` to `.env`:
 cp .env.example .env
 ```
 
-The application reads `.env` only in development, filling in variables that are
-not already set. Inherited environment variables take precedence, even when empty.
-Tests and production releases do not load `.env`. For releases, set `OPENAI_HOST`
-and `OPENAI_API_KEY` in the process environment; both the OpenAI and embedding
-clients read them at release startup. Docker Compose handles its own `.env`
-substitution before starting the container.
+The application loads an optional `.env` from the working directory at startup in
+all environments, before reading runtime configuration. Precedence is **process
+environment → `.env` → application defaults**, including explicitly empty values.
+A missing file is fine. Set `DOCTRANS_ENV_FILE=/absolute/path/to/.env` to select a
+specific file, including when running a release. Restart after changing the file.
+
+Both API clients use `OPENAI_HOST` and `OPENAI_API_KEY`. When an inherited API
+setting differs from the file, startup logs a warning identifying the winning
+source without printing either value. To use the file's API key, start with
+`env -u OPENAI_API_KEY mix phx.server`.
+
+Tests follow the same loading rules; use `DOCTRANS_ENV_FILE` to select a separate
+test file when needed. Docker Compose handles its own `.env` substitution; the
+application can only read a file available inside its container.
 
 ## Usage
 
