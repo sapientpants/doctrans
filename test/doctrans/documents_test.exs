@@ -6,6 +6,25 @@ defmodule Doctrans.DocumentsTest do
 
   import Doctrans.Fixtures
 
+  describe "non-bang document lookups" do
+    test "returns nil for absent and malformed IDs" do
+      for id <- [Uniq.UUID.uuid7(), "invalid", nil] do
+        assert Documents.get_document(id) == nil
+        assert Documents.get_document_with_pages(id) == nil
+      end
+    end
+
+    test "preloads pages in page number order" do
+      document = document_fixture()
+      page_fixture(document, %{page_number: 2})
+      page_fixture(document, %{page_number: 1})
+
+      result = Documents.get_document_with_pages(document.id)
+      assert result.id == document.id
+      assert Enum.map(result.pages, & &1.page_number) == [1, 2]
+    end
+  end
+
   describe "list_documents/1" do
     test "returns empty list when no documents" do
       assert Documents.list_documents() == []

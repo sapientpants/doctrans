@@ -18,8 +18,13 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    document = Documents.get_document_with_pages!(id)
+    case Documents.get_document_with_pages(id) do
+      nil -> {:ok, assign(socket, :document, nil)}
+      document -> mount_document(socket, document)
+    end
+  end
 
+  defp mount_document(socket, document) do
     _ =
       if connected?(socket) do
         _ = Topics.subscribe_document(document.id)
@@ -51,6 +56,10 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   @impl true
+  def handle_params(_params, _uri, %{assigns: %{document: nil}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_params(params, _uri, socket) do
     socket =
       socket
@@ -82,6 +91,10 @@ defmodule DoctransWeb.DocumentLive.Show do
   defp back_url(_from, _query, _page), do: ~p"/"
 
   @impl true
+  def handle_event(_event, _params, %{assigns: %{document: nil}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_event(event, params, socket)
       when event in ~w(prev_page next_page goto_page toggle_original zoom_in zoom_out) do
     PageViewer.handle_event(event, params, socket)
@@ -174,7 +187,10 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def terminate(_reason, socket) do
-    if connected?(socket), do: Topics.unsubscribe_document(socket.assigns.document.id)
+    if connected?(socket) && socket.assigns.document do
+      Topics.unsubscribe_document(socket.assigns.document.id)
+    end
+
     :ok
   end
 

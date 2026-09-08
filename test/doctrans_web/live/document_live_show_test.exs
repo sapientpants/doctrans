@@ -6,6 +6,37 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
 
+  describe "missing documents" do
+    test "renders a missing document on HTTP load and connected mount", %{conn: conn} do
+      conn = get(conn, ~p"/documents/#{Uniq.UUID.uuid7()}?page=2&from=search&q=test")
+
+      assert html_response(conn, 200)
+             |> LazyHTML.from_document()
+             |> LazyHTML.query("#document-not-found")
+             |> LazyHTML.to_tree() != []
+
+      {:ok, view, _html} = live(conn)
+
+      assert has_element?(view, "#document-not-found h1", "Document not found")
+      refute has_element?(view, "#page-selector")
+      assert has_element?(view, "#document-not-found-home[href='/']")
+      view |> element("#document-not-found-home") |> render_click()
+      assert_redirect(view, ~p"/")
+    end
+
+    test "renders malformed and deleted document IDs safely", %{conn: conn} do
+      document = document_fixture()
+      {:ok, _} = Documents.delete_document(document)
+
+      for id <- ["invalid", document.id] do
+        {:ok, view, _html} = live(conn, ~p"/documents/#{id}")
+        assert has_element?(view, "#document-not-found")
+        render_click(view, "next_page")
+        assert has_element?(view, "#document-not-found")
+      end
+    end
+  end
+
   describe "Show LiveView" do
     test "mounts with document and first page", %{conn: conn} do
       doc = document_with_pages_fixture(%{title: "Test Doc"}, 3)

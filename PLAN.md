@@ -229,6 +229,10 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 14. LiveView `mount` raises on missing documents → 500 instead of 404
 
+- **Status:** Implemented: non-bang lookups handle missing and malformed IDs; the
+  viewer renders a translated not-found state with a link home. Repeated deletes
+  refresh the dashboard without failing. Regression tests cover both paths.
+
 - **Problem:** `DocumentLive.Show.mount/3` calls `Documents.get_document_with_pages!(id)`;
   a bad/already-deleted id raises `Ecto.NoResultsError` and the client gets a 500 page
   (and a logged exception). Also `handle_event("delete_document")` calls `get_document!/1`.

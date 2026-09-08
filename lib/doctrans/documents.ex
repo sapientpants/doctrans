@@ -126,9 +126,23 @@ defmodule Doctrans.Documents do
   def get_document!(id), do: Repo.get!(Document, id)
 
   @doc """
-  Gets a single document by ID, returns nil if not found.
+  Gets a single document by ID, returns nil if not found or the ID is invalid.
   """
-  def get_document(id), do: Repo.get(Document, id)
+  def get_document(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} -> Repo.get(Document, id)
+      :error -> nil
+    end
+  end
+
+  @doc """
+  Gets a document with ordered pages, or nil for a missing or invalid ID.
+  """
+  def get_document_with_pages(id) do
+    id
+    |> get_document()
+    |> Repo.preload(pages: from(p in Page, order_by: p.page_number))
+  end
 
   @doc """
   Gets a document with its pages preloaded.
