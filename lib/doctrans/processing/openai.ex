@@ -6,6 +6,7 @@ defmodule Doctrans.Processing.OpenAI do
   model listing against OpenAI-compatible API endpoints.
   """
 
+  alias Doctrans.Config.{Embedding, OpenAI}
   alias Doctrans.Processing.SSECollector
   alias Doctrans.Resilience.CircuitBreaker
   alias Doctrans.Resilience.ErrorClassifier
@@ -14,8 +15,6 @@ defmodule Doctrans.Processing.OpenAI do
 
   @behaviour Doctrans.Processing.OpenAIBehaviour
 
-  # Request timeout for API calls (300 seconds)
-  @api_timeout 300_000
   @embedding_dimensions 1024
 
   @impl true
@@ -28,7 +27,7 @@ defmodule Doctrans.Processing.OpenAI do
       {:ok, image_data} ->
         content = build_multimodal_content(image_path, image_data, opts)
         messages = [%{role: "user", content: content}]
-        opts = with_default_model(opts, vision_model_default())
+        opts = with_default_model(opts, OpenAI.vision_model())
         request_body = build_request_body(Keyword.put(opts, :messages, messages))
 
         post_chat_completion(request_body, opts)
@@ -134,7 +133,7 @@ defmodule Doctrans.Processing.OpenAI do
     |> Req.post(
       url: api_url("/v1/chat/completions"),
       json: request_body,
-      receive_timeout: Keyword.get(opts, :timeout, @api_timeout),
+      receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
       # :transient retries all methods (incl. POST) on 408/429/5xx and
       # connection errors; chat-completion POSTs are safe to replay
       retry: :transient
@@ -198,7 +197,7 @@ defmodule Doctrans.Processing.OpenAI do
          |> Req.post(
            url: api_url("/v1/chat/completions"),
            json: request_body,
-           receive_timeout: Keyword.get(opts, :timeout, @api_timeout),
+           receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
            retry: :transient,
            into: into
          ) do
@@ -233,7 +232,7 @@ defmodule Doctrans.Processing.OpenAI do
   def translate(markdown, source_language, target_language, opts)
       when is_binary(markdown) and is_binary(source_language) and is_binary(target_language) do
     prompt = build_translate_prompt(markdown, source_language, target_language)
-    opts = with_default_model(opts, translation_model_default())
+    opts = with_default_model(opts, OpenAI.translation_model())
 
     case chat(
            [%{role: "user", content: prompt}],
@@ -318,9 +317,8 @@ defmodule Doctrans.Processing.OpenAI do
   def embed("", _opts), do: {:ok, nil}
 
   def embed(text, opts) when is_binary(text) do
-    config = embed_config()
-    model = Keyword.get(opts, :model) || config[:model] || model(opts)
-    timeout = Keyword.get(opts, :timeout) || config[:timeout] || 120_000
+    model = Keyword.get(opts, :model) || Embedding.model()
+    timeout = Keyword.get(opts, :timeout) || Embedding.timeout()
     fuse = :embedding_api
 
     Logger.debug(
@@ -364,29 +362,18 @@ defmodule Doctrans.Processing.OpenAI do
 
   defp parse_embed_response(_body), do: {:error, "Invalid embedding response from API"}
 
-  defp model(opts) do
-    Keyword.get_lazy(opts, :model, fn ->
-      Application.get_env(:doctrans, :openai, [])[:chat_model] ||
-        Application.get_env(:doctrans, :openai, [])[:vision_model]
-    end)
-  end
-
   # Private helpers
-
-  defp openai_config do
-    Application.get_env(:doctrans, :openai, [])
-  end
 
   defp api_url(path) do
     "#{base_url()}/#{String.trim_leading(path, "/")}"
   end
 
   defp base_url do
-    openai_config()[:base_url] || "http://localhost:8000"
+    OpenAI.base_url()
   end
 
   defp api_key do
-    openai_config()[:api_key]
+    OpenAI.api_key()
   end
 
   defp build_base_req do
@@ -396,20 +383,16 @@ defmodule Doctrans.Processing.OpenAI do
     end
   end
 
-  defp embed_config do
-    Application.get_env(:doctrans, :embedding, [])
-  end
-
   defp embed_url(path) do
     "#{embed_base_url()}/#{String.trim_leading(path, "/")}"
   end
 
   defp embed_base_url do
-    embed_config()[:base_url] || api_url("")
+    Embedding.base_url()
   end
 
   defp embed_api_key do
-    embed_config()[:api_key]
+    Embedding.api_key()
   end
 
   defp build_embed_base_req do
@@ -420,7 +403,7 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp build_request_body(options) do
-    model = Keyword.get(options, :model) || default_model()
+    model = Keyword.get(options, :model) || OpenAI.chat_model()
     max_tokens = Keyword.get(options, :max_tokens, default_max_tokens())
     messages = Keyword.fetch!(options, :messages)
     stream = Keyword.get(options, :stream, false)
@@ -450,21 +433,6 @@ defmodule Doctrans.Processing.OpenAI do
     else
       body
     end
-  end
-
-  defp default_model do
-    openai_config()[:chat_model] || openai_config()[:vision_model]
-  end
-
-  # Extraction requires image understanding, so prefer the vision model
-  # (matching the Ollama backend behaviour).
-  defp vision_model_default do
-    openai_config()[:vision_model] || openai_config()[:chat_model]
-  end
-
-  # Translation uses the dedicated translation model when configured.
-  defp translation_model_default do
-    openai_config()[:translation_model] || openai_config()[:chat_model]
   end
 
   defp with_default_model(opts, default) do

@@ -120,6 +120,14 @@ defmodule Doctrans.EnvLoaderTest do
     end
   end
 
+  test "runtime configuration preserves configured API settings without environment overrides" do
+    config =
+      Config.Reader.read!(Path.expand("../../config/runtime.exs", __DIR__), env: :test)
+
+    refute config[:doctrans][:openai]
+    refute config[:doctrans][:embedding]
+  end
+
   test "a key-only line sets an empty value", %{path: path} do
     File.write!(path, "OPENAI_API_KEY\n")
     assert :ok = EnvLoader.load(path)

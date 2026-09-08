@@ -9,6 +9,7 @@ defmodule Doctrans.Documents do
 
   import Ecto.Query
 
+  alias Doctrans.Config.Uploads
   alias Doctrans.Documents.{Document, Page, Pages}
   alias Doctrans.Repo
   alias Doctrans.Validation
@@ -235,8 +236,7 @@ defmodule Doctrans.Documents do
   Returns the base uploads directory.
   """
   def uploads_dir do
-    Application.get_env(:doctrans, :uploads)[:upload_dir] ||
-      Path.expand("priv/static/uploads", Application.app_dir(:doctrans))
+    Uploads.upload_dir()
   end
 
   @doc """
