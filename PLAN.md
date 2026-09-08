@@ -242,6 +242,12 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 15. Add Dialyzer to `mix precommit` (and CI)
 
+- **Status:** Implemented: `mix precommit` now runs strict Dialyzer analysis. CI
+  warms the cached PLT with `mix dialyzer --plt` before its existing analysis step.
+  Public APIs in `Validation`, `Search`, `OpenAI`, and `Worker` have specs, with
+  named search result types. Removed 18 unused warning filters; PLT artifacts
+  remain ignored by Git. Remaining suppressions are retained for separate fixes.
+
 - **Problem:** `mix.exs` already configures strict Dialyzer flags (`:error_handling`,
   `:underspecs`, `:unmatched_returns`, `:no_improper_lists`) and a PLT, but neither the
   `precommit` alias nor the GitHub workflow runs it — the strictness is decorative.

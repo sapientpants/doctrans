@@ -17,6 +17,7 @@ defmodule Doctrans.Validation do
   - `{:ok, sanitized_attrs}` if valid
   - `{:error, reason}` if invalid
   """
+  @spec validate_document_attrs(map()) :: {:ok, map()} | {:error, Doctrans.Errors.reason()}
   def validate_document_attrs(attrs) when is_map(attrs) do
     required_fields = [:title, :original_filename, :target_language]
 
@@ -41,6 +42,7 @@ defmodule Doctrans.Validation do
   - `{:ok, sanitized_query}` if valid
   - `{:error, reason}` if invalid
   """
+  @spec validate_search_query(term()) :: {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def validate_search_query(query) when is_binary(query) do
     trimmed = String.trim(query)
 
@@ -68,6 +70,7 @@ defmodule Doctrans.Validation do
   - `{:ok, language}` if valid
   - `{:error, reason}` if invalid
   """
+  @spec validate_language(term()) :: {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def validate_language(language) when is_binary(language) do
     supported_languages = ["en", "es", "fr", "de", "it", "pt", "nl", "no", "sv", "da", "pl"]
     normalized_language = String.downcase(String.trim(language))
@@ -92,6 +95,7 @@ defmodule Doctrans.Validation do
   - :ok if the magic bytes match the extension
   - {:error, reason} if they don't match or the file can't be read
   """
+  @spec validate_file_content(term(), term()) :: :ok | {:error, Doctrans.Errors.reason()}
   def validate_file_content(file_path, extension)
       when is_binary(file_path) and is_binary(extension) do
     case read_header(file_path, 8) do
@@ -122,6 +126,7 @@ defmodule Doctrans.Validation do
   ## Returns
   - Sanitized filename string
   """
+  @spec sanitize_filename_string(term()) :: String.t()
   def sanitize_filename_string(filename) when is_binary(filename) do
     filename
     # Replace .. with _

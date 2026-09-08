@@ -36,3 +36,17 @@ Test domain error codes and bindings, web translations (including an error from
 another process), and retry behavior when changing error shapes. Run
 `mix gettext.extract` after moving or adding messages and `mix precommit` before
 finishing a change.
+
+## Static type checks
+
+`mix precommit` runs Dialyzer in the test environment with the project's strict
+warning flags, including test support modules. For a focused run, use
+`MIX_ENV=test mix dialyzer`. The first run builds the PLT and can take longer;
+`MIX_ENV=test mix dialyzer --plt` builds it without running analysis. CI restores
+and warms the PLT before analysis, caching it by OS, OTP, Elixir, and dependency
+lockfile. Generated `priv/plts/*.plt` and `*.plt.hash` files are ignored by Git.
+
+Add specs to public APIs and use concrete result types. Fix new warnings at their
+source before considering a suppression. Existing exceptions live in
+`.dialyzer_ignore.exs`; audit stale entries with
+`MIX_ENV=test mix dialyzer --list-unused-filters` when changing that file.

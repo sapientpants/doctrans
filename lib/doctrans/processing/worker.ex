@@ -18,6 +18,7 @@ defmodule Doctrans.Processing.Worker do
   @document_id_match "?->>'#{@document_id_key}' = ?"
   @page_id_match "?->>'#{@page_id_key}' = ANY(?)"
 
+  @spec start_link(term()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -28,6 +29,8 @@ defmodule Doctrans.Processing.Worker do
   Supports PDF, Word (.docx), and other document formats.
   Document extraction is queued as a job for better reliability and tracking.
   """
+  @spec process_document(Ecto.UUID.t(), binary()) ::
+          {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
   def process_document(document_id, file_path) do
     %{@document_id_key => document_id, "file_path" => file_path}
     |> DocumentExtractionJob.new()
@@ -45,6 +48,8 @@ defmodule Doctrans.Processing.Worker do
 
   - `:page_number` - Page number for priority ordering (lower = processed first)
   """
+  @spec queue_page(Ecto.UUID.t(), keyword()) ::
+          {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
   def queue_page(page_id, opts \\ []) do
     page_number = Keyword.get(opts, :page_number, 0)
 
@@ -68,6 +73,8 @@ defmodule Doctrans.Processing.Worker do
   - `:extraction_model` - Override the default extraction model
   - `:translation_model` - Override the default translation model
   """
+  @spec queue_page_reprocess(Ecto.UUID.t(), keyword()) ::
+          {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
   def queue_page_reprocess(page_id, opts \\ []) do
     args = %{@page_id_key => page_id}
 
@@ -140,6 +147,12 @@ defmodule Doctrans.Processing.Worker do
   Returns a map with job counts per queue, or zeros on database failures.
   Database failures are logged; unexpected errors propagate.
   """
+  @spec status() :: %{
+          pdf_extraction: non_neg_integer(),
+          llm_processing: non_neg_integer(),
+          embedding_generation: non_neg_integer(),
+          health_check: non_neg_integer()
+        }
   def status do
     repo = Application.get_env(:doctrans, Oban)[:repo] || Doctrans.Repo
 
