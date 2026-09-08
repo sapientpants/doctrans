@@ -3,11 +3,11 @@ defmodule Doctrans.EnvLoader do
   Loads variables from a `.env` file and applies the OpenAI/OMLX ones to
   the application config.
 
-  `.env` file values always win over inherited environment variables
-  (the checked-in file is the source of truth for local development).
-  The config defaults in `config/config.exs` are resolved from the
-  environment at boot, and this loader re-applies the `OPENAI_HOST` /
-  `OPENAI_API_KEY` values it loads to the application config at startup.
+  Only development loads `.env`; test and production leave the environment
+  and application config untouched. Inherited environment variables take
+  precedence over file values, including explicitly empty variables.
+  In development, the loader re-applies `OPENAI_HOST` / `OPENAI_API_KEY`
+  to the application config at startup. Releases use `config/runtime.exs`.
 
   The same `OPENAI_HOST` / `OPENAI_API_KEY` pair is applied to both the
   `:openai` and `:embedding` config keys, which is fine for the single OMLX
@@ -17,10 +17,12 @@ defmodule Doctrans.EnvLoader do
   @env_path Path.join(__DIR__, "../../.env")
 
   def load(path \\ @env_path) do
-    parse_env_file(path)
+    if Application.get_env(:doctrans, :env) == :dev do
+      parse_env_file(path)
 
-    apply_to(:openai)
-    apply_to(:embedding)
+      apply_to(:openai)
+      apply_to(:embedding)
+    end
 
     :ok
   end
@@ -50,9 +52,8 @@ defmodule Doctrans.EnvLoader do
     end
   end
 
-  # `.env` file values always win.
   defp put_env(key, value) do
-    System.put_env(key, value)
+    if is_nil(System.get_env(key)), do: System.put_env(key, value)
   end
 
   defp apply_to(config_key) do

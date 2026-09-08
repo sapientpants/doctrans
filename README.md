@@ -116,6 +116,13 @@ To customize environment variables, copy `.env.example` to `.env`:
 cp .env.example .env
 ```
 
+The application reads `.env` only in development, filling in variables that are
+not already set. Inherited environment variables take precedence, even when empty.
+Tests and production releases do not load `.env`. For releases, set `OPENAI_HOST`
+and `OPENAI_API_KEY` in the process environment; both the OpenAI and embedding
+clients read them at release startup. Docker Compose handles its own `.env`
+substitution before starting the container.
+
 ## Usage
 
 1. Click **Upload** on the dashboard

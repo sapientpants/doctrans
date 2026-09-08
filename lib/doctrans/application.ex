@@ -9,6 +9,7 @@ defmodule Doctrans.Application do
 
   @impl true
   def start(_type, _args) do
+    # The loader only reads local .env defaults in development.
     Doctrans.EnvLoader.load()
 
     # Install circuit breakers before starting workers
