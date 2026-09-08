@@ -558,6 +558,16 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
   end
 
   describe "embed/2" do
+    test "uses the shared endpoint without inserting a double slash", %{bypass: bypass} do
+      Application.put_env(:doctrans, :embedding, base_url: nil, model: "embed")
+
+      Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
+        json(conn, 200, %{"data" => [%{"embedding" => List.duplicate(0.1, 1024)}]})
+      end)
+
+      assert {:ok, _embedding} = OpenAI.embed("text")
+    end
+
     test "returns truncated embedding vector", %{bypass: bypass, test_pid: test_pid} do
       vector = Enum.map(1..1500, fn _ -> 0.5 end)
 

@@ -25,9 +25,11 @@ end
 
 # Resolve credentials when the release starts, for both API clients.
 for config_key <- [:openai, :embedding] do
-  config :doctrans, config_key,
-    base_url: System.get_env("OPENAI_HOST", "http://localhost:8000"),
-    api_key: System.get_env("OPENAI_API_KEY")
+  for {env_key, option} <- [{"OPENAI_HOST", :base_url}, {"OPENAI_API_KEY", :api_key}],
+      value = System.get_env(env_key),
+      not is_nil(value) do
+    config :doctrans, config_key, [{option, value}]
+  end
 end
 
 if config_env() == :prod do

@@ -2,6 +2,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   @moduledoc "Dashboard LiveView for managing documents."
   use DoctransWeb, :live_view
 
+  alias Doctrans.Config.Uploads
   alias Doctrans.Documents
   alias Doctrans.Processing.Worker
   alias Doctrans.Validation
@@ -300,8 +301,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @spec max_file_size() :: pos_integer()
   defp max_file_size do
-    size = Application.get_env(:doctrans, :uploads, [])[:max_file_size]
-    if is_integer(size) and size > 0, do: size, else: 100_000_000
+    Uploads.max_file_size()
   end
 
   # The client-side allow_upload size limit is not a security boundary;

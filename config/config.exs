@@ -16,12 +16,11 @@ config :doctrans,
 # OPENAI_HOST / OPENAI_API_KEY env vars allow overriding (e.g., Docker:
 # http://host.docker.internal:8000). Defaults match the local OMLX server.
 config :doctrans, :openai,
-  base_url: System.get_env("OPENAI_HOST", "http://localhost:8000"),
-  api_key: System.get_env("OPENAI_API_KEY"),
+  base_url: "http://localhost:8000",
+  api_key: nil,
   vision_model: "mlx-community/Qwen3.5-9B-MLX-4bit",
   translation_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
-  chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
-  timeout: 300_000
+  chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit"
 
 # Circuit breaker configuration for resilience
 config :doctrans, :circuit_breakers,
@@ -79,12 +78,11 @@ config :doctrans, DoctransWeb.Gettext,
   default_locale: "en",
   locales: ~w(da de en es fr it nl no pl pt sv)
 
-# Embedding configuration for semantic search
+# Embedding configuration for semantic search. A nil URL uses the OpenAI endpoint.
 config :doctrans, :embedding,
-  base_url: "http://localhost:8000",
+  base_url: nil,
   api_key: nil,
-  model: "mlx-community/Qwen3-Embedding-8B-4bit-DWQ",
-  timeout: 60_000
+  model: "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"
 
 # Oban configuration for persistent job queuing
 #

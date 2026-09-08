@@ -20,6 +20,7 @@ defmodule Doctrans.Resilience.HealthCheck do
       true
   """
 
+  alias Doctrans.Config.OpenAI
   alias Doctrans.Repo
   alias Doctrans.Resilience.CircuitBreaker
 
@@ -72,12 +73,11 @@ defmodule Doctrans.Resilience.HealthCheck do
           {:error, :circuit_open}
         else
           # Actually check OpenAI connectivity
-          config = Application.get_env(:doctrans, :openai, [])
-          url = "#{config[:base_url]}/v1/models"
+          url = "#{OpenAI.base_url()}/v1/models"
 
           case Req.get(url,
                  receive_timeout: 5_000,
-                 headers: [{"authorization", "Bearer #{config[:api_key]}"}]
+                 headers: [{"authorization", "Bearer #{OpenAI.api_key()}"}]
                ) do
             {:ok, %{status: 200, body: body}} ->
               models = get_in(body, ["data"]) || []

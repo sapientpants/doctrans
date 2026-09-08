@@ -3,6 +3,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   use DoctransWeb, :live_view
 
   alias Doctrans.Chat
+  alias Doctrans.Config
   alias Doctrans.Documents
   alias Doctrans.Processing.{OpenAI, Worker}
   alias DoctransWeb.DocumentLive.ChatSession
@@ -27,9 +28,6 @@ defmodule DoctransWeb.DocumentLive.Show do
     current_page_number = 1
     current_page = Documents.get_page_by_number(document.id, current_page_number)
 
-    # Get default models from config
-    openai_config = Application.get_env(:doctrans, :openai, [])
-
     socket =
       socket
       |> assign(:document, document)
@@ -45,14 +43,8 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:available_models, [])
       |> assign(:models_loading, false)
       |> assign(:model_fetch_error, nil)
-      |> assign(
-        :extraction_model,
-        openai_config[:vision_model] || "mlx-community/Qwen3.5-9B-MLX-4bit"
-      )
-      |> assign(
-        :translation_model,
-        openai_config[:chat_model] || "mlx-community/Qwen3.6-35B-A3B-4bit"
-      )
+      |> assign(:extraction_model, Config.OpenAI.vision_model())
+      |> assign(:translation_model, Config.OpenAI.translation_model())
       # Chat state
       |> assign(:chat_open, false)
       |> assign(:chat_loading, false)

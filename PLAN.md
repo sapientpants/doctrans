@@ -134,6 +134,10 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 8. Fragmented, duplicated model/config defaults
 
+- **Status:** Implemented: typed `Doctrans.Config` accessors shared by API, health,
+  upload, and LiveView consumers; one default API endpoint and model configuration.
+  Reprocessing uses the dedicated translation model, and request timeouts honor config.
+
 - **Problem:** Model names and endpoints are hard-coded in at least four places:
   `config/config.exs` (`:openai` models), `config.exs` `:embedding` base_url
   (`"http://localhost:8000"` duplicated), `show.ex` fallback defaults

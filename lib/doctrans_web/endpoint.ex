@@ -15,10 +15,11 @@ defmodule DoctransWeb.Endpoint do
 
   # Hard server-side limit for multipart bodies: the upload UI allows up to
   # 10 files of `:max_file_size` each, so allow headroom above that.
-  # (`:uploads` is static config, never overridden at runtime.)
+  # Keep this compile-time read so Mix tracks changes to the parser limit.
+  # It uses the same required setting as Config.Uploads.max_file_size/0.
   @multipart_length fn ->
     max_file_size =
-      Application.compile_env(:doctrans, :uploads, [])[:max_file_size] || 100_000_000
+      Application.compile_env!(:doctrans, [:uploads, :max_file_size])
 
     10 * max_file_size + 1_000_000
   end
