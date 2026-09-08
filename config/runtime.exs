@@ -20,6 +20,14 @@ if System.get_env("PHX_SERVER") do
   config :doctrans, DoctransWeb.Endpoint, server: true
 end
 
+# Resolve credentials when the release starts, for both API clients.
+# Development re-applies these after loading optional .env defaults.
+for config_key <- [:openai, :embedding] do
+  config :doctrans, config_key,
+    base_url: System.get_env("OPENAI_HOST", "http://localhost:8000"),
+    api_key: System.get_env("OPENAI_API_KEY")
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

@@ -60,6 +60,9 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 3. `.env` loader runs in every environment and *wins* over real env vars
 
+- **Status:** Implemented: development-only loading, inherited environment variables
+  take precedence, and release-time OpenAI/embedding configuration in runtime.exs.
+
 - **Problem:** `Doctrans.EnvLoader.load/1` is called unconditionally in `Application.start/2`
   and its documented behavior is "`.env` file values always win over inherited environment
   variables". In production this means a `.env` file that accidentally ships in a release
