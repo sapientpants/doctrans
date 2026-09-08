@@ -259,6 +259,10 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 16. `@spec consume_upload_entry :: {:ok, term()}` leaks `term()`
 
+- **Status:** Implemented: a concrete `upload_result` union describes accepted and
+  rejected files. The upload callback and the `split_with` predicate use this type,
+  preserving LiveView's outer `{:ok, result}` callback wrapper.
+
 - **Problem:** `index.ex` annotates a 4-tuple/2-tuple result as `term()`, defeating
   Dialyzer; the same tuple is then pattern-matched in two different shapes by callers.
 - **Fix:** Define an `@type upload_result :: {:ok, document_id, filename, path} |
