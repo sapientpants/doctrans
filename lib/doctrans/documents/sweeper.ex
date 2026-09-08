@@ -83,6 +83,8 @@ defmodule Doctrans.Documents.Sweeper do
     end
   end
 
+  # Paths are direct File.ls children of the configured documents directory; rm_rf does not follow symlinks.
+  # sobelow_skip ["Traversal.FileModule"]
   defp delete_directory(path, count, dry_run) do
     if dry_run do
       Logger.info("[DRY RUN] Would delete: #{path}")

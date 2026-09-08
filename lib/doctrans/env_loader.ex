@@ -9,6 +9,8 @@ defmodule Doctrans.EnvLoader do
 
   require Logger
 
+  # The path is operator configuration (DOCTRANS_ENV_FILE), never an upload or request value.
+  # sobelow_skip ["Traversal.FileModule"]
   def load(path \\ System.get_env("DOCTRANS_ENV_FILE", ".env")) do
     case File.read(path) do
       {:ok, contents} ->

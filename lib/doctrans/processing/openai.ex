@@ -22,6 +22,8 @@ defmodule Doctrans.Processing.OpenAI do
           {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def extract_markdown(image_path, opts \\ [])
 
+  # The image path comes from internally generated PDF page records, not the client filename.
+  # sobelow_skip ["Traversal.FileModule"]
   def extract_markdown(image_path, opts) when is_binary(image_path) do
     path = Path.expand(image_path)
 

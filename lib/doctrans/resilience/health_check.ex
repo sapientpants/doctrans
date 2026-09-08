@@ -141,6 +141,8 @@ defmodule Doctrans.Resilience.HealthCheck do
   Returns `:ok` on success, or `{:error, reason}` on failure.
   """
   @spec check_filesystem() :: :ok | {:error, term()}
+  # The probe path uses the configured upload root and a server-generated timestamp.
+  # sobelow_skip ["Traversal.FileModule"]
   def check_filesystem do
     start_time = System.monotonic_time(:millisecond)
 

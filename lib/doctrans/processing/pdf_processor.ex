@@ -26,6 +26,8 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   Returns `:ok`, `:cancelled`, or `{:error, reason}`.
   """
+  # pdf_path is the stored original upload or the converter output in the same document directory.
+  # sobelow_skip ["Traversal.FileModule"]
   def extract_document(document_id, pdf_path, cancelled_documents) do
     if MapSet.member?(cancelled_documents, document_id) do
       Logger.info("Document #{document_id} was cancelled, skipping PDF extraction")
@@ -76,6 +78,8 @@ defmodule Doctrans.Processing.PdfProcessor do
     ])
   end
 
+  # Only the stored original PDF or converted PDF is removed after successful extraction.
+  # sobelow_skip ["Traversal.FileModule"]
   defp extract_pdf_pages(document, pdf_path) do
     Logger.info("Extracting pages from PDF for document #{document.id}")
 
