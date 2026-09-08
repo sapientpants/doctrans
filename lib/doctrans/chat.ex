@@ -154,25 +154,58 @@ defmodule Doctrans.Chat do
   end
 
   @max_context_chunks 16
+  @max_context_bytes 32_000
 
   @doc """
   Merges newly retrieved chunks into the prior accumulated conversation context.
 
   Dedups by chunk identity `{page_id, chunk_index}` (chunk_index is nil for
   page-level results), keeping the higher-`similarity` copy on collision, sorts
-  by similarity descending, and caps the result to `@max_context_chunks` so the
-  accumulated context cannot grow past the model's context budget.
+  by similarity descending, and retains whole chunks within both `:max_chunks`
+  (default 16) and `:max_bytes` (default 32,000). The byte budget counts both
+  markdown fields plus page labels and separators, bounding stored source text
+  as well as rendered retrieval context. This is not a model token limit.
+
+  Chunks that do not fit are dropped, allowing smaller, lower-ranked chunks to
+  use the remaining budget. Budget drops are logged without document content.
 
   Returns the merged chunk list, suitable for `build_context/1`.
   """
   def merge_context(prior_chunks, new_chunks, opts \\ []) do
     max_chunks = Keyword.get(opts, :max_chunks, @max_context_chunks)
+    max_bytes = Keyword.get(opts, :max_bytes, @max_context_bytes)
 
-    (prior_chunks ++ new_chunks)
-    |> Enum.group_by(&chunk_identity/1)
-    |> Enum.map(fn {_id, dupes} -> Enum.max_by(dupes, & &1.similarity) end)
-    |> Enum.sort_by(& &1.similarity, :desc)
-    |> Enum.take(max_chunks)
+    ranked =
+      (prior_chunks ++ new_chunks)
+      |> Enum.group_by(&chunk_identity/1)
+      |> Enum.map(fn {_id, dupes} -> Enum.max_by(dupes, & &1.similarity) end)
+      |> Enum.sort_by(& &1.similarity, :desc)
+
+    {kept, _bytes, count} =
+      Enum.reduce(ranked, {[], 0, 0}, fn chunk, {kept, bytes, count} = acc ->
+        size = context_chunk_bytes(chunk)
+
+        if count < max_chunks and bytes + size <= max_bytes do
+          {[chunk | kept], bytes + size, count + 1}
+        else
+          acc
+        end
+      end)
+
+    if count < length(ranked) do
+      Logger.info(
+        "Chat context budget dropped #{length(ranked) - count} chunks " <>
+          "(max_chunks=#{max_chunks}, max_bytes=#{max_bytes})"
+      )
+    end
+
+    Enum.reverse(kept)
+  end
+
+  defp context_chunk_bytes(chunk) do
+    byte_size(chunk.original_markdown || "") +
+      byte_size(chunk.translated_markdown || "") +
+      byte_size("[Page #{chunk.page_number}]\n") + byte_size("\n\n---\n\n")
   end
 
   defp chunk_identity(chunk), do: {chunk.page_id, Map.get(chunk, :chunk_index)}

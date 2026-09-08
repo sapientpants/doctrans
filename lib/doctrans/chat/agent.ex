@@ -8,7 +8,9 @@ defmodule Doctrans.Chat.Agent do
   (passed in via `opts[:retrieved_context]` and returned for the next turn). This
   guarantees the source is searched whenever the conversation lacks the answer,
   and keeps the real retrieved chunks — not just paraphrased prior answers — in
-  front of the model across turns.
+  front of the model across turns. Every merge (including refinement) applies
+  `Chat.merge_context/3`'s chunk and byte budgets before grading or generation;
+  only that bounded context is returned for storage in the socket.
 
   Progress and streamed tokens are reported through an `on_event` callback so the
   caller (a LiveView) can render stage labels and stream the answer. Events:

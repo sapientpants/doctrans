@@ -87,6 +87,10 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 5. Unbounded growth of accumulated chat retrieval context
 
+- **Status:** Implemented: accumulated context is capped at 16 chunks and 32,000
+  bytes of source text plus formatting overhead, keeping the highest-similarity
+  chunks that fit. Budget drops are logged; tests cover trimming and repeated turns.
+
 - **Problem:** `Doctrans.Chat.Agent` keeps "real retrieved chunks" accumulating across
   conversation turns (`chat_retrieved_context`), with history capped at 16 messages but
   **no cap on the retrieved context itself**. Long conversations send ever-larger prompts:

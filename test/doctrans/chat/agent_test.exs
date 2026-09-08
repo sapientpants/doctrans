@@ -57,6 +57,34 @@ defmodule Doctrans.Chat.AgentTest do
                Agent.run(build_stub_document(), "   ", [], [], fn _ -> :ok end)
     end
 
+    test "drops oversized prior context before returning context for the next turn", %{
+      document: document
+    } do
+      oversized = %{
+        page_id: "old-page",
+        page_number: 99,
+        chunk_index: nil,
+        similarity: 1.0,
+        original_markdown: String.duplicate("x", 32_001),
+        translated_markdown: nil
+      }
+
+      assert {:ok, _answer, context} =
+               Agent.run(
+                 document,
+                 "What is this about?",
+                 [],
+                 [retrieved_context: [oversized]],
+                 fn _ ->
+                   :ok
+                 end
+               )
+
+      assert [_ | _] = context
+      refute Enum.any?(context, &(&1.page_id == "old-page"))
+      assert byte_size(Doctrans.Chat.build_context(context)) <= 32_000
+    end
+
     test "surfaces generation errors", %{document: document} do
       Application.put_env(:doctrans, :openai_stub_chat_error, "boom")
       on_exit(fn -> Application.delete_env(:doctrans, :openai_stub_chat_error) end)
