@@ -181,6 +181,17 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   defp restore_chat_messages(%{assigns: %{chat_open: true}} = socket) do
     conversation = Conversations.load(socket.assigns.document.id)
+
+    socket =
+      if socket.assigns.chat_loading do
+        socket
+      else
+        socket
+        |> assign(:chat_history, conversation.history)
+        |> assign(:chat_retrieved_context, conversation.context)
+        |> assign(:chat_interrupted, conversation.interrupted?)
+      end
+
     stream(socket, :chat_messages, conversation.messages, reset: true)
   end
 

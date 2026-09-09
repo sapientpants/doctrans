@@ -57,6 +57,7 @@ defmodule Doctrans.Chat.Conversations do
           message =
             Repo.insert!(%Message{
               chat_session_id: session.id,
+              question_id: saved.id,
               role: role,
               content: content,
               completed: role == "assistant"
@@ -106,11 +107,7 @@ defmodule Doctrans.Chat.Conversations do
       from(m in Message, where: m.chat_session_id == ^session.id, order_by: m.id)
       |> Repo.all()
 
-    history =
-      messages
-      |> Enum.filter(& &1.completed)
-      |> Enum.take(-16)
-      |> Enum.map(&Map.take(&1, [:role, :content]))
+    history = completed_history(messages)
 
     context =
       Enum.map(session.retrieved_context, fn chunk ->
@@ -123,5 +120,28 @@ defmodule Doctrans.Chat.Conversations do
       context: context,
       interrupted?: match?(%Message{role: "user", completed: false}, List.last(messages))
     }
+  end
+
+  # Keep the last eight complete exchanges in answer-completion order. Message
+  # insertion order alone cannot pair turns generated concurrently in two tabs.
+  # Rotation and pre-linkage messages may leave answers without a known question;
+  # keep those visible, but never guess their pairing in model history.
+  defp completed_history(messages) do
+    questions =
+      messages
+      |> Enum.filter(&(&1.role == "user" and &1.completed))
+      |> Map.new(&{&1.id, &1})
+
+    messages
+    |> Enum.filter(&(&1.role == "assistant" and &1.completed))
+    |> Enum.flat_map(fn answer ->
+      case Map.fetch(questions, answer.question_id) do
+        {:ok, question} -> [[question, answer]]
+        :error -> []
+      end
+    end)
+    |> Enum.take(-8)
+    |> List.flatten()
+    |> Enum.map(&Map.take(&1, [:role, :content]))
   end
 end

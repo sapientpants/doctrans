@@ -64,3 +64,8 @@ Streaming tokens and running generation tasks are transient. A reload during gen
 may interrupt the answer; the saved question remains visible with a retry notice. The
 application does not automatically replay questions. Conversations are shared by tabs
 viewing the same document and are refreshed from storage when the viewer mounts.
+Opening an idle chat panel also refreshes its history, retrieval context, and retry
+notice. Model history uses the last eight complete question/answer pairs, ordered
+by answer completion, so overlapping turns from different tabs stay paired.
+Messages saved before question links were introduced remain visible, but are
+excluded from model history because their pairing cannot be recovered reliably.

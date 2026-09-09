@@ -4,6 +4,7 @@ defmodule Doctrans.Chat.Message do
 
   schema "messages" do
     field :chat_session_id, :binary_id
+    field :question_id, :id
     field :role, :string
     field :content, :string
     field :completed, :boolean, default: false
