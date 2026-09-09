@@ -22,14 +22,15 @@ defmodule Doctrans.Documents.Page do
   schema "pages" do
     field :page_number, :integer
     field :image_path, :string
+    field :content_revision, :integer, default: 0, read_after_writes: true
     field :original_markdown, :string
     field :translated_markdown, :string
     field :extraction_status, :string, default: "pending"
     field :translation_status, :string, default: "pending"
 
     # Embedding field for semantic search (based on translated content)
-    field :embedding, Pgvector.Ecto.Vector
-    field :embedding_status, :string, default: "pending"
+    field :embedding, Pgvector.Ecto.Vector, read_after_writes: true
+    field :embedding_status, :string, default: "pending", read_after_writes: true
 
     # Note: The pages table also has tsvector columns (original_searchable,
     # translated_searchable) managed by database triggers. These are not

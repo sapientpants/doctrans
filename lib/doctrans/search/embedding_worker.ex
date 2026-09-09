@@ -35,15 +35,13 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
   @impl true
   def init(_opts) do
-    {:ok, %{tasks: %{}}}
+    {:ok, %{tasks: %{}, pending: MapSet.new()}}
   end
 
   @impl true
   def handle_cast({:generate, page_id}, state) do
-    # Skip if this page already has an in-flight embedding task
     if page_id in Map.values(state.tasks) do
-      Logger.debug("Skipping duplicate embedding request for page #{page_id}")
-      {:noreply, state}
+      {:noreply, %{state | pending: MapSet.put(state.pending, page_id)}}
     else
       task =
         Task.Supervisor.async_nolink(
@@ -72,7 +70,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
         :ok
     end
 
-    {:noreply, %{state | tasks: tasks}}
+    finish_task(page_id, %{state | tasks: tasks})
   end
 
   @impl true
@@ -91,7 +89,15 @@ defmodule Doctrans.Search.EmbeddingWorker do
       Logger.error("Unknown embedding task crashed: #{inspect(reason)}")
     end
 
-    {:noreply, %{state | tasks: tasks}}
+    finish_task(page_id, %{state | tasks: tasks})
+  end
+
+  defp finish_task(page_id, state) do
+    if MapSet.member?(state.pending, page_id) do
+      handle_cast({:generate, page_id}, %{state | pending: MapSet.delete(state.pending, page_id)})
+    else
+      {:noreply, state}
+    end
   end
 
   defp do_generate_embedding(page_id, attempt \\ 0) do
@@ -112,19 +118,23 @@ defmodule Doctrans.Search.EmbeddingWorker do
   end
 
   defp process_page_embedding(page, page_id, attempt) do
-    case safe_update!(Page.embedding_changeset(page, %{embedding_status: "processing"})) do
+    case safe_update!(Page.embedding_changeset(page, %{embedding_status: "processing"}), page) do
       {:error, _} ->
         Logger.debug("Page #{page_id} was deleted before embedding; skipping")
         {:ok, page_id}
 
       {:ok, page} ->
         # Create chunks from page content
-        chunks = ensure_chunks(page)
+        chunks =
+          case with_current_revision(page, &ensure_chunks/1) do
+            {:ok, chunks} -> chunks
+            {:error, :stale_entry} -> []
+          end
 
         if chunks == [] do
           Logger.info("No chunks to embed for page #{page_id} (empty content)")
 
-          _ = safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}))
+          _ = safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}), page)
 
           {:ok, page_id}
         else
@@ -135,14 +145,15 @@ defmodule Doctrans.Search.EmbeddingWorker do
           results =
             Enum.map(chunks, fn chunk ->
               embed_content = Chunker.content_for_embedding(chunk_data, chunk.chunk_index)
-              embed_chunk(chunk, embed_content, attempt)
+              embed_chunk(chunk, embed_content, attempt, page)
             end)
 
           if Enum.all?(results, &match?({:ok, _}, &1)) do
             # Also generate page-level embedding for hybrid search fallback
             _ = generate_page_embedding(page)
 
-            _ = safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}))
+            _ =
+              safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}), page)
 
             Logger.info("Generated embeddings for #{length(chunks)} chunks on page #{page_id}")
             {:ok, page_id}
@@ -198,7 +209,17 @@ defmodule Doctrans.Search.EmbeddingWorker do
   defp create_chunks(page) do
     chunk_data = Chunker.chunk(page.original_markdown)
 
+    # Translation may have finished while regeneration waited for an old task.
+    # Use the page read under the revision lock so concurrent translation writes
+    # either precede these inserts or update the inserted chunks afterwards.
+    translations =
+      page.translated_markdown
+      |> Chunker.chunk()
+      |> Map.new(&{&1.chunk_index, &1.content})
+
     Enum.each(chunk_data, fn data ->
+      data = Map.put(data, :translated_content, Map.get(translations, data.chunk_index))
+
       %Chunk{page_id: page.id}
       |> Chunk.changeset(data)
       |> Repo.insert!(
@@ -250,8 +271,8 @@ defmodule Doctrans.Search.EmbeddingWorker do
     end
   end
 
-  defp embed_chunk(chunk, embed_content, attempt) do
-    case safe_update!(Chunk.embedding_changeset(chunk, %{embedding_status: "processing"})) do
+  defp embed_chunk(chunk, embed_content, attempt, page) do
+    case safe_update!(Chunk.embedding_changeset(chunk, %{embedding_status: "processing"}), page) do
       {:error, :stale_entry} ->
         Logger.debug("Chunk #{chunk.id} was deleted before embedding; skipping")
         {:ok, chunk.id}
@@ -269,18 +290,19 @@ defmodule Doctrans.Search.EmbeddingWorker do
                 Chunk.embedding_changeset(chunk, %{
                   embedding: embedding,
                   embedding_status: "completed"
-                })
+                }),
+                page
               )
 
             {:ok, chunk.id}
 
           {:error, :circuit_open} ->
             Logger.warning("Embedding circuit breaker open for chunk #{chunk.id}")
-            _ = mark_chunk_error(chunk)
+            _ = mark_chunk_error(chunk, page)
             {:error, :circuit_open}
 
           {:error, reason} ->
-            handle_chunk_error(chunk, embed_content, reason, attempt)
+            handle_chunk_error(chunk, embed_content, reason, attempt, page)
         end
     end
   end
@@ -293,20 +315,20 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
     case result do
       {:ok, embedding} ->
-        _ = safe_update!(Page.embedding_changeset(page, %{embedding: embedding}))
+        _ = safe_update!(Page.embedding_changeset(page, %{embedding: embedding}), page)
 
       {:error, reason} ->
         Logger.warning("Page-level embedding failed for page #{page.id}: #{inspect(reason)}")
     end
   end
 
-  defp handle_chunk_error(chunk, embed_content, reason, attempt) do
+  defp handle_chunk_error(chunk, embed_content, reason, attempt, page) do
     classification = ErrorClassifier.classify(reason)
 
     cond do
       classification == :permanent ->
         Logger.error("Permanent embedding error for chunk #{chunk.id}: #{inspect(reason)}")
-        _ = mark_chunk_error(chunk)
+        _ = mark_chunk_error(chunk, page)
         {:error, reason}
 
       attempt < @max_retries ->
@@ -323,7 +345,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
         )
 
         Process.sleep(delay)
-        embed_chunk(chunk, embed_content, attempt + 1)
+        embed_chunk(chunk, embed_content, attempt + 1, page)
 
       true ->
         Logger.error(
@@ -336,25 +358,39 @@ defmodule Doctrans.Search.EmbeddingWorker do
           %{type: :embedding, chunk_id: chunk.id}
         )
 
-        _ = mark_chunk_error(chunk)
+        _ = mark_chunk_error(chunk, page)
         {:error, reason}
     end
   end
 
   defp mark_embedding_error(page) do
-    safe_update!(Page.embedding_changeset(page, %{embedding_status: "error"}))
+    safe_update!(Page.embedding_changeset(page, %{embedding_status: "error"}), page)
   end
 
-  defp mark_chunk_error(chunk) do
-    safe_update!(Chunk.embedding_changeset(chunk, %{embedding_status: "error"}))
+  defp mark_chunk_error(chunk, page) do
+    safe_update!(Chunk.embedding_changeset(chunk, %{embedding_status: "error"}), page)
   end
 
   # `Repo.update!` raises `Ecto.StaleEntryError` when the row is deleted while
   # the task is in flight (e.g. the user removes the book mid-embedding). The
   # row is gone, so there is nothing to update — treat it as a no-op.
-  defp safe_update!(changeset) do
-    {:ok, Repo.update!(changeset)}
+  defp safe_update!(changeset, page) do
+    with_current_revision(page, fn _current -> Repo.update!(changeset) end)
   rescue
     Ecto.StaleEntryError -> {:error, :stale_entry}
+  end
+
+  # Serialize writes with content invalidation, without holding a lock during API calls.
+  defp with_current_revision(page, fun) do
+    Repo.transaction(fn ->
+      current = Repo.one(from p in Page, where: p.id == ^page.id, lock: "FOR UPDATE")
+
+      if current && current.content_revision == page.content_revision &&
+           current.extraction_status == "completed" do
+        fun.(current)
+      else
+        Repo.rollback(:stale_entry)
+      end
+    end)
   end
 end
