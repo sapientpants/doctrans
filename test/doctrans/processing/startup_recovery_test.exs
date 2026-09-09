@@ -79,4 +79,72 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
       assert Repo.aggregate(Oban.Job, :count) == 50
     end)
   end
+
+  test "preserves work and avoids duplicate jobs queued after candidate selection" do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      document = document_fixture(%{status: "processing"})
+      page = page_fixture(document, %{extraction_status: "processing"})
+
+      after_candidate_selection(fn ->
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "Concurrent result"
+        })
+
+        %{"page_id" => page.id} |> LlmProcessingJob.new() |> Oban.insert!()
+      end)
+
+      assert :done = StartupRecovery.run_batch({:pages, nil})
+      assert Repo.aggregate(Oban.Job, :count) == 1
+      saved = Documents.get_page!(page.id)
+      assert saved.extraction_status == "completed"
+      assert saved.original_markdown == "Concurrent result"
+    end)
+  end
+
+  test "rereads completed stages even without a conflicting job" do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      document = document_fixture(%{status: "processing"})
+      page = page_fixture(document, %{extraction_status: "processing"})
+
+      after_candidate_selection(fn ->
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "Concurrent result"
+        })
+      end)
+
+      assert :done = StartupRecovery.run_batch({:pages, nil})
+      assert Repo.aggregate(Oban.Job, :count) == 1
+      assert Documents.get_page!(page.id).extraction_status == "completed"
+    end)
+  end
+
+  test "does not recover a document stopped after candidate selection" do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      document = document_with_pages_fixture(%{status: "processing"}, 1)
+      after_candidate_selection(fn -> Documents.update_document_status(document, "error") end)
+      assert :done = StartupRecovery.run_batch({:pages, nil})
+      assert Repo.aggregate(Oban.Job, :count) == 0
+    end)
+  end
+
+  # Inject the competing write after the SELECT returns, before recovery locks
+  # and rereads the candidate. This deterministically exercises the race window.
+  defp after_candidate_selection(callback) do
+    handler = {__MODULE__, make_ref()}
+    Process.put(handler, callback)
+    :telemetry.attach(handler, [:doctrans, :repo, :query], &__MODULE__.after_query/4, handler)
+    on_exit(fn -> :telemetry.detach(handler) end)
+  end
+
+  @doc false
+  def after_query(_event, _measurements, metadata, handler) do
+    if String.contains?(metadata.query, "NOT (exists") do
+      case Process.delete(handler) do
+        nil -> :ok
+        callback -> callback.()
+      end
+    end
+  end
 end

@@ -37,9 +37,15 @@ defmodule Doctrans.Processing.StartupRecovery do
 
     Repo.transact(fn ->
       Enum.each(rows, fn document ->
-        %{"document_id" => document.id}
-        |> DocumentExtractionJob.new(meta: %{recovered: true})
-        |> Oban.insert!()
+        case Repo.one(from(d in Document, where: d.id == ^document.id, lock: "FOR UPDATE")) do
+          %Document{status: status} when status in ["queued", "extracting"] ->
+            %{"document_id" => document.id}
+            |> DocumentExtractionJob.new(meta: %{recovered: true})
+            |> Oban.insert!()
+
+          _ ->
+            :ok
+        end
       end)
 
       {:ok, :queued}
@@ -69,16 +75,14 @@ defmodule Doctrans.Processing.StartupRecovery do
           ),
         select: %{
           id: p.id,
-          page_number: p.page_number,
-          extraction_status: p.extraction_status,
-          translation_status: p.translation_status
+          document_id: p.document_id
         }
       )
       |> fetch_batch(after_id)
 
     pages =
       Repo.transact(fn ->
-        pages = Enum.map(rows, &recover_page/1)
+        pages = Enum.flat_map(rows, &recover_page/1)
         {:ok, pages}
       end)
       |> unwrap!()
@@ -96,20 +100,40 @@ defmodule Doctrans.Processing.StartupRecovery do
   end
 
   defp recover_page(row) do
-    changes = %{
-      extraction_status: recovered_status(row.extraction_status),
-      translation_status: recovered_status(row.translation_status)
-    }
+    # Lock the parent first so stopping/deleting a document cannot race recovery.
+    document =
+      from(d in Document, where: d.id == ^row.document_id, lock: "FOR UPDATE")
+      |> Repo.one()
 
-    page = struct!(Page, row) |> Ecto.Changeset.change(changes) |> Repo.update!()
+    page = from(p in Page, where: p.id == ^row.id, lock: "FOR UPDATE") |> Repo.one()
 
-    _job =
-      %{"page_id" => row.id, "page_number" => row.page_number}
+    case {document, page} do
+      {%Document{status: "processing"}, %Page{} = page} -> maybe_recover_page(page)
+      _ -> []
+    end
+  end
+
+  defp maybe_recover_page(%Page{extraction_status: "completed", translation_status: "completed"}),
+    do: []
+
+  defp maybe_recover_page(page) do
+    # Insert before changing statuses: uniqueness also covers jobs queued since
+    # candidate selection. A conflicting job owns this page's processing state.
+    job =
+      %{"page_id" => page.id, "page_number" => page.page_number}
       |> LlmProcessingJob.new(priority: 2, meta: %{recovered: true})
       |> Oban.insert!()
 
-    # Fetch the complete page for the same progress event used by normal processing.
-    Repo.get!(Page, page.id)
+    if job.conflict? do
+      []
+    else
+      changes = %{
+        extraction_status: recovered_status(page.extraction_status),
+        translation_status: recovered_status(page.translation_status)
+      }
+
+      [page |> Ecto.Changeset.change(changes) |> Repo.update!()]
+    end
   end
 
   defp recovered_status("completed"), do: "completed"

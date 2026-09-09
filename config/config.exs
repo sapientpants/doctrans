@@ -94,6 +94,7 @@ config :doctrans, Oban,
   repo: Doctrans.Repo,
   plugins: [
     Oban.Plugins.Pruner,
+    {Oban.Lifeline, rescue_after: {1, :hour}},
     {Oban.Plugins.Cron, crontab: [{"* * * * *", Doctrans.Jobs.HealthCheckJob}]}
   ],
   queues: [

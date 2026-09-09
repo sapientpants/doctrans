@@ -310,7 +310,11 @@ by priority; each includes the problem, the affected code, and the proposed fix.
   interrupted stages return to pending without losing completed content, and page
   updates refresh progress. Queued/extracting documents use the extraction job's
   existing file lookup. Regression tests cover batching, resumption, duplicate
-  avoidance, progress, and documents stopped between batches.
+  avoidance, progress, and documents stopped between batches. Recovery locks and
+  rereads candidates before mutation, and active-job uniqueness prevents concurrent
+  queueing from duplicating recovery work. Oban Lifeline rescues orphaned jobs after
+  one hour; page retries resume interrupted/errored stages while preserving completed
+  content. Regression coverage includes concurrent updates and rescued execution.
 
 - **Problem:** `:recover_incomplete_documents` re-queues every page of every
   "processing" document unbounded on boot. After a crash mid-way through a 5,000-page

@@ -7,7 +7,14 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   converted to PDF before extraction.
   """
 
-  use Oban.Worker, queue: :pdf_extraction, max_attempts: 3
+  use Oban.Worker,
+    queue: :pdf_extraction,
+    max_attempts: 3,
+    unique: [
+      period: :infinity,
+      keys: [:document_id],
+      states: [:available, :scheduled, :executing, :retryable, :suspended]
+    ]
 
   alias Doctrans.Documents
   alias Doctrans.Processing.DocumentProcessor
