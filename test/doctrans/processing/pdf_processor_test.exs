@@ -3,6 +3,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Processing.DocumentOrchestrator
   alias Doctrans.Processing.PdfProcessor
 
   import Doctrans.Fixtures
@@ -11,6 +12,50 @@ defmodule Doctrans.Processing.PdfProcessorTest do
   alias Doctrans.Processing.{ResumablePdfExtractorStub, Worker}
 
   describe "extract_document/3" do
+    test "waits for all expected pages when processing catches up with PDF extraction" do
+      original = Application.fetch_env!(:doctrans, :pdf_extractor_module)
+      Application.put_env(:doctrans, :pdf_extractor_module, ResumablePdfExtractorStub)
+      on_exit(fn -> Application.put_env(:doctrans, :pdf_extractor_module, original) end)
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "processing"})
+        Topics.subscribe_document(document.id)
+        pdf_path = create_temp_pdf()
+        owner = self()
+
+        task =
+          Task.async(fn ->
+            Process.put(:pause_pdf_page, {2, owner})
+
+            Oban.Testing.with_testing_mode(:manual, fn ->
+              PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+            end)
+          end)
+
+        assert_receive {:pdf_page_paused, 2}, 2_000
+        assert Documents.get_document!(document.id).total_pages == 3
+        assert [first_page] = Documents.list_pages(document.id)
+        complete_page(first_page)
+
+        assert DocumentOrchestrator.check_document_completion(document.id) == :incomplete
+        assert Documents.get_document!(document.id).status == "processing"
+        refute_received {:document_updated, %{status: "completed"}}
+
+        send(task.pid, :resume_pdf)
+        assert Task.await(task) == :ok
+        assert length(Documents.list_pages(document.id)) == 3
+        assert DocumentOrchestrator.check_document_completion(document.id) == :incomplete
+
+        for page <- Documents.list_pages(document.id), page.page_number > 1 do
+          complete_page(page)
+        end
+
+        assert DocumentOrchestrator.check_document_completion(document.id) == :completed
+        assert Documents.get_document!(document.id).status == "completed"
+        assert_received {:document_updated, %{status: "completed"}}
+      end)
+    end
+
     test "extracts pages from PDF and creates page records" do
       document = document_fixture(%{status: "extracting"})
       pdf_path = create_temp_pdf()
@@ -160,6 +205,11 @@ defmodule Doctrans.Processing.PdfProcessorTest do
 
       assert {:error, :document_not_found} = result
     end
+  end
+
+  defp complete_page(page) do
+    {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "completed"})
+    {:ok, _page} = Documents.update_page_translation(page, %{translation_status: "completed"})
   end
 
   defp processing_jobs do

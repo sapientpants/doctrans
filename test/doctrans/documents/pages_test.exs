@@ -284,8 +284,48 @@ defmodule Doctrans.Documents.PagesTest do
       assert Pages.all_pages_completed?(doc.id)
     end
 
-    test "returns true for document with no pages" do
+    test "returns false for document with unknown page count" do
       doc = document_fixture()
+      refute Pages.all_pages_completed?(doc.id)
+      completed_page_fixture(doc)
+      refute Pages.all_pages_completed?(doc.id)
+    end
+
+    test "returns false for zero pages or a missing document" do
+      doc = document_fixture(%{total_pages: 0})
+      refute Pages.all_pages_completed?(doc.id)
+      refute Pages.all_pages_completed?(Ecto.UUID.generate())
+    end
+
+    test "requires the stored page count to match the expected count" do
+      doc = document_fixture(%{total_pages: 3})
+      refute Pages.all_pages_completed?(doc.id)
+
+      for number <- 1..2 do
+        completed_page_fixture(doc, %{page_number: number})
+        refute Pages.all_pages_completed?(doc.id)
+      end
+
+      completed_page_fixture(doc, %{page_number: 3})
+      assert Pages.all_pages_completed?(doc.id)
+
+      completed_page_fixture(doc, %{page_number: 4})
+      refute Pages.all_pages_completed?(doc.id)
+    end
+
+    test "extraction errors count as done but translation errors do not" do
+      doc = document_fixture(%{total_pages: 2})
+      page_fixture(doc, %{extraction_status: "error"})
+
+      page =
+        page_fixture(doc, %{
+          page_number: 2,
+          extraction_status: "completed",
+          translation_status: "error"
+        })
+
+      refute Pages.all_pages_completed?(doc.id)
+      {:ok, _} = Pages.update_page_translation(page, %{translation_status: "completed"})
       assert Pages.all_pages_completed?(doc.id)
     end
   end

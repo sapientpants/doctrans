@@ -7,7 +7,7 @@ defmodule Doctrans.Documents.Pages do
 
   import Ecto.Query
 
-  alias Doctrans.Documents.Page
+  alias Doctrans.Documents.{Document, Page}
   alias Doctrans.Repo
 
   @doc """
@@ -132,20 +132,26 @@ defmodule Doctrans.Documents.Pages do
   end
 
   @doc """
-  Checks if all pages in a document are fully processed.
+  Checks if all expected pages in a document exist and are fully processed.
+
+  Documents with an unknown or non-positive page count are not complete.
 
   A page is considered "done" if:
   - translation_status = "completed", OR
   - extraction_status = "error" (can't translate without successful extraction)
   """
   def all_pages_completed?(document_id) do
-    incomplete_count =
-      Page
-      |> where([p], p.document_id == ^document_id)
-      |> where([p], p.translation_status != "completed" and p.extraction_status != "error")
-      |> Repo.aggregate(:count)
-
-    incomplete_count == 0
+    Document
+    |> where([d], d.id == ^document_id and d.total_pages > 0)
+    |> join(:inner, [d], p in Page, on: p.document_id == d.id)
+    |> group_by([d], [d.id, d.total_pages])
+    |> having([d, p], count(p.id) == d.total_pages)
+    |> having(
+      [d, p],
+      filter(count(p.id), p.translation_status == "completed" or p.extraction_status == "error") ==
+        d.total_pages
+    )
+    |> Repo.exists?()
   end
 
   @doc """
