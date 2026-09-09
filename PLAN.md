@@ -357,7 +357,7 @@ The only repository change was this plan; the findings remain unresolved.
 
 ### Correctness and reliability follow-ups
 
-- [ ] **F04:** Prevent stale embedding writes and retain regeneration requests.
+- [x] **F04:** Prevent stale embedding writes and retain regeneration requests.
 - [ ] **F05:** Require all expected pages before completing a document.
 - [ ] **F06:** Preserve selected models through persisted job execution.
 - [ ] **F07:** Fuse retrieval results by chunk identity.
