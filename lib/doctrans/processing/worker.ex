@@ -11,6 +11,7 @@ defmodule Doctrans.Processing.Worker do
 
   alias Doctrans.Documents
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
+  alias Doctrans.Processing.StartupRecovery
   import Ecto.Query
 
   @document_id_key DocumentExtractionJob.document_id_key()
@@ -114,7 +115,7 @@ defmodule Doctrans.Processing.Worker do
 
     # Also cancel page jobs
     pages = Documents.list_pages(document_id)
-    page_ids = Enum.map(pages, & &1.id)
+    page_ids = for page <- pages, do: page.id
 
     _ =
       case page_ids do
@@ -194,42 +195,16 @@ defmodule Doctrans.Processing.Worker do
 
   @impl true
   def handle_info(:recover_incomplete_documents, state) do
-    Logger.info("Recovering incomplete documents...")
+    send(self(), {:recover_batch, {:documents, nil}})
+    {:noreply, state}
+  end
 
-    # Find documents with incomplete processing and queue them
-    Documents.list_incomplete_documents()
-    |> Enum.each(fn document ->
-      case document.status do
-        "extracting" ->
-          Logger.info("Re-queuing extracting document: #{document.id}")
-
-          if document.file_path do
-            process_document(document.id, document.file_path)
-          else
-            Logger.warning("Document #{document.id} has no file_path, skipping recovery")
-          end
-
-        "processing" ->
-          Logger.info("Re-queuing processing document: #{document.id}")
-
-          Documents.list_pages(document.id)
-          |> Enum.each(fn page ->
-            queue_page(page.id, page_number: page.page_number)
-          end)
-
-        "queued" ->
-          Logger.info("Re-queuing queued document: #{document.id}")
-
-          if document.file_path do
-            process_document(document.id, document.file_path)
-          else
-            Logger.warning("Document #{document.id} has no file_path, skipping recovery")
-          end
-
-        _ ->
-          :ok
+  def handle_info({:recover_batch, cursor}, state) do
+    _ =
+      case StartupRecovery.run_batch(cursor) do
+        :done -> :ok
+        next -> Process.send_after(self(), {:recover_batch, next}, 1_000)
       end
-    end)
 
     {:noreply, state}
   end
