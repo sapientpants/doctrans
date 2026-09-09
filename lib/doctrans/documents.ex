@@ -61,17 +61,28 @@ defmodule Doctrans.Documents do
   Only the page fields required for progress are loaded (in one query),
   avoiding loading every page's markdown content into memory. Documents
   with no pages yet are treated as 0% progress.
+
+  Supports `:sort_by` and `:sort_dir`, plus `:document_ids` to refresh only
+  affected cards. Optional `:limit` and `:offset` bound the document query
+  and its associated page query for paginated callers.
   """
   def list_documents_with_progress(opts \\ []) do
-    sort_by = Keyword.get(opts, :sort_by, :inserted_at)
-    sort_dir = Keyword.get(opts, :sort_dir, :desc)
+    query = ordered_documents(Document, opts)
 
-    order = [{sort_dir, sort_by}]
+    query =
+      case Keyword.fetch(opts, :document_ids) do
+        {:ok, ids} -> where(query, [d], d.id in ^ids)
+        :error -> query
+      end
 
-    documents =
-      Document
-      |> order_by(^order)
-      |> Repo.all()
+    query =
+      case Keyword.fetch(opts, :limit) do
+        {:ok, count} -> limit(query, ^count)
+        :error -> query
+      end
+
+    offset = Keyword.get(opts, :offset, 0)
+    documents = query |> offset(^offset) |> Repo.all()
 
     document_ids = Enum.map(documents, & &1.id)
 
@@ -105,6 +116,32 @@ defmodule Doctrans.Documents do
     Enum.map(documents, fn document ->
       Summary.new(document, Map.get(pages_by_document, document.id, []))
     end)
+  end
+
+  @doc """
+  Sorts `{id, sort_key}` pairs using the database's ordering semantics.
+
+  Supports the same `:sort_by` and `:sort_dir` options as summary queries. Sorts
+  only the supplied snapshot so unrelated, unhandled changes cannot reorder
+  dashboard cards. No document rows or pages are loaded.
+  """
+  def sort_document_order(entries, opts \\ [])
+  def sort_document_order([], _opts), do: []
+
+  def sort_document_order(entries, opts) do
+    sort_by = Keyword.get(opts, :sort_by, :inserted_at)
+    rows = Enum.map(entries, fn {id, key} -> %{sort_by => key, :id => id} end)
+
+    from(d in values(rows, Document))
+    |> ordered_documents(opts)
+    |> select([d], {d.id, field(d, ^sort_by)})
+    |> Repo.all()
+  end
+
+  defp ordered_documents(query, opts) do
+    sort_by = Keyword.get(opts, :sort_by, :inserted_at)
+    sort_dir = Keyword.get(opts, :sort_dir, :desc)
+    order_by(query, ^[{sort_dir, sort_by}, {sort_dir, :id}])
   end
 
   @doc """

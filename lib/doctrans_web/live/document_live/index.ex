@@ -17,9 +17,9 @@ defmodule DoctransWeb.DocumentLive.Index do
           {:ok, document_id :: Ecto.UUID.t(), filename :: String.t(), path :: String.t()}
           | {:error, filename :: String.t(), reason :: Doctrans.Errors.reason()}
 
-  # How long to wait after a page-level update before refreshing the list.
+  # How long to wait after a page-level update before refreshing affected cards.
   # Page updates arrive very frequently (one per page, per document); this
-  # coalesces bursts of messages into a single re-query.
+  # coalesces bursts while retaining a trailing refresh for every affected document.
   @refresh_coalesce_ms 1_500
 
   @impl true
@@ -30,6 +30,7 @@ defmodule DoctransWeb.DocumentLive.Index do
       socket
       |> assign(:document_topics, [])
       |> assign(:refresh_scheduled?, false)
+      |> assign(:pending_document_ids, [])
       |> assign(:show_upload_modal, false)
       |> assign(:target_language, defaults[:target_language] || "en")
       |> assign(:sort_by, :inserted_at)
@@ -251,7 +252,7 @@ defmodule DoctransWeb.DocumentLive.Index do
         socket =
           socket
           |> put_flash(:info, gettext("Document deleted successfully"))
-          |> refresh_list()
+          |> remove_document(id)
 
         {:noreply, socket}
 
@@ -414,24 +415,33 @@ defmodule DoctransWeb.DocumentLive.Index do
   @impl true
   def handle_info({:document_updated, document}, socket) do
     Logger.debug("Dashboard received document_updated for #{document.id}")
-    {:noreply, refresh_list(socket)}
+    {:noreply, refresh_documents(socket, [document.id])}
   end
 
   @impl true
-  def handle_info({:page_updated, _page}, socket) do
-    # Coalesce bursts of them into a single list refresh.
+  def handle_info({:page_updated, page}, socket) do
     if socket.assigns.refresh_scheduled? do
-      {:noreply, socket}
+      ids = Enum.uniq([page.document_id | socket.assigns.pending_document_ids])
+      {:noreply, assign(socket, :pending_document_ids, ids)}
     else
-      socket = assign(socket, :refresh_scheduled?, true)
       Process.send_after(self(), :dashboard_refresh, @refresh_coalesce_ms)
-      {:noreply, refresh_list(socket)}
+
+      {:noreply,
+       socket
+       |> assign(:refresh_scheduled?, true)
+       |> refresh_documents([page.document_id])}
     end
   end
 
   @impl true
   def handle_info(:dashboard_refresh, socket) do
-    {:noreply, assign(socket, :refresh_scheduled?, false)}
+    ids = socket.assigns.pending_document_ids
+
+    {:noreply,
+     socket
+     |> assign(:refresh_scheduled?, false)
+     |> assign(:pending_document_ids, [])
+     |> refresh_documents(ids)}
   end
 
   @impl true
@@ -454,13 +464,98 @@ defmodule DoctransWeb.DocumentLive.Index do
     topics = Enum.map(documents, & &1.id)
 
     if connected?(socket) do
-      subscribe_to_documents_topics(topics)
+      unsubscribe_from_documents_topics(socket.assigns.document_topics -- topics)
+      subscribe_to_documents_topics(topics -- socket.assigns.document_topics)
     end
 
     socket
     |> assign(:document_topics, topics)
+    |> assign(:document_order, Enum.map(documents, &order_entry(&1, socket)))
     |> assign(:documents_count, length(documents))
     |> stream(:documents, documents, reset: true)
+  end
+
+  # Keys detect changes; PostgreSQL determines ordering, including title collation.
+  defp order_entry(summary, socket) do
+    {summary.id, Map.fetch!(summary.document, socket.assigns.sort_by)}
+  end
+
+  defp refresh_documents(socket, []), do: socket
+
+  defp refresh_documents(socket, ids) do
+    summaries = Documents.list_documents_with_progress(document_ids: ids)
+    found_ids = Enum.map(summaries, & &1.id)
+    socket = Enum.reduce(ids -- found_ids, socket, &remove_document(&2, &1))
+    update_documents(socket, summaries)
+  end
+
+  defp update_documents(socket, summaries) do
+    previous_order = socket.assigns.document_order
+    order = updated_document_order(socket, summaries)
+
+    # The client applies all deletions before insertions. Remove affected cards
+    # together, then reinsert from left to right at their final batch positions.
+    socket =
+      if order != previous_order do
+        Enum.reduce(summaries, socket, &stream_delete(&2, :documents, &1))
+      else
+        socket
+      end
+
+    topics = Enum.map(order, &elem(&1, 0))
+
+    if connected?(socket),
+      do: subscribe_to_documents_topics(topics -- socket.assigns.document_topics)
+
+    socket =
+      socket
+      |> assign(:document_order, order)
+      |> assign(:documents_count, length(order))
+      |> assign(:document_topics, topics)
+
+    summaries_by_id = Map.new(summaries, &{&1.id, &1})
+
+    order
+    |> Enum.with_index()
+    |> Enum.reduce(socket, fn {{id, _key}, index}, socket ->
+      case Map.fetch(summaries_by_id, id) do
+        {:ok, summary} -> stream_insert(socket, :documents, summary, at: index)
+        :error -> socket
+      end
+    end)
+  end
+
+  defp updated_document_order(socket, summaries) do
+    previous_order = socket.assigns.document_order
+    previous_keys = Map.new(previous_order)
+    entries = Map.new(summaries, &order_entry(&1, socket))
+
+    if Enum.any?(entries, fn {id, key} -> Map.fetch(previous_keys, id) != {:ok, key} end) do
+      previous_keys
+      |> Map.merge(entries)
+      |> Map.to_list()
+      |> Documents.sort_document_order(
+        sort_by: socket.assigns.sort_by,
+        sort_dir: socket.assigns.sort_dir
+      )
+    else
+      previous_order
+    end
+  end
+
+  defp remove_document(socket, id) do
+    if connected?(socket), do: Topics.unsubscribe_document(id)
+    order = Enum.reject(socket.assigns.document_order, &(elem(&1, 0) == id))
+
+    socket
+    |> assign(:document_order, order)
+    |> assign(:documents_count, length(order))
+    |> assign(:document_topics, Enum.reject(socket.assigns.document_topics, &(&1 == id)))
+    |> assign(
+      :pending_document_ids,
+      Enum.reject(socket.assigns.pending_document_ids, &(&1 == id))
+    )
+    |> stream_delete(:documents, %{id: id})
   end
 
   defp subscribe_to_documents_topics(topics) do

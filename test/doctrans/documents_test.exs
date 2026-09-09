@@ -67,6 +67,32 @@ defmodule Doctrans.DocumentsTest do
   end
 
   describe "list_documents_with_progress/1" do
+    test "filters summaries by IDs and bounds document and page loading with pagination" do
+      alpha = document_with_pages_fixture(%{title: "Alpha"}, 1)
+      beta = document_with_pages_fixture(%{title: "Beta"}, 1)
+      _gamma = document_with_pages_fixture(%{title: "Gamma"}, 1)
+
+      assert [summary] = Documents.list_documents_with_progress(document_ids: [beta.id])
+      assert summary.id == beta.id
+      assert summary.thumbnail_path == hd(beta.pages).image_path
+      assert Documents.list_documents_with_progress(document_ids: []) == []
+
+      assert [summary] =
+               Documents.list_documents_with_progress(
+                 sort_by: :title,
+                 sort_dir: :asc,
+                 limit: 1,
+                 offset: 1
+               )
+
+      assert summary.id == beta.id
+
+      assert [summary] =
+               Documents.list_documents_with_progress(limit: 1, sort_by: :title, sort_dir: :asc)
+
+      assert summary.id == alpha.id
+    end
+
     test "returns an empty list without documents" do
       assert Documents.list_documents_with_progress() == []
     end
