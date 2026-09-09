@@ -360,6 +360,12 @@ Current suite is solid (components, LiveViews, processing, search, chat), but th
 
 ### 22. Coverage gate exists (80%) but `mix cover` isn't in precommit/CI
 
+- **Status:** Implemented. `mix precommit` and the test hook use `mix test --cover`;
+  CI runs it in an explicit, unconditional step and skips the duplicate hook run.
+  ExCoveralls enforces the 80% floor from `coveralls.json`, with existing exclusions
+  unchanged. Added sanitizer regression coverage for nested frames, image event
+  handlers, and JavaScript links. Contributor documentation explains the gate.
+
 - **Fix:** Add `test --cover` (coveralls) to CI so the 80% floor actually gates merges;
   then drive coverage up in the areas above.
 

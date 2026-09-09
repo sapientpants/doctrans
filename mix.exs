@@ -14,7 +14,7 @@ defmodule Doctrans.MixProject do
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
-      test_coverage: [tool: ExCoveralls, minimum_coverage: 80],
+      test_coverage: [tool: ExCoveralls],
       preferred_cli_env: [
         coveralls: :test,
         "coveralls.detail": :test,
@@ -136,7 +136,7 @@ defmodule Doctrans.MixProject do
         "credo --strict",
         "sobelow --config",
         "dialyzer",
-        "test"
+        "test --cover"
       ]
     ]
   end

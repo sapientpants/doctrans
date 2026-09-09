@@ -37,6 +37,18 @@ another process), and retry behavior when changing error shapes. Run
 `mix gettext.extract` after moving or adding messages and `mix precommit` before
 finishing a change.
 
+## Test coverage
+
+`mix precommit`, the test pre-commit hook, and CI run `mix test --cover` with
+ExCoveralls. CI runs coverage on every pull request and push to `main`, including
+configuration-only changes. Tests run once in CI; its pre-commit invocation skips
+the coverage hook in favor of the explicit coverage step.
+
+The minimum coverage is 80%, configured in `coveralls.json`; falling below it
+fails the command and CI. The same file lists the existing coverage exclusions.
+Add meaningful tests for uncovered behavior instead of lowering the threshold or
+expanding exclusions. Use `mix coveralls.html` for a local report in `cover/`.
+
 ## Static type checks
 
 `mix precommit` runs Dialyzer in the test environment with the project's strict
