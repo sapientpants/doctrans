@@ -66,7 +66,9 @@ defmodule Doctrans.Processing.LlmProcessor do
     end
   end
 
-  defp maybe_extract(%{extraction_status: "pending"} = page, opts) do
+  # A retried or rescued Oban job may have left a stage processing or errored.
+  defp maybe_extract(%{extraction_status: status} = page, opts)
+       when status in ["pending", "processing", "error"] do
     process_page_extraction(page, 0, opts)
   end
 
@@ -78,20 +80,22 @@ defmodule Doctrans.Processing.LlmProcessor do
   defp maybe_translate(
          %{
            extraction_status: "completed",
-           translation_status: "pending",
+           translation_status: status,
            original_markdown: markdown
          } =
            page,
          opts
        )
-       when is_binary(markdown) and markdown != "" do
+       when status in ["pending", "processing", "error"] and is_binary(markdown) and
+              markdown != "" do
     process_page_translation(page, 0, opts)
   end
 
   defp maybe_translate(
-         %{extraction_status: "completed", translation_status: "pending"} = page,
+         %{extraction_status: "completed", translation_status: status} = page,
          _opts
-       ) do
+       )
+       when status in ["pending", "processing", "error"] do
     # No content to translate - mark as completed with empty translation
     Logger.warning("Page #{page.page_number} has no content to translate, marking as completed")
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "completed"})

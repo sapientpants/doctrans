@@ -6,7 +6,14 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
   using vision and text models.
   """
 
-  use Oban.Worker, queue: :llm_processing, max_attempts: 3
+  use Oban.Worker,
+    queue: :llm_processing,
+    max_attempts: 3,
+    unique: [
+      period: :infinity,
+      keys: [:page_id],
+      states: [:available, :scheduled, :executing, :retryable, :suspended]
+    ]
 
   alias Doctrans.Processing.LlmProcessor
 
