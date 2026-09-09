@@ -5,10 +5,73 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Pages
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.StartupRecovery
+  alias Doctrans.Processing.{OpenAIProbe, StartupRecovery, Worker}
   alias Oban.Engines.Basic
 
   import Doctrans.Fixtures
+
+  describe "persisted model selections" do
+    setup do
+      previous_module = Application.fetch_env!(:doctrans, :openai_module)
+      Application.put_env(:doctrans, :openai_module, OpenAIProbe)
+      Application.put_env(:doctrans, :openai_probe_pid, self())
+
+      on_exit(fn ->
+        Application.put_env(:doctrans, :openai_module, previous_module)
+        Application.delete_env(:doctrans, :openai_probe_pid)
+      end)
+
+      :ok
+    end
+
+    for opts <- [
+          [extraction_model: "selected-vision", translation_model: "selected-translation"],
+          [extraction_model: "selected-vision"],
+          [translation_model: "selected-translation"],
+          []
+        ] do
+      @opts opts
+      test "reprocessing preserves #{inspect(opts)} through the database" do
+        Oban.Testing.with_testing_mode(:manual, fn ->
+          document = document_fixture(%{total_pages: 1, status: "completed"})
+          page = completed_page_fixture(document)
+          assert {:ok, _} = Pages.reset_page_for_reprocessing(page)
+          assert {:ok, job} = Worker.queue_page_reprocess(page.id, @opts)
+          persisted = Repo.get!(Oban.Job, job.id)
+
+          for {key, model} <- @opts do
+            assert persisted.args[Atom.to_string(key)] == model
+          end
+
+          assert %{success: 1, failure: 0} = Oban.drain_queue(queue: :llm_processing)
+
+          extraction_opts =
+            if @opts[:extraction_model], do: [model: @opts[:extraction_model]], else: []
+
+          translation_opts =
+            if @opts[:translation_model], do: [model: @opts[:translation_model]], else: []
+
+          assert_received {:extract_markdown, ^extraction_opts}
+          assert_received {:translate, ^translation_opts}
+          saved = Documents.get_page!(page.id)
+          assert saved.extraction_status == "completed"
+          assert saved.translation_status == "completed"
+          assert Repo.get!(Oban.Job, job.id).state == "completed"
+        end)
+      end
+    end
+
+    test "ordinary queued pages use default models" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{total_pages: 1})
+        page = page_fixture(document)
+        assert {:ok, _} = Worker.queue_page(page.id, page_number: 1)
+        assert %{success: 1, failure: 0} = Oban.drain_queue(queue: :llm_processing)
+        assert_received {:extract_markdown, []}
+        assert_received {:translate, []}
+      end)
+    end
+  end
 
   describe "perform/1" do
     test "processes page without opts" do
