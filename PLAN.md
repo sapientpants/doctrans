@@ -290,7 +290,10 @@ by priority; each includes the problem, the affected code, and the proposed fix.
   update their stream cards in place. Page bursts retain a trailing refresh for every
   affected document. Renames preserve sort order; deletion clears pending updates and
   subscriptions. Summary queries support `:document_ids`, `:limit`, and `:offset`.
-  Regression tests cover scoped queries, final progress, renames, and late deletion events.
+  Sort-key changes use a lightweight database ordering query to preserve collation.
+  Batched moves reinsert affected cards in final order after all deletions.
+  Regression tests cover scoped queries, final progress, mixed-case/accented titles,
+  batched renames, and late deletion events.
 
 - **Problem:** `refresh_list` (index) re-runs `list_documents_with_progress` (all documents +
   all lightweight page rows) on every PubSub-coalesced tick; fine for 10 documents, linearly

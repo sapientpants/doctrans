@@ -67,11 +67,7 @@ defmodule Doctrans.Documents do
   and its associated page query for paginated callers.
   """
   def list_documents_with_progress(opts \\ []) do
-    sort_by = Keyword.get(opts, :sort_by, :inserted_at)
-    sort_dir = Keyword.get(opts, :sort_dir, :desc)
-    order = [{sort_dir, sort_by}, {sort_dir, :id}]
-
-    query = order_by(Document, ^order)
+    query = ordered_documents(Document, opts)
 
     query =
       case Keyword.fetch(opts, :document_ids) do
@@ -120,6 +116,32 @@ defmodule Doctrans.Documents do
     Enum.map(documents, fn document ->
       Summary.new(document, Map.get(pages_by_document, document.id, []))
     end)
+  end
+
+  @doc """
+  Sorts `{id, sort_key}` pairs using the database's ordering semantics.
+
+  Supports the same `:sort_by` and `:sort_dir` options as summary queries. Sorts
+  only the supplied snapshot so unrelated, unhandled changes cannot reorder
+  dashboard cards. No document rows or pages are loaded.
+  """
+  def sort_document_order(entries, opts \\ [])
+  def sort_document_order([], _opts), do: []
+
+  def sort_document_order(entries, opts) do
+    sort_by = Keyword.get(opts, :sort_by, :inserted_at)
+    rows = Enum.map(entries, fn {id, key} -> %{sort_by => key, :id => id} end)
+
+    from(d in values(rows, Document))
+    |> ordered_documents(opts)
+    |> select([d], {d.id, field(d, ^sort_by)})
+    |> Repo.all()
+  end
+
+  defp ordered_documents(query, opts) do
+    sort_by = Keyword.get(opts, :sort_by, :inserted_at)
+    sort_dir = Keyword.get(opts, :sort_dir, :desc)
+    order_by(query, ^[{sort_dir, sort_by}, {sort_dir, :id}])
   end
 
   @doc """

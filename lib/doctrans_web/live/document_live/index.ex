@@ -475,17 +475,9 @@ defmodule DoctransWeb.DocumentLive.Index do
     |> stream(:documents, documents, reset: true)
   end
 
-  # Keep only IDs and sort keys outside the stream, never full cards or page rows.
-  defp order_entry(summary, %{assigns: %{sort_by: :title}}) do
-    {summary.id, summary.document.title}
-  end
-
-  defp order_entry(summary, %{assigns: %{sort_by: :inserted_at}}) do
-    # Compare timestamp fields chronologically, not date structs structurally.
-    date = summary.document.inserted_at
-
-    {summary.id,
-     {date.year, date.month, date.day, date.hour, date.minute, date.second, date.microsecond}}
+  # Keys detect changes; PostgreSQL determines ordering, including title collation.
+  defp order_entry(summary, socket) do
+    {summary.id, Map.fetch!(summary.document, socket.assigns.sort_by)}
   end
 
   defp refresh_documents(socket, []), do: socket
@@ -494,44 +486,61 @@ defmodule DoctransWeb.DocumentLive.Index do
     summaries = Documents.list_documents_with_progress(document_ids: ids)
     found_ids = Enum.map(summaries, & &1.id)
     socket = Enum.reduce(ids -- found_ids, socket, &remove_document(&2, &1))
-    Enum.reduce(summaries, socket, &update_document(&2, &1))
+    update_documents(socket, summaries)
   end
 
-  defp update_document(socket, summary) do
+  defp update_documents(socket, summaries) do
     previous_order = socket.assigns.document_order
-    old_index = Enum.find_index(previous_order, &(elem(&1, 0) == summary.id))
+    order = updated_document_order(socket, summaries)
 
-    entry = order_entry(summary, socket)
-
-    order =
-      if entry in previous_order do
-        previous_order
-      else
-        [entry | Enum.reject(previous_order, &(elem(&1, 0) == summary.id))]
-        |> Enum.sort_by(fn {id, key} -> {key, id} end, socket.assigns.sort_dir)
-      end
-
-    index = Enum.find_index(order, &(elem(&1, 0) == summary.id))
-
+    # The client applies all deletions before insertions. Remove affected cards
+    # together, then reinsert from left to right at their final batch positions.
     socket =
-      if old_index != nil and old_index != index do
-        stream_delete(socket, :documents, summary)
+      if order != previous_order do
+        Enum.reduce(summaries, socket, &stream_delete(&2, :documents, &1))
       else
         socket
       end
 
-    topics = socket.assigns.document_topics
+    topics = Enum.map(order, &elem(&1, 0))
 
-    _ =
-      if connected?(socket) and summary.id not in topics do
-        subscribe_to_document_topic(summary.id)
+    if connected?(socket),
+      do: subscribe_to_documents_topics(topics -- socket.assigns.document_topics)
+
+    socket =
+      socket
+      |> assign(:document_order, order)
+      |> assign(:documents_count, length(order))
+      |> assign(:document_topics, topics)
+
+    summaries_by_id = Map.new(summaries, &{&1.id, &1})
+
+    order
+    |> Enum.with_index()
+    |> Enum.reduce(socket, fn {{id, _key}, index}, socket ->
+      case Map.fetch(summaries_by_id, id) do
+        {:ok, summary} -> stream_insert(socket, :documents, summary, at: index)
+        :error -> socket
       end
+    end)
+  end
 
-    socket
-    |> assign(:document_order, order)
-    |> assign(:documents_count, length(order))
-    |> assign(:document_topics, Enum.uniq([summary.id | topics]))
-    |> stream_insert(:documents, summary, at: index)
+  defp updated_document_order(socket, summaries) do
+    previous_order = socket.assigns.document_order
+    previous_keys = Map.new(previous_order)
+    entries = Map.new(summaries, &order_entry(&1, socket))
+
+    if Enum.any?(entries, fn {id, key} -> Map.fetch(previous_keys, id) != {:ok, key} end) do
+      previous_keys
+      |> Map.merge(entries)
+      |> Map.to_list()
+      |> Documents.sort_document_order(
+        sort_by: socket.assigns.sort_by,
+        sort_dir: socket.assigns.sort_dir
+      )
+    else
+      previous_order
+    end
   end
 
   defp remove_document(socket, id) do

@@ -1,6 +1,7 @@
 defmodule DoctransWeb.DocumentLive.IndexTest do
   use DoctransWeb.ConnCase, async: true
 
+  alias Doctrans.Documents
   alias Doctrans.Documents.Topics
 
   import Doctrans.Fixtures
@@ -94,6 +95,84 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     send(view.pid, {:document_updated, updated})
     assert has_element?(view, "#documents > #documents-#{beta.id}:first-child")
     assert has_element?(view, "#documents > #documents-#{alpha.id}:last-child h2", "Zulu")
+  end
+
+  for dir <- ~w(asc desc) do
+    test "incremental title updates match database ordering (#{dir})", %{conn: conn} do
+      [document | _] =
+        for title <- ["apple", "Banana", "cherry", "Zebra", "Äpfel"] do
+          document_fixture(%{title: title})
+        end
+
+      {:ok, view, _} = live(conn, ~p"/")
+      render_click(view, "sort", %{"field" => "title", "dir" => unquote(dir)})
+
+      {:ok, updated} = Documents.update_document(document, %{title: "apricot"})
+      send(view.pid, {:document_updated, updated})
+      assert_title_order(view, unquote(dir))
+
+      new_document = document_fixture(%{title: "ábaco"})
+      send(view.pid, {:document_updated, new_document})
+      assert_title_order(view, unquote(dir))
+    end
+
+    test "queued document renames preserve ordering (#{dir})", %{conn: conn} do
+      [a, _b, _c, d, _e] =
+        for title <- ["A", "B", "C", "D", "E"], do: document_fixture(%{title: title})
+
+      {:ok, view, _} = live(conn, ~p"/")
+      render_click(view, "sort", %{"field" => "title", "dir" => unquote(dir)})
+
+      {:ok, d} = Documents.update_document(d, %{title: "BB"})
+      {:ok, a} = Documents.update_document(a, %{title: "ZZ"})
+      send(view.pid, {:document_updated, d})
+      assert has_element?(view, "#documents-#{d.id} h2", "BB")
+      send(view.pid, {:document_updated, a})
+      assert_title_order(view, unquote(dir))
+    end
+
+    test "coalesced renames preserve final batch ordering (#{dir})", %{conn: conn} do
+      [a, _b, c, d, e] =
+        for title <- ["A", "B", "C", "D", "E"] do
+          document_with_pages_fixture(%{title: title}, 1)
+        end
+
+      {:ok, view, _} = live(conn, ~p"/")
+      render_click(view, "sort", %{"field" => "title", "dir" => unquote(dir)})
+      send(view.pid, {:page_updated, hd(e.pages)})
+      assert has_element?(view, "#documents-#{e.id}")
+
+      {:ok, _} = Documents.update_document(d, %{title: "BB"})
+      {:ok, _} = Documents.update_document(a, %{title: "ZZ"})
+      send(view.pid, {:page_updated, hd(d.pages)})
+      send(view.pid, {:page_updated, hd(a.pages)})
+      send(view.pid, :dashboard_refresh)
+      assert_title_order(view, unquote(dir))
+
+      # A second batch also includes a progress-only card between moved cards.
+      send(view.pid, {:page_updated, hd(e.pages)})
+      assert has_element?(view, "#documents-#{e.id}")
+      {:ok, _} = Documents.update_document(d, %{title: "Z"})
+      {:ok, _} = Documents.update_document(a, %{title: "AA"})
+      send(view.pid, {:page_updated, hd(d.pages)})
+      send(view.pid, {:page_updated, hd(c.pages)})
+      send(view.pid, {:page_updated, hd(a.pages)})
+      send(view.pid, :dashboard_refresh)
+      assert_title_order(view, unquote(dir))
+    end
+  end
+
+  defp assert_title_order(view, dir) do
+    sort_dir = if dir == "asc", do: :asc, else: :desc
+    summaries = Documents.list_documents_with_progress(sort_by: :title, sort_dir: sort_dir)
+
+    for {summary, index} <- Enum.with_index(summaries, 1) do
+      assert has_element?(
+               view,
+               "#documents > #documents-#{summary.id}:nth-child(#{index}) h2",
+               summary.document.title
+             )
+    end
   end
 
   test "new card updates preserve chronological ordering across months", %{conn: conn} do
