@@ -344,11 +344,17 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 21. Tests missing for the security-sensitive paths
 
-Current suite is solid (components, LiveViews, processing, search, chat), but the
-*adversarial* paths are uncovered:
+- **Status:** Implemented: upload regression tests cover malicious paths, sizes just
+  below/at/above the limit, the independent on-disk size check, and magic-byte
+  mismatches for all five extensions. Sweeper tests hold an active file reader across
+  grace-period preservation and expired-orphan deletion. Existing regressions cover
+  sanitizer payloads, converter timeout/process reaping, encrypted session cookies,
+  and real PostgreSQL cancellation queries (now tagged `:postgres`).
+
+The adversarial coverage checklist (including tests added with earlier items):
 
 - Upload: malicious filenames/paths, size-limit boundary, magic-byte mismatch for each of
-  the 5 supported extensions (only happy path in `index` tests).
+  the 5 supported extensions.
 - `MarkdownHelpers.sanitize_html/1`: `<script>`, `onerror=` image payloads, `javascript:`
   hrefs, nested `<iframe>` (XSS via LLM output is the main web risk — MDEx +
   HtmlSanitizeEx is the only defense).

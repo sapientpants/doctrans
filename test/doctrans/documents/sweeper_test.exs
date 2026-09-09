@@ -96,6 +96,47 @@ defmodule Doctrans.Documents.SweeperTest do
   end
 
   describe "sweep/1" do
+    test "grace period preserves a file during a concurrent read and expired orphans are removed",
+         %{
+           documents_dir: documents_dir
+         } do
+      orphan_dir = Path.join(documents_dir, Ecto.UUID.generate())
+      File.mkdir_p!(orphan_dir)
+      path = Path.join(orphan_dir, "page.png")
+      File.write!(path, "first chunk;last chunk")
+      owner = self()
+
+      # Hold an open file across both sweeps, as an in-flight file response does.
+      # Messages establish ordering without relying on sleeps or a large file.
+      reader =
+        Task.async(fn ->
+          File.open!(path, [:read, :binary], fn file ->
+            send(owner, {:reading, self(), IO.binread(file, 12)})
+
+            receive do
+              :finish -> IO.binread(file, :eof)
+            after
+              5_000 -> raise "sweep did not release the reader"
+            end
+          end)
+        end)
+
+      assert_receive {:reading, reader_pid, "first chunk;"}
+      assert {:ok, 0} = Sweeper.sweep()
+      assert File.read!(path) == "first chunk;last chunk"
+
+      # Age the directory (the sweeper uses directory mtime, not file atime).
+      expired = System.os_time(:second) - 25 * 60 * 60
+      File.touch!(orphan_dir, expired)
+      assert {:ok, 1} = Sweeper.sweep()
+      refute File.exists?(path)
+
+      # POSIX open descriptors remain readable after unlink; the grace period
+      # does not promise to preserve paths for new requests after expiry.
+      send(reader_pid, :finish)
+      assert Task.await(reader) == "last chunk"
+    end
+
     test "removes orphaned directories", %{documents_dir: documents_dir} do
       fake_uuid = Ecto.UUID.generate()
       orphan_dir = Path.join(documents_dir, fake_uuid)

@@ -6,6 +6,8 @@ defmodule Doctrans.Processing.WorkerCancellationTest do
 
   import Doctrans.Fixtures
 
+  @moduletag :postgres
+
   test "cancels all pending states while preserving running, terminal, and unrelated jobs" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_fixture()
