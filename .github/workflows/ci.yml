@@ -91,7 +91,13 @@ jobs:
         run: mix dialyzer --plt
 
       - name: Run pre-commit hooks
+        env:
+          # Coverage runs unconditionally in its own step below.
+          SKIP: mix-test-coverage
         run: pre-commit run --all-files
+
+      - name: Test with 80% coverage gate
+        run: mix test --cover
 
       - name: Run Dialyzer
         run: mix dialyzer --format dialyxir
