@@ -13,6 +13,8 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   require Logger
 
+  alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
   alias Doctrans.Processing.PdfProcessor
 
   # Allow DocumentConverter module to be configured for testing
@@ -61,7 +63,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
     end
   end
 
-  # Only the stored original upload is removed on conversion success or failure.
+  # Only the stored original upload is removed, after page extraction succeeds.
   # sobelow_skip ["Traversal.FileModule"]
   defp do_convert_and_extract(document_id, file_path, cancelled_documents) do
     output_dir = Path.dirname(file_path)
@@ -70,17 +72,27 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
     case document_converter_module().convert_to_pdf(file_path, output_dir) do
       {:ok, pdf_path} ->
-        # Delete the original document after successful conversion
-        _ = File.rm(file_path)
+        case PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents) do
+          :ok ->
+            _ = File.rm(file_path)
+            :ok
 
-        # Process the converted PDF
-        PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents)
+          result ->
+            result
+        end
 
       {:error, reason} ->
         Logger.error("Failed to convert document #{document_id}: #{inspect(reason)}")
-        # Clean up the source file on failure to prevent storage leaks
-        _ = File.rm(file_path)
+        # Preserve the source for the persisted job's next attempt or manual recovery.
+        publish_conversion_error(document_id, reason)
         {:error, reason}
+    end
+  end
+
+  defp publish_conversion_error(document_id, reason) do
+    with %Documents.Document{} = document <- Documents.get_document(document_id),
+         {:ok, document} <- Documents.update_document_status(document, "error", reason) do
+      Topics.broadcast_document_update(document)
     end
   end
 
