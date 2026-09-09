@@ -61,17 +61,32 @@ defmodule Doctrans.Documents do
   Only the page fields required for progress are loaded (in one query),
   avoiding loading every page's markdown content into memory. Documents
   with no pages yet are treated as 0% progress.
+
+  Supports `:sort_by` and `:sort_dir`, plus `:document_ids` to refresh only
+  affected cards. Optional `:limit` and `:offset` bound the document query
+  and its associated page query for paginated callers.
   """
   def list_documents_with_progress(opts \\ []) do
     sort_by = Keyword.get(opts, :sort_by, :inserted_at)
     sort_dir = Keyword.get(opts, :sort_dir, :desc)
+    order = [{sort_dir, sort_by}, {sort_dir, :id}]
 
-    order = [{sort_dir, sort_by}]
+    query = order_by(Document, ^order)
 
-    documents =
-      Document
-      |> order_by(^order)
-      |> Repo.all()
+    query =
+      case Keyword.fetch(opts, :document_ids) do
+        {:ok, ids} -> where(query, [d], d.id in ^ids)
+        :error -> query
+      end
+
+    query =
+      case Keyword.fetch(opts, :limit) do
+        {:ok, count} -> limit(query, ^count)
+        :error -> query
+      end
+
+    offset = Keyword.get(opts, :offset, 0)
+    documents = query |> offset(^offset) |> Repo.all()
 
     document_ids = Enum.map(documents, & &1.id)
 

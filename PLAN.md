@@ -286,6 +286,12 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 18. Dashboard re-queries the entire documents table on every coalesced refresh
 
+- **Status:** Implemented: PubSub refreshes query only affected document summaries and
+  update their stream cards in place. Page bursts retain a trailing refresh for every
+  affected document. Renames preserve sort order; deletion clears pending updates and
+  subscriptions. Summary queries support `:document_ids`, `:limit`, and `:offset`.
+  Regression tests cover scoped queries, final progress, renames, and late deletion events.
+
 - **Problem:** `refresh_list` (index) re-runs `list_documents_with_progress` (all documents +
   all lightweight page rows) on every PubSub-coalesced tick; fine for 10 documents, linearly
   painful at 500.
