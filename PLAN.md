@@ -352,7 +352,7 @@ The only repository change was this plan; the findings remain unresolved.
 
 - [x] **F01:** Configure production vector decoding and add a production
   configuration smoke test.
-- [ ] **F02:** Make partial PDF extraction resumable without duplicate pages.
+- [x] **F02:** Make partial PDF extraction resumable without duplicate pages.
 - [ ] **F03:** Preserve conversion retry inputs and publish terminal failures.
 
 ### Correctness and reliability follow-ups
