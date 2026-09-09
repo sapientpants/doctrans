@@ -33,12 +33,14 @@ defmodule Doctrans.Processing.OpenAIProbe do
   end
 
   @impl true
-  def extract_markdown(_image_path, _opts) do
+  def extract_markdown(_image_path, opts) do
+    record(:extract_markdown, opts)
     {:ok, "# Probe markdown"}
   end
 
   @impl true
-  def translate(_markdown, _source_language, target_language, _opts) do
+  def translate(_markdown, _source_language, target_language, opts) do
+    record(:translate, opts)
     {:ok, "probe translation #{target_language}"}
   end
 

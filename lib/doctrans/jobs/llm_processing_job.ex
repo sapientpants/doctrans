@@ -23,12 +23,14 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
   def page_id_key, do: @page_id_key
 
   @impl true
-  def perform(%Oban.Job{args: %{@page_id_key => page_id, "opts" => opts}}) do
-    LlmProcessor.process_page(page_id, MapSet.new(), opts || [])
-  end
+  def perform(%Oban.Job{args: %{@page_id_key => page_id} = args}) do
+    # Oban persists JSON with string keys; the processor expects keyword options.
+    opts =
+      for key <- [:extraction_model, :translation_model],
+          model = Map.get(args, Atom.to_string(key)),
+          not is_nil(model),
+          do: {key, model}
 
-  @impl true
-  def perform(%Oban.Job{args: %{@page_id_key => page_id}}) do
-    LlmProcessor.process_page(page_id, MapSet.new(), [])
+    LlmProcessor.process_page(page_id, MapSet.new(), opts)
   end
 end
