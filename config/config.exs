@@ -12,6 +12,9 @@ config :doctrans,
   ecto_repos: [Doctrans.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Page and chunk vector columns require this decoder in every environment.
+config :doctrans, Doctrans.Repo, types: Doctrans.PostgrexTypes
+
 # OpenAI-compatible API configuration for AI models (OMLX).
 # OPENAI_HOST / OPENAI_API_KEY env vars allow overriding (e.g., Docker:
 # http://host.docker.internal:8000). Defaults match the local OMLX server.
