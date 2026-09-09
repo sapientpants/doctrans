@@ -42,6 +42,7 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   defp do_extract(document_id, pdf_path) do
     with {:ok, document} <- fetch_document(document_id),
+         {:ok, document} <- resume_failed_document(document),
          :ok <- extract_pdf_pages(document, pdf_path) do
       :ok
     else
@@ -51,6 +52,16 @@ defmodule Doctrans.Processing.PdfProcessor do
         {:error, reason}
     end
   end
+
+  defp resume_failed_document(%{status: "error"} = document) do
+    # Restore processing before queueing pages so retries can publish live progress.
+    with {:ok, document} <- Documents.update_document_status(document, "processing") do
+      _ = Topics.broadcast_document_update(document)
+      {:ok, document}
+    end
+  end
+
+  defp resume_failed_document(document), do: {:ok, document}
 
   defp fetch_document(document_id) do
     case Documents.get_document(document_id) do

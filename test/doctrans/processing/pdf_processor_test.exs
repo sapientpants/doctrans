@@ -2,6 +2,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
   alias Doctrans.Processing.PdfProcessor
 
   import Doctrans.Fixtures
@@ -51,6 +52,9 @@ defmodule Doctrans.Processing.PdfProcessorTest do
                  PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
 
         assert File.exists?(pdf_path)
+        failed_document = Documents.get_document!(document.id)
+        assert failed_document.status == "error"
+        assert is_binary(failed_document.error_message)
         assert [first_page] = Documents.list_pages(document.id)
         assert [first_job] = processing_jobs()
 
@@ -58,7 +62,12 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         assert_received {:extracted_pdf_page, 2}
         Process.delete(:fail_pdf_page)
 
+        Topics.subscribe_document(document.id)
         assert :ok = PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+        resumed_document = Documents.get_document!(document.id)
+        assert resumed_document.status == "processing"
+        assert resumed_document.error_message == nil
+        assert_received {:document_updated, %{status: "processing", error_message: nil}}
         refute_received {:extracted_pdf_page, 1}
         assert_received {:extracted_pdf_page, 2}
         assert_received {:extracted_pdf_page, 3}
