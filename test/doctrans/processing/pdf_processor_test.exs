@@ -2,9 +2,13 @@ defmodule Doctrans.Processing.PdfProcessorTest do
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
   alias Doctrans.Processing.PdfProcessor
 
   import Doctrans.Fixtures
+
+  alias Doctrans.Jobs.LlmProcessingJob
+  alias Doctrans.Processing.{ResumablePdfExtractorStub, Worker}
 
   describe "extract_document/3" do
     test "extracts pages from PDF and creates page records" do
@@ -33,6 +37,104 @@ defmodule Doctrans.Processing.PdfProcessorTest do
       refute File.exists?(pdf_path)
     end
 
+    test "resumes after a partial extraction failure without duplicating pages or jobs" do
+      original = Application.fetch_env!(:doctrans, :pdf_extractor_module)
+      Application.put_env(:doctrans, :pdf_extractor_module, ResumablePdfExtractorStub)
+      on_exit(fn -> Application.put_env(:doctrans, :pdf_extractor_module, original) end)
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "extracting"})
+        pdf_path = create_temp_pdf()
+
+        Process.put(:fail_pdf_page, 2)
+
+        assert {:error, {:pdf_extraction_failed, _}} =
+                 PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+
+        assert File.exists?(pdf_path)
+        failed_document = Documents.get_document!(document.id)
+        assert failed_document.status == "error"
+        assert is_binary(failed_document.error_message)
+        assert [first_page] = Documents.list_pages(document.id)
+        assert [first_job] = processing_jobs()
+
+        assert_received {:extracted_pdf_page, 1}
+        assert_received {:extracted_pdf_page, 2}
+        Process.delete(:fail_pdf_page)
+
+        Topics.subscribe_document(document.id)
+        assert :ok = PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+        resumed_document = Documents.get_document!(document.id)
+        assert resumed_document.status == "processing"
+        assert resumed_document.error_message == nil
+        assert_received {:document_updated, %{status: "processing", error_message: nil}}
+        refute_received {:extracted_pdf_page, 1}
+        assert_received {:extracted_pdf_page, 2}
+        assert_received {:extracted_pdf_page, 3}
+        pages = Documents.list_pages(document.id)
+        assert Enum.map(pages, & &1.page_number) == [1, 2, 3]
+        assert hd(pages).id == first_page.id
+        jobs = processing_jobs()
+        assert length(jobs) == 3
+        assert Enum.any?(jobs, &(&1.id == first_job.id))
+
+        assert Enum.sort(Enum.map(jobs, & &1.args["page_id"])) ==
+                 Enum.sort(Enum.map(pages, & &1.id))
+
+        refute File.exists?(pdf_path)
+      end)
+    end
+
+    test "recovers missing images and jobs while preserving completed page content" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "extracting"})
+        completed = completed_page_fixture(document)
+        pending = page_fixture(document, %{page_number: 2, image_path: nil})
+        translating = page_fixture(document, %{page_number: 3})
+
+        {:ok, translating} =
+          Documents.update_page_extraction(translating, %{
+            extraction_status: "completed",
+            original_markdown: "Already extracted"
+          })
+
+        pdf_path = create_temp_pdf()
+        assert :ok = PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+
+        pages = Documents.list_pages(document.id)
+        assert Enum.map(pages, & &1.id) == [completed.id, pending.id, translating.id]
+
+        for page <- pages do
+          assert File.regular?(Path.join(Documents.uploads_dir(), page.image_path))
+        end
+
+        restored = Documents.get_page!(completed.id)
+        assert restored.original_markdown == completed.original_markdown
+        assert restored.translated_markdown == completed.translated_markdown
+        assert restored.translation_status == "completed"
+        assert Documents.get_page!(translating.id).original_markdown == "Already extracted"
+
+        assert Enum.sort(Enum.map(processing_jobs(), & &1.args["page_id"])) ==
+                 Enum.sort([pending.id, translating.id])
+      end)
+    end
+
+    test "preserves an active processing job and interrupted page status" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "extracting"})
+        page = page_fixture(document, %{extraction_status: "processing"})
+        {:ok, job} = Worker.queue_page(page.id, page_number: 1)
+        job |> Ecto.Changeset.change(state: "retryable", attempt: 1) |> Repo.update!()
+
+        assert :ok =
+                 PdfProcessor.extract_document(document.id, create_temp_pdf(), MapSet.new())
+
+        assert Documents.get_page!(page.id).extraction_status == "processing"
+        assert Repo.get!(Oban.Job, job.id).state == "retryable"
+        assert length(processing_jobs()) == 3
+      end)
+    end
+
     test "skips cancelled documents" do
       document = document_fixture(%{status: "extracting"})
       pdf_path = create_temp_pdf()
@@ -58,6 +160,11 @@ defmodule Doctrans.Processing.PdfProcessorTest do
 
       assert {:error, :document_not_found} = result
     end
+  end
+
+  defp processing_jobs do
+    worker = Oban.Worker.to_string(LlmProcessingJob)
+    from(j in Oban.Job, where: j.worker == ^worker) |> Repo.all()
   end
 
   defp create_temp_pdf do

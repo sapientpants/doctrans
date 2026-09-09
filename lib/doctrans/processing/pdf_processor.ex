@@ -7,6 +7,8 @@ defmodule Doctrans.Processing.PdfProcessor do
   - Immediate thumbnail availability (first page)
   - Progressive UI updates as pages are extracted
   - Early total_pages availability for progress tracking
+
+  Retries reuse stored pages and images and queue only unfinished processing.
   """
 
   require Logger
@@ -40,6 +42,7 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   defp do_extract(document_id, pdf_path) do
     with {:ok, document} <- fetch_document(document_id),
+         {:ok, document} <- resume_failed_document(document),
          :ok <- extract_pdf_pages(document, pdf_path) do
       :ok
     else
@@ -49,6 +52,16 @@ defmodule Doctrans.Processing.PdfProcessor do
         {:error, reason}
     end
   end
+
+  defp resume_failed_document(%{status: "error"} = document) do
+    # Restore processing before queueing pages so retries can publish live progress.
+    with {:ok, document} <- Documents.update_document_status(document, "processing") do
+      _ = Topics.broadcast_document_update(document)
+      {:ok, document}
+    end
+  end
+
+  defp resume_failed_document(document), do: {:ok, document}
 
   defp fetch_document(document_id) do
     case Documents.get_document(document_id) do
@@ -115,12 +128,10 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp extract_pages_progressively(document, pdf_path, pages_dir, page_count) do
     result =
       Enum.reduce_while(1..page_count, :ok, fn page_number, :ok ->
-        case extract_and_create_page(document, pdf_path, pages_dir, page_number) do
-          {:ok, page} ->
-            # Queue page for LLM processing immediately
-            _ = queue_page_for_processing(page)
-            {:cont, :ok}
-
+        with {:ok, page} <- ensure_page(document, pdf_path, pages_dir, page_number),
+             :ok <- queue_page_for_processing(page) do
+          {:cont, :ok}
+        else
           {:error, reason} ->
             {:halt, {:error, reason}}
         end
@@ -132,18 +143,39 @@ defmodule Doctrans.Processing.PdfProcessor do
     result
   end
 
+  defp queue_page_for_processing(%{
+         extraction_status: "completed",
+         translation_status: "completed"
+       }),
+       do: :ok
+
   defp queue_page_for_processing(page) do
     Logger.info("Queueing page #{page.page_number} for LLM processing")
-    Worker.queue_page(page.id, page_number: page.page_number)
+    # Oban uniqueness preserves any active job, including its retry state.
+    case Worker.queue_page(page.id, page_number: page.page_number) do
+      {:ok, _job} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 
-  defp extract_and_create_page(document, pdf_path, pages_dir, page_number) do
+  defp ensure_page(document, pdf_path, pages_dir, page_number) do
+    page = Documents.get_page_by_number(document.id, page_number)
+
+    if page && is_binary(page.image_path) &&
+         File.regular?(Path.join(Documents.uploads_dir(), page.image_path)) do
+      {:ok, page}
+    else
+      extract_and_save_page(document, page, pdf_path, pages_dir, page_number)
+    end
+  end
+
+  defp extract_and_save_page(document, page, pdf_path, pages_dir, page_number) do
     case pdf_extractor_module().extract_page(pdf_path, pages_dir, page_number, []) do
       {:ok, image_path} ->
         relative_path = Path.relative_to(image_path, Documents.uploads_dir())
         page_attrs = %{page_number: page_number, image_path: relative_path}
 
-        case Documents.create_page(document, page_attrs) do
+        case save_page(document, page, page_attrs) do
           {:ok, page} ->
             # Broadcast page creation for progressive UI updates
             Topics.broadcast_page_update(page)
@@ -157,4 +189,7 @@ defmodule Doctrans.Processing.PdfProcessor do
         {:error, reason}
     end
   end
+
+  defp save_page(document, nil, attrs), do: Documents.create_page(document, attrs)
+  defp save_page(_document, page, attrs), do: Documents.update_page(page, attrs)
 end
