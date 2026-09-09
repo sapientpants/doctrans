@@ -5,6 +5,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
   import DoctransWeb.DocumentLive.MarkdownHelpers, only: [render_markdown: 2]
 
   attr :chat_messages, :any, required: true
+  attr :chat_interrupted, :boolean, default: false
   attr :chat_loading, :boolean, required: true
   attr :chat_stage, :atom, default: nil
   attr :chat_streaming_content, :string, default: ""
@@ -28,6 +29,18 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
           <.icon name="hero-x-mark" class="w-4 h-4" />
         </button>
       </div>
+
+      <p id="chat-retention-note" class="px-4 py-2 text-xs text-base-content/60">
+        {gettext("Chat is saved on this device. The latest 100 messages are kept per document.")}
+      </p>
+      <p
+        :if={@chat_interrupted}
+        id="chat-interrupted"
+        role="status"
+        class="px-4 py-2 text-xs text-warning"
+      >
+        {gettext("The last question has no saved answer. Send it again to retry.")}
+      </p>
 
       <%!-- Messages area (scroll container) --%>
       <div id="chat-scroll" class="flex-1 overflow-y-auto p-3 space-y-3" phx-hook="ScrollToBottom">

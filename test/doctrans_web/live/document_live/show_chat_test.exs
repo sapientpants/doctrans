@@ -3,13 +3,99 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
   import Phoenix.LiveViewTest
 
+  alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Repo
+  alias DoctransWeb.DocumentLive.Show
 
   describe "chat panel" do
     setup do
       document = create_completed_document_with_embeddings()
       %{document: document}
+    end
+
+    test "restores saved messages after remount and warns about an unfinished answer", %{
+      conn: conn,
+      document: document
+    } do
+      question = Conversations.start_question(document.id, "Saved question")
+
+      {:ok, answer} =
+        Conversations.finish(question, "assistant", "Saved answer", [])
+
+      {:ok, first, _} = live(conn, ~p"/documents/#{document.id}")
+      first |> element("header button[phx-click='toggle_chat']") |> render_click()
+      assert has_element?(first, "#chat_messages-#{answer.id}")
+      first |> element("header button[phx-click='toggle_chat']") |> render_click()
+      first |> element("header button[phx-click='toggle_chat']") |> render_click()
+      assert has_element?(first, "#chat_messages-#{answer.id}")
+      GenServer.stop(first.pid)
+
+      pending = Conversations.start_question(document.id, "Unfinished question")
+      {:ok, restored, _} = live(conn, ~p"/documents/#{document.id}")
+      restored |> element("header button[phx-click='toggle_chat']") |> render_click()
+      assert has_element?(restored, "#chat_messages-#{answer.id}")
+      assert has_element?(restored, "#chat_messages-#{pending.id}")
+      assert has_element?(restored, "#chat-interrupted")
+      assert has_element?(restored, "#chat-retention-note")
+    end
+
+    test "opening idle chat refreshes history, context, and the interrupted notice", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      question = Conversations.start_question(document.id, "Another tab's question")
+      toggle = "header button[phx-click='toggle_chat']"
+      view |> element(toggle) |> render_click()
+      assert has_element?(view, "#chat-interrupted")
+      view |> element(toggle) |> render_click()
+
+      context = [
+        %{
+          page_id: Ecto.UUID.generate(),
+          page_number: 1,
+          chunk_index: 0,
+          similarity: 0.9,
+          original_markdown: "Source from another tab",
+          translated_markdown: nil
+        }
+      ]
+
+      {:ok, answer} = Conversations.finish(question, "assistant", "Another tab's answer", context)
+      view |> element(toggle) |> render_click()
+      assert has_element?(view, "#chat_messages-#{answer.id}")
+      refute has_element?(view, "#chat-interrupted")
+
+      assigns = :sys.get_state(view.pid).socket.assigns
+      assert assigns.chat_history == Conversations.load(document.id).history
+      assert assigns.chat_retrieved_context == context
+    end
+
+    test "reopening chat during generation preserves the active turn's state", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      socket = :sys.get_state(view.pid).socket
+      question = Conversations.start_question(document.id, "Active question")
+
+      socket =
+        Phoenix.Component.assign(socket,
+          chat_loading: true,
+          chat_question: question,
+          chat_last_question: question.content,
+          chat_streaming_content: "Partial answer"
+        )
+
+      {:noreply, reopened} = Show.handle_event("toggle_chat", %{}, socket)
+
+      assert reopened.assigns.chat_loading
+      assert reopened.assigns.chat_question == question
+      assert reopened.assigns.chat_streaming_content == "Partial answer"
+      refute reopened.assigns.chat_interrupted
+      assert reopened.assigns.chat_history == socket.assigns.chat_history
+      assert reopened.assigns.chat_retrieved_context == socket.assigns.chat_retrieved_context
     end
 
     test "chat button is visible in header", %{conn: conn, document: document} do

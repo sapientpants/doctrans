@@ -65,12 +65,12 @@ msgstr ""
 msgid "Completed"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:68
+#: lib/doctrans_web/live/document_live/index.ex:73
 #, elixir-autogen, elixir-format
 msgid "Doctrans"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:249
+#: lib/doctrans_web/live/document_live/index.ex:254
 #, elixir-autogen, elixir-format
 msgid "Document deleted successfully"
 msgstr ""
@@ -145,12 +145,12 @@ msgstr ""
 msgid "Maximum 10 files can be uploaded at once"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:126
+#: lib/doctrans_web/live/document_live/index.ex:131
 #, elixir-autogen, elixir-format
 msgid "Name (A-Z)"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:136
+#: lib/doctrans_web/live/document_live/index.ex:141
 #, elixir-autogen, elixir-format
 msgid "Name (Z-A)"
 msgstr ""
@@ -160,7 +160,7 @@ msgstr ""
 msgid "Newest"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:106
+#: lib/doctrans_web/live/document_live/index.ex:111
 #, elixir-autogen, elixir-format
 msgid "Newest First"
 msgstr ""
@@ -171,12 +171,12 @@ msgstr ""
 msgid "Next"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:165
+#: lib/doctrans_web/live/document_live/index.ex:170
 #, elixir-autogen, elixir-format
 msgid "No documents yet"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:337
+#: lib/doctrans_web/live/document_live/index.ex:344
 #, elixir-autogen, elixir-format
 msgid "No files were uploaded"
 msgstr ""
@@ -196,7 +196,7 @@ msgstr ""
 msgid "Oldest"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:116
+#: lib/doctrans_web/live/document_live/index.ex:121
 #, elixir-autogen, elixir-format
 msgid "Oldest First"
 msgstr ""
@@ -270,7 +270,7 @@ msgstr ""
 msgid "Search documents"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:83
+#: lib/doctrans_web/live/document_live/index.ex:88
 #: lib/doctrans_web/live/search_live.ex:126
 #, elixir-autogen, elixir-format
 msgid "Search..."
@@ -332,7 +332,7 @@ msgstr ""
 msgid "Unknown"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:149
+#: lib/doctrans_web/live/document_live/index.ex:154
 #, elixir-autogen, elixir-format
 msgid "Upload"
 msgstr ""
@@ -390,7 +390,7 @@ msgstr ""
 msgid "Swedish"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:346
+#: lib/doctrans_web/live/document_live/index.ex:353
 #, elixir-autogen, elixir-format
 msgid "Document uploaded! Processing will begin shortly."
 msgid_plural "%{count} documents uploaded! Processing will begin shortly."
@@ -398,7 +398,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: lib/doctrans_web/live/document_live/components.ex:118
-#: lib/doctrans_web/live/document_live/show.html.heex:143
+#: lib/doctrans_web/live/document_live/show.html.heex:144
 #, elixir-autogen, elixir-format
 msgid "Documents"
 msgstr ""
@@ -504,17 +504,17 @@ msgstr ""
 msgid "PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Up to 10 files"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:100
+#: lib/doctrans_web/live/document_live/chat_components.ex:113
 #, elixir-autogen, elixir-format
 msgid "Ask a question..."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:42
+#: lib/doctrans_web/live/document_live/chat_components.ex:55
 #, elixir-autogen, elixir-format
 msgid "Ask questions about this document"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:20
+#: lib/doctrans_web/live/document_live/chat_components.ex:21
 #: lib/doctrans_web/live/document_live/show.html.heex:43
 #, elixir-autogen, elixir-format
 msgid "Chat"
@@ -525,12 +525,12 @@ msgstr ""
 msgid "Chat with document"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:26
+#: lib/doctrans_web/live/document_live/chat_components.ex:27
 #, elixir-autogen, elixir-format
 msgid "Close chat"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:85
+#: lib/doctrans_web/live/document_live/chat_components.ex:98
 #, elixir-autogen, elixir-format
 msgid "Document is still being processed. Chat will be available soon."
 msgstr ""
@@ -540,7 +540,7 @@ msgstr ""
 msgid "Failed to search the document. Please try again."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:44
+#: lib/doctrans_web/live/document_live/chat_components.ex:57
 #, elixir-autogen, elixir-format
 msgid "I'll find relevant content and answer based on it."
 msgstr ""
@@ -550,12 +550,12 @@ msgstr ""
 msgid "Please enter a question."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:70
+#: lib/doctrans_web/live/document_live/index.ex:75
 #, elixir-autogen, elixir-format
 msgid "Private document translation powered by local AI"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:111
+#: lib/doctrans_web/live/document_live/chat_components.ex:124
 #, elixir-autogen, elixir-format
 msgid "Send message"
 msgstr ""
@@ -565,12 +565,12 @@ msgstr ""
 msgid "Sorry, I encountered an error. Please try again."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:150
+#: lib/doctrans_web/live/document_live/chat_components.ex:163
 #, elixir-autogen, elixir-format
 msgid "Thinking..."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:167
+#: lib/doctrans_web/live/document_live/index.ex:172
 #, elixir-autogen, elixir-format
 msgid "Upload a document to get started. All processing happens locally on your device."
 msgstr ""
@@ -580,7 +580,7 @@ msgstr ""
 msgid "Your documents never leave your device"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:148
+#: lib/doctrans_web/live/document_live/chat_components.ex:161
 #, elixir-autogen, elixir-format
 msgid "Checking the sources..."
 msgstr ""
@@ -590,27 +590,37 @@ msgstr ""
 msgid "Failed to fetch models from OpenAI"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:333
+#: lib/doctrans_web/live/document_live/index.ex:340
 #, elixir-autogen, elixir-format
 msgid "No valid files were uploaded. Check file formats."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:147
+#: lib/doctrans_web/live/document_live/chat_components.ex:160
 #, elixir-autogen, elixir-format
 msgid "Searching the document..."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:366
+#: lib/doctrans_web/live/document_live/index.ex:373
 #, elixir-autogen, elixir-format
 msgid "Some files were rejected: %{names}"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:146
+#: lib/doctrans_web/live/document_live/chat_components.ex:159
 #, elixir-autogen, elixir-format
 msgid "Understanding your question..."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:149
+#: lib/doctrans_web/live/document_live/chat_components.ex:162
 #, elixir-autogen, elixir-format
 msgid "Writing the answer..."
+msgstr ""
+
+#: lib/doctrans_web/live/document_live/chat_components.ex:34
+#, elixir-autogen, elixir-format
+msgid "Chat is saved on this device. The latest 100 messages are kept per document."
+msgstr ""
+
+#: lib/doctrans_web/live/document_live/chat_components.ex:42
+#, elixir-autogen, elixir-format
+msgid "The last question has no saved answer. Send it again to retry."
 msgstr ""

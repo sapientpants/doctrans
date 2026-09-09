@@ -325,6 +325,12 @@ by priority; each includes the problem, the affected code, and the proposed fix.
 
 ### 20. Session storage for chat is entirely ephemeral — no crash/upgrade survival, no docs
 
+- **Status:** Implemented: per-document database conversations restore messages and bounded
+  retrieval context after reloads. Writes rotate to the latest 100 messages; model history
+  retains 16 completed messages. Interrupted answers leave saved questions with a retry
+  notice. Document deletion cascades to chat storage. Retention is explained in the chat
+  panel and `docs/CONTRIBUTING.md`, with persistence and remount regression tests.
+
 - **Problem:** Chat history + retrieval context live in socket assigns only; a LiveView
   reload silently drops the whole conversation, with no "conversation lost" notice and no
   way for the user to know.

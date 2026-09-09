@@ -12,6 +12,8 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   import Phoenix.Component, only: [assign: 3]
   import Phoenix.LiveView, only: [stream_insert: 3]
 
+  alias Doctrans.Chat.Conversations
+
   # Keep the last 8 exchanges (user + assistant) as history for future turns.
   @history_limit 16
 
@@ -23,7 +25,8 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   context for the next turn.
   """
   def put_response(socket, response, retrieved_context) do
-    assistant_msg = message(:assistant, response)
+    {:ok, assistant_msg} =
+      Conversations.finish(socket.assigns.chat_question, "assistant", response, retrieved_context)
 
     updated_history =
       (socket.assigns.chat_history ++
@@ -45,25 +48,20 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   resetting the transient streaming assigns.
   """
   def put_error(socket, message) do
+    {:ok, error_msg} = Conversations.finish(socket.assigns.chat_question, "error", message, [])
+
     socket
-    |> stream_insert(:chat_messages, message(:error, message))
+    |> stream_insert(:chat_messages, error_msg)
     |> reset_transient()
   end
 
   defp reset_transient(socket) do
     socket
+    |> assign(:chat_question, nil)
     |> assign(:chat_loading, false)
     |> assign(:chat_task_ref, nil)
     |> assign(:chat_last_question, nil)
     |> assign(:chat_stage, nil)
     |> assign(:chat_streaming_content, "")
-  end
-
-  defp message(role, content) do
-    %{
-      id: "msg-#{System.unique_integer([:positive])}",
-      role: to_string(role),
-      content: content
-    }
   end
 end
