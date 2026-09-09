@@ -606,3 +606,9 @@ msgstr "Forstår spørsmålet ditt..."
 #, elixir-autogen, elixir-format
 msgid "Writing the answer..."
 msgstr "Skriver svaret..."
+
+msgid "Chat is saved on this device. The latest 100 messages are kept per document."
+msgstr "Chatten lagres på denne enheten. De siste 100 meldingene beholdes per dokument."
+
+msgid "The last question has no saved answer. Send it again to retry."
+msgstr "Det siste spørsmålet har ikke noe lagret svar. Send det på nytt for å prøve igjen."

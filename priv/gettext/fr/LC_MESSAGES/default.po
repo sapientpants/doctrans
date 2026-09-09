@@ -613,3 +613,9 @@ msgstr "Compréhension de votre question..."
 #, elixir-autogen, elixir-format
 msgid "Writing the answer..."
 msgstr "Rédaction de la réponse..."
+
+msgid "Chat is saved on this device. The latest 100 messages are kept per document."
+msgstr "La conversation est enregistrée sur cet appareil. Les 100 derniers messages sont conservés par document."
+
+msgid "The last question has no saved answer. Send it again to retry."
+msgstr "La dernière question n’a pas de réponse enregistrée. Renvoyez-la pour réessayer."

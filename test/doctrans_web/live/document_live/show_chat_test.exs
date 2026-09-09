@@ -3,6 +3,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
   import Phoenix.LiveViewTest
 
+  alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Repo
 
@@ -10,6 +11,32 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
     setup do
       document = create_completed_document_with_embeddings()
       %{document: document}
+    end
+
+    test "restores saved messages after remount and warns about an unfinished answer", %{
+      conn: conn,
+      document: document
+    } do
+      question = Conversations.start_question(document.id, "Saved question")
+
+      {:ok, answer} =
+        Conversations.finish(question, "assistant", "Saved answer", [])
+
+      {:ok, first, _} = live(conn, ~p"/documents/#{document.id}")
+      first |> element("header button[phx-click='toggle_chat']") |> render_click()
+      assert has_element?(first, "#chat_messages-#{answer.id}")
+      first |> element("header button[phx-click='toggle_chat']") |> render_click()
+      first |> element("header button[phx-click='toggle_chat']") |> render_click()
+      assert has_element?(first, "#chat_messages-#{answer.id}")
+      GenServer.stop(first.pid)
+
+      pending = Conversations.start_question(document.id, "Unfinished question")
+      {:ok, restored, _} = live(conn, ~p"/documents/#{document.id}")
+      restored |> element("header button[phx-click='toggle_chat']") |> render_click()
+      assert has_element?(restored, "#chat_messages-#{answer.id}")
+      assert has_element?(restored, "#chat_messages-#{pending.id}")
+      assert has_element?(restored, "#chat-interrupted")
+      assert has_element?(restored, "#chat-retention-note")
     end
 
     test "chat button is visible in header", %{conn: conn, document: document} do

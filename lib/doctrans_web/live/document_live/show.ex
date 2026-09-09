@@ -3,6 +3,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   use DoctransWeb, :live_view
 
   alias Doctrans.Chat
+  alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias DoctransWeb.DocumentLive.{ChatSession, PageViewer, ReprocessModal}
@@ -32,6 +33,8 @@ defmodule DoctransWeb.DocumentLive.Show do
         :ok
       end
 
+    conversation = Conversations.load(document.id)
+
     socket =
       socket
       |> assign(:document, document)
@@ -43,14 +46,16 @@ defmodule DoctransWeb.DocumentLive.Show do
       # Chat state
       |> assign(:chat_open, false)
       |> assign(:chat_loading, false)
-      |> assign(:chat_history, [])
+      |> assign(:chat_history, conversation.history)
       |> assign(:chat_task_ref, nil)
       |> assign(:chat_last_question, nil)
       |> assign(:chat_stage, nil)
       |> assign(:chat_streaming_content, "")
-      |> assign(:chat_retrieved_context, [])
+      |> assign(:chat_retrieved_context, conversation.context)
+      |> assign(:chat_interrupted, conversation.interrupted?)
+      |> assign(:chat_question, nil)
       |> assign(:embeddings_ready, Chat.embeddings_ready?(document))
-      |> stream(:chat_messages, [])
+      |> stream(:chat_messages, conversation.messages)
 
     {:ok, socket}
   end
@@ -114,6 +119,7 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:chat_open, !socket.assigns.chat_open)
       # Refresh embeddings status when opening chat
       |> maybe_refresh_embeddings_status()
+      |> restore_chat_messages()
 
     {:noreply, socket}
   end
@@ -129,15 +135,13 @@ defmodule DoctransWeb.DocumentLive.Show do
       document = socket.assigns.document
 
       # Add user message to stream
-      user_msg = %{
-        id: "msg-#{System.unique_integer([:positive])}",
-        role: "user",
-        content: trimmed_message
-      }
+      user_msg = Conversations.start_question(document.id, trimmed_message)
 
       socket =
         socket
         |> stream_insert(:chat_messages, user_msg)
+        |> assign(:chat_question, user_msg)
+        |> assign(:chat_interrupted, false)
         |> assign(:chat_loading, true)
         |> assign(:chat_stage, :understanding)
         |> assign(:chat_streaming_content, "")
@@ -174,6 +178,13 @@ defmodule DoctransWeb.DocumentLive.Show do
       {:noreply, socket}
     end
   end
+
+  defp restore_chat_messages(%{assigns: %{chat_open: true}} = socket) do
+    conversation = Conversations.load(socket.assigns.document.id)
+    stream(socket, :chat_messages, conversation.messages, reset: true)
+  end
+
+  defp restore_chat_messages(socket), do: socket
 
   defp maybe_refresh_embeddings_status(socket) do
     if socket.assigns.chat_open do
