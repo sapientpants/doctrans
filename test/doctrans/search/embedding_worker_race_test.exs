@@ -13,6 +13,7 @@ defmodule Doctrans.Search.EmbeddingWorkerRaceTest do
       document = document_fixture()
       old_text = "Obsolete OCR #{document.id}"
       new_text = "Corrected OCR #{document.id}"
+      translated_text = "Corrected translation #{document.id}"
 
       page =
         page_fixture(document, %{extraction_status: "completed", original_markdown: old_text})
@@ -44,6 +45,16 @@ defmodule Doctrans.Search.EmbeddingWorkerRaceTest do
       # Coalesce repeated requests while retaining one regeneration.
       for _ <- 1..3, do: EmbeddingWorker.generate_embedding(page.id)
       :sys.get_state(EmbeddingWorker)
+
+      # Translation can finish before the old embedding task releases the queued
+      # regeneration. There are no chunks for the translation callback to update.
+      {:ok, translated} =
+        Pages.update_page_translation(corrected, %{
+          translated_markdown: translated_text,
+          translation_status: "completed"
+        })
+
+      EmbeddingWorker.update_chunk_translations(translated)
 
       reason =
         if @stage == :crash do
@@ -84,6 +95,7 @@ defmodule Doctrans.Search.EmbeddingWorkerRaceTest do
                Doctrans.Search.search_by_embedding(document.id, completed.embedding)
 
       assert result.original_markdown == new_text
+      assert result.translated_markdown == translated_text
       refute_receive {:embedding_started, ^new_barrier, _}, 50
     end
   end

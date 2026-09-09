@@ -126,7 +126,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
       {:ok, page} ->
         # Create chunks from page content
         chunks =
-          case with_current_revision(page, fn -> ensure_chunks(page) end) do
+          case with_current_revision(page, &ensure_chunks/1) do
             {:ok, chunks} -> chunks
             {:error, :stale_entry} -> []
           end
@@ -209,7 +209,17 @@ defmodule Doctrans.Search.EmbeddingWorker do
   defp create_chunks(page) do
     chunk_data = Chunker.chunk(page.original_markdown)
 
+    # Translation may have finished while regeneration waited for an old task.
+    # Use the page read under the revision lock so concurrent translation writes
+    # either precede these inserts or update the inserted chunks afterwards.
+    translations =
+      page.translated_markdown
+      |> Chunker.chunk()
+      |> Map.new(&{&1.chunk_index, &1.content})
+
     Enum.each(chunk_data, fn data ->
+      data = Map.put(data, :translated_content, Map.get(translations, data.chunk_index))
+
       %Chunk{page_id: page.id}
       |> Chunk.changeset(data)
       |> Repo.insert!(
@@ -365,7 +375,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
   # the task is in flight (e.g. the user removes the book mid-embedding). The
   # row is gone, so there is nothing to update — treat it as a no-op.
   defp safe_update!(changeset, page) do
-    with_current_revision(page, fn -> Repo.update!(changeset) end)
+    with_current_revision(page, fn _current -> Repo.update!(changeset) end)
   rescue
     Ecto.StaleEntryError -> {:error, :stale_entry}
   end
@@ -377,7 +387,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
 
       if current && current.content_revision == page.content_revision &&
            current.extraction_status == "completed" do
-        fun.()
+        fun.(current)
       else
         Repo.rollback(:stale_entry)
       end
