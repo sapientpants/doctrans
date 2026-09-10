@@ -232,11 +232,12 @@ defmodule DoctransWeb.DocumentLive.Show do
     if page.document_id != socket.assigns.document.id do
       {:noreply, socket}
     else
-      # Update the current page in place. No re-query of the document and its
+      # Populate or refresh the selected page, including pages created after
+      # mount or navigation. No re-query of the document and its
       # full page list is needed; document-level fields (title, status,
       # total_pages) are kept fresh via :document_updated broadcasts.
       socket =
-        if socket.assigns.current_page && socket.assigns.current_page.id == page.id do
+        if socket.assigns.current_page_number == page.page_number do
           assign(socket, :current_page, page)
         else
           socket
