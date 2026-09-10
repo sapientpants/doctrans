@@ -142,6 +142,64 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     end)
   end
 
+  test "extraction completion preserves an exhausted translation error", c do
+    Application.put_env(:doctrans, :openai_stub_translation_error, :circuit_open)
+    on_exit(fn -> Application.delete_env(:doctrans, :openai_stub_translation_error) end)
+    owner = self()
+
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      {:ok, run} = DocumentReprocessing.reprocess_document(c.document.id)
+      [extraction_job] = all_enqueued(worker: DocumentExtractionJob)
+
+      task =
+        Task.async(fn ->
+          Oban.Testing.with_testing_mode(:manual, fn ->
+            Process.put(:pause_pdf_page, {3, owner})
+            DocumentExtractionJob.perform(extraction_job)
+          end)
+        end)
+
+      assert_receive {:pdf_page_paused, 3}, 5_000
+      page = Documents.get_page_by_number(run.id, 1)
+
+      {:ok, _} =
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "Extracted before rendering finished"
+        })
+
+      page_job =
+        Enum.find(all_enqueued(worker: LlmProcessingJob), &(&1.args["page_id"] == page.id))
+
+      assert {:error, _} = LlmProcessingJob.perform(%{page_job | attempt: page_job.max_attempts})
+      Repo.update!(Ecto.Changeset.change(page_job, state: "discarded"))
+      failed = Documents.get_document!(run.id)
+      assert failed.status == "error"
+
+      send(task.pid, :resume_pdf)
+      assert :ok = Task.await(task)
+      assert Documents.get_document!(run.id).status == "error"
+      assert Documents.get_document!(run.id).error_message == failed.error_message
+
+      # Once the remaining jobs finish, the failed document can be restarted.
+      for remaining <- Documents.list_pages(run.id), remaining.id != page.id do
+        {:ok, remaining} =
+          Documents.update_page_extraction(remaining, %{extraction_status: "completed"})
+
+        {:ok, _} =
+          Documents.update_page_translation(remaining, %{translation_status: "completed"})
+      end
+
+      assert :incomplete = DocumentOrchestrator.check_document_completion(run.id)
+
+      Repo.update_all(from(j in Oban.Job, where: j.state == "available"),
+        set: [state: "completed"]
+      )
+
+      assert {:ok, _} = DocumentReprocessing.reprocess_document(run.id)
+    end)
+  end
+
   test "chat results are fenced by the run that supplied their context", c do
     Oban.Testing.with_testing_mode(:manual, fn ->
       context = [

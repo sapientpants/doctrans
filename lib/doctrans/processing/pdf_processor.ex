@@ -141,7 +141,9 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   defp finish_extraction(document) do
     Run.with_current(document, fn current ->
-      if current.status in ~w(uploading queued extracting error) do
+      # Page jobs may have exhausted their retries while rendering was running.
+      # Extraction success must not clear their document-level error.
+      if current.status in ~w(uploading queued extracting) do
         with {:ok, current} <- Documents.update_document_status(current, "processing") do
           Topics.broadcast_document_update(current)
         end
