@@ -252,14 +252,16 @@ defmodule Doctrans.Chat do
   Retrieves relevant document context for a set of search queries.
 
   Runs multi-query search with RRF when there are multiple query variants,
-  otherwise a single semantic search. Returns `{:ok, pages}` or `{:error, reason}`.
+  otherwise a single semantic search using the supplied query, falling back to
+  the standalone question only when no queries are supplied.
+  Returns `{:ok, pages}` or `{:error, reason}`.
   Shared by `send_message/4` and `Doctrans.Chat.Agent`.
   """
   def retrieve(document_id, standalone_question, queries, search_opts) do
-    if length(queries) > 1 do
-      MultiSearch.search_with_queries(document_id, queries, search_opts)
-    else
-      Search.search_in_document(document_id, standalone_question, search_opts)
+    case queries do
+      [] -> Search.search_in_document(document_id, standalone_question, search_opts)
+      [query] -> Search.search_in_document(document_id, query, search_opts)
+      queries -> MultiSearch.search_with_queries(document_id, queries, search_opts)
     end
   end
 

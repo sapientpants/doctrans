@@ -363,7 +363,7 @@ The only repository change was this plan; the findings remain unresolved.
 - [x] **F07:** Fuse retrieval results by chunk identity.
 - [x] **F08:** Enforce circuit rejection before LLM requests.
 - [x] **F09:** Populate the selected viewer page when it is created after mount.
-- [ ] **F10:** Use a single refined query when supplied.
+- [x] **F10:** Use a single refined query when supplied.
 
 ### Longer-term improvements
 
