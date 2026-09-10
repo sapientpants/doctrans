@@ -16,7 +16,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.{Run, Worker}
+  alias Doctrans.Processing.{DocumentOrchestrator, Run, Worker}
 
   # Allow PdfExtractor module to be configured for testing
   defp pdf_extractor_module do
@@ -147,6 +147,8 @@ defmodule Doctrans.Processing.PdfProcessor do
         end
       end
 
+      # A rescued extraction job may resume after every page job has finished.
+      DocumentOrchestrator.check_document_completion(current.id)
       :ok
     end)
   end

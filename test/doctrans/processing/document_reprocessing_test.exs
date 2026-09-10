@@ -6,7 +6,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Chunk, Page}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
-  alias Doctrans.Processing.{DocumentReprocessing, Run, StartupRecovery}
+  alias Doctrans.Processing.{DocumentOrchestrator, DocumentReprocessing, Run, StartupRecovery}
 
   setup do
     for {key, value} <- [
@@ -107,6 +107,72 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       refute File.exists?(c.old_image)
       assert File.exists?(c.source)
       assert Enum.all?(pages, &File.regular?(Path.join(Documents.uploads_dir(), &1.image_path)))
+    end)
+  end
+
+  test "extraction retry after page completion restores completed status", c do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      assert {:ok, run} = DocumentReprocessing.reprocess_document(c.document.id)
+      [job] = all_enqueued(worker: DocumentExtractionJob)
+      assert :ok = DocumentExtractionJob.perform(job)
+
+      for page <- Documents.list_pages(run.id) do
+        {:ok, page} =
+          Documents.update_page_extraction(page, %{
+            extraction_status: "completed",
+            original_markdown: "New OCR"
+          })
+
+        {:ok, _} =
+          Documents.update_page_translation(page, %{
+            translation_status: "completed",
+            translated_markdown: "New translation"
+          })
+      end
+
+      assert :completed =
+               DocumentOrchestrator.check_document_completion(run.id)
+
+      # Simulate rescue after page jobs finished but extraction was not acknowledged.
+      Repo.update_all(from(j in Oban.Job), set: [state: "completed"])
+      assert :ok = DocumentExtractionJob.perform(job)
+      assert Documents.get_document(run.id).status == "completed"
+      assert all_enqueued(worker: LlmProcessingJob) == []
+      assert {:ok, _} = DocumentReprocessing.reprocess_document(run.id)
+    end)
+  end
+
+  test "chat results are fenced by the run that supplied their context", c do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      context = [
+        %{
+          page_id: c.page.id,
+          page_number: 1,
+          similarity: 1.0,
+          original_markdown: "Old OCR",
+          translated_markdown: nil
+        }
+      ]
+
+      saved = Conversations.start_question(c.document.id, "Finished before restart")
+
+      assert {:ok, _} =
+               Conversations.finish(saved, "assistant", "Old answer", context, c.document)
+
+      pending = Conversations.start_question(c.document.id, "Still generating")
+      assert {:ok, run} = DocumentReprocessing.reprocess_document(c.document.id)
+      assert Conversations.load(run.id).context == []
+
+      assert {:error, :obsolete_run} =
+               Conversations.finish(pending, "assistant", "Late answer", context, c.document)
+
+      snapshot = Conversations.load(run.id)
+      assert snapshot.context == []
+      assert length(snapshot.messages) == 3
+      refute Repo.get!(Doctrans.Chat.Message, pending.id).completed
+
+      current = Conversations.start_question(run.id, "New run question")
+      assert {:ok, _} = Conversations.finish(current, "assistant", "New answer", [], run)
     end)
   end
 

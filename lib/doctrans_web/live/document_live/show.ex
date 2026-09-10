@@ -315,12 +315,10 @@ defmodule DoctransWeb.DocumentLive.Show do
       when socket.assigns.chat_task_ref == ref do
     # Flush the :DOWN message
     Process.demonitor(ref, [:flush])
-    current = Documents.get_document(socket.assigns.document.id)
 
-    if current && current.processing_run_id == socket.assigns.document.processing_run_id do
-      {:noreply, ChatSession.put_response(socket, response, retrieved_context)}
-    else
-      {:noreply, interrupt_chat(socket)}
+    case ChatSession.put_response(socket, response, retrieved_context) do
+      {:ok, socket} -> {:noreply, socket}
+      {:error, :obsolete_run} -> {:noreply, interrupt_chat(socket)}
     end
   end
 

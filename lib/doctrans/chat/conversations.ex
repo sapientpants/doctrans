@@ -9,6 +9,7 @@ defmodule Doctrans.Chat.Conversations do
   import Ecto.Query
   alias Doctrans.Chat
   alias Doctrans.Chat.{Message, Session}
+  alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
   @context_fields ~w(page_id page_number chunk_index similarity original_markdown translated_markdown)a
@@ -39,6 +40,18 @@ defmodule Doctrans.Chat.Conversations do
       end)
 
     message
+  end
+
+  @doc """
+  Saves a result only while its source processing run is still current.
+
+  Lock the document before the session, matching document reprocessing, so a
+  restart either clears this result's context afterwards or rejects the result.
+  """
+  def finish(question, role, content, context, document) do
+    Run.with_current(document, fn _current ->
+      finish(question, role, content, context)
+    end)
   end
 
   def finish(question, role, content, context) do

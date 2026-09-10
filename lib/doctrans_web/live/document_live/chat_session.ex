@@ -25,9 +25,19 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   context for the next turn.
   """
   def put_response(socket, response, retrieved_context) do
-    {:ok, assistant_msg} =
-      Conversations.finish(socket.assigns.chat_question, "assistant", response, retrieved_context)
+    with {:ok, assistant_msg} <-
+           Conversations.finish(
+             socket.assigns.chat_question,
+             "assistant",
+             response,
+             retrieved_context,
+             socket.assigns.document
+           ) do
+      {:ok, apply_response(socket, assistant_msg, response, retrieved_context)}
+    end
+  end
 
+  defp apply_response(socket, assistant_msg, response, retrieved_context) do
     updated_history =
       (socket.assigns.chat_history ++
          [
