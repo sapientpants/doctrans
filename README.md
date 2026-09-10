@@ -1,15 +1,18 @@
 # Doctrans
 
 A privacy-first Phoenix LiveView application for translating documents using local AI
-models with oMLX (an OpenAI-compatible API server). Upload a PDF, Word, OpenDocument, or RTF file, and Doctrans will extract
-each page as an image, use a vision model to extract text as Markdown, and then translate it
-to your target language. All processing happens on your device — no data is ever sent to
-external services.
+models through an OpenAI-compatible API server such as oMLX. Upload a PDF, Word, OpenDocument,
+or RTF file, and Doctrans will extract each page as an image, use a vision model to extract
+text as Markdown, and then translate it to your target language. Processing stays local when
+you use a local inference server; configuring a remote endpoint sends document content to that server.
+
+Doctrans is a local, single-user application with no authentication. Keep access restricted
+to your device or a trusted network.
 
 ## Features
 
-- **100% local processing** — your documents never leave your device
-- Upload PDF, DOCX, DOC, ODT, and RTF files (up to 10 at once)
+- **Local AI processing** — use a local inference server to keep document content on your device
+- Upload PDF, DOCX, DOC, ODT, and RTF files (up to 10 at once, 100 MB per file)
 - Background processing pipeline (image extraction → OCR → translation)
 - Split-screen document viewer (original page image | translated markdown)
 - Real-time progress updates via LiveView
@@ -23,12 +26,13 @@ external services.
 
 ## Prerequisites
 
-- **Erlang** 27.0+
-- **Elixir** 1.18+
-- **PostgreSQL** 14+ with pgvector extension
+- **Erlang/OTP** 29 (CI uses 29.0.5)
+- **Elixir** 1.20+ (`mix.exs` requires `~> 1.20`; CI and Docker use 1.20.3)
+- **PostgreSQL** with pgvector extension (CI uses PostgreSQL 17; Docker Compose uses 18)
 - **poppler-utils** - for PDF page extraction (`pdftoppm`)
 - **LibreOffice** (optional) - for DOCX, DOC, ODT, and RTF conversion
-- **oMLX** - local inference server (OpenAI-compatible API)
+- **OpenAI-compatible inference server** - vision, translation/chat, and embedding models
+  (the defaults target oMLX on Apple Silicon)
 
 ### Installing poppler-utils
 
@@ -58,31 +62,39 @@ sudo apt-get install libreoffice-writer-nogui
 sudo dnf install libreoffice-writer
 ```
 
-### Installing oMLX (OpenAI-compatible API Server)
+### Installing oMLX (Apple Silicon macOS)
+
+Follow the [oMLX installation and quickstart guide](https://github.com/jundot/omlx#install).
+For Homebrew:
 
 ```bash
-# macOS
-brew install jundot/omlx
-
-# Linux
-# Build from source: https://github.com/jundot/omlx
-```
-
-### Pull Required Models
-
-```bash
-omlx serve --model qwen3.5:9b           # Vision model for OCR and text extraction
-omlx serve --model translategemma:12b   # Text model for translation
-omlx serve --model qwen3-embedding:0.6b # Embedding model for search and chat
-```
-
-Ensure oMLX is running before starting Doctrans:
-
-```bash
+brew tap jundot/omlx https://github.com/jundot/omlx
+brew install jundot/omlx/omlx
 omlx serve
 ```
 
+On Linux, use a compatible inference server or connect to oMLX running on a Mac.
+
+### Configure Required Models
+
+Download models through oMLX's model management UI or place them in its model directory.
+The Doctrans defaults in `config/config.exs` are:
+
+| Purpose | Model |
+|---------|-------|
+| Vision / OCR | `mlx-community/Qwen3.5-9B-MLX-4bit` |
+| Translation and chat | `mlx-community/Qwen3.6-35B-A3B-4bit` |
+| Embeddings | `mlx-community/Qwen3-Embedding-8B-4bit-DWQ` |
+
+Set the model names in `config/config.exs` to the exact IDs exposed by your server's
+`/v1/models` endpoint. Embeddings must contain at least 1,024 dimensions; Doctrans stores
+only the first 1,024, so use a model compatible with that truncation.
+
 ## Getting Started
+
+Start PostgreSQL with pgvector installed before running `mix setup`. Development uses
+username `postgres`, password `postgres`, and database `doctrans_dev` on `localhost`.
+`mix setup` creates the database and runs migrations, including enabling pgvector.
 
 ```bash
 git clone https://github.com/sapientpants/doctrans.git
@@ -95,7 +107,7 @@ Visit [http://localhost:4000](http://localhost:4000) in your browser.
 
 ## Docker Setup
 
-Run the app with Docker Compose while using oMLX on your host machine:
+Run the development app with Docker Compose while using an inference server on your host machine:
 
 ```bash
 # Ensure oMLX is running on your host
@@ -107,14 +119,23 @@ docker compose up
 
 Visit [http://localhost:4000](http://localhost:4000) in your browser.
 
-The app connects to oMLX at `host.docker.internal:8000`. For Linux, the `extra_hosts`
-directive in `docker-compose.yml` maps this automatically.
+The app connects to the inference server at `http://host.docker.internal:8000`. The server must
+listen on an interface reachable from the container. The `extra_hosts` directive in
+`docker-compose.yml` supplies the host-gateway mapping, including on Linux.
+The app and database ports are published on host loopback only. This Compose setup runs
+in development mode with source files mounted for hot reload.
 
-To customize environment variables, copy `.env.example` to `.env`:
+## Environment File
+
+For a Docker-oriented starting point, copy `.env.example` to `.env`:
 
 ```bash
 cp .env.example .env
 ```
+
+For a native run, change `OPENAI_HOST` to `http://localhost:8000`; the example uses Docker
+hostnames. Development/test database credentials are configured in `config/dev.exs` and
+`config/test.exs`; `DATABASE_URL` is only used in production.
 
 The application loads an optional `.env` from the working directory at startup in
 all environments, before reading runtime configuration. Precedence is **process
@@ -128,8 +149,15 @@ source without printing either value. To use the file's API key, start with
 `env -u OPENAI_API_KEY mix phx.server`.
 
 Tests follow the same loading rules; use `DOCTRANS_ENV_FILE` to select a separate
-test file when needed. Docker Compose handles its own `.env` substitution; the
-application can only read a file available inside its container.
+test file when needed. Settings read before runtime configuration, such as `DATABASE_HOST`
+in dev/test and `PORT` in dev, must be exported in the process environment before starting Mix;
+the runtime `.env` loader is too late to affect them. Setting `DATABASE_HOST` in the process
+environment also makes the development endpoint bind to all interfaces.
+
+The checked-in Compose file sets literal environment values, so copying `.env` does not
+override those values. Edit `docker-compose.yml` or use a Compose override to change them.
+The source mount makes the project `.env` available at `/app/.env`; values absent from the
+container environment, such as `OPENAI_API_KEY`, can be loaded from it.
 
 ## Usage
 
@@ -138,7 +166,8 @@ application can only read a file available inside its container.
 3. Select target language
 4. Click **Start Translation**
 
-The document appears on the dashboard with a progress indicator. Click it to view completed pages while processing continues.
+The document appears on the dashboard with a progress indicator. Click it to view completed pages while
+processing continues.
 
 ### Search
 
@@ -149,17 +178,20 @@ click a result to jump directly to that page.
 ### Document Chat
 
 Open the chat panel on any document to ask questions about its content. The chat uses
-retrieval-augmented generation (RAG) to find relevant pages via semantic search and answer
-using the AI model. Chat is available once page embeddings have been generated.
+retrieval-augmented generation (RAG) to find relevant document chunks via semantic search (with a page-level
+fallback) and answer
+using the AI model. Chat is available once chunk or page embeddings have been generated.
+Conversations are saved per document and can be resumed after reopening it.
 
 ## Configuration
 
-Configuration in `config/config.exs`:
+Key settings in `config/config.exs` (timeouts shown below are the client defaults):
 
 ```elixir
-# API server settings (OPENAI_HOST env var overrides base_url)
+# API server settings (runtime OPENAI_HOST / OPENAI_API_KEY override these)
 config :doctrans, :openai,
-  base_url: System.get_env("OPENAI_HOST", "http://localhost:8000"),
+  base_url: "http://localhost:8000",
+  api_key: nil,
   vision_model: "mlx-community/Qwen3.5-9B-MLX-4bit",
   translation_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
   chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
@@ -167,7 +199,8 @@ config :doctrans, :openai,
 
 # Embedding settings
 config :doctrans, :embedding,
-  base_url: System.get_env("OPENAI_HOST", "http://localhost:8000"),
+  base_url: nil, # Falls back to the OpenAI base_url
+  api_key: nil,
   model: "mlx-community/Qwen3-Embedding-8B-4bit-DWQ",
   timeout: 60_000
 
@@ -190,7 +223,7 @@ config :doctrans, :uploads,
 # PDF extraction configuration
 config :doctrans, :pdf_extraction, dpi: 150
 
-# Document conversion timeout (for DOCX, ODT, RTF via LibreOffice)
+# Document conversion timeout (for DOCX, DOC, ODT, RTF via LibreOffice)
 config :doctrans, :document_conversion, timeout: 120_000
 
 # Default language settings
@@ -199,24 +232,33 @@ config :doctrans, :defaults,
   target_language: "en"
 ```
 
+The default source language is German (`de`), and the target language is English (`en`).
+The upload dialog selects the target language; change `source_language` in the configuration
+for documents in another source language.
+
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENAI_HOST` | `http://localhost:8000` | OpenAI-compatible API URL |
+| `OPENAI_HOST` | `http://localhost:8000` | Shared API base URL, without `/v1` or a trailing slash |
+| `OPENAI_API_KEY` | unset | Bearer API key for both AI and embedding requests |
+| `DOCTRANS_ENV_FILE` | `.env` | Environment file path, relative to the working directory or absolute |
 | `DATABASE_HOST` | `localhost` | PostgreSQL hostname (dev/test) |
 | `DATABASE_URL` | - | Full database URL (required in production) |
-| `PORT` | `4000` | Phoenix server port |
+| `PORT` | `4000` | Phoenix server port (dev/prod; tests use 4002) |
 | `PHX_BIND_IP` | `127.0.0.1` | Interface the production endpoint binds to (prod only). Doctrans has no authentication, so it defaults to loopback; set `PHX_BIND_IP=0.0.0.0` to expose it to a trusted LAN at your own risk |
-| `PHX_HOST` | `localhost` | Phoenix host for URL generation |
+| `PHX_HOST` | `example.com` | Production host for URL generation (dev uses `localhost`) |
+| `PHX_SERVER` | unset | Set to `true` to enable the HTTP server when starting a release |
 | `SECRET_KEY_BASE` | - | Secret key for signing (required in production) |
-| `POOL_SIZE` | `10` | Database connection pool size |
+| `POOL_SIZE` | `10` | Production database connection pool size |
+| `ECTO_IPV6` | unset | Enable IPv6 database sockets in production with `true` or `1` |
+| `DNS_CLUSTER_QUERY` | unset | Optional DNS cluster discovery query in production |
 
 ## Development
 
 ```bash
 mix test              # Run tests
-mix precommit         # Run all checks (compile, deps.unlock, deps.audit, format, credo, sobelow, test)
+mix precommit         # Compile, unused deps, audit, format, Credo, Sobelow, Dialyzer, tests with coverage
 mix credo --strict    # Static code analysis
 mix sobelow --config  # Security analysis
 mix dialyzer          # Type checking (first run builds PLT)
@@ -230,7 +272,7 @@ iex -S mix phx.server # Interactive console
 This project enforces strict code quality:
 
 - **80% test coverage** minimum (enforced in CI)
-- **500-line module limit** (enforced via pre-commit hook)
+- **600-line module limit** (enforced via pre-commit hook)
 - **Strict Credo checks** including cyclomatic complexity, nesting depth, and code duplication
 - **Security scanning** via Sobelow and dependency auditing
 - **Type checking** via Dialyzer with strict flags
@@ -244,13 +286,15 @@ pip install pre-commit
 pre-commit install
 ```
 
-Hooks run automatically on commit and include:
+Hooks run automatically on commit, selected by the changed file types, and include:
 
-- Code formatting (`mix format`)
+- Code formatting check (`mix format --check-formatted`)
+- Markdown/YAML and other file validation
+- Translation completeness checks for changed locale files
 - Compilation with warnings as errors
 - Credo strict mode
 - Sobelow security analysis
-- Module size limit check (500 lines max)
+- Module size limit check (600 lines max)
 - Dependency vulnerability audit
 - Test suite with coverage
 
@@ -278,19 +322,20 @@ messages must follow this format:
 
 **Scope is required.** Examples:
 
-- `feat(auth): add user login`
+- `feat(chat): add saved conversations`
 - `fix(api): resolve timeout issue`
 - `docs(readme): update setup instructions`
 - `test(pipeline): add integration tests`
 
 ### CI/CD
 
-GitHub Actions runs on every push and PR to `main`:
+GitHub Actions runs on pushes to `main` and pull requests targeting `main`:
 
 - Pre-commit hooks (formatting, linting, security checks)
 - Full test suite with 80% coverage requirement
 - Dialyzer type checking
 - Uncommitted changes detection
+- Development Docker image build verification
 
 ## Troubleshooting
 
@@ -309,13 +354,9 @@ For Docker, verify `host.docker.internal` resolves correctly.
 model "mlx-community/Qwen3.5-9B-MLX-4bit" not found
 ```
 
-Pull the required models before starting:
-
-```bash
-omlx serve --model mlx-community/Qwen3.5-9B-MLX-4bit
-omlx serve --model mlx-community/Qwen3.6-35B-A3B-4bit
-omlx serve --model mlx-community/Qwen3-Embedding-8B-4bit-DWQ
-```
+Check that the model is downloaded and served, then compare its ID in `/v1/models` with the
+configured model name. See [Configure Required Models](#configure-required-models).
+`omlx serve` starts the server; it is not a model download command.
 
 ### PDF processing fails
 
