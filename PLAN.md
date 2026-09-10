@@ -361,7 +361,7 @@ The only repository change was this plan; the findings remain unresolved.
 - [x] **F05:** Require all expected pages before completing a document.
 - [x] **F06:** Preserve selected models through persisted job execution.
 - [x] **F07:** Fuse retrieval results by chunk identity.
-- [ ] **F08:** Enforce circuit rejection before LLM requests.
+- [x] **F08:** Enforce circuit rejection before LLM requests.
 - [ ] **F09:** Populate the selected viewer page when it is created after mount.
 - [ ] **F10:** Use a single refined query when supplied.
 

@@ -80,7 +80,8 @@ defmodule Doctrans.Resilience.CircuitBreaker do
   without executing the function.
 
   On success, returns the function result.
-  On failure, melts the fuse and returns the error.
+  On failure, melts the fuse and returns the error. Pass `melt: false` when
+  the caller classifies and records failures itself.
 
   ## Examples
 
@@ -94,11 +95,11 @@ defmodule Doctrans.Resilience.CircuitBreaker do
       iex> CircuitBreaker.call(:openai_api, fn -> :never_called end)
       {:error, :circuit_open}
   """
-  @spec call(atom(), (-> any())) :: any()
-  def call(fuse_name, fun) when is_atom(fuse_name) and is_function(fun, 0) do
+  @spec call(atom(), (-> any()), keyword()) :: any()
+  def call(fuse_name, fun, opts \\ []) when is_atom(fuse_name) and is_function(fun, 0) do
     case :fuse.ask(fuse_name, :sync) do
       :ok ->
-        execute_with_fuse(fuse_name, fun)
+        execute_with_fuse(fuse_name, fun, opts)
 
       :blown ->
         Logger.warning("Circuit breaker #{fuse_name} is open, rejecting request")
@@ -117,7 +118,7 @@ defmodule Doctrans.Resilience.CircuitBreaker do
     end
   end
 
-  defp execute_with_fuse(fuse_name, fun) do
+  defp execute_with_fuse(fuse_name, fun, opts) do
     result = fun.()
 
     case result do
@@ -128,7 +129,7 @@ defmodule Doctrans.Resilience.CircuitBreaker do
         result
 
       {:error, reason} = error ->
-        melt(fuse_name, reason)
+        if Keyword.get(opts, :melt, true), do: melt(fuse_name, reason)
         error
 
       other ->
