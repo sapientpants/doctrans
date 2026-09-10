@@ -104,6 +104,19 @@
 
 /* This file is for your main application CSS */
 
+/* Markdown paragraph spacing without extra space at container edges. */
+.prose p {
+  margin-block: 0.75em;
+}
+
+.prose p:first-child {
+  margin-block-start: 0;
+}
+
+.prose p:last-child {
+  margin-block-end: 0;
+}
+
 /* Markdown table styling within prose containers */
 .prose table {
   width: 100%;
