@@ -59,10 +59,12 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
         Run.with_page(page, fn _ ->
           document = Documents.get_document!(page.document_id)
 
-          with {:ok, document} <- Documents.update_document_status(document, "error", reason) do
-            Topics.broadcast_document_update(document)
-          end
+          Documents.update_document_status(document, "error", reason)
         end)
+        |> case do
+          {:ok, document} -> Topics.broadcast_document_update(document)
+          error -> error
+        end
 
       _ ->
         :ok

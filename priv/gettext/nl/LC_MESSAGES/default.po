@@ -428,9 +428,9 @@ msgid "Loading models..."
 msgstr "Loading models..."
 
 #: lib/doctrans_web/live/search_live.ex:260
-#, elixir-autogen, elixir-format, fuzzy
+#, elixir-autogen, elixir-format
 msgid "Page %{page} of %{total}"
-msgstr "Pagina %{current} van %{total}"
+msgstr "Pagina %{page} van %{total}"
 
 #: lib/doctrans_web/live/document_live/reprocess_modal.ex:88
 #, elixir-autogen, elixir-format
