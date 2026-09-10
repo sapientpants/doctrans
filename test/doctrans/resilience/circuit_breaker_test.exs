@@ -65,6 +65,20 @@ defmodule Doctrans.Resilience.CircuitBreakerTest do
       assert result == {:error, "something went wrong"}
     end
 
+    test "allows callers to own failure accounting" do
+      for _ <- 1..6 do
+        assert {:error, :timeout} =
+                 CircuitBreaker.call(:openai_api, fn -> {:error, :timeout} end, melt: false)
+      end
+
+      assert CircuitBreaker.status(:openai_api) == :ok
+
+      for _ <- 1..6, do: CircuitBreaker.melt(:openai_api)
+
+      assert {:error, :circuit_open} =
+               CircuitBreaker.call(:openai_api, fn -> flunk("must not execute") end, melt: false)
+    end
+
     test "re-raises function exceptions" do
       assert_raise RuntimeError, "boom", fn ->
         CircuitBreaker.call(:openai_api, fn ->

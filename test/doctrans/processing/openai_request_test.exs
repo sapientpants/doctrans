@@ -8,8 +8,10 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
   use ExUnit.Case, async: false
 
   alias Doctrans.Processing.OpenAI
+  alias Doctrans.Resilience.CircuitBreaker
 
   setup do
+    CircuitBreaker.reset(:openai_api)
     prev_openai = Application.get_env(:doctrans, :openai)
     prev_embedding = Application.get_env(:doctrans, :embedding)
     test_pid = self()
@@ -36,12 +38,108 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     )
 
     on_exit(fn ->
+      CircuitBreaker.reset(:openai_api)
       restore_env(:openai, prev_openai)
       restore_env(:embedding, prev_embedding)
       Bypass.down(bypass)
     end)
 
     %{bypass: bypass, url: url, test_pid: test_pid}
+  end
+
+  describe "LLM circuit protection" do
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: tmp_dir} do
+      image_path = Path.join(tmp_dir, "page.png")
+      File.write!(image_path, "test image")
+      test_pid = self()
+      handler_id = {__MODULE__, make_ref()}
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:doctrans, :circuit_breaker, :failure],
+          fn _event, _measurements, metadata, pid ->
+            send(pid, {:circuit_failure, metadata.fuse_name})
+          end,
+          test_pid
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+      %{image_path: image_path}
+    end
+
+    for operation <- [:extraction, :translation, :chat, :streaming] do
+      @operation operation
+
+      test "rejects #{@operation} without HTTP requests and resumes after reset", context do
+        %{bypass: bypass, image_path: image_path, test_pid: test_pid} = context
+
+        Bypass.stub(bypass, "POST", "/v1/chat/completions", fn conn ->
+          send(test_pid, :http_request)
+          completion_response(conn, @operation)
+        end)
+
+        for _ <- 1..6, do: :fuse.melt(:openai_api)
+        assert CircuitBreaker.status(:openai_api) == :blown
+
+        assert {:error, :circuit_open} = call_llm(@operation, image_path)
+        refute_received :http_request
+        refute_received {:delta, _}
+        refute_received {:circuit_failure, :openai_api}
+
+        CircuitBreaker.reset(:openai_api)
+        assert {:ok, "hello"} = call_llm(@operation, image_path)
+        assert_received :http_request
+        refute_received {:circuit_failure, :openai_api}
+      end
+
+      test "counts one transient failure for #{@operation} despite HTTP retries", context do
+        Bypass.stub(context.bypass, "POST", "/v1/chat/completions", fn conn ->
+          conn
+          |> Plug.Conn.put_resp_header("retry-after", "0")
+          |> json(503, %{"error" => "unavailable"})
+        end)
+
+        assert {:error, {:http_error, [status: 503]}} =
+                 call_llm(@operation, context.image_path)
+
+        assert_received {:circuit_failure, :openai_api}
+        refute_received {:circuit_failure, :openai_api}
+      end
+
+      test "does not count permanent failures for #{@operation}", context do
+        Bypass.expect_once(context.bypass, "POST", "/v1/chat/completions", fn conn ->
+          json(conn, 401, %{"error" => "unauthorized"})
+        end)
+
+        assert {:error, {:http_error, [status: 401]}} =
+                 call_llm(@operation, context.image_path)
+
+        refute_received {:circuit_failure, :openai_api}
+      end
+    end
+  end
+
+  defp call_llm(:extraction, image_path), do: OpenAI.extract_markdown(image_path)
+  defp call_llm(:translation, _), do: OpenAI.translate("hello", "en", "de")
+  defp call_llm(:chat, _), do: OpenAI.chat([%{role: "user", content: "hello"}])
+
+  defp call_llm(:streaming, _) do
+    OpenAI.chat_stream([%{role: "user", content: "hello"}], &send(self(), {:delta, &1}))
+  end
+
+  defp completion_response(conn, :streaming) do
+    data = Jason.encode!(%{"choices" => [%{"delta" => %{"content" => "hello"}}]})
+
+    conn
+    |> Plug.Conn.put_resp_content_type("text/event-stream")
+    |> Plug.Conn.resp(200, "data: #{data}\n\ndata: [DONE]\n\n")
+  end
+
+  defp completion_response(conn, _) do
+    json(conn, 200, %{"choices" => [%{"message" => %{"content" => "hello"}}]})
   end
 
   defp restore_env(key, value) do

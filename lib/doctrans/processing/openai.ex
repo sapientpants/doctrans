@@ -134,14 +134,20 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp post_chat_completion(request_body, opts) do
-    build_base_req()
-    |> Req.post(
-      url: api_url("/v1/chat/completions"),
-      json: request_body,
-      receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
-      # :transient retries all methods (incl. POST) on 408/429/5xx and
-      # connection errors; chat-completion POSTs are safe to replay
-      retry: :transient
+    CircuitBreaker.call(
+      :openai_api,
+      fn ->
+        build_base_req()
+        |> Req.post(
+          url: api_url("/v1/chat/completions"),
+          json: request_body,
+          receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
+          # :transient retries all methods (incl. POST) on 408/429/5xx and
+          # connection errors; chat-completion POSTs are safe to replay
+          retry: :transient
+        )
+      end,
+      melt: false
     )
   end
 
@@ -183,6 +189,16 @@ defmodule Doctrans.Processing.OpenAI do
   def chat_stream(messages, on_delta, opts \\ [])
 
   def chat_stream(messages, on_delta, opts) when is_list(messages) and is_function(on_delta, 1) do
+    CircuitBreaker.call(
+      :openai_api,
+      fn ->
+        do_chat_stream(messages, on_delta, opts)
+      end,
+      melt: false
+    )
+  end
+
+  defp do_chat_stream(messages, on_delta, opts) do
     request_body = build_request_body(opts ++ [messages: messages, stream: true])
     fuse = :openai_api
     collector = SSECollector.new(on_delta)
