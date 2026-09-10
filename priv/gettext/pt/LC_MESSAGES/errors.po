@@ -94,174 +94,162 @@ msgstr "deve ser maior ou igual a %{number}"
 msgid "must be equal to %{number}"
 msgstr "deve ser igual a %{number}"
 
-#: lib/doctrans/processing/pdf_extractor.ex:124
+#: lib/doctrans_web/error_messages.ex:74
 #, elixir-autogen, elixir-format
 msgid "Could not parse page count from pdfinfo output"
 msgstr "Não foi possível analisar o número de páginas da saída do pdfinfo"
 
-#: lib/doctrans/processing/pdf_processor.ex:53
+#: lib/doctrans_web/error_messages.ex:42
 #, elixir-autogen, elixir-format
 msgid "Document not found"
 msgstr "Documento não encontrado"
 
-#: lib/doctrans/processing/pdf_extractor.ex:60
-#: lib/doctrans/processing/pdf_extractor.ex:108
+#: lib/doctrans_web/error_messages.ex:68
 #, elixir-autogen, elixir-format
 msgid "PDF extraction failed: %{error}"
 msgstr "Falha na extração do PDF: %{error}"
 
-#: lib/doctrans/processing/pdf_processor.ex:98
+#: lib/doctrans_web/error_messages.ex:65
 #, elixir-autogen, elixir-format
 msgid "PDF extraction failed: %{reason}"
 msgstr "Falha na extração do PDF: %{reason}"
 
-#: lib/doctrans/processing/llm_processor.ex:212
+#: lib/doctrans_web/error_messages.ex:48
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} extraction failed: %{reason}"
 msgstr "Falha na extração da página %{page_number}: %{reason}"
 
-#: lib/doctrans/processing/llm_processor.ex:326
+#: lib/doctrans_web/error_messages.ex:55
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} translation failed: %{reason}"
 msgstr "Falha na tradução da página %{page_number}: %{reason}"
 
-#: lib/doctrans/search/embedding.ex:78
-#, elixir-autogen, elixir-format
-msgid "Request failed: %{reason}"
-msgstr "Falha no pedido: %{reason}"
-
-#: lib/doctrans/processing/pdf_extractor.ex:128
+#: lib/doctrans_web/error_messages.ex:77
 #, elixir-autogen, elixir-format
 msgid "pdfinfo failed: %{error}"
 msgstr "pdfinfo falhou: %{error}"
 
-#: lib/doctrans/processing/document_converter.ex:88
+#: lib/doctrans_web/error_messages.ex:85
 #, elixir-autogen, elixir-format
 msgid "Conversion completed but PDF file not found"
 msgstr "Conversão concluída mas arquivo PDF não encontrado"
 
-#: lib/doctrans/processing/document_converter.ex:95
+#: lib/doctrans_web/error_messages.ex:89
 #, elixir-autogen, elixir-format
 msgid "Document conversion failed: %{error}"
 msgstr "Falha na conversão do documento: %{error}"
 
-#: lib/doctrans/processing/document_converter.ex:101
+#: lib/doctrans_web/error_messages.ex:99
 #, elixir-autogen, elixir-format
 msgid "Document conversion timed out"
 msgstr "Tempo limite de conversão do documento esgotado"
 
-#: lib/doctrans/processing/document_converter.ex:47
+#: lib/doctrans_web/error_messages.ex:79
 #, elixir-autogen, elixir-format
 msgid "LibreOffice is not installed"
 msgstr "LibreOffice não está instalado"
 
-#: lib/doctrans/processing/pdf_extractor.ex:100
+#: lib/doctrans_web/error_messages.ex:71
 #, elixir-autogen, elixir-format
 msgid "Page image not found after extraction"
 msgstr "Page image not found after extraction"
 
-#: lib/doctrans/processing/llm_processor.ex:55
+#: lib/doctrans_web/error_messages.ex:44
 #, elixir-autogen, elixir-format
 msgid "Page not found"
 msgstr "Page not found"
 
-#: lib/doctrans/processing/document_converter.ex:38
+#: lib/doctrans_web/error_messages.ex:82
 #, elixir-autogen, elixir-format
 msgid "Source file not found: %{path}"
 msgstr "Arquivo de origem não encontrado: %{path}"
 
-#: lib/doctrans/processing/document_processor.ex:49
+#: lib/doctrans_web/error_messages.ex:62
 #, elixir-autogen, elixir-format
 msgid "Unsupported file format: %{format}"
 msgstr "Formato de arquivo não suportado: %{format}"
 
-#: lib/doctrans/search/embedding.ex:71
-#, elixir-autogen, elixir-format, fuzzy
-msgid "OpenAI embedding error (%{status}): %{body}"
-msgstr "Erro de embedding do Ollama (%{status}): %{body}"
-
-#: lib/doctrans/search/embedding.ex:59
-#, elixir-autogen, elixir-format
-msgid "OpenAI embedding too short: expected at least %{expected} dimensions, got %{actual}"
-msgstr "Embedding do OpenAI muito curto: esperadas pelo menos %{expected} dimensões, obtidas %{actual}"
-
+#: lib/doctrans_web/error_messages.ex:93
 #, elixir-autogen, elixir-format
 msgid "Failed to start LibreOffice: %{error}"
 msgstr "Não foi possível iniciar o LibreOffice: %{error}"
 
-#: lib/doctrans/validation.ex:111
+#: lib/doctrans_web/error_messages.ex:26
 #, elixir-autogen, elixir-format
 msgid "Could not read file for validation"
 msgstr "Não foi possível ler o ficheiro para validação"
 
-#: lib/doctrans/validation.ex:104
+#: lib/doctrans_web/error_messages.ex:22
 #, elixir-autogen, elixir-format
 msgid "File content does not match its extension"
 msgstr "O conteúdo do ficheiro não corresponde à sua extensão"
 
-#: lib/doctrans/validation.ex:108
+#: lib/doctrans_web/error_messages.ex:24
 #, elixir-autogen, elixir-format
 msgid "File is too small to be a valid document"
 msgstr "O ficheiro é demasiado pequeno para ser um documento válido"
 
-#: lib/doctrans/validation.ex:116
+#: lib/doctrans_web/error_messages.ex:29
 #, elixir-autogen, elixir-format
 msgid "File path and extension must be strings"
 msgstr "O caminho e a extensão do ficheiro devem ser cadeias de caracteres"
 
-#: lib/doctrans/validation.ex:84
+#: lib/doctrans_web/error_messages.ex:19
 #, elixir-autogen, elixir-format
 msgid "Language code must be a string"
 msgstr "O código do idioma deve ser uma cadeia de caracteres"
 
-#: lib/doctrans/validation.ex:180
+#: lib/doctrans_web/error_messages.ex:33
 #, elixir-autogen, elixir-format
 msgid "Missing required fields: %{fields}"
 msgstr "Campos obrigatórios em falta: %{fields}"
 
-#: lib/doctrans/validation.ex:54
+#: lib/doctrans_web/error_messages.ex:9
 #, elixir-autogen, elixir-format
 msgid "Query too long (max %{max} characters)"
 msgstr "Consulta demasiado longa (máximo de %{max} caracteres)"
 
-#: lib/doctrans/validation.ex:51
+#: lib/doctrans_web/error_messages.ex:6
 #, elixir-autogen, elixir-format
 msgid "Query too short"
 msgstr "Consulta demasiado curta"
 
-#: lib/doctrans/validation.ex:61
+#: lib/doctrans_web/error_messages.ex:11
 #, elixir-autogen, elixir-format
 msgid "Search query must be a string"
 msgstr "A consulta de pesquisa deve ser uma cadeia de caracteres"
 
-#: lib/doctrans/validation.ex:207
+#: lib/doctrans_web/error_messages.ex:40
 #, elixir-autogen, elixir-format
 msgid "Target language is required and must be a string"
 msgstr "O idioma de destino é obrigatório e deve ser uma cadeia de caracteres"
 
-#: lib/doctrans/validation.ex:192
+#: lib/doctrans_web/error_messages.ex:35
 #, elixir-autogen, elixir-format
 msgid "Title cannot be empty"
 msgstr "O título não pode estar vazio"
 
-#: lib/doctrans/validation.ex:197
+#: lib/doctrans_web/error_messages.ex:37
 #, elixir-autogen, elixir-format
 msgid "Title is required and must be a string"
 msgstr "O título é obrigatório e deve ser uma cadeia de caracteres"
 
-#: lib/doctrans/validation.ex:80
+#: lib/doctrans_web/error_messages.ex:15
 #, elixir-autogen, elixir-format
 msgid "Unsupported language: %{language}"
 msgstr "Idioma não suportado: %{language}"
 
+#: lib/doctrans_web/error_messages.ex:110
 #, elixir-autogen, elixir-format
 msgid "Could not read uploaded file"
 msgstr "Não foi possível ler o ficheiro carregado"
 
-#, elixir-autogen, elixir-format
-msgid "LibreOffice process terminated unexpectedly"
-msgstr "O processo do LibreOffice terminou inesperadamente"
-
+#: lib/doctrans_web/error_messages.ex:114
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
 msgstr "Ficheiro demasiado grande (%{size}MB, máximo %{max}MB)"
+
+#: lib/doctrans_web/error_messages.ex:97
+#, elixir-autogen, elixir-format
+msgid "LibreOffice process terminated unexpectedly"
+msgstr "O processo do LibreOffice terminou inesperadamente"

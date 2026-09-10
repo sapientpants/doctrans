@@ -8,6 +8,7 @@ defmodule Doctrans.Documents.Pages do
   import Ecto.Query
 
   alias Doctrans.Documents.{Document, Page}
+  alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
   @doc """
@@ -92,20 +93,24 @@ defmodule Doctrans.Documents.Pages do
   Updates extraction results for a page.
   """
   def update_page_extraction(%Page{} = page, attrs) do
-    page
-    |> Page.extraction_changeset(attrs)
-    |> Repo.update()
-    |> Doctrans.Errors.result()
+    Run.with_page(page, fn current ->
+      current
+      |> Page.extraction_changeset(attrs)
+      |> Repo.update()
+      |> Doctrans.Errors.result()
+    end)
   end
 
   @doc """
   Updates translation results for a page.
   """
   def update_page_translation(%Page{} = page, attrs) do
-    page
-    |> Page.translation_changeset(attrs)
-    |> Repo.update()
-    |> Doctrans.Errors.result()
+    Run.with_page(page, fn current ->
+      current
+      |> Page.translation_changeset(attrs)
+      |> Repo.update()
+      |> Doctrans.Errors.result()
+    end)
   end
 
   @doc """
@@ -164,6 +169,9 @@ defmodule Doctrans.Documents.Pages do
   def reset_page_for_reprocessing(%Page{} = page) do
     page
     |> Ecto.Changeset.change(%{
+      processing_generation: Uniq.UUID.uuid7(),
+      extraction_model: nil,
+      translation_model: nil,
       original_markdown: nil,
       translated_markdown: nil,
       extraction_status: "pending",

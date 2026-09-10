@@ -387,3 +387,28 @@ or install the extension manually: `CREATE EXTENSION vector;`
 ## License
 
 MIT
+
+## Reprocessing a document
+
+Open a document and choose **Reprocess document**. Select the extraction and
+translation models, then confirm to rerun conversion (for office documents), page
+rendering, extraction, translation, and search indexing from the original upload.
+The dashboard and viewer show live progress, and pages become readable as they
+finish. Existing generated pages and search results are replaced; the document
+URL and chat history remain. Previous chat answers are historical.
+
+Original uploads are retained until you delete the document. Generated files live
+in separate processing-run directories; superseded output is cleaned up after a
+restart. This uses more disk space than the previous source-deletion policy.
+Only generated page images are served over HTTP; retained originals and converted
+PDFs are excluded from static serving.
+Documents imported before source retention was added may need to be uploaded
+again before whole-document reprocessing is available. Single-page reprocessing
+remains available when page images exist.
+
+A document cannot restart while extraction or page-processing jobs are active,
+including scheduled retries and suspended jobs. Let those jobs finish first.
+Model choices are saved for the run and preserved during recovery. Page details
+show the request model identifiers that produced the current extraction and
+translation; older results with no recorded model display **Unknown**. Model
+identifiers may be aliases and do not identify an immutable set of model weights.

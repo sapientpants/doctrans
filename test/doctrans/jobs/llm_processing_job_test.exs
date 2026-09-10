@@ -2,6 +2,7 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
   use Doctrans.DataCase
   use Oban.Testing, repo: Doctrans.Repo
 
+  alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
   alias Doctrans.Documents.Pages
   alias Doctrans.Jobs.LlmProcessingJob
@@ -46,10 +47,14 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
           assert %{success: 1, failure: 0} = Oban.drain_queue(queue: :llm_processing)
 
           extraction_opts =
-            if @opts[:extraction_model], do: [model: @opts[:extraction_model]], else: []
+            if @opts[:extraction_model],
+              do: [model: @opts[:extraction_model]],
+              else: [model: OpenAI.vision_model()]
 
           translation_opts =
-            if @opts[:translation_model], do: [model: @opts[:translation_model]], else: []
+            if @opts[:translation_model],
+              do: [model: @opts[:translation_model]],
+              else: [model: OpenAI.translation_model()]
 
           assert_received {:extract_markdown, ^extraction_opts}
           assert_received {:translate, ^translation_opts}
@@ -67,8 +72,10 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
         page = page_fixture(document)
         assert {:ok, _} = Worker.queue_page(page.id, page_number: 1)
         assert %{success: 1, failure: 0} = Oban.drain_queue(queue: :llm_processing)
-        assert_received {:extract_markdown, []}
-        assert_received {:translate, []}
+        vision = OpenAI.vision_model()
+        translation = OpenAI.translation_model()
+        assert_received {:extract_markdown, [model: ^vision]}
+        assert_received {:translate, [model: ^translation]}
       end)
     end
   end

@@ -102,7 +102,8 @@ defmodule Doctrans.Processing.WorkerTest do
       fake_id = Ecto.UUID.generate()
 
       # Should not crash
-      assert {:ok, _job} = Worker.process_document(fake_id, "/tmp/nonexistent.pdf")
+      assert {:error, :document_not_found} =
+               Worker.process_document(fake_id, "/tmp/nonexistent.pdf")
 
       # Give time for async handling
       Process.sleep(50)

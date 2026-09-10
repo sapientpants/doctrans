@@ -17,56 +17,79 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
     ]
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
   alias Doctrans.Processing.DocumentProcessor
+  alias Doctrans.Processing.Run
+  alias Doctrans.Repo
 
   @document_id_key "document_id"
 
   @doc false
   def document_id_key, do: @document_id_key
 
-  @impl true
-  def perform(%Oban.Job{args: %{@document_id_key => document_id, "file_path" => file_path}}) do
-    DocumentProcessor.extract_document(document_id, file_path, MapSet.new())
+  def enqueue_document(document_id, file_path) do
+    Repo.transaction(fn ->
+      document = Run.lock(document_id) || Repo.rollback(:document_not_found)
+
+      # This is the stored upload path, whose extension passed magic-byte validation.
+      extension = file_path |> Path.extname() |> String.downcase()
+
+      unless extension in ~w(.pdf .doc .docx .odt .rtf),
+        do: Repo.rollback({:unsupported_format, [format: extension]})
+
+      document =
+        document
+        |> Ecto.Changeset.change(source_extension: document.source_extension || extension)
+        |> Repo.update!()
+
+      document =
+        if document.processing_run_id do
+          document
+        else
+          document |> Ecto.Changeset.change(Run.new_attrs()) |> Repo.update!()
+        end
+
+      case Run.args(document)
+           |> Map.put("file_path", file_path)
+           |> new()
+           |> Oban.insert() do
+        {:ok, job} -> job
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+    |> Doctrans.Errors.result()
   end
 
   @impl true
-  def perform(%Oban.Job{args: %{@document_id_key => document_id}}) do
-    # For cases where file path is not provided (e.g., retries)
-    # Try to find the original file in the document directory
+  def perform(%Oban.Job{args: %{@document_id_key => document_id} = args}) do
     case Documents.get_document(document_id) do
-      nil ->
-        {:error, :document_not_found}
-
-      doc ->
-        file_path = find_document_file(document_id, doc.original_filename)
-
-        if file_path do
-          DocumentProcessor.extract_document(document_id, file_path, MapSet.new())
-        else
-          {:error, :document_file_not_found}
-        end
+      nil -> {:error, :document_not_found}
+      document -> perform_current(document, args)
     end
   end
 
-  # Find the document file in the upload directory
-  defp find_document_file(document_id, original_filename) do
-    upload_dir = Documents.document_upload_dir(document_id)
+  defp perform_current(document, args) do
+    if Run.current?(document, Map.get(args, "run_id")) do
+      path =
+        if document.processing_run_id,
+          do: Run.source_path(document),
+          else: Map.get(args, "file_path") || Run.source_path(document)
 
-    # First check for original.pdf (standard naming)
-    pdf_path = Path.join(upload_dir, "original.pdf")
-
-    if File.exists?(pdf_path) do
-      pdf_path
-    else
-      # Try to find by original extension
-      extension = original_filename |> Path.extname() |> String.downcase()
-      original_path = Path.join(upload_dir, "original#{extension}")
-
-      if File.exists?(original_path) do
-        original_path
+      if path && File.regular?(path) do
+        case DocumentProcessor.extract_document(document.id, path, MapSet.new(), document) do
+          {:error, :obsolete_run} -> :ok
+          result -> result
+        end
       else
-        nil
+        with {:ok, updated} <-
+               Documents.update_document_status(document, "error", :document_file_not_found) do
+          Topics.broadcast_document_update(updated)
+        end
+
+        {:error, :document_file_not_found}
       end
+    else
+      :ok
     end
   end
 end

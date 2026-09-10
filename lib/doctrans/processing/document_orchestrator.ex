@@ -13,25 +13,55 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Processing.Run
 
   @doc """
   Checks if the current document is complete and handles completion.
   """
-  @spec check_document_completion(Uniq.UUID.t() | nil) :: :completed | :incomplete
+  @spec check_document_completion(
+          Uniq.UUID.t()
+          | Documents.Page.t()
+          | Documents.Document.t()
+          | nil
+        ) ::
+          :completed | :incomplete | {:error, :obsolete_run}
   def check_document_completion(nil), do: :incomplete
 
-  def check_document_completion(document_id) do
-    Logger.debug("Checking document completion for #{document_id}")
+  def check_document_completion(%Documents.Page{} = page) do
+    Run.with_page(page, fn _ -> complete_locked_document(Run.lock(page.document_id)) end)
+    |> publish_completion()
+  end
 
-    if Documents.all_pages_completed?(document_id) do
-      Logger.info("Document #{document_id} fully processed")
-      mark_document_completed(document_id)
-      :completed
+  def check_document_completion(%Documents.Document{} = document) do
+    Run.with_current(document, &complete_locked_document/1)
+    |> publish_completion()
+  end
+
+  def check_document_completion(document_id) do
+    {:ok, result} =
+      Doctrans.Repo.transaction(fn -> complete_locked_document(Run.lock(document_id)) end)
+
+    publish_completion(result)
+  end
+
+  defp complete_locked_document(nil), do: :incomplete
+
+  defp complete_locked_document(document) do
+    if Documents.all_pages_completed?(document.id) do
+      {:ok, document} = Documents.update_document_status(document, "completed")
+      {:completed, document}
     else
-      Logger.debug("Document #{document_id} not yet complete, waiting for more pages")
       :incomplete
     end
   end
+
+  # Call after the run/page guard returns, so subscribers can read committed state.
+  defp publish_completion({:completed, document}) do
+    _ = Topics.broadcast_document_update(document)
+    :completed
+  end
+
+  defp publish_completion(result), do: result
 
   @doc """
   Gets the current status of a document.
@@ -85,9 +115,18 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   Only updates if document is currently in uploading, extracting, or queued state.
   This is safe to call multiple times - it will only update if needed.
   """
-  @spec update_document_status_to_processing(Uniq.UUID.t()) :: :ok
+  @spec update_document_status_to_processing(Uniq.UUID.t() | Documents.Page.t()) ::
+          :ok | {:error, :obsolete_run}
+  def update_document_status_to_processing(%Documents.Page{} = page) do
+    Run.with_page(page, fn _ ->
+      update_document_status(page.document_id, "processing", ["uploading", "extracting", "queued"])
+    end)
+    |> publish_status()
+  end
+
   def update_document_status_to_processing(document_id) do
     update_document_status(document_id, "processing", ["uploading", "extracting", "queued"])
+    |> publish_status()
   end
 
   @doc """
@@ -96,6 +135,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   @spec update_document_status_to_queued(Uniq.UUID.t()) :: :ok
   def update_document_status_to_queued(document_id) do
     update_document_status(document_id, "queued", ["extracting"])
+    |> publish_status()
   end
 
   # Private functions
@@ -106,17 +146,20 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
         :ok
 
       document ->
-        _ =
-          if document.status in valid_from do
-            {:ok, document} = Documents.update_document_status(document, new_status)
-            _ = Topics.broadcast_document_update(document)
-          else
-            :ok
-          end
-
-        :ok
+        if document.status in valid_from do
+          Documents.update_document_status(document, new_status)
+        else
+          :ok
+        end
     end
   end
+
+  defp publish_status({:ok, document}) do
+    _ = Topics.broadcast_document_update(document)
+    :ok
+  end
+
+  defp publish_status(result), do: result
 
   @doc """
   Starts document processing.
@@ -133,7 +176,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
         # Use the existing document from database
         case existing_doc.status do
           "queued" ->
-            update_document_status_to_processing(document.id)
+            :ok = update_document_status_to_processing(document.id)
             {:ok, :processing_started}
 
           "processing" ->
@@ -143,7 +186,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
             {:error, :already_completed}
 
           "extracting" ->
-            update_document_status_to_processing(document.id)
+            :ok = update_document_status_to_processing(document.id)
             {:ok, :processing_started}
 
           _ ->

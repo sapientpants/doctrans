@@ -14,6 +14,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Processing.DocumentOrchestrator
+  alias Doctrans.Processing.Run
   alias Doctrans.Resilience.{Backoff, ErrorClassifier}
   alias Doctrans.Search.EmbeddingWorker
 
@@ -45,18 +46,28 @@ defmodule Doctrans.Processing.LlmProcessor do
   - `:translation_model` - Override the default translation model
   """
   def process_page(page_id, cancelled_documents, opts \\ []) do
+    generation = Keyword.fetch(opts, :generation)
+    opts = Map.to_list(Run.choices(opts))
+
     case Documents.get_page(page_id) do
       nil ->
         {:error, :page_not_found}
 
       page ->
-        if MapSet.member?(cancelled_documents, page.document_id) do
+        if MapSet.member?(cancelled_documents, page.document_id) ||
+             (generation != :error && generation != {:ok, page.processing_generation}) do
           Logger.info("Document #{page.document_id} was cancelled, skipping page #{page_id}")
           :ok
         else
           do_process_page(page, opts)
         end
     end
+  rescue
+    error in MatchError ->
+      if error.term == {:error, :obsolete_run}, do: :ok, else: reraise(error, __STACKTRACE__)
+
+    Ecto.NoResultsError ->
+      :ok
   end
 
   defp do_process_page(page, opts) do
@@ -102,7 +113,8 @@ defmodule Doctrans.Processing.LlmProcessor do
     Topics.broadcast_page_update(page)
 
     # Check if all pages are complete and mark document as completed if so
-    DocumentOrchestrator.check_document_completion(page.document_id)
+    _ = DocumentOrchestrator.check_document_completion(page)
+
     :ok
   end
 
@@ -116,7 +128,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     # Update document status to "processing" when page extraction starts (if not already processing).
     # This is safe to call for every page - DocumentOrchestrator only updates if status
     # is in a pre-processing state (uploading, extracting, queued).
-    DocumentOrchestrator.update_document_status_to_processing(page.document_id)
+    :ok = DocumentOrchestrator.update_document_status_to_processing(page)
 
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "processing"})
     Topics.broadcast_page_update(page)
@@ -128,6 +140,7 @@ defmodule Doctrans.Processing.LlmProcessor do
       {:ok, markdown} ->
         {:ok, page} =
           Documents.update_page_extraction(page, %{
+            extraction_model: opts[:extraction_model],
             original_markdown: markdown,
             extraction_status: "completed"
           })
@@ -230,6 +243,7 @@ defmodule Doctrans.Processing.LlmProcessor do
       {:ok, translated} ->
         {:ok, page} =
           Documents.update_page_translation(page, %{
+            translation_model: opts[:translation_model],
             translated_markdown: translated,
             translation_status: "completed"
           })
@@ -240,7 +254,8 @@ defmodule Doctrans.Processing.LlmProcessor do
         EmbeddingWorker.update_chunk_translations(page)
 
         # Check if all pages are complete and mark document as completed if so
-        DocumentOrchestrator.check_document_completion(page.document_id)
+        _ = DocumentOrchestrator.check_document_completion(page)
+
         :ok
 
       {:error, reason} ->

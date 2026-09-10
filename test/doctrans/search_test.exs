@@ -58,7 +58,7 @@ defmodule Doctrans.SearchTest do
       doc = document_fixture(%{status: "completed", title: "Translated Test Doc"})
       page = page_fixture(doc, %{page_number: 1})
 
-      {:ok, _page} =
+      {:ok, page} =
         Pages.update_page_extraction(page, %{
           extraction_status: "completed",
           original_markdown: "Original content"
@@ -78,7 +78,7 @@ defmodule Doctrans.SearchTest do
       doc = document_fixture(%{status: "completed", title: "Stemming Test"})
       page = page_fixture(doc, %{page_number: 1})
 
-      {:ok, _page} =
+      {:ok, page} =
         Pages.update_page_extraction(page, %{
           extraction_status: "completed",
           original_markdown: "placeholder"

@@ -6,11 +6,12 @@ defmodule DoctransWeb.DocumentLive.Show do
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Processing.Run
   alias DoctransWeb.DocumentLive.{ChatSession, PageViewer, ReprocessModal}
   alias DoctransWeb.ErrorMessages
 
   import DoctransWeb.DocumentLive.Components,
-    only: [status_color: 1, status_text: 1, language_name: 1]
+    only: [status_color: 1, status_text: 1, language_name: 1, processing_progress: 1]
 
   import DoctransWeb.DocumentLive.ViewerComponents
   import DoctransWeb.DocumentLive.PageViewer, only: [zoom_controls: 1, navigation: 1]
@@ -19,7 +20,7 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Documents.get_document_with_pages(id) do
+    case Documents.get_document(id) do
       nil -> {:ok, assign(socket, :document, nil)}
       document -> mount_document(socket, document)
     end
@@ -38,6 +39,11 @@ defmodule DoctransWeb.DocumentLive.Show do
     socket =
       socket
       |> assign(:document, document)
+      |> assign(:source_available, Run.source_available?(document))
+      |> assign(:progress_refresh_pending, false)
+      |> assign(:chat_task_pid, nil)
+      |> assign(:chat_token, nil)
+      |> refresh_progress()
       |> PageViewer.init()
       |> assign(:from, nil)
       |> assign(:search_query, nil)
@@ -106,7 +112,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   def handle_event(event, params, socket)
-      when event in ~w(show_reprocess_modal hide_reprocess_modal update_reprocess_models reprocess_page) do
+      when event in ~w(show_reprocess_modal show_document_reprocess_modal hide_reprocess_modal update_reprocess_models reprocess_page reprocess_document) do
     ReprocessModal.handle_event(event, params, socket)
   end
 
@@ -155,6 +161,7 @@ defmodule DoctransWeb.DocumentLive.Show do
       # return value carries the final answer + updated context for history and
       # accumulation.
       lv = self()
+      chat_token = make_ref()
 
       task =
         Task.Supervisor.async_nolink(
@@ -165,14 +172,16 @@ defmodule DoctransWeb.DocumentLive.Show do
               trimmed_message,
               chat_history,
               [retrieved_context: retrieved_context],
-              fn event -> send(lv, {:chat_event, event}) end
+              fn event -> send(lv, {:chat_event, chat_token, event}) end
             )
           end
         )
 
       socket =
         socket
+        |> assign(:chat_token, chat_token)
         |> assign(:chat_task_ref, task.ref)
+        |> assign(:chat_task_pid, task.pid)
         |> assign(:chat_last_question, trimmed_message)
 
       {:noreply, socket}
@@ -222,34 +231,73 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   @impl true
-  def handle_info({:document_updated, document}, socket) do
-    {:noreply, assign(socket, :document, document)}
+  def handle_info({:document_updated, _document}, socket) do
+    document = Documents.get_document(socket.assigns.document.id)
+
+    if document do
+      changed? = document.processing_run_id != socket.assigns.document.processing_run_id
+      socket = if changed?, do: interrupt_chat(socket), else: socket
+
+      number =
+        min(
+          socket.assigns.current_page_number,
+          document.total_pages || socket.assigns.current_page_number
+        )
+
+      {:noreply,
+       socket
+       |> assign(:document, document)
+       |> assign(:source_available, Run.source_available?(document))
+       |> PageViewer.apply_params(%{"page" => to_string(max(1, number))})
+       |> refresh_progress()}
+    else
+      {:noreply, assign(socket, :document, nil)}
+    end
   end
 
   @impl true
   def handle_info({:page_updated, page}, socket) do
-    # Ignore updates for other documents (the socket is subscribed to one).
-    if page.document_id != socket.assigns.document.id do
-      {:noreply, socket}
-    else
-      # Populate or refresh the selected page, including pages created after
-      # mount or navigation. No re-query of the document and its
-      # full page list is needed; document-level fields (title, status,
-      # total_pages) are kept fresh via :document_updated broadcasts.
+    if socket.assigns.document && page.document_id == socket.assigns.document.id do
       socket =
-        if socket.assigns.current_page_number == page.page_number do
-          assign(socket, :current_page, page)
-        else
+        if socket.assigns.current_page_number == page.page_number,
+          do:
+            assign(
+              socket,
+              :current_page,
+              Documents.get_page_by_number(page.document_id, page.page_number)
+            ),
+          else: socket
+
+      socket =
+        if socket.assigns.progress_refresh_pending do
           socket
+        else
+          Process.send_after(self(), :refresh_progress, 100)
+          assign(socket, :progress_refresh_pending, true)
         end
 
       {:noreply, maybe_refresh_embeddings_status(socket)}
+    else
+      {:noreply, socket}
     end
+  end
+
+  def handle_info(:refresh_progress, socket) do
+    {:noreply, socket |> assign(:progress_refresh_pending, false) |> refresh_progress()}
+  end
+
+  def handle_info({:chat_event, token, event}, socket) do
+    if token == socket.assigns.chat_token,
+      do: handle_info({:chat_event, event}, socket),
+      else: {:noreply, socket}
   end
 
   # Chat streaming/progress events from the agent pipeline
 
   @impl true
+  def handle_info({:chat_event, _event}, %{assigns: %{chat_loading: false}} = socket),
+    do: {:noreply, socket}
+
   def handle_info({:chat_event, {:stage, stage}}, socket) do
     {:noreply, assign(socket, :chat_stage, stage)}
   end
@@ -267,7 +315,11 @@ defmodule DoctransWeb.DocumentLive.Show do
       when socket.assigns.chat_task_ref == ref do
     # Flush the :DOWN message
     Process.demonitor(ref, [:flush])
-    {:noreply, ChatSession.put_response(socket, response, retrieved_context)}
+
+    case ChatSession.put_response(socket, response, retrieved_context) do
+      {:ok, socket} -> {:noreply, socket}
+      {:error, :obsolete_run} -> {:noreply, interrupt_chat(socket)}
+    end
   end
 
   @impl true
@@ -294,4 +346,26 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket), do: {:noreply, socket}
+  defp refresh_progress(%{assigns: %{document: nil}} = socket), do: socket
+
+  defp refresh_progress(socket) do
+    case Documents.list_documents_with_progress(document_ids: [socket.assigns.document.id]) do
+      [summary] -> assign(socket, :processing_progress, summary.progress)
+      [] -> assign(socket, :processing_progress, 0.0)
+    end
+  end
+
+  defp interrupt_chat(socket) do
+    if socket.assigns.chat_task_pid, do: Process.exit(socket.assigns.chat_task_pid, :kill)
+    if socket.assigns.chat_task_ref, do: Process.demonitor(socket.assigns.chat_task_ref, [:flush])
+
+    socket
+    |> assign(:chat_task_pid, nil)
+    |> assign(:chat_token, nil)
+    |> assign(:chat_task_ref, nil)
+    |> assign(:chat_loading, false)
+    |> assign(:chat_streaming_content, "")
+    |> assign(:chat_retrieved_context, [])
+    |> assign(:embeddings_ready, false)
+  end
 end

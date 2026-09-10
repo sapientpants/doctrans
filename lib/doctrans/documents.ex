@@ -11,6 +11,7 @@ defmodule Doctrans.Documents do
 
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents.{Document, Page, Pages, Summary}
+  alias Doctrans.Processing.Run
   alias Doctrans.Repo
   alias Doctrans.Validation
 
@@ -206,20 +207,24 @@ defmodule Doctrans.Documents do
   Updates a document.
   """
   def update_document(%Document{} = document, attrs) do
-    document
-    |> Document.changeset(attrs)
-    |> Repo.update()
-    |> Doctrans.Errors.result()
+    Run.with_current(document, fn current ->
+      current
+      |> Document.changeset(attrs)
+      |> Repo.update()
+      |> Doctrans.Errors.result()
+    end)
   end
 
   @doc """
   Updates a document's status.
   """
   def update_document_status(%Document{} = document, status, error_message \\ nil) do
-    document
-    |> Document.status_changeset(status, Doctrans.Errors.diagnostic(error_message))
-    |> Repo.update()
-    |> Doctrans.Errors.result()
+    Run.with_current(document, fn current ->
+      current
+      |> Document.status_changeset(status, Doctrans.Errors.diagnostic(error_message))
+      |> Repo.update()
+      |> Doctrans.Errors.result()
+    end)
   end
 
   @doc """
@@ -235,6 +240,19 @@ defmodule Doctrans.Documents do
   # The directory comes from the persisted document UUID and configured upload root.
   # sobelow_skip ["Traversal.FileModule"]
   def delete_document(%Document{} = document) do
+    Repo.transaction(fn ->
+      _ = Run.lock(document.id)
+      delete_locked_document(document)
+    end)
+    |> case do
+      {:ok, result} -> result
+      error -> Doctrans.Errors.result(error)
+    end
+  end
+
+  # Fixed document directory under configured uploads, serialized with restarts.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp delete_locked_document(document) do
     # Delete files first (best-effort; a failure here must not prevent the
     # database row from being removed)
     document_dir = document_upload_dir(document.id)

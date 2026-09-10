@@ -115,7 +115,7 @@ defmodule Doctrans.Processing.DocumentConversionRetryTest do
     assert Enum.sort(Enum.map(jobs, & &1.args["page_id"])) ==
              Enum.sort(Enum.map(document.pages, & &1.id))
 
-    refute File.exists?(context.source_path)
-    refute File.exists?(context.pdf_path)
+    assert File.exists?(context.source_path)
+    assert File.exists?(context.pdf_path)
   end
 end

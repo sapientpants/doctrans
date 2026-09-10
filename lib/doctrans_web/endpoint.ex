@@ -39,12 +39,11 @@ defmodule DoctransWeb.Endpoint do
     gzip: not code_reloading?,
     only: DoctransWeb.static_paths()
 
-  # Serve uploaded page images from priv/static/uploads.
-  # Original source files are deleted after extraction, so only derived
-  # page images are ever served from this directory.
+  # Serve generated page images only; retained sources and converted PDFs
+  # share the upload root but must never be exposed by static serving.
   # These contain private document content: prevent browser/proxy storage,
   # including requests with Plug.Static's versioned query strings.
-  plug Plug.Static,
+  plug DoctransWeb.Plugs.UploadImages,
     at: "/uploads",
     from: {:doctrans, "priv/static/uploads"},
     gzip: false,

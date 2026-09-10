@@ -29,7 +29,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
       |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}, %{id: "translation"}]}))
     end)
 
-    document = document_fixture(%{total_pages: 1})
+    document = document_fixture(%{total_pages: 1, status: "completed"})
     page = completed_page_fixture(document)
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
@@ -65,7 +65,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
       Plug.Conn.resp(conn, 401, "unauthorized")
     end)
 
-    document = document_fixture(%{total_pages: 1})
+    document = document_fixture(%{total_pages: 1, status: "completed"})
     completed_page_fixture(document)
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 

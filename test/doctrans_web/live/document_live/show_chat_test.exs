@@ -98,6 +98,34 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       assert reopened.assigns.chat_retrieved_context == socket.assigns.chat_retrieved_context
     end
 
+    test "late response from a replaced run is discarded without waiting for PubSub", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      question = Conversations.start_question(document.id, "Old question")
+      ref = make_ref()
+
+      socket =
+        :sys.get_state(view.pid).socket
+        |> Phoenix.Component.assign(
+          chat_loading: true,
+          chat_question: question,
+          chat_task_ref: ref,
+          chat_last_question: question.content
+        )
+
+      document
+      |> Ecto.Changeset.change(processing_run_id: Ecto.UUID.generate())
+      |> Repo.update!()
+
+      {:noreply, updated} = Show.handle_info({ref, {:ok, "Stale answer", []}}, socket)
+      refute updated.assigns.chat_loading
+      assert updated.assigns.chat_task_ref == nil
+      assert updated.assigns.chat_retrieved_context == []
+      assert length(Conversations.load(document.id).messages) == 1
+    end
+
     test "chat button is visible in header", %{conn: conn, document: document} do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
