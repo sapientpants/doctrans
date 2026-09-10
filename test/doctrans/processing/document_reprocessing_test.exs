@@ -142,6 +142,26 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     end)
   end
 
+  test "reprocessing resolves the persisted source extension after a metadata rename", c do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      assert {:ok, job} = DocumentExtractionJob.enqueue_document(c.document.id, c.source)
+      document = Documents.get_document!(c.document.id)
+      assert document.source_extension == ".docx"
+
+      assert {:ok, document} =
+               Documents.update_document(document, %{original_filename: "renamed.pdf"})
+
+      assert Run.source_path(document) == c.source
+      Repo.delete!(job)
+
+      assert {:ok, run} = DocumentReprocessing.reprocess_document(document.id)
+      [job] = all_enqueued(worker: DocumentExtractionJob)
+      assert :ok = DocumentExtractionJob.perform(job)
+      assert File.read!(Path.join(Run.output_dir(run), "original.pdf")) == "original office bytes"
+      assert length(Documents.list_pages(run.id)) == 3
+    end)
+  end
+
   test "extraction completion preserves an exhausted translation error", c do
     Application.put_env(:doctrans, :openai_stub_translation_error, :circuit_open)
     on_exit(fn -> Application.delete_env(:doctrans, :openai_stub_translation_error) end)

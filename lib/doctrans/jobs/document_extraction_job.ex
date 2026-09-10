@@ -31,6 +31,17 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
     Repo.transaction(fn ->
       document = Run.lock(document_id) || Repo.rollback(:document_not_found)
 
+      # This is the stored upload path, whose extension passed magic-byte validation.
+      extension = file_path |> Path.extname() |> String.downcase()
+
+      unless extension in ~w(.pdf .doc .docx .odt .rtf),
+        do: Repo.rollback({:unsupported_format, [format: extension]})
+
+      document =
+        document
+        |> Ecto.Changeset.change(source_extension: document.source_extension || extension)
+        |> Repo.update!()
+
       document =
         if document.processing_run_id do
           document

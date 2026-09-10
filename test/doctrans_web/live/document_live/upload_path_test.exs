@@ -2,6 +2,7 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
+  alias Doctrans.Processing.Run
 
   @moduletag :capture_log
 
@@ -24,7 +25,8 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
         "C:\\Windows\\x.pdf",
         "nul\0name.pdf",
         "．．／資料∕Übersetzung.pdf",
-        "../../etc/x.PDF"
+        "../../etc/x.PDF",
+        "report..pdf"
       ] do
     @filename filename
 
@@ -51,6 +53,8 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
       assert Path.relative_to(directory, Documents.uploads_dir()) == "documents/#{document.id}"
       assert Enum.sort(File.ls!(directory)) == ["original.pdf", "runs"]
       assert File.read!(Path.join(directory, "original.pdf")) == content
+      assert document.source_extension == ".pdf"
+      assert Run.source_available?(document)
       refute String.contains?(document.original_filename, ["/", "\\", "\0"])
       refute String.contains?(document.title, "\0")
       assert has_element?(view, "#documents-#{document.id}")

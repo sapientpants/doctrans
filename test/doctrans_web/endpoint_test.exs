@@ -5,13 +5,13 @@ defmodule DoctransWeb.EndpointTest do
 
   describe "uploaded page caching" do
     setup do
-      directory = "cache-test-#{System.unique_integer([:positive])}"
+      directory = "documents/#{Uniq.UUID.uuid7()}/pages"
       path = Application.app_dir(:doctrans, "priv/static/uploads/#{directory}")
       File.mkdir_p!(path)
       on_exit(fn -> File.rm_rf!(path) end)
-      File.write!(Path.join(path, "page.png"), "page image content")
+      File.write!(Path.join(path, "page-01.png"), "page image content")
 
-      {:ok, image_url: "/uploads/#{directory}/page.png"}
+      {:ok, image_url: "/uploads/#{directory}/page-01.png"}
     end
 
     test "ordinary and versioned images cannot be stored in caches", %{image_url: url} do
@@ -34,6 +34,47 @@ defmodule DoctransWeb.EndpointTest do
 
       assert response(conn, 304) == ""
       assert get_resp_header(conn, "cache-control") == ["private, no-store"]
+    end
+  end
+
+  test "only generated images are served from legacy and run directories" do
+    directory = "documents/#{Uniq.UUID.uuid7()}"
+    run = "runs/#{Uniq.UUID.uuid7()}"
+    root = Application.app_dir(:doctrans, "priv/static/uploads/#{directory}")
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    images = ["pages/page-01.png", "#{run}/pages/page-002.png"]
+
+    private_files = [
+      "original.pdf",
+      "original.docx",
+      "original.doc",
+      "original.odt",
+      "original.rtf",
+      "#{run}/original.pdf",
+      "pages/original.pdf",
+      "pages/notes.png"
+    ]
+
+    for file <- images ++ private_files do
+      path = Path.join(root, file)
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "stored bytes")
+    end
+
+    for file <- images do
+      conn = get(build_conn(), "/uploads/#{directory}/#{file}")
+      assert response(conn, 200) == "stored bytes"
+      assert get_resp_header(conn, "cache-control") == ["private, no-store"]
+    end
+
+    for file <- private_files, query <- ["", "?vsn=123"], method <- [:get, :head] do
+      conn = dispatch(build_conn(), @endpoint, method, "/uploads/#{directory}/#{file}#{query}")
+      assert conn.status == 404
+    end
+
+    for file <- ["%6Friginal.pdf", "pages/../original.pdf", "pages/%2e%2e/original.pdf"] do
+      assert get(build_conn(), "/uploads/#{directory}/#{file}").status == 404
     end
   end
 

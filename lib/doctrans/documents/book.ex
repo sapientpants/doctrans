@@ -19,6 +19,7 @@ defmodule Doctrans.Documents.Document do
   schema "documents" do
     field :title, :string
     field :original_filename, :string
+    field :source_extension, :string
     field :total_pages, :integer
     field :status, :string, default: "uploading"
     field :target_language, :string

@@ -61,7 +61,10 @@ defmodule Doctrans.Processing.Run do
   def args(document), do: %{"document_id" => document.id, "run_id" => document.processing_run_id}
 
   def source_path(document) do
-    extension = document.original_filename |> Path.extname() |> String.downcase()
+    # Older documents predate source metadata; retain their filename fallback.
+    extension =
+      document.source_extension ||
+        document.original_filename |> Path.extname() |> String.downcase()
 
     if extension in ~w(.pdf .doc .docx .odt .rtf) do
       Path.join(Documents.document_upload_dir(document.id), "original" <> extension)

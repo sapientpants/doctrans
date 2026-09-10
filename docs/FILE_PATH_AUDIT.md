@@ -15,6 +15,13 @@ the exact extensions `.pdf`, `.doc`, `.docx`, `.odt`, and `.rtf`, with matching 
 bytes, before any destination directory or copy is created. The destination is
 `<configured uploads>/documents/<server-generated UUID>/original<extension>`.
 Filename sanitization is for metadata, not the path-containment boundary.
+The validated extension is persisted from the stored upload path when extraction
+is queued, independently of the sanitized display filename. Older documents use
+their filename extension as a compatibility fallback.
+
+HTTP serving allows only `documents/<UUID>/pages/page-<digits>.png` and
+`documents/<UUID>/runs/<UUID>/pages/page-<digits>.png`. Retained originals,
+converted PDFs, and other files beneath the upload root are not served.
 
 The LiveView regression tests exercise traversal segments, absolute paths, Windows
 separators, NUL bytes, Unicode, and uppercase extensions through real uploads and

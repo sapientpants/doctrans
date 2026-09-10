@@ -400,6 +400,8 @@ URL and chat history remain. Previous chat answers are historical.
 Original uploads are retained until you delete the document. Generated files live
 in separate processing-run directories; superseded output is cleaned up after a
 restart. This uses more disk space than the previous source-deletion policy.
+Only generated page images are served over HTTP; retained originals and converted
+PDFs are excluded from static serving.
 Documents imported before source retention was added may need to be uploaded
 again before whole-document reprocessing is available. Single-page reprocessing
 remains available when page images exist.
