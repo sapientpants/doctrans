@@ -4,7 +4,7 @@ defmodule Doctrans.Chat.MultiSearch do
   Reciprocal Rank Fusion (RRF).
 
   Each query is embedded and searched independently in parallel. Results are
-  deduplicated by page and scored using RRF to surface pages that rank highly
+  deduplicated by page and chunk index and scored using RRF to surface results that rank highly
   across multiple query phrasings.
   """
 
@@ -22,7 +22,7 @@ defmodule Doctrans.Chat.MultiSearch do
 
   ## Options
 
-  - `:limit` - Maximum number of pages to return (default: 3)
+  - `:limit` - Maximum number of results to return (default: 3)
   - `:min_similarity` - Minimum cosine similarity threshold (default: Search default)
   """
   def search_with_queries(document_id, queries, opts \\ [])
@@ -51,8 +51,8 @@ defmodule Doctrans.Chat.MultiSearch do
         max_concurrency: length(queries)
       )
       |> Enum.flat_map(fn
-        {:ok, {:ok, pages}} ->
-          [pages]
+        {:ok, {:ok, results}} ->
+          [results]
 
         {:ok, {:error, reason}} ->
           Logger.warning("Multi-search query failed: #{inspect(reason)}")
@@ -66,7 +66,7 @@ defmodule Doctrans.Chat.MultiSearch do
     merged = merge_with_rrf(ranked_lists, limit)
 
     Logger.info(
-      "Multi-search: #{length(queries)} queries, #{length(ranked_lists)} successful, #{length(merged)} pages returned"
+      "Multi-search: #{length(queries)} queries, #{length(ranked_lists)} successful, #{length(merged)} results returned"
     )
 
     {:ok, merged}
@@ -74,21 +74,22 @@ defmodule Doctrans.Chat.MultiSearch do
 
   defp merge_with_rrf(ranked_lists, limit) do
     # For each ranked list, assign RRF scores based on position
-    # Then sum scores per unique page across all lists
+    # Then sum scores per unique chunk (or fallback page) across all lists
     ranked_lists
-    |> Enum.flat_map(fn pages ->
-      pages
+    |> Enum.flat_map(fn results ->
+      results
       |> Enum.with_index(1)
-      |> Enum.map(fn {page, rank} ->
-        {page.page_id, 1.0 / (@rrf_k + rank), page}
+      |> Enum.map(fn {result, rank} ->
+        identity = {result.page_id, Map.get(result, :chunk_index)}
+        {identity, 1.0 / (@rrf_k + rank), result}
       end)
     end)
-    |> Enum.group_by(fn {page_id, _score, _page} -> page_id end)
-    |> Enum.map(fn {_page_id, entries} ->
+    |> Enum.group_by(fn {identity, _score, _result} -> identity end)
+    |> Enum.map(fn {_identity, entries} ->
       total_score = Enum.reduce(entries, 0.0, fn {_, score, _}, acc -> acc + score end)
-      # Use the page data from the highest-scoring entry (best similarity)
-      {_, _, best_page} = Enum.max_by(entries, fn {_, _, page} -> page.similarity end)
-      Map.put(best_page, :rrf_score, total_score)
+      # Keep the result data with the best similarity across queries
+      {_, _, best_result} = Enum.max_by(entries, fn {_, _, result} -> result.similarity end)
+      Map.put(best_result, :rrf_score, total_score)
     end)
     |> Enum.sort_by(& &1.rrf_score, :desc)
     |> Enum.take(limit)
