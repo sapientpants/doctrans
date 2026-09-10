@@ -40,13 +40,11 @@ defmodule DoctransWeb.DocumentLive.Components do
             )}
           </span>
         </div>
-        <div :if={@document.status in ["extracting", "processing"]} class="mt-2">
-          <div class="flex justify-between text-xs mb-1">
-            <span>{gettext("Progress")}</span>
-            <span>{Float.round(@progress, 1)}%</span>
-          </div>
-          <progress class="progress progress-primary w-full" value={@progress} max="100" />
-        </div>
+        <.processing_progress
+          id={"document-progress-#{@document.id}"}
+          document={@document}
+          progress={@progress}
+        />
         <div class="card-actions justify-end mt-2">
           <button
             type="button"
@@ -61,6 +59,38 @@ defmodule DoctransWeb.DocumentLive.Components do
           </button>
         </div>
       </div>
+    </div>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :document, :map, required: true
+  attr :progress, :float, required: true
+
+  def processing_progress(assigns) do
+    ~H"""
+    <div
+      :if={@document.status in ~w(queued extracting processing completed error)}
+      id={@id}
+      class="my-2 space-y-2"
+    >
+      <div class="flex items-center justify-between gap-4 text-xs text-base-content/70">
+        <span>{status_text(@document.status)}</span>
+        <span :if={@document.total_pages}>{Float.round(@progress, 1)}%</span>
+        <span :if={!@document.total_pages}>{gettext("Preparing pages…")}</span>
+      </div>
+      <progress
+        aria-label={gettext("Processing progress")}
+        class="block h-2 w-full overflow-hidden rounded-full accent-primary"
+        value={if @document.total_pages || @document.status == "queued", do: @progress, else: nil}
+        max="100"
+      />
+      <p :if={@document.status == "completed" && @progress < 100} class="text-xs text-error">
+        {gettext("Finished with page errors")}
+      </p>
+      <p :if={@document.status == "error"} class="text-xs text-error">
+        {gettext("Processing failed. You can reprocess the document when its jobs have finished.")}
+      </p>
     </div>
     """
   end

@@ -78,8 +78,8 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         assert page.extraction_status in ["pending", "processing", "completed"]
       end
 
-      # PDF should be deleted after extraction
-      refute File.exists?(pdf_path)
+      # Original PDF is retained for full reprocessing
+      assert File.exists?(pdf_path)
     end
 
     test "resumes after a partial extraction failure without duplicating pages or jobs" do
@@ -126,7 +126,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         assert Enum.sort(Enum.map(jobs, & &1.args["page_id"])) ==
                  Enum.sort(Enum.map(pages, & &1.id))
 
-        refute File.exists?(pdf_path)
+        assert File.exists?(pdf_path)
       end)
     end
 
@@ -189,8 +189,8 @@ defmodule Doctrans.Processing.PdfProcessorTest do
 
       assert result == :cancelled
 
-      # PDF should be deleted even for cancelled documents
-      refute File.exists?(pdf_path)
+      # Cancelling processing preserves the original PDF
+      assert File.exists?(pdf_path)
 
       # No pages should be created
       pages = Documents.list_pages(document.id)

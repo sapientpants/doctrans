@@ -49,7 +49,7 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
 
       assert {:ok, _uuid} = Ecto.UUID.cast(document.id)
       assert Path.relative_to(directory, Documents.uploads_dir()) == "documents/#{document.id}"
-      assert Enum.sort(File.ls!(directory)) == ["original.pdf", "pages"]
+      assert Enum.sort(File.ls!(directory)) == ["original.pdf", "runs"]
       assert File.read!(Path.join(directory, "original.pdf")) == content
       refute String.contains?(document.original_filename, ["/", "\\", "\0"])
       refute String.contains?(document.title, "\0")

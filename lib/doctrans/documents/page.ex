@@ -22,6 +22,11 @@ defmodule Doctrans.Documents.Page do
   schema "pages" do
     field :page_number, :integer
     field :image_path, :string
+    field :processing_generation, Ecto.UUID
+    field :requested_extraction_model, :string
+    field :requested_translation_model, :string
+    field :extraction_model, :string
+    field :translation_model, :string
     field :content_revision, :integer, default: 0, read_after_writes: true
     field :original_markdown, :string
     field :translated_markdown, :string
@@ -63,7 +68,7 @@ defmodule Doctrans.Documents.Page do
   """
   def extraction_changeset(page, attrs) do
     page
-    |> cast(attrs, [:original_markdown, :extraction_status])
+    |> cast(attrs, [:original_markdown, :extraction_status, :extraction_model])
     |> validate_inclusion(:extraction_status, @statuses)
   end
 
@@ -72,7 +77,7 @@ defmodule Doctrans.Documents.Page do
   """
   def translation_changeset(page, attrs) do
     page
-    |> cast(attrs, [:translated_markdown, :translation_status])
+    |> cast(attrs, [:translated_markdown, :translation_status, :translation_model])
     |> validate_inclusion(:translation_status, @statuses)
   end
 

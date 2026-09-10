@@ -23,6 +23,9 @@ defmodule Doctrans.Documents.Document do
     field :status, :string, default: "uploading"
     field :target_language, :string
     field :error_message, :string
+    field :processing_run_id, Ecto.UUID
+    field :extraction_model, :string
+    field :translation_model, :string
 
     has_many :pages, Doctrans.Documents.Page
 

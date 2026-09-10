@@ -98,6 +98,14 @@ defmodule DoctransWeb.ErrorMessages do
 
   def message(:conversion_timeout), do: dgettext("errors", "Document conversion timed out")
 
+  def message(:original_upload_missing),
+    do: gettext("Original upload unavailable. Re-upload this document to process it again.")
+
+  def message(:already_processing),
+    do: gettext("This document still has active processing jobs. Please wait for them to finish.")
+
+  def message(:obsolete_run), do: gettext("The document has changed. Please try again.")
+
   def message(:invalid_model), do: gettext("Invalid model selection")
   def message(:upload_unreadable), do: dgettext("errors", "Could not read uploaded file")
 

@@ -251,7 +251,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       {:ok, view, _html} = live(conn, ~p"/")
 
       # Should show progress bar for processing documents
-      assert render(view) =~ "Progress"
+      assert has_element?(view, "#documents progress")
     end
 
     test "shows completed badge for completed documents", %{conn: conn} do
@@ -416,7 +416,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       _doc = document_with_pages_fixture(%{status: "extracting"}, 2)
       {:ok, view, _html} = live(conn, ~p"/")
 
-      assert render(view) =~ "Progress"
+      assert has_element?(view, "#documents progress")
     end
 
     test "receives document updates via PubSub", %{conn: conn} do

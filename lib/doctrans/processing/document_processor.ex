@@ -15,7 +15,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.PdfProcessor
+  alias Doctrans.Processing.{PdfProcessor, Run}
 
   # Allow DocumentConverter module to be configured for testing
   defp document_converter_module do
@@ -34,15 +34,33 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   Returns `:ok`, `:cancelled`, or `{:error, reason}`.
   """
-  def extract_document(document_id, file_path, cancelled_documents) do
+  def extract_document(document_id, file_path, cancelled_documents, document \\ nil) do
+    document = document || Documents.get_document(document_id)
+
+    with {:ok, document} <- prepare_document(document) do
+      process_source(document_id, file_path, cancelled_documents, document)
+    end
+  end
+
+  defp prepare_document(nil), do: {:error, :document_not_found}
+  defp prepare_document(%{processing_run_id: nil} = document), do: {:ok, document}
+
+  defp prepare_document(document) do
+    with {:ok, document} <- Documents.update_document_status(document, "extracting") do
+      _ = Topics.broadcast_document_update(document)
+      {:ok, document}
+    end
+  end
+
+  defp process_source(document_id, file_path, cancelled_documents, document) do
     extension = file_path |> Path.extname() |> String.downcase()
 
     case extension do
       ".pdf" ->
-        PdfProcessor.extract_document(document_id, file_path, cancelled_documents)
+        PdfProcessor.extract_document(document_id, file_path, cancelled_documents, document)
 
       ext when ext in [".docx", ".doc", ".odt", ".rtf"] ->
-        extract_convertible_document(document_id, file_path, cancelled_documents)
+        extract_convertible_document(document_id, file_path, cancelled_documents, document)
 
       _ ->
         Logger.error("Unsupported file format: #{extension}")
@@ -52,47 +70,40 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   # The job path is the fixed original.<validated extension> path created during upload.
   # sobelow_skip ["Traversal.FileModule"]
-  defp extract_convertible_document(document_id, file_path, cancelled_documents) do
+  defp extract_convertible_document(document_id, file_path, cancelled_documents, document) do
     if MapSet.member?(cancelled_documents, document_id) do
       Logger.info("Document #{document_id} was cancelled, skipping conversion")
-      _ = File.rm(file_path)
 
       :cancelled
     else
-      do_convert_and_extract(document_id, file_path, cancelled_documents)
+      do_convert_and_extract(document_id, file_path, cancelled_documents, document)
     end
   end
 
-  # Only the stored original upload is removed, after page extraction succeeds.
+  # Source is the stored original upload; output is a directory derived from persisted UUIDs.
   # sobelow_skip ["Traversal.FileModule"]
-  defp do_convert_and_extract(document_id, file_path, cancelled_documents) do
-    output_dir = Path.dirname(file_path)
+  defp do_convert_and_extract(document_id, file_path, cancelled_documents, document) do
+    output_dir = if document, do: Run.output_dir(document), else: Path.dirname(file_path)
+    File.mkdir_p!(output_dir)
 
     Logger.info("Converting document #{file_path} to PDF")
 
     case document_converter_module().convert_to_pdf(file_path, output_dir) do
       {:ok, pdf_path} ->
-        case PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents) do
-          :ok ->
-            _ = File.rm(file_path)
-            :ok
-
-          result ->
-            result
-        end
+        PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents, document)
 
       {:error, reason} ->
         Logger.error("Failed to convert document #{document_id}: #{inspect(reason)}")
         # Preserve the source for the persisted job's next attempt or manual recovery.
-        publish_conversion_error(document_id, reason)
+        publish_conversion_error(document, reason)
         {:error, reason}
     end
   end
 
-  defp publish_conversion_error(document_id, reason) do
-    with %Documents.Document{} = document <- Documents.get_document(document_id),
+  defp publish_conversion_error(document, reason) do
+    with %Documents.Document{} = document <- document,
          {:ok, document} <- Documents.update_document_status(document, "error", reason) do
-      Topics.broadcast_document_update(document)
+      _ = Topics.broadcast_document_update(document)
     end
   end
 

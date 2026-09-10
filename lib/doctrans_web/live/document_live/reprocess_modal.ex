@@ -4,15 +4,15 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
 
   import Phoenix.LiveView, only: [put_flash: 3]
 
-  alias Doctrans.{Config, Documents}
-  alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.{OpenAI, Worker}
+  alias Doctrans.Config
+  alias Doctrans.Processing.{DocumentReprocessing, OpenAI}
   alias DoctransWeb.ErrorMessages
 
   @doc "Initializes model selections and modal state."
   def init(socket) do
     socket
     |> assign(:show_reprocess_modal, false)
+    |> assign(:reprocess_scope, :page)
     |> assign(:available_models, [])
     |> assign(:models_loading, false)
     |> assign(:model_fetch_error, nil)
@@ -26,8 +26,12 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   def can_reprocess?(nil), do: false
 
   def can_reprocess?(page) do
-    page.extraction_status in ["completed", "error"] ||
-      page.translation_status == "error"
+    page.extraction_status in ["completed", "error"] &&
+      page.translation_status in ["completed", "error", "pending"]
+  end
+
+  def handle_event("show_document_reprocess_modal", params, socket) do
+    handle_event("show_reprocess_modal", params, assign(socket, :reprocess_scope, :document))
   end
 
   def handle_event("show_reprocess_modal", _params, socket) do
@@ -43,7 +47,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   end
 
   def handle_event("hide_reprocess_modal", _params, socket) do
-    {:noreply, assign(socket, :show_reprocess_modal, false)}
+    {:noreply, socket |> assign(:show_reprocess_modal, false) |> assign(:reprocess_scope, :page)}
   end
 
   def handle_event("update_reprocess_models", params, socket) do
@@ -59,49 +63,56 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     {:noreply, socket}
   end
 
-  def handle_event("reprocess_page", params, socket) do
-    page = socket.assigns.current_page
+  def handle_event(event, params, socket)
+      when event in ["reprocess_page", "reprocess_document"] do
     extraction_model = params["extraction_model"]
     translation_model = params["translation_model"]
-    available_models = socket.assigns.available_models
+    models = socket.assigns.available_models
+    expected_scope = if event == "reprocess_document", do: :document, else: :page
 
-    # Validate model selection
-    if extraction_model not in available_models or translation_model not in available_models do
-      socket =
-        socket
-        |> put_flash(:error, ErrorMessages.message(:invalid_model))
-        |> assign(:show_reprocess_modal, false)
+    valid? =
+      expected_scope == socket.assigns.reprocess_scope &&
+        extraction_model in models && translation_model in models
 
-      {:noreply, socket}
-    else
-      case Documents.reset_page_for_reprocessing(page) do
-        {:ok, page} ->
-          _ = Topics.broadcast_page_update(page)
+    opts = [extraction_model: extraction_model, translation_model: translation_model]
+    result = if valid?, do: submit(socket, expected_scope, opts), else: {:error, :invalid_model}
 
-          _ =
-            Worker.queue_page_reprocess(page.id,
-              extraction_model: extraction_model,
-              translation_model: translation_model
-            )
+    case result do
+      {:ok, result} ->
+        socket =
+          if expected_scope == :page, do: assign(socket, :current_page, result), else: socket
 
-          socket =
-            socket
-            |> assign(:current_page, page)
-            |> assign(:show_reprocess_modal, false)
-            |> put_flash(:info, gettext("Page queued for reprocessing"))
+        message =
+          if expected_scope == :document,
+            do: gettext("Document queued for reprocessing"),
+            else: gettext("Page queued for reprocessing")
 
-          {:noreply, socket}
+        {:noreply,
+         socket
+         |> assign(:show_reprocess_modal, false)
+         |> assign(:reprocess_scope, :page)
+         |> put_flash(:info, message)}
 
-        {:error, _reason} ->
-          socket =
-            socket
-            |> put_flash(:error, ErrorMessages.message(:reprocess_failed))
-            |> assign(:show_reprocess_modal, false)
-
-          {:noreply, socket}
-      end
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:show_reprocess_modal, false)
+         |> assign(:reprocess_scope, :page)
+         |> put_flash(:error, ErrorMessages.message(reason))}
     end
   end
+
+  defp submit(socket, :document, opts),
+    do:
+      DocumentReprocessing.reprocess_document(
+        socket.assigns.document.id,
+        Keyword.put(opts, :expected_run_id, socket.assigns.document.processing_run_id)
+      )
+
+  defp submit(%{assigns: %{current_page: nil}}, :page, _opts), do: {:error, :page_not_found}
+
+  defp submit(socket, :page, opts),
+    do: DocumentReprocessing.reprocess_page(socket.assigns.current_page.id, opts)
 
   def fetch_available_models(socket) do
     {models, error} =
@@ -131,6 +142,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   end
 
   attr :page, :map, required: true
+  attr :document, :map, default: nil
+  attr :scope, :atom, default: :page
   attr :form, Phoenix.HTML.Form, required: true
   attr :available_models, :list, required: true
   attr :models_loading, :boolean, default: false
@@ -145,19 +158,37 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     assigns = assign(assigns, :model_options, options)
 
     ~H"""
-    <div class="modal modal-open" id="reprocess-modal">
-      <div class="modal-box max-w-md">
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      id="reprocess-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="reprocess-title"
+      phx-window-keydown="hide_reprocess_modal"
+      phx-key="escape"
+      phx-mounted={JS.push_focus() |> JS.focus_first(to: "#reprocess-modal")}
+      phx-remove={JS.pop_focus()}
+    >
+      <div class="relative z-10 w-full max-w-lg rounded-2xl border border-base-300 bg-base-100 p-6 shadow-2xl">
         <button
           type="button"
           phx-click="hide_reprocess_modal"
-          class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2"
+          class="absolute right-3 top-3 rounded-lg p-2 transition-colors hover:bg-base-200"
         >
           <.icon name="hero-x-mark" class="w-5 h-5" />
         </button>
 
-        <h3 class="font-bold text-lg mb-4">{gettext("Reprocess Page")}</h3>
+        <h3 id="reprocess-title" class="font-bold text-lg mb-4">
+          {if @scope == :document, do: gettext("Reprocess document"), else: gettext("Reprocess Page")}
+        </h3>
+        <p :if={@scope == :document} class="mb-3 font-medium">{@document.title}</p>
         <p class="text-sm text-base-content/70 mb-4">
-          {gettext("Select models to use for re-extracting and re-translating this page.")}
+          {if @scope == :document,
+            do:
+              gettext(
+                "Run every processing step again from the original upload. Existing pages and search results will be replaced. This may take some time."
+              ),
+            else: gettext("Select models to use for re-extracting and re-translating this page.")}
         </p>
 
         <div :if={@model_fetch_error} id="reprocess-model-error" class="alert alert-error mb-4">
@@ -167,16 +198,16 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
 
         <.form
           for={@form}
-          phx-submit="reprocess_page"
+          phx-submit={if @scope == :document, do: "reprocess_document", else: "reprocess_page"}
           phx-change="update_reprocess_models"
-          id="reprocess-form"
+          id={if @scope == :document, do: "document-reprocess-form", else: "reprocess-form"}
         >
           <.input
             field={@form[:extraction_model]}
             type="select"
             label={gettext("Extraction Model")}
             options={@model_options}
-            class="select select-bordered w-full"
+            class="w-full rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-base-content focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
             id="extraction-model-select"
             disabled={@models_loading}
           />
@@ -185,32 +216,42 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
             type="select"
             label={gettext("Translation Model")}
             options={@model_options}
-            class="select select-bordered w-full"
+            class="w-full rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-base-content focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
             id="translation-model-select"
             disabled={@models_loading}
           />
 
-          <div class="modal-action">
+          <div class="mt-6 flex justify-end gap-3">
             <button
               type="button"
               id="reprocess-cancel"
               phx-click="hide_reprocess_modal"
-              class="btn btn-ghost"
+              class="btn-ghost rounded-lg px-4 py-2 transition-colors hover:bg-base-200"
             >
               {gettext("Cancel")}
             </button>
             <button
               type="submit"
-              class="btn btn-primary"
+              class="rounded-lg bg-primary px-4 py-2 font-medium text-primary-content transition-opacity hover:opacity-90 disabled:opacity-50"
               disabled={@models_loading || @available_models == []}
-              id="reprocess-submit-btn"
+              id={
+                if @scope == :document, do: "document-reprocess-submit", else: "reprocess-submit-btn"
+              }
+              phx-disable-with={gettext("Queuing…")}
             >
               {gettext("Reprocess")}
             </button>
           </div>
         </.form>
       </div>
-      <div class="modal-backdrop bg-black/50" phx-click="hide_reprocess_modal"></div>
+      <button
+        type="button"
+        tabindex="-1"
+        aria-label={gettext("Cancel")}
+        class="absolute inset-0"
+        phx-click="hide_reprocess_modal"
+      >
+      </button>
     </div>
     """
   end

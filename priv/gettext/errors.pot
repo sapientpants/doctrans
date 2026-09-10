@@ -253,12 +253,12 @@ msgstr ""
 msgid "Unsupported language: %{language}"
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:102
+#: lib/doctrans_web/error_messages.ex:110
 #, elixir-autogen, elixir-format
 msgid "Could not read uploaded file"
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:106
+#: lib/doctrans_web/error_messages.ex:114
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
 msgstr ""

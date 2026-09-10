@@ -8,6 +8,7 @@ defmodule Doctrans.Processing.StartupRecovery do
 
   alias Doctrans.Documents.{Document, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
+  alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
   @batch_size 50
@@ -38,8 +39,8 @@ defmodule Doctrans.Processing.StartupRecovery do
     Repo.transact(fn ->
       Enum.each(rows, fn document ->
         case Repo.one(from(d in Document, where: d.id == ^document.id, lock: "FOR UPDATE")) do
-          %Document{status: status} when status in ["queued", "extracting"] ->
-            %{"document_id" => document.id}
+          %Document{status: status} = current when status in ["queued", "extracting"] ->
+            Run.args(current)
             |> DocumentExtractionJob.new(meta: %{recovered: true})
             |> Oban.insert!()
 
@@ -108,19 +109,30 @@ defmodule Doctrans.Processing.StartupRecovery do
     page = from(p in Page, where: p.id == ^row.id, lock: "FOR UPDATE") |> Repo.one()
 
     case {document, page} do
-      {%Document{status: "processing"}, %Page{} = page} -> maybe_recover_page(page)
-      _ -> []
+      {%Document{status: "processing"} = document, %Page{} = page} ->
+        maybe_recover_page(page, document)
+
+      _ ->
+        []
     end
   end
 
-  defp maybe_recover_page(%Page{extraction_status: "completed", translation_status: "completed"}),
-    do: []
+  defp maybe_recover_page(
+         %Page{extraction_status: "completed", translation_status: "completed"},
+         _document
+       ),
+       do: []
 
-  defp maybe_recover_page(page) do
+  defp maybe_recover_page(page, document) do
     # Insert before changing statuses: uniqueness also covers jobs queued since
     # candidate selection. A conflicting job owns this page's processing state.
     job =
-      %{"page_id" => page.id, "page_number" => page.page_number}
+      %{
+        "page_id" => page.id,
+        "page_number" => page.page_number,
+        "generation" => page.processing_generation
+      }
+      |> Map.merge(Run.page_model_args(page, document))
       |> LlmProcessingJob.new(priority: 2, meta: %{recovered: true})
       |> Oban.insert!()
 

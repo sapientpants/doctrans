@@ -13,6 +13,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Processing.Run
 
   @doc """
   Checks if the current document is complete and handles completion.
@@ -21,16 +22,21 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   def check_document_completion(nil), do: :incomplete
 
   def check_document_completion(document_id) do
-    Logger.debug("Checking document completion for #{document_id}")
+    Doctrans.Repo.transaction(fn ->
+      case Run.lock(document_id) do
+        nil ->
+          :incomplete
 
-    if Documents.all_pages_completed?(document_id) do
-      Logger.info("Document #{document_id} fully processed")
-      mark_document_completed(document_id)
-      :completed
-    else
-      Logger.debug("Document #{document_id} not yet complete, waiting for more pages")
-      :incomplete
-    end
+        _document ->
+          if Documents.all_pages_completed?(document_id) do
+            mark_document_completed(document_id)
+            :completed
+          else
+            :incomplete
+          end
+      end
+    end)
+    |> elem(1)
   end
 
   @doc """

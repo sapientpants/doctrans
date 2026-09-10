@@ -31,13 +31,14 @@ the filename sanitizer also replaces backslashes.
 | Orphan sweeper deletion | Direct children returned by `File.ls` on the documents directory; `File.rm_rf` removes symlinks without traversing their targets. |
 | Environment loading | Operator-specified `.env` path or `DOCTRANS_ENV_FILE`; intentionally outside upload storage. |
 | Converter directory creation and profile cleanup | Output directory is the stored upload's parent. Profile directory is created by `mktemp`; PDF name uses `Path.basename` of the source. Executable lookup uses operator PATH directories. |
-| Document/PDF processor cleanup | Stored upload path passed through the internal Oban job, or PDF produced by conversion in that same directory. |
+| Document/PDF processing | The retained original uses a fixed validated extension. Conversion and page output use persisted document/run UUID directories. Successful processing and cancellation preserve the original. |
 | PDF extraction | Document UUID/pages directory with fixed `page` output prefix; page numbers come from the extraction loop. Globs use the same directory. The legacy `get_pdf_path/1` helper uses an internal document ID and has no production callers. |
 | Image reads | `LlmProcessor` joins the configured upload root with the relative image path recorded by `PdfProcessor`, derived from extractor output. |
 | Health probe | Configured upload root plus fixed prefix and server timestamp. |
 | Validation header reads | LiveView temporary upload path, never the client name. |
 | Failed document creation cleanup | Exact destination returned by the upload copy operation. |
-| Extraction job fallback | Database document UUID plus fixed `original.pdf` or `original` with the stored filename's extension. No client directory component is joined. |
+| Extraction job source | Database document UUID plus `original` with the stored validated extension. An office upload is always reconverted from its original, never substituted with an older PDF. |
+| Superseded-run cleanup | Fixed `pages` legacy directory and validated UUID children of `runs`, excluding the current run. Legacy converted `original.pdf` is removable only for non-PDF originals. Original uploads are never cleanup targets. |
 
 These internal APIs assume application-generated job arguments and page records.
 Operator configuration, direct database edits, and filesystem modification by other

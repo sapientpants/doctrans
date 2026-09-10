@@ -33,10 +33,7 @@ defmodule Doctrans.Processing.Worker do
   @spec process_document(Ecto.UUID.t(), binary()) ::
           {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
   def process_document(document_id, file_path) do
-    %{@document_id_key => document_id, "file_path" => file_path}
-    |> DocumentExtractionJob.new()
-    |> Oban.insert()
-    |> Doctrans.Errors.result()
+    DocumentExtractionJob.enqueue_document(document_id, file_path)
   end
 
   @doc """
@@ -59,6 +56,8 @@ defmodule Doctrans.Processing.Worker do
     # Sequential processing is guaranteed by setting concurrency: 1 for the queue.
     # page_number is included for logging/debugging purposes only.
     %{@page_id_key => page_id, "page_number" => page_number}
+    |> Map.merge(LlmProcessingJob.model_args(opts))
+    |> Map.put("generation", page_generation(page_id))
     |> LlmProcessingJob.new(priority: 2)
     |> Oban.insert()
     |> Doctrans.Errors.result()
@@ -90,9 +89,17 @@ defmodule Doctrans.Processing.Worker do
         else: args
 
     args
+    |> Map.put("generation", page_generation(page_id))
     |> LlmProcessingJob.new(priority: 1)
     |> Oban.insert()
     |> Doctrans.Errors.result()
+  end
+
+  defp page_generation(page_id) do
+    case Documents.get_page(page_id) do
+      nil -> nil
+      page -> page.processing_generation
+    end
   end
 
   @doc """

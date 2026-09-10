@@ -16,7 +16,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.Worker
+  alias Doctrans.Processing.{Run, Worker}
 
   # Allow PdfExtractor module to be configured for testing
   defp pdf_extractor_module do
@@ -30,25 +30,24 @@ defmodule Doctrans.Processing.PdfProcessor do
   """
   # pdf_path is the stored original upload or the converter output in the same document directory.
   # sobelow_skip ["Traversal.FileModule"]
-  def extract_document(document_id, pdf_path, cancelled_documents) do
+  def extract_document(document_id, pdf_path, cancelled_documents, document \\ nil) do
     if MapSet.member?(cancelled_documents, document_id) do
       Logger.info("Document #{document_id} was cancelled, skipping PDF extraction")
-      _ = File.rm(pdf_path)
       :cancelled
     else
-      do_extract(document_id, pdf_path)
+      do_extract(document_id, pdf_path, document || Documents.get_document(document_id))
     end
   end
 
-  defp do_extract(document_id, pdf_path) do
-    with {:ok, document} <- fetch_document(document_id),
+  defp do_extract(document_id, pdf_path, document) do
+    with {:ok, document} <- fetch_document(document_id, document),
          {:ok, document} <- resume_failed_document(document),
          :ok <- extract_pdf_pages(document, pdf_path) do
       :ok
     else
       {:error, reason} ->
         Logger.error("Failed to extract PDF for document #{document_id}: #{inspect(reason)}")
-        maybe_update_error(document_id, reason)
+        maybe_update_error(document, reason)
         {:error, reason}
     end
   end
@@ -63,18 +62,17 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   defp resume_failed_document(document), do: {:ok, document}
 
-  defp fetch_document(document_id) do
+  defp fetch_document(_document_id, %Documents.Document{} = document), do: {:ok, document}
+
+  defp fetch_document(document_id, nil) do
     case Documents.get_document(document_id) do
       nil -> {:error, :document_not_found}
       document -> {:ok, document}
     end
   end
 
-  defp maybe_update_error(document_id, reason) do
-    case Documents.get_document(document_id) do
-      nil -> :ok
-      document -> Documents.update_document_status(document, "error", reason)
-    end
+  defp maybe_update_error(document, reason) do
+    if document, do: Documents.update_document_status(document, "error", reason), else: :ok
   end
 
   @doc """
@@ -91,21 +89,19 @@ defmodule Doctrans.Processing.PdfProcessor do
     ])
   end
 
-  # Only the stored original PDF or converted PDF is removed after successful extraction.
+  # The output path is built from persisted document/run UUIDs with a fixed pages suffix.
   # sobelow_skip ["Traversal.FileModule"]
   defp extract_pdf_pages(document, pdf_path) do
     Logger.info("Extracting pages from PDF for document #{document.id}")
 
-    pages_dir = Documents.ensure_document_dirs!(document.id)
+    pages_dir = Run.pages_dir(document)
+    File.mkdir_p!(pages_dir)
 
     # Get page count early so UI can show progress
     with {:ok, page_count} <- pdf_extractor_module().get_page_count(pdf_path),
          {:ok, document} <- set_total_pages(document, page_count),
          :ok <- extract_pages_progressively(document, pdf_path, pages_dir, page_count) do
       Logger.info("Extracted #{page_count} pages for document #{document.id}")
-
-      # Delete the original PDF to save space
-      _ = File.rm(pdf_path)
 
       :ok
     else
@@ -129,7 +125,10 @@ defmodule Doctrans.Processing.PdfProcessor do
     result =
       Enum.reduce_while(1..page_count, :ok, fn page_number, :ok ->
         with {:ok, page} <- ensure_page(document, pdf_path, pages_dir, page_number),
-             :ok <- queue_page_for_processing(page) do
+             :ok <-
+               Run.with_current(document, fn current ->
+                 queue_page_for_processing(page, current)
+               end) do
           {:cont, :ok}
         else
           {:error, reason} ->
@@ -137,22 +136,34 @@ defmodule Doctrans.Processing.PdfProcessor do
         end
       end)
 
-    # Final broadcast after all pages are extracted
-    _ = Topics.broadcast_document_update(document)
-
-    result
+    if result == :ok, do: finish_extraction(document), else: result
   end
 
-  defp queue_page_for_processing(%{
-         extraction_status: "completed",
-         translation_status: "completed"
-       }),
+  defp finish_extraction(document) do
+    Run.with_current(document, fn current ->
+      if current.status in ~w(uploading queued extracting error) do
+        with {:ok, current} <- Documents.update_document_status(current, "processing") do
+          Topics.broadcast_document_update(current)
+        end
+      end
+
+      :ok
+    end)
+  end
+
+  defp queue_page_for_processing(
+         %{
+           extraction_status: "completed",
+           translation_status: "completed"
+         },
+         _document
+       ),
        do: :ok
 
-  defp queue_page_for_processing(page) do
+  defp queue_page_for_processing(page, document) do
     Logger.info("Queueing page #{page.page_number} for LLM processing")
     # Oban uniqueness preserves any active job, including its retry state.
-    case Worker.queue_page(page.id, page_number: page.page_number) do
+    case Worker.queue_page(page.id, [page_number: page.page_number] ++ Run.model_opts(document)) do
       {:ok, _job} -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -175,7 +186,7 @@ defmodule Doctrans.Processing.PdfProcessor do
         relative_path = Path.relative_to(image_path, Documents.uploads_dir())
         page_attrs = %{page_number: page_number, image_path: relative_path}
 
-        case save_page(document, page, page_attrs) do
+        case Run.with_current(document, fn current -> save_page(current, page, page_attrs) end) do
           {:ok, page} ->
             # Broadcast page creation for progressive UI updates
             Topics.broadcast_page_update(page)
