@@ -250,9 +250,6 @@ defmodule Doctrans.Processing.LlmProcessor do
 
         Topics.broadcast_page_update(page)
 
-        # Update chunk translated content
-        EmbeddingWorker.update_chunk_translations(page)
-
         # Check if all pages are complete and mark document as completed if so
         _ = DocumentOrchestrator.check_document_completion(page)
 

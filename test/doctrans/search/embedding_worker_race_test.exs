@@ -47,14 +47,12 @@ defmodule Doctrans.Search.EmbeddingWorkerRaceTest do
       :sys.get_state(EmbeddingWorker)
 
       # Translation can finish before the old embedding task releases the queued
-      # regeneration. There are no chunks for the translation callback to update.
-      {:ok, translated} =
+      # regeneration. Regenerated chunks must still use only source content.
+      {:ok, _translated} =
         Pages.update_page_translation(corrected, %{
           translated_markdown: translated_text,
           translation_status: "completed"
         })
-
-      EmbeddingWorker.update_chunk_translations(translated)
 
       reason =
         if @stage == :crash do
@@ -95,7 +93,7 @@ defmodule Doctrans.Search.EmbeddingWorkerRaceTest do
                Doctrans.Search.search_by_embedding(document.id, completed.embedding)
 
       assert result.original_markdown == new_text
-      assert result.translated_markdown == translated_text
+      assert result.translated_markdown == nil
       refute_receive {:embedding_started, ^new_barrier, _}, 50
     end
   end

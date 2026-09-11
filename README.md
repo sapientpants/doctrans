@@ -181,6 +181,15 @@ Open the chat panel on any document to ask questions about its content. The chat
 retrieval-augmented generation (RAG) to find relevant document chunks via semantic search (with a page-level
 fallback) and answer
 using the AI model. Chat is available once chunk or page embeddings have been generated.
+Chunk retrieval supplies the original source passage to chat: independently chunked translations
+can expand or contract and are not reliably aligned. Whole-page fallback can use the full page
+translation. Translations remain available in the document viewer.
+
+Existing source embeddings remain usable without rebuilding: retrieval ignores legacy chunk
+translations, including those in saved chat context. To rebuild existing chunks and remove their
+old translation pairings, run `mix rechunk_documents` with the embedding server available.
+Previously generated chat answers are retained.
+
 Conversations are saved per document and can be resumed after reopening it.
 
 ## Configuration

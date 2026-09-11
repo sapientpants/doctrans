@@ -1,6 +1,6 @@
 # Doctrans improvement plan
 
-Status: proposed; implementation has not started.
+Status: implementation in progress; C01 completed.
 Base: `main` at `6953656`, reviewed on 11 September 2026.
 Branch: `plan/project-improvements`.
 
@@ -36,7 +36,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
 
 ## Phase 1 — Faithful document content and answers
 
-- [ ] **C01 · P1 · Align source and translated retrieval chunks.**
+- [x] **C01 · P1 · Align source and translated retrieval chunks.**
   Original and translated Markdown are independently grouped by word count, then paired by chunk index.
   Translation expansion or contraction shifts boundaries, attaching unrelated translations to source embeddings.
   A probe produced source chunks `[assets + liabilities, cash]` and translations `[assets, liabilities, cash]`;
@@ -45,6 +45,11 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Apply the same strategy to normal indexing and the maintenance rechunk task.
   Acceptance: expansion/contraction fixtures retain every passage and never pair unrelated source/translation text;
   chat context contains the passage retrieved by the vector search.
+  Implemented: source-only chunks in normal indexing and maintenance rechunking; retrieval ignores
+  legacy chunk translations and chat uses source text for saved chunk context. Whole-page fallback
+  retains its full translation. Expansion/contraction regression tests cover both indexing paths,
+  passage preservation, vector retrieval, and legacy chat context. Existing vectors need no rebuild;
+  README documents optional rechunking to remove stored legacy pairings.
   Evidence: `lib/doctrans/search/embedding_worker.ex:215,262`, `lib/doctrans/chat.ex:141`,
   `lib/mix/tasks/rechunk_documents.ex`. Reproduced with a chunking probe.
 

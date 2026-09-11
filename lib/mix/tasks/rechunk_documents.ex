@@ -69,7 +69,6 @@ defmodule Mix.Tasks.RechunkDocuments do
       :ok
     else
       chunks = insert_chunks(page, chunk_data)
-      update_translations(page, chunks)
       results = embed_chunks(chunks)
       embed_page(page)
 
@@ -86,20 +85,6 @@ defmodule Mix.Tasks.RechunkDocuments do
       |> Chunk.changeset(data)
       |> Repo.insert!()
     end)
-  end
-
-  defp update_translations(page, chunks) do
-    if page.translated_markdown do
-      translated_data = Chunker.chunk(page.translated_markdown)
-
-      Enum.each(chunks, fn chunk ->
-        match = Enum.find(translated_data, &(&1.chunk_index == chunk.chunk_index))
-
-        if match do
-          chunk |> Chunk.changeset(%{translated_content: match.content}) |> Repo.update!()
-        end
-      end)
-    end
   end
 
   defp embed_chunks(chunks) do
