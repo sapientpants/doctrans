@@ -38,6 +38,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     # Show modal and trigger async model fetch
     socket =
       socket
+      |> select_page_models()
       |> assign(:show_reprocess_modal, true)
       |> assign(:models_loading, true)
 
@@ -117,7 +118,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   def fetch_available_models(socket) do
     {models, error} =
       case OpenAI.list_models() do
-        {:ok, models} -> {models, nil}
+        {:ok, models} -> {Enum.reject(models, &embedding_model?/1), nil}
         {:error, _} -> {[], ErrorMessages.message(:models_unavailable)}
       end
 
@@ -128,6 +129,22 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
       |> assign(:model_fetch_error, error)
 
     {:noreply, socket}
+  end
+
+  defp select_page_models(
+         %{assigns: %{reprocess_scope: :page, current_page: %{} = page}} = socket
+       ) do
+    socket
+    |> assign(:extraction_model, page.extraction_model || Config.OpenAI.vision_model())
+    |> assign(:translation_model, page.translation_model || Config.OpenAI.translation_model())
+    |> assign_form()
+  end
+
+  defp select_page_models(socket), do: socket
+
+  defp embedding_model?(model) do
+    model == Config.get(:embedding, :model) ||
+      String.contains?(String.downcase(model), "embed")
   end
 
   defp assign_form(socket) do
