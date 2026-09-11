@@ -137,8 +137,7 @@ defmodule Doctrans.Processing.OpenAI do
        when is_map(message) do
     with "stop" <- Map.get(choice, "finish_reason"),
          content when is_binary(content) <- Map.get(message, "content"),
-         result when result != "" <- clean_response(content),
-         false <- Regex.match?(~r/<\/?think>/i, result) do
+         {:ok, result} <- clean_response(content) do
       {:ok, result}
     else
       _ -> {:error, :incomplete_output}
@@ -245,11 +244,30 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp clean_response(response) do
-    # Remove any thinking blocks that may be in the response, then strip code fences
-    response
-    |> String.replace(~r/\<think\>[\s\S]*?<\/think\>/i, "")
-    |> String.trim()
-    |> strip_code_fences()
+    # Only leading, unfenced thinking blocks form the reasoning envelope.
+    # Once final text starts, tags belong to the document (including code examples).
+    with {:ok, content} <- strip_reasoning_prefix(String.trim(response)),
+         result when result != "" <- strip_code_fences(content) do
+      {:ok, result}
+    else
+      _ -> {:error, :incomplete_output}
+    end
+  end
+
+  defp strip_reasoning_prefix(content) do
+    case Regex.run(~r/\A<think>(.*?)<\/think>(.*)\z/is, content) do
+      [_, reasoning, rest] ->
+        if Regex.match?(~r/<\/?think>/i, reasoning) do
+          {:error, :incomplete_output}
+        else
+          strip_reasoning_prefix(String.trim(rest))
+        end
+
+      nil ->
+        if Regex.match?(~r/\A<\/?think>/i, content),
+          do: {:error, :incomplete_output},
+          else: {:ok, content}
+    end
   end
 
   @impl true

@@ -427,8 +427,11 @@ identifiers may be aliases and do not identify an immutable set of model weights
 OCR, translation, and non-streaming chat require a non-empty final answer and
 `finish_reason: "stop"` from the OpenAI-compatible provider. Responses marked
 `length`, filtered/tool-call responses, missing completion markers, and
-reasoning-only output are rejected. Thinking blocks are removed before validating
-the final text. Rejected OCR or translation output is not saved as completed text.
+reasoning-only output are rejected. Only leading, unfenced `<think>` blocks are
+treated as model reasoning and removed before validating the final text. Tags
+inside final text or code examples are preserved. A literal tag block at the very
+start of a response must be fenced to distinguish it from reasoning.
+Rejected OCR or translation output is not saved as completed text.
 
 If processing reports incomplete output, use a model with a larger output budget
 or split the page into smaller sections, then reprocess. Ensure the provider

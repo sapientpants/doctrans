@@ -62,7 +62,9 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: truncated and reasoning-only OCR/translation never become completed/indexed text;
   valid final responses still work; provider compatibility is covered by representative response fixtures.
   Implemented: non-streaming responses require explicit `finish_reason: stop` and non-empty
-  final text after removing thinking blocks and code fences. Missing/unknown completion markers,
+  final text after removing leading, unfenced thinking blocks and response code fences.
+  Literal thinking tags within final document text and code examples are preserved.
+  Missing/unknown completion markers,
   truncation, filtering, tool calls, reasoning-only output, and unclosed thinking blocks return
   `incomplete_output`, with recovery guidance in the UI and no immediate unchanged-request retries.
   HTTP/database regression fixtures cover OCR and translation persistence and final-content variants.

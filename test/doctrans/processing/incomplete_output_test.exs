@@ -50,6 +50,11 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
     %{"finish_reason" => "stop", "message" => %{"content" => %{"text" => "invalid shape"}}},
     %{"finish_reason" => "stop", "message" => %{"content" => "<think>reasoning</think>"}},
     %{"finish_reason" => "stop", "message" => %{"content" => "<think>unfinished reasoning"}},
+    %{"finish_reason" => "stop", "message" => %{"content" => "</think>orphaned reasoning"}},
+    %{
+      "finish_reason" => "stop",
+      "message" => %{"content" => "<think>outer <think>inner</think>unfinished reasoning"}
+    },
     %{"finish_reason" => "stop", "message" => %{"content" => "```markdown\n```"}}
   ]
 
@@ -112,6 +117,8 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
         %{"content" => "Final text", "reasoning_content" => "private reasoning"},
         %{"content" => "Final text", "reasoning" => "private reasoning"},
         %{"content" => "<think>private reasoning</think>\nFinal text"},
+        %{"content" => " \n<THINK>private reasoning</THINK>\n```markdown\nFinal text\n```"},
+        %{"content" => "<think>first</think>\n<think>second</think>\nFinal text"},
         %{"content" => "```markdown\nFinal text\n```"}
       ] do
     @message message
@@ -128,6 +135,45 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
 
       assert {:ok, "Final text"} = OpenAI.extract_markdown(path)
       assert {:ok, "Final text"} = OpenAI.translate("source", "de", "en")
+    end
+  end
+
+  for content <- [
+        "# Template reference\n\nExample: `<think>sample text</think>`\n\nEnd of example.",
+        "The opening tag is `<think>` and the closing tag is `</think>`.",
+        "An opening tag example: `<think>`",
+        "A closing tag example: `</think>`",
+        "# Example\n\n```xml\n<think>sample text</think>\n```\n\nEnd of example.",
+        "# Example\n\n<think>literal document text</think>"
+      ],
+      prefix <- ["", "<think>private reasoning</think>\n"],
+      wrapped? <- [false, true] do
+    @content content
+    @prefix prefix
+    @wrapped wrapped?
+
+    test "preserves literal tags in #{inspect(content)} with prefix #{inspect(prefix)}, wrapped: #{wrapped?}",
+         %{
+           bypass: bypass,
+           path: path
+         } do
+      # The outer Markdown fence is a response wrapper; inner code belongs to the document.
+      final = if @wrapped, do: "```markdown\n" <> @content <> "\n```", else: @content
+      response = @prefix <> final
+
+      Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => response}}]
+          })
+        )
+      end)
+
+      assert {:ok, @content} = OpenAI.extract_markdown(path)
+      assert {:ok, @content} = OpenAI.translate(@content, "de", "en")
     end
   end
 end
