@@ -44,17 +44,8 @@ defmodule Doctrans.Processing.OpenAI do
 
   defp resolve_extract_response({:ok, %Req.Response{status: 200, body: body}}, fuse) do
     case parse_chat_response(body) do
-      {:ok, markdown} ->
-        result = markdown |> String.trim() |> strip_code_fences()
-
-        if result == "" do
-          {:error, :empty_image_response}
-        else
-          {:ok, result}
-        end
-
-      {:error, _} = error ->
-        handle_api_error(fuse, error)
+      {:ok, _} = result -> result
+      {:error, _} = error -> handle_api_error(fuse, error)
     end
   end
 
@@ -110,19 +101,7 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp resolve_chat_response({:ok, %Req.Response{status: 200, body: body}}, _fuse) do
-    case parse_chat_response(body) do
-      {:ok, content} ->
-        result = content |> String.trim() |> strip_code_fences()
-
-        if result == "" do
-          {:error, :empty_response}
-        else
-          {:ok, result}
-        end
-
-      {:error, _} = error ->
-        error
-    end
+    parse_chat_response(body)
   end
 
   defp resolve_chat_response({:ok, %Req.Response{status: status} = resp}, fuse) do
@@ -151,37 +130,22 @@ defmodule Doctrans.Processing.OpenAI do
     )
   end
 
-  defp parse_chat_response(%{"choices" => [%{"message" => message}]})
+  # Fail closed: a non-streaming completion must explicitly finish normally.
+  # Require the OpenAI-compatible "stop" marker; absent/null markers cannot
+  # establish that the output is complete.
+  defp parse_chat_response(%{"choices" => [%{"message" => message} = choice | _]})
        when is_map(message) do
-    case Map.get(message, "content") do
-      content when is_binary(content) and content != "" ->
-        {:ok, content}
-
-      _ ->
-        # Missing or blank content — fall back to reasoning content if the
-        # model produced any (e.g. truncated or thinking-only responses)
-        check_for_reasoning(message)
+    with "stop" <- Map.get(choice, "finish_reason"),
+         content when is_binary(content) <- Map.get(message, "content"),
+         result when result != "" <- clean_response(content),
+         false <- Regex.match?(~r/<\/?think>/i, result) do
+      {:ok, result}
+    else
+      _ -> {:error, :incomplete_output}
     end
-  end
-
-  defp parse_chat_response(%{"choices" => choices})
-       when is_list(choices) and length(choices) > 1 do
-    # Multiple choices: use the first one
-    parse_chat_response(%{"choices" => [Enum.at(choices, 0)]})
   end
 
   defp parse_chat_response(_body), do: {:error, :invalid_api_response}
-
-  # Returns the trimmed reasoning content as the result, or an error when the
-  # response carried no usable content at all.
-  defp check_for_reasoning(message) do
-    reasoning = Map.get(message, "reasoning") || Map.get(message, "reasoning_content", "")
-
-    case String.trim(to_string(reasoning)) do
-      "" -> {:error, :missing_api_response}
-      content -> {:ok, content}
-    end
-  end
 
   @impl true
   @spec chat_stream([map()], (String.t() -> any()), keyword()) ::
@@ -259,17 +223,10 @@ defmodule Doctrans.Processing.OpenAI do
     prompt = build_translate_prompt(markdown, source_language, target_language)
     opts = with_default_model(opts, OpenAI.translation_model())
 
-    case chat(
-           [%{role: "user", content: prompt}],
-           opts ++ [max_tokens: 8192, think: false]
-         ) do
-      {:ok, response} ->
-        # Strip potential thinking tags from the response
-        {:ok, clean_response(response)}
-
-      {:error, _reason} = error ->
-        error
-    end
+    chat(
+      [%{role: "user", content: prompt}],
+      opts ++ [max_tokens: 8192, think: false]
+    )
   end
 
   defp build_translate_prompt(markdown, source_language, target_language) do

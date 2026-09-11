@@ -253,3 +253,8 @@ msgstr "Ficheiro demasiado grande (%{size}MB, máximo %{max}MB)"
 #, elixir-autogen, elixir-format
 msgid "LibreOffice process terminated unexpectedly"
 msgstr "O processo do LibreOffice terminou inesperadamente"
+
+#: lib/doctrans_web/error_messages.ex:46
+#, elixir-autogen, elixir-format
+msgid "The model did not return complete final text. Use a model with a larger output budget or split the page into smaller sections, then reprocess. The provider must return finish_reason=stop."
+msgstr "O modelo não devolveu um texto final completo. Utilize um modelo com um limite de saída maior ou divida a página em secções mais pequenas e volte a processá-la. O fornecedor deve devolver finish_reason=stop."

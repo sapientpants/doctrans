@@ -53,6 +53,7 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   def classify({:validation_failed, _}), do: :permanent
   def classify({:source_file_not_found, _}), do: :permanent
   def classify(:document_not_found), do: :permanent
+  def classify(:incomplete_output), do: :permanent
   def classify(:page_not_found), do: :permanent
   def classify(:soffice_not_found), do: :permanent
 

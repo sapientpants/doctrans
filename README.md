@@ -421,3 +421,17 @@ Model choices are saved for the run and preserved during recovery. Page details
 show the request model identifiers that produced the current extraction and
 translation; older results with no recorded model display **Unknown**. Model
 identifiers may be aliases and do not identify an immutable set of model weights.
+
+### Incomplete model output
+
+OCR, translation, and non-streaming chat require a non-empty final answer and
+`finish_reason: "stop"` from the OpenAI-compatible provider. Responses marked
+`length`, filtered/tool-call responses, missing completion markers, and
+reasoning-only output are rejected. Thinking blocks are removed before validating
+the final text. Rejected OCR or translation output is not saved as completed text.
+
+If processing reports incomplete output, use a model with a larger output budget
+or split the page into smaller sections, then reprocess. Ensure the provider
+returns the completion marker. The client does not automatically increase token
+limits or segment pages; existing background job retries may still run.
+Streaming chat uses a separate completion path and is not covered by this validation.
