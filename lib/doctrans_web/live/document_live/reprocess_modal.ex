@@ -127,6 +127,9 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
       |> assign(:available_models, models)
       |> assign(:models_loading, false)
       |> assign(:model_fetch_error, error)
+      |> assign(:extraction_model, available_selection(socket.assigns.extraction_model, models))
+      |> assign(:translation_model, available_selection(socket.assigns.translation_model, models))
+      |> assign_form()
 
     {:noreply, socket}
   end
@@ -141,6 +144,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   end
 
   defp select_page_models(socket), do: socket
+
+  defp available_selection(model, models), do: if(model in models, do: model, else: "")
 
   defp embedding_model?(model) do
     model == Config.get(:embedding, :model) ||
@@ -170,7 +175,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     options =
       if assigns.models_loading,
         do: [{gettext("Loading models..."), ""}],
-        else: Enum.sort(assigns.available_models)
+        else: [{gettext("Select a model"), ""} | Enum.sort(assigns.available_models)]
 
     assigns = assign(assigns, :model_options, options)
 
@@ -250,7 +255,10 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
             <button
               type="submit"
               class="rounded-lg bg-primary px-4 py-2 font-medium text-primary-content transition-opacity hover:opacity-90 disabled:opacity-50"
-              disabled={@models_loading || @available_models == []}
+              disabled={
+                @models_loading || @form[:extraction_model].value not in @available_models ||
+                  @form[:translation_model].value not in @available_models
+              }
               id={
                 if @scope == :document, do: "document-reprocess-submit", else: "reprocess-submit-btn"
               }

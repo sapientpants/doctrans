@@ -91,6 +91,60 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
            )
   end
 
+  for unavailable_field <- [:extraction_model, :translation_model] do
+    @unavailable_field unavailable_field
+    test "unavailable historical #{@unavailable_field} requires an explicit selection", %{
+      conn: conn,
+      bypass: bypass
+    } do
+      Bypass.expect_once(bypass, "GET", "/v1/models", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "available"}]}))
+      end)
+
+      document = document_fixture(%{total_pages: 1, status: "completed"})
+      page = completed_page_fixture(document)
+
+      models =
+        Map.put(
+          %{extraction_model: "available", translation_model: "available"},
+          @unavailable_field,
+          "removed"
+        )
+
+      {:ok, page} = Pages.update_page_extraction(page, Map.take(models, [:extraction_model]))
+      {:ok, _page} = Pages.update_page_translation(page, Map.take(models, [:translation_model]))
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      view |> element("#show-reprocess") |> render_click()
+
+      for {field, model} <- models do
+        selector =
+          if field == :extraction_model,
+            do: "#extraction-model-select",
+            else: "#translation-model-select"
+
+        expected = if model == "removed", do: "", else: model
+        assert has_element?(view, "#{selector} option[value='#{expected}'][selected]")
+      end
+
+      assert has_element?(view, "#reprocess-submit-btn[disabled]")
+      assert Documents.get_page!(page.id).original_markdown == page.original_markdown
+
+      view
+      |> form("#reprocess-form", extraction_model: "available", translation_model: "available")
+      |> render_change()
+
+      refute has_element?(view, "#reprocess-submit-btn[disabled]")
+
+      view |> form("#reprocess-form") |> render_submit()
+
+      refute has_element?(view, "#reprocess-modal")
+      assert Documents.get_page!(page.id).original_markdown != page.original_markdown
+    end
+  end
+
   test "embedding models are excluded from both model lists", %{conn: conn, bypass: bypass} do
     previous = Application.get_env(:doctrans, :embedding)
     Application.put_env(:doctrans, :embedding, model: "custom-vector-model")
