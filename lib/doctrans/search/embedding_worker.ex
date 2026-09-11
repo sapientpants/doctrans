@@ -209,17 +209,8 @@ defmodule Doctrans.Search.EmbeddingWorker do
   defp create_chunks(page) do
     chunk_data = Chunker.chunk(page.original_markdown)
 
-    # Translation may have finished while regeneration waited for an old task.
-    # Use the page read under the revision lock so concurrent translation writes
-    # either precede these inserts or update the inserted chunks afterwards.
-    translations =
-      page.translated_markdown
-      |> Chunker.chunk()
-      |> Map.new(&{&1.chunk_index, &1.content})
-
+    # Source and translation boundaries are not aligned. Store source chunks only.
     Enum.each(chunk_data, fn data ->
-      data = Map.put(data, :translated_content, Map.get(translations, data.chunk_index))
-
       %Chunk{page_id: page.id}
       |> Chunk.changeset(data)
       |> Repo.insert!(
@@ -243,32 +234,6 @@ defmodule Doctrans.Search.EmbeddingWorker do
     Chunk |> where([c], c.page_id == ^page_id) |> Repo.delete_all()
     page = Repo.get!(Page, page_id)
     create_chunks(page)
-  end
-
-  @doc """
-  Updates translated content on existing chunks after translation completes.
-  Re-chunks the translated text and matches by chunk_index.
-  """
-  def update_chunk_translations(page) do
-    chunks =
-      Chunk
-      |> where([c], c.page_id == ^page.id)
-      |> order_by([c], c.chunk_index)
-      |> Repo.all()
-
-    if chunks != [] and page.translated_markdown do
-      translated_chunks = Chunker.chunk(page.translated_markdown)
-
-      Enum.each(chunks, fn chunk ->
-        translated_data = Enum.find(translated_chunks, &(&1.chunk_index == chunk.chunk_index))
-
-        if translated_data do
-          chunk
-          |> Chunk.changeset(%{translated_content: translated_data.content})
-          |> Repo.update!()
-        end
-      end)
-    end
   end
 
   defp embed_chunk(chunk, embed_content, attempt, page) do

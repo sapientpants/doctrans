@@ -148,7 +148,7 @@ defmodule Doctrans.Search do
       c.page_id,
       p.page_number,
       c.content as original_markdown,
-      c.translated_content as translated_markdown,
+      NULL::text as translated_markdown,
       c.chunk_index,
       1 - (c.embedding <=> $1::vector) as similarity
     FROM chunks c

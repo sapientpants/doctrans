@@ -78,7 +78,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
         assert result.page_id == chunk.page_id
         assert result.chunk_index == chunk.chunk_index
         assert result.original_markdown == chunk.content
-        assert result.translated_markdown == chunk.translated_content
+        assert result.translated_markdown == nil
         assert_in_delta result.rrf_score, 2 / (60 + rank), 1.0e-12
       end)
 

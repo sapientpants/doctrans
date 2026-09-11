@@ -138,7 +138,7 @@ defmodule Doctrans.Chat do
         items
         |> Enum.sort_by(&(Map.get(&1, :chunk_index) || 0))
         |> Enum.map(fn item ->
-          String.trim(item.translated_markdown || item.original_markdown || "")
+          String.trim(context_content(item) || "")
         end)
         |> Enum.reject(&(&1 == ""))
         |> Enum.join("\n\n")
@@ -152,6 +152,13 @@ defmodule Doctrans.Chat do
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n\n---\n\n")
   end
+
+  # Old saved chunk context can still contain translations paired by index.
+  # Only whole-page results have a reliable source/translation boundary.
+  defp context_content(%{chunk_index: index} = item) when is_integer(index),
+    do: item.original_markdown
+
+  defp context_content(item), do: item.translated_markdown || item.original_markdown
 
   @max_context_chunks 16
   @max_context_bytes 32_000
