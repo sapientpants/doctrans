@@ -41,6 +41,7 @@ defmodule DoctransWeb.DocumentLive.Components do
           </span>
         </div>
         <.processing_progress
+          :if={@progress < 100}
           id={"document-progress-#{@document.id}"}
           document={@document}
           progress={@progress}

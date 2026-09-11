@@ -44,7 +44,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
         state
       end)
 
-      assert has_element?(view, "#document-processing-progress progress[value='100.0']")
+      refute has_element?(view, "#document-processing-progress")
       view |> element("#show-document-reprocess") |> render_click()
       assert has_element?(view, "#document-reprocess-form")
       model = "vision"
@@ -60,11 +60,10 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
       assert Documents.list_pages(document.id) == []
       {:ok, reloaded, _} = live(conn, ~p"/documents/#{document.id}")
       assert has_element?(reloaded, "#document-processing-progress progress[value='0.0']")
-      assert has_element?(reloaded, "#document-processing-models", model)
     end)
   end
 
-  test "missing original is explained and cancel leaves generated pages intact", %{
+  test "missing original disables reprocessing and cancel leaves generated pages intact", %{
     conn: conn,
     document: document
   } do
@@ -75,7 +74,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
     File.rm!(Run.source_path(document))
     {:ok, missing, _} = live(conn, ~p"/documents/#{document.id}")
     assert has_element?(missing, "#show-document-reprocess[disabled]")
-    assert has_element?(missing, "#original-upload-missing")
-    assert has_element?(missing, "#page-processing-models", "Unknown")
+    refute has_element?(missing, "#original-upload-missing")
+    refute has_element?(missing, "#page-processing-models")
   end
 end

@@ -63,6 +63,7 @@
       </header>
 
       <section
+        :if={@processing_progress < 100}
         class="border-b border-base-300 px-4 py-2"
         aria-label={gettext("Document processing")}
       >
@@ -77,10 +78,6 @@
           class="text-xs text-base-content/60"
         >
           {gettext("Original upload unavailable. Re-upload this document to process it again.")}
-        </p>
-        <p id="document-processing-models" class="text-xs text-base-content/60">
-          {gettext("Run models")}: {@document.extraction_model || gettext("Unknown")} / {@document.translation_model ||
-            gettext("Unknown")}
         </p>
         <p
           :if={@current_page}
