@@ -691,3 +691,8 @@ msgstr "Dokumentet har ändrats. Försök igen."
 #, elixir-autogen, elixir-format
 msgid "This document still has active processing jobs. Please wait for them to finish."
 msgstr "Det här dokumentet har fortfarande aktiva bearbetningsjobb. Vänta tills de är klara."
+
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:178
+#, elixir-autogen, elixir-format
+msgid "Select a model"
+msgstr "Välj en modell"

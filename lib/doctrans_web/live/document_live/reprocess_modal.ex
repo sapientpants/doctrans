@@ -38,6 +38,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     # Show modal and trigger async model fetch
     socket =
       socket
+      |> select_page_models()
       |> assign(:show_reprocess_modal, true)
       |> assign(:models_loading, true)
 
@@ -117,7 +118,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   def fetch_available_models(socket) do
     {models, error} =
       case OpenAI.list_models() do
-        {:ok, models} -> {models, nil}
+        {:ok, models} -> {Enum.reject(models, &embedding_model?/1), nil}
         {:error, _} -> {[], ErrorMessages.message(:models_unavailable)}
       end
 
@@ -126,8 +127,29 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
       |> assign(:available_models, models)
       |> assign(:models_loading, false)
       |> assign(:model_fetch_error, error)
+      |> assign(:extraction_model, available_selection(socket.assigns.extraction_model, models))
+      |> assign(:translation_model, available_selection(socket.assigns.translation_model, models))
+      |> assign_form()
 
     {:noreply, socket}
+  end
+
+  defp select_page_models(
+         %{assigns: %{reprocess_scope: :page, current_page: %{} = page}} = socket
+       ) do
+    socket
+    |> assign(:extraction_model, page.extraction_model || Config.OpenAI.vision_model())
+    |> assign(:translation_model, page.translation_model || Config.OpenAI.translation_model())
+    |> assign_form()
+  end
+
+  defp select_page_models(socket), do: socket
+
+  defp available_selection(model, models), do: if(model in models, do: model, else: "")
+
+  defp embedding_model?(model) do
+    model == Config.get(:embedding, :model) ||
+      String.contains?(String.downcase(model), "embed")
   end
 
   defp assign_form(socket) do
@@ -153,7 +175,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     options =
       if assigns.models_loading,
         do: [{gettext("Loading models..."), ""}],
-        else: Enum.sort(assigns.available_models)
+        else: [{gettext("Select a model"), ""} | Enum.sort(assigns.available_models)]
 
     assigns = assign(assigns, :model_options, options)
 
@@ -233,7 +255,10 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
             <button
               type="submit"
               class="rounded-lg bg-primary px-4 py-2 font-medium text-primary-content transition-opacity hover:opacity-90 disabled:opacity-50"
-              disabled={@models_loading || @available_models == []}
+              disabled={
+                @models_loading || @form[:extraction_model].value not in @available_models ||
+                  @form[:translation_model].value not in @available_models
+              }
               id={
                 if @scope == :document, do: "document-reprocess-submit", else: "reprocess-submit-btn"
               }

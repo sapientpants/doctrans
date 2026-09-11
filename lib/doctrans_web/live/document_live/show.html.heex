@@ -39,7 +39,7 @@
             }
             class="inline-flex items-center gap-2 rounded-lg border border-base-300 px-3 py-2 text-sm transition-colors hover:bg-base-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <.icon name="hero-arrow-path" class="size-4" /> {gettext("Reprocess document")}
+            <.icon name="hero-arrow-path" class="size-4" />
           </button>
           <.page_selector
             current_page={@current_page_number}
@@ -63,6 +63,7 @@
       </header>
 
       <section
+        :if={@processing_progress < 100}
         class="border-b border-base-300 px-4 py-2"
         aria-label={gettext("Document processing")}
       >
@@ -78,17 +79,11 @@
         >
           {gettext("Original upload unavailable. Re-upload this document to process it again.")}
         </p>
-        <p id="document-processing-models" class="text-xs text-base-content/60">
-          {gettext("Run models")}: {@document.extraction_model || gettext("Unknown")} / {@document.translation_model ||
-            gettext("Unknown")}
-        </p>
         <p
           :if={@current_page}
           id="page-processing-models"
           class="mt-1 text-xs text-base-content/60"
         >
-          {gettext("Page models (extraction / translation)")}: {@current_page.extraction_model ||
-            gettext("Unknown")} / {@current_page.translation_model || gettext("Unknown")}
         </p>
       </section>
       <%!-- Main content - Split screen --%>

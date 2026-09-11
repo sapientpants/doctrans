@@ -698,3 +698,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "This document still has active processing jobs. Please wait for them to finish."
 msgstr ""
+
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:178
+#, elixir-autogen, elixir-format
+msgid "Select a model"
+msgstr "Select a model"

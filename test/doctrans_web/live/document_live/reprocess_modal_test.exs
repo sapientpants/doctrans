@@ -3,7 +3,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Documents
+  alias Doctrans.{Config, Documents}
+  alias Doctrans.Documents.Pages
 
   setup do
     previous = Application.fetch_env!(:doctrans, :openai)
@@ -19,24 +20,31 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     %{bypass: bypass}
   end
 
-  test "model selections survive reopening and the page is reprocessed", %{
+  test "opening restores the page's recorded models and the page is reprocessed", %{
     conn: conn,
     bypass: bypass
   } do
     Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
-      |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}, %{id: "translation"}]}))
+      |> Plug.Conn.resp(
+        200,
+        Jason.encode!(%{data: [%{id: "vision"}, %{id: "translation"}, %{id: "alternative"}]})
+      )
     end)
 
     document = document_fixture(%{total_pages: 1, status: "completed"})
     page = completed_page_fixture(document)
+    {:ok, page} = Pages.update_page_extraction(page, %{extraction_model: "vision"})
+    {:ok, page} = Pages.update_page_translation(page, %{translation_model: "translation"})
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
     view |> element("#show-reprocess") |> render_click()
+    assert has_element?(view, "#extraction-model-select option[value='vision'][selected]")
+    assert has_element?(view, "#translation-model-select option[value='translation'][selected]")
 
     view
-    |> form("#reprocess-form", extraction_model: "vision", translation_model: "translation")
+    |> form("#reprocess-form", extraction_model: "alternative", translation_model: "alternative")
     |> render_change()
 
     view |> element("#reprocess-cancel") |> render_click()
@@ -55,6 +63,118 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     assert reprocessed.extraction_status == "completed"
     assert reprocessed.original_markdown != page.original_markdown
     assert reprocessed.translated_markdown != page.translated_markdown
+  end
+
+  test "pages without model history use configured defaults", %{conn: conn, bypass: bypass} do
+    extraction = Config.OpenAI.vision_model()
+    translation = Config.OpenAI.translation_model()
+
+    Bypass.expect_once(bypass, "GET", "/v1/models", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(
+        200,
+        Jason.encode!(%{data: Enum.map(Enum.uniq([extraction, translation]), &%{id: &1})})
+      )
+    end)
+
+    document = document_fixture(%{total_pages: 1, status: "completed"})
+    completed_page_fixture(document)
+    {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+    view |> element("#show-reprocess") |> render_click()
+
+    assert has_element?(view, "#extraction-model-select option[value='#{extraction}'][selected]")
+
+    assert has_element?(
+             view,
+             "#translation-model-select option[value='#{translation}'][selected]"
+           )
+  end
+
+  for unavailable_field <- [:extraction_model, :translation_model] do
+    @unavailable_field unavailable_field
+    test "unavailable historical #{@unavailable_field} requires an explicit selection", %{
+      conn: conn,
+      bypass: bypass
+    } do
+      Bypass.expect_once(bypass, "GET", "/v1/models", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "available"}]}))
+      end)
+
+      document = document_fixture(%{total_pages: 1, status: "completed"})
+      page = completed_page_fixture(document)
+
+      models =
+        Map.put(
+          %{extraction_model: "available", translation_model: "available"},
+          @unavailable_field,
+          "removed"
+        )
+
+      {:ok, page} = Pages.update_page_extraction(page, Map.take(models, [:extraction_model]))
+      {:ok, _page} = Pages.update_page_translation(page, Map.take(models, [:translation_model]))
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      view |> element("#show-reprocess") |> render_click()
+
+      for {field, model} <- models do
+        selector =
+          if field == :extraction_model,
+            do: "#extraction-model-select",
+            else: "#translation-model-select"
+
+        expected = if model == "removed", do: "", else: model
+        assert has_element?(view, "#{selector} option[value='#{expected}'][selected]")
+      end
+
+      assert has_element?(view, "#reprocess-submit-btn[disabled]")
+      assert Documents.get_page!(page.id).original_markdown == page.original_markdown
+
+      view
+      |> form("#reprocess-form", extraction_model: "available", translation_model: "available")
+      |> render_change()
+
+      refute has_element?(view, "#reprocess-submit-btn[disabled]")
+
+      view |> form("#reprocess-form") |> render_submit()
+
+      refute has_element?(view, "#reprocess-modal")
+      assert Documents.get_page!(page.id).original_markdown != page.original_markdown
+    end
+  end
+
+  test "embedding models are excluded from both model lists", %{conn: conn, bypass: bypass} do
+    previous = Application.get_env(:doctrans, :embedding)
+    Application.put_env(:doctrans, :embedding, model: "custom-vector-model")
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:doctrans, :embedding, previous),
+        else: Application.delete_env(:doctrans, :embedding)
+    end)
+
+    models = ["vision", "text-embedding-3-small", "Qwen3-Embedding-8B", "custom-vector-model"]
+
+    Bypass.expect_once(bypass, "GET", "/v1/models", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, Jason.encode!(%{data: Enum.map(models, &%{id: &1})}))
+    end)
+
+    document = document_fixture(%{total_pages: 1, status: "completed"})
+    completed_page_fixture(document)
+    {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+    view |> element("#show-reprocess") |> render_click()
+
+    for selector <- ["#extraction-model-select", "#translation-model-select"] do
+      assert has_element?(view, "#{selector} option[value='vision']")
+
+      for model <- tl(models) do
+        refute has_element?(view, "#{selector} option[value='#{model}']")
+      end
+    end
   end
 
   test "model fetch failure leaves an error and disables submission", %{
