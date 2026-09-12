@@ -366,10 +366,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   # it here too; the next answer would otherwise still be grounded in the text
   # that was just replaced.
   defp prune_chat_context(socket, page) do
-    context =
-      Enum.reject(socket.assigns.chat_retrieved_context, fn chunk ->
-        Map.get(chunk, :page_id) == page.id and Chat.superseded_by?(chunk, page)
-      end)
+    context = Enum.reject(socket.assigns.chat_retrieved_context, &Chat.superseded_by?(&1, page))
 
     assign(socket, :chat_retrieved_context, context)
   end

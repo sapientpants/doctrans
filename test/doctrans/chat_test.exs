@@ -73,18 +73,6 @@ defmodule Doctrans.ChatTest do
   end
 
   describe "merge_context/3" do
-    defp chunk(page_id, chunk_index, similarity, opts \\ []) do
-      %{
-        page_id: page_id,
-        page_number: 1,
-        chunk_index: chunk_index,
-        content_revision: Keyword.get(opts, :content_revision),
-        similarity: similarity,
-        translated_markdown: Keyword.get(opts, :content, "content"),
-        original_markdown: nil
-      }
-    end
-
     test "dedups by chunk identity {page_id, chunk_index}" do
       prior = [chunk("p1", 0, 0.9)]
       new = [chunk("p1", 0, 0.8), chunk("p1", 1, 0.7)]
@@ -149,6 +137,47 @@ defmodule Doctrans.ChatTest do
       new = [chunk("p1", nil, 0.40, content_revision: 1, content: "Assets are 100")]
 
       assert [%{translated_markdown: "Assets are 100"}] = Chat.merge_context(prior, new)
+    end
+
+    test "the translated copy keeps the best similarity of the copies it replaces" do
+      prior = [chunk("p1", nil, 0.95, content_revision: 1, content: nil)]
+      new = [chunk("p1", nil, 0.40, content_revision: 1, content: "Assets are 100")]
+
+      assert [%{translated_markdown: "Assets are 100", similarity: 0.95}] =
+               Chat.merge_context(prior, new)
+    end
+
+    # Inheriting the translated copy's own lower score would sort the page to the
+    # bottom and drop it, leaving the conversation without the page it is about.
+    test "preferring the translation does not cost the page its place in the budget" do
+      prior = [
+        chunk("p1", nil, 0.95, content_revision: 1, content: nil),
+        chunk("p2", nil, 0.89, content_revision: 1, content: "Other"),
+        chunk("p3", nil, 0.88, content_revision: 1, content: "Other"),
+        chunk("p4", nil, 0.87, content_revision: 1, content: "Other")
+      ]
+
+      new = [chunk("p1", nil, 0.40, content_revision: 1, content: "Assets are 100")]
+
+      merged = Chat.merge_context(prior, new, max_chunks: 3)
+
+      assert Enum.map(merged, & &1.page_id) == ["p1", "p2", "p3"]
+    end
+
+    test "a stale copy's similarity is not inherited across a revision bump" do
+      prior = [chunk("p1", nil, 0.95, content_revision: 1, content: "Assets are 10")]
+      new = [chunk("p1", nil, 0.40, content_revision: 2, content: "Assets are 100")]
+
+      assert [%{content_revision: 2, similarity: 0.40}] = Chat.merge_context(prior, new)
+    end
+
+    # Chunk retrieval carries no translation, so the translation preference must
+    # stay inert there and leave similarity as the only tie-break.
+    test "translation presence does not reorder chunk-level copies" do
+      prior = [chunk("p1", 0, 0.95, content_revision: 1, content: nil)]
+      new = [chunk("p1", 0, 0.40, content_revision: 1, content: "Assets are 100")]
+
+      assert [%{translated_markdown: nil, similarity: 0.95}] = Chat.merge_context(prior, new)
     end
 
     test "a newer revision supersedes older chunks of the same page under other indexes" do
@@ -260,6 +289,31 @@ defmodule Doctrans.ChatTest do
       assert Chat.current_context(context) == context
     end
 
+    # The content check catches more than the extraction-to-translation window: a
+    # translation rewritten at one revision also leaves saved context stale.
+    test "drops page context holding a superseded translation", %{page: page} do
+      {:ok, first} =
+        Documents.update_page_translation(page, %{
+          translation_status: "completed",
+          translated_markdown: "Aktiva sind 10"
+        })
+
+      context = [
+        chunk(page.id, nil, 0.9,
+          content_revision: first.content_revision,
+          content: "Aktiva sind 10"
+        )
+      ]
+
+      assert Chat.current_context(context) == context
+
+      {:ok, second} =
+        Documents.update_page_translation(first, %{translated_markdown: "Assets are 10"})
+
+      assert second.content_revision == first.content_revision
+      assert Chat.current_context(context) == []
+    end
+
     test "drops chunks from deleted pages and chunks without a revision", %{page: page} do
       assert Chat.current_context([chunk(page.id, 0, 0.9)]) == []
 
@@ -268,6 +322,75 @@ defmodule Doctrans.ChatTest do
 
       assert Chat.current_context([chunk("not-a-uuid", 0, 0.9, content_revision: 0)]) == []
       assert Chat.current_context([]) == []
+    end
+  end
+
+  describe "superseded_by?/2" do
+    setup do
+      document = create_document(status: "completed")
+
+      page =
+        create_page(document,
+          page_number: 1,
+          extraction_status: "completed",
+          original_markdown: "Assets are 10"
+        )
+
+      %{page: page}
+    end
+
+    test "a chunk read from another page is never superseded", %{page: page} do
+      other = chunk(Ecto.UUID.generate(), nil, 0.9, content_revision: page.content_revision + 5)
+
+      refute Chat.superseded_by?(other, page)
+    end
+
+    test "page context is superseded once the translation lands", %{page: page} do
+      untranslated =
+        chunk(page.id, nil, 0.9, content_revision: page.content_revision, content: nil)
+
+      refute Chat.superseded_by?(untranslated, page)
+
+      {:ok, translated} =
+        Documents.update_page_translation(page, %{
+          translation_status: "completed",
+          translated_markdown: "Aktiva sind 10"
+        })
+
+      assert Chat.superseded_by?(untranslated, translated)
+
+      current =
+        chunk(page.id, nil, 0.9,
+          content_revision: translated.content_revision,
+          content: "Aktiva sind 10"
+        )
+
+      refute Chat.superseded_by?(current, translated)
+    end
+
+    test "chunk context is superseded only by a revision change", %{page: page} do
+      context = chunk(page.id, 0, 0.9, content_revision: page.content_revision, content: nil)
+
+      {:ok, translated} =
+        Documents.update_page_translation(page, %{
+          translation_status: "completed",
+          translated_markdown: "Aktiva sind 10"
+        })
+
+      refute Chat.superseded_by?(context, translated)
+      assert Chat.superseded_by?(context, %{translated | content_revision: 99})
+    end
+
+    defp chunk(page_id, chunk_index, similarity, opts \\ []) do
+      %{
+        page_id: page_id,
+        page_number: 1,
+        chunk_index: chunk_index,
+        content_revision: Keyword.get(opts, :content_revision),
+        similarity: similarity,
+        translated_markdown: Keyword.get(opts, :content, "content"),
+        original_markdown: nil
+      }
     end
   end
 

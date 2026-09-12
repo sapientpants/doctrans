@@ -148,6 +148,70 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       assert Enum.map(updated.assigns.chat_retrieved_context, & &1.chunk_index) == [0]
     end
 
+    test "a page-level chunk carrying the current translation survives the update", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+
+      page =
+        Repo.insert!(%Doctrans.Documents.Page{
+          document_id: document.id,
+          page_number: 3,
+          image_path: "documents/#{document.id}/pages/page_3.png",
+          original_markdown: "Aktiva sind 10",
+          translated_markdown: "Assets are 10",
+          extraction_status: "completed",
+          translation_status: "completed"
+        })
+
+      socket =
+        :sys.get_state(view.pid).socket
+        |> Phoenix.Component.assign(:chat_retrieved_context, [page_context_chunk(page)])
+
+      {:noreply, updated} = Show.handle_info({:page_updated, page}, socket)
+
+      assert Enum.map(updated.assigns.chat_retrieved_context, & &1.page_id) == [page.id]
+    end
+
+    test "an unrelated page's update leaves the accumulated context alone", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+
+      kept =
+        Repo.insert!(%Doctrans.Documents.Page{
+          document_id: document.id,
+          page_number: 4,
+          image_path: "documents/#{document.id}/pages/page_4.png",
+          original_markdown: "Aktiva sind 10",
+          extraction_status: "completed",
+          translation_status: "processing"
+        })
+
+      {:ok, other} =
+        Documents.update_page_translation(
+          Repo.insert!(%Doctrans.Documents.Page{
+            document_id: document.id,
+            page_number: 5,
+            image_path: "documents/#{document.id}/pages/page_5.png",
+            original_markdown: "Aktiva sind 20",
+            extraction_status: "completed",
+            translation_status: "processing"
+          }),
+          %{translation_status: "completed", translated_markdown: "Assets are 20"}
+        )
+
+      socket =
+        :sys.get_state(view.pid).socket
+        |> Phoenix.Component.assign(:chat_retrieved_context, [page_context_chunk(kept)])
+
+      {:noreply, updated} = Show.handle_info({:page_updated, other}, socket)
+
+      assert Enum.map(updated.assigns.chat_retrieved_context, & &1.page_id) == [kept.id]
+    end
+
     test "an answer finishing after a page correction keeps neither socket nor saved context", %{
       conn: conn,
       document: document

@@ -176,7 +176,9 @@ defmodule Doctrans.Chat do
   Within one revision, a page-level copy carrying the page's translation
   outranks a copy retrieved before that translation was written: writing a
   translation does not advance the revision, so similarity alone would keep
-  serving the untranslated text.
+  serving the untranslated text. The surviving copy keeps the best similarity
+  recorded for its identity at that revision, so preferring the translation
+  never costs the page its rank.
 
   The surviving chunks are sorted by similarity descending and retained within
   both `:max_chunks` (default 16) and `:max_bytes` (default 32,000). The byte
@@ -209,11 +211,26 @@ defmodule Doctrans.Chat do
   defp rank_context(chunks) do
     chunks
     |> Enum.group_by(&chunk_identity/1)
-    |> Enum.map(fn {_id, dupes} ->
-      Enum.max_by(dupes, &{revision(&1), translation_rank(&1), &1.similarity})
-    end)
+    |> Enum.map(fn {_id, dupes} -> best_copy(dupes) end)
     |> drop_superseded()
     |> Enum.sort_by(& &1.similarity, :desc)
+  end
+
+  # Takes the text from the preferred copy but keeps the best similarity seen
+  # for the identity at that revision. The translated copy is retrieved by a
+  # later query and can score lower than the untranslated one it replaces;
+  # inheriting that lower score would push a page the conversation is about to
+  # the bottom of the ranking and out of the byte budget below.
+  defp best_copy(dupes) do
+    best = Enum.max_by(dupes, &{revision(&1), translation_rank(&1), &1.similarity})
+
+    similarity =
+      dupes
+      |> Enum.filter(&(revision(&1) == revision(best)))
+      |> Enum.map(& &1.similarity)
+      |> Enum.max()
+
+    %{best | similarity: similarity}
   end
 
   defp fit_context(ranked, max_chunks, max_bytes) do
@@ -255,8 +272,16 @@ defmodule Doctrans.Chat do
 
   # Page embeddings are generated as soon as extraction completes, so the same
   # page can be retrieved twice at one revision: once before its translation is
-  # written and once after. Only page-level results render `translated_markdown`,
-  # since chunk results always carry nil, so chunk ranking is left untouched.
+  # written and once after. Chunk ranking is left untouched: chunk retrieval
+  # carries a nil translation, and a translation on legacy saved chunk context
+  # is ignored for freshness just as `context_content/1` ignores it for
+  # rendering.
+  #
+  # Only the nil/non-nil boundary is ranked, which is sufficient because a
+  # completed translation is never rewritten at the same revision: every
+  # re-translation entry point requires `translation_status` to be pending,
+  # processing, or error, and resetting a page for reprocessing moves
+  # `extraction_status` off "completed" and so bumps the revision.
   defp translation_rank(chunk) do
     if page_level?(chunk) and not is_nil(Map.get(chunk, :translated_markdown)), do: 1, else: 0
   end
@@ -324,9 +349,13 @@ defmodule Doctrans.Chat do
   A socket keeps its retrieval context between turns, so a page changed in
   another tab has to be evicted where it is held. Applies `current_context/1`'s
   test to callers that already hold the updated page.
+
+  A chunk read from another page is never superseded by this one, so callers can
+  pass their whole accumulated context without pre-filtering by `page_id`.
   """
   def superseded_by?(chunk, page) do
-    not current_chunk?(chunk, page.content_revision, page.translated_markdown)
+    Map.get(chunk, :page_id) == page.id and
+      not current_chunk?(chunk, page.content_revision, page.translated_markdown)
   end
 
   defp current_chunk?(chunk, revision, translation) do
