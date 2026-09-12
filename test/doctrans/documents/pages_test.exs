@@ -267,73 +267,6 @@ defmodule Doctrans.Documents.PagesTest do
     end
   end
 
-  describe "all_pages_completed?/1" do
-    test "returns false when pages have pending translation" do
-      doc = document_with_pages_fixture(%{}, 2)
-      refute Pages.all_pages_completed?(doc.id)
-    end
-
-    test "returns true when all pages have completed translation" do
-      doc = document_with_pages_fixture(%{}, 2)
-
-      for page <- Pages.list_pages(doc.id) do
-        {:ok, page} = Pages.update_page_extraction(page, %{extraction_status: "completed"})
-        Pages.update_page_translation(page, %{translation_status: "completed"})
-      end
-
-      assert Pages.all_pages_completed?(doc.id)
-    end
-
-    test "returns false for document with unknown page count" do
-      doc = document_fixture()
-      refute Pages.all_pages_completed?(doc.id)
-      completed_page_fixture(doc)
-      refute Pages.all_pages_completed?(doc.id)
-    end
-
-    test "returns false for zero pages or a missing document" do
-      doc = document_fixture(%{total_pages: 0})
-      refute Pages.all_pages_completed?(doc.id)
-      refute Pages.all_pages_completed?(Ecto.UUID.generate())
-    end
-
-    test "requires the stored page count to match the expected count" do
-      doc = document_fixture(%{total_pages: 3})
-      refute Pages.all_pages_completed?(doc.id)
-
-      for number <- 1..2 do
-        completed_page_fixture(doc, %{page_number: number})
-        refute Pages.all_pages_completed?(doc.id)
-      end
-
-      completed_page_fixture(doc, %{page_number: 3})
-      assert Pages.all_pages_completed?(doc.id)
-
-      completed_page_fixture(doc, %{page_number: 4})
-      refute Pages.all_pages_completed?(doc.id)
-    end
-
-    test "failed pages never count as completed" do
-      doc = document_fixture(%{total_pages: 2})
-      failed = page_fixture(doc, %{extraction_status: "error"})
-
-      page =
-        page_fixture(doc, %{
-          page_number: 2,
-          extraction_status: "completed",
-          translation_status: "error"
-        })
-
-      refute Pages.all_pages_completed?(doc.id)
-      {:ok, _} = Pages.update_page_translation(page, %{translation_status: "completed"})
-      refute Pages.all_pages_completed?(doc.id)
-
-      {:ok, failed} = Pages.update_page_extraction(failed, %{extraction_status: "completed"})
-      {:ok, _} = Pages.update_page_translation(failed, %{translation_status: "completed"})
-      assert Pages.all_pages_completed?(doc.id)
-    end
-  end
-
   describe "completion_state/1" do
     test "is incomplete while pages are missing or unfinished" do
       doc = document_fixture(%{total_pages: 2})
@@ -367,6 +300,56 @@ defmodule Doctrans.Documents.PagesTest do
     test "is incomplete for an unknown page count" do
       doc = document_fixture()
       completed_page_fixture(doc)
+      assert Pages.completion_state(doc.id) == :incomplete
+    end
+
+    test "is incomplete for zero pages or a missing document" do
+      doc = document_fixture(%{total_pages: 0})
+      assert Pages.completion_state(doc.id) == :incomplete
+      assert Pages.completion_state(Ecto.UUID.generate()) == :incomplete
+    end
+
+    test "requires the stored page count to match the expected count" do
+      doc = document_fixture(%{total_pages: 3})
+      assert Pages.completion_state(doc.id) == :incomplete
+
+      for number <- 1..2 do
+        completed_page_fixture(doc, %{page_number: number})
+        assert Pages.completion_state(doc.id) == :incomplete
+      end
+
+      completed_page_fixture(doc, %{page_number: 3})
+      assert Pages.completion_state(doc.id) == :completed
+
+      completed_page_fixture(doc, %{page_number: 4})
+      assert Pages.completion_state(doc.id) == :incomplete
+    end
+
+    test "a failed page keeps the document out of the completed state" do
+      doc = document_fixture(%{total_pages: 2})
+      failed = page_fixture(doc, %{extraction_status: "error"})
+
+      page =
+        page_fixture(doc, %{
+          page_number: 2,
+          extraction_status: "completed",
+          translation_status: "error"
+        })
+
+      assert Pages.completion_state(doc.id) == :failed
+      assert Pages.failed_page_numbers(doc.id) == [1, 2]
+
+      {:ok, _} = Pages.update_page_translation(page, %{translation_status: "completed"})
+      assert Pages.completion_state(doc.id) == :failed
+      assert Pages.failed_page_numbers(doc.id) == [1]
+
+      {:ok, failed} = Pages.update_page_extraction(failed, %{extraction_status: "completed"})
+      {:ok, _} = Pages.update_page_translation(failed, %{translation_status: "completed"})
+      assert Pages.completion_state(doc.id) == :completed
+    end
+
+    test "pages still pending translation are not settled" do
+      doc = document_with_pages_fixture(%{}, 2)
       assert Pages.completion_state(doc.id) == :incomplete
     end
   end

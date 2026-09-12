@@ -6,6 +6,7 @@ defmodule Doctrans.Documents.Pages do
   """
 
   import Ecto.Query
+  import Doctrans.Documents.Page, only: [failed?: 1]
 
   alias Doctrans.Documents.{Document, Page}
   alias Doctrans.Processing.Run
@@ -165,28 +166,25 @@ defmodule Doctrans.Documents.Pages do
   end
 
   @doc """
-  Checks if all expected pages in a document exist and completed successfully.
-
-  Failed pages never count as success; use `completion_state/1` to tell an
-  unfinished document from one that settled with failures.
-  """
-  def all_pages_completed?(document_id), do: completion_state(document_id) == :completed
-
-  @doc """
   Lists the page numbers whose extraction or translation failed, in page order.
   """
   @spec failed_page_numbers(Uniq.UUID.t()) :: [integer()]
   def failed_page_numbers(document_id) do
-    Page
-    |> where([p], p.document_id == ^document_id)
-    |> where(
-      [p],
-      p.translation_status != "completed" and
-        (p.extraction_status == "error" or p.translation_status == "error")
-    )
+    document_id
+    |> failed_pages_query()
     |> order_by([p], p.page_number)
     |> select([p], p.page_number)
     |> Repo.all()
+  end
+
+  @doc """
+  Query for the pages of a document whose extraction or translation failed.
+  """
+  @spec failed_pages_query(Uniq.UUID.t()) :: Ecto.Query.t()
+  def failed_pages_query(document_id) do
+    Page
+    |> where([p], p.document_id == ^document_id)
+    |> where([p], failed?(p))
   end
 
   # Success and failure stay disjoint so settled pages add up to the expected total.
@@ -199,12 +197,7 @@ defmodule Doctrans.Documents.Pages do
       total_pages: d.total_pages,
       pages: count(p.id),
       succeeded: filter(count(p.id), p.translation_status == "completed"),
-      failed:
-        filter(
-          count(p.id),
-          p.translation_status != "completed" and
-            (p.extraction_status == "error" or p.translation_status == "error")
-        )
+      failed: filter(count(p.id), failed?(p))
     })
     |> Repo.one()
   end

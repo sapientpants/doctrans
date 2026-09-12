@@ -47,6 +47,35 @@ defmodule Doctrans.Documents.Page do
     timestamps()
   end
 
+  @doc """
+  Query-land predicate for a page whose content failed.
+
+  A page fails when a required stage errored and translation never succeeded,
+  so failure and success stay disjoint: every page is counted at most once.
+  """
+  defmacro failed?(page) do
+    quote do
+      unquote(page).translation_status != "completed" and
+        (unquote(page).extraction_status == "error" or
+           unquote(page).translation_status == "error")
+    end
+  end
+
+  @doc """
+  In-memory counterpart of `failed?/1` for already-loaded page statuses.
+
+  Must express the same rule; the database and the UI would otherwise disagree
+  about which pages failed.
+  """
+  @spec failed_status?(%{
+          required(:extraction_status) => String.t(),
+          required(:translation_status) => String.t(),
+          optional(atom()) => term()
+        }) :: boolean()
+  def failed_status?(%{extraction_status: extraction, translation_status: translation}) do
+    translation != "completed" and (extraction == "error" or translation == "error")
+  end
+
   @doc false
   def changeset(page, attrs) do
     page

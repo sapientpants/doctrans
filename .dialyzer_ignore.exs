@@ -7,6 +7,9 @@
   {"test/support/fixtures.ex", :unmatched_return},
   {"test/support/worker_helpers.ex", :unmatched_return},
 
+  # The crash stub exists to raise; only terminating with an exception is the point
+  {"test/support/openai_crash_stub.ex", :no_return},
+
   # Resilience module specs are intentionally broad for flexibility
   {"lib/doctrans/resilience/circuit_breaker.ex", :contract_supertype},
   {"lib/doctrans/resilience/health_check.ex", :contract_supertype},

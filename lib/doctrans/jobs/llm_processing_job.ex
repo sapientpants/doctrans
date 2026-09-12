@@ -39,19 +39,32 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
           not is_nil(model),
           do: {key, model}
 
-    result =
-      LlmProcessor.process_page(
-        page_id,
-        MapSet.new(),
-        Keyword.put(opts, :generation, Map.get(args, "generation"))
-      )
+    generation = Map.get(args, "generation")
 
-    if match?({:error, _}, result) && job.attempt >= job.max_attempts do
-      _ = publish_final_error(page_id, Map.get(args, "generation"), result)
+    try do
+      LlmProcessor.process_page(page_id, MapSet.new(), Keyword.put(opts, :generation, generation))
+    catch
+      # A crash returns no result, so settle here: Oban discards the job after
+      # the last attempt and nothing else would move the document off
+      # "processing" until the next startup recovery pass.
+      kind, reason ->
+        _ = settle_exhausted_job(job, page_id, generation, {:error, crash_reason(kind, reason)})
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    else
+      result ->
+        _ = settle_exhausted_job(job, page_id, generation, result)
+        result
     end
-
-    result
   end
+
+  defp settle_exhausted_job(job, page_id, generation, result) do
+    if match?({:error, _}, result) and job.attempt >= job.max_attempts,
+      do: publish_final_error(page_id, generation, result),
+      else: :ok
+  end
+
+  defp crash_reason(kind, reason),
+    do: {:operation_failed, [reason: Exception.format(kind, reason)]}
 
   defp publish_final_error(page_id, generation, {:error, reason}) do
     case Documents.get_page(page_id) do

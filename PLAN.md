@@ -89,7 +89,10 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   failed page numbers (`{:pages_failed, ...}`) unless `Run.retry_pending?/1` finds an active job for a
   failed page, which reports `:retrying` and preserves the current state. An error recorded by an
   exhausted page job is never overwritten, and a successful retry or page reprocess reconciles the
-  document back to `completed`. The progress panel distinguishes partial from total failure.
+  document back to `completed`. A page job that crashes on its final attempt settles the document
+  too, instead of leaving it `processing` until the next startup recovery pass. The progress panel
+  names the pages to reprocess, from `Summary.failed_pages`, and falls back to the whole-document
+  message when no page failed.
   Evidence: `lib/doctrans/documents/pages.ex:156`,
   `lib/doctrans/processing/document_orchestrator.ex:50`, `lib/doctrans/processing/llm_processor.ex:220`.
   Reproduced in a database test using a rolled-back transaction.

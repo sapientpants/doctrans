@@ -6,7 +6,7 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Pages
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{OpenAIProbe, StartupRecovery, Worker}
+  alias Doctrans.Processing.{OpenAICrashStub, OpenAIProbe, StartupRecovery, Worker}
   alias Oban.Engines.Basic
 
   import Doctrans.Fixtures
@@ -100,6 +100,38 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
 
       result = perform_job(LlmProcessingJob, %{"page_id" => fake_page_id})
       assert {:error, _reason} = result
+    end
+
+    test "a crash on the last attempt still settles the document" do
+      previous_module = Application.fetch_env!(:doctrans, :openai_module)
+      Application.put_env(:doctrans, :openai_module, OpenAICrashStub)
+      on_exit(fn -> Application.put_env(:doctrans, :openai_module, previous_module) end)
+
+      document = document_fixture(%{status: "processing", total_pages: 1})
+      page = page_fixture(document)
+      args = %{"page_id" => page.id, "generation" => page.processing_generation}
+
+      assert_raise RuntimeError, "extraction crashed", fn ->
+        perform_job(LlmProcessingJob, args, attempt: 3)
+      end
+
+      assert Documents.get_document!(document.id).status == "error"
+    end
+
+    test "a crash before the last attempt leaves the document processing" do
+      previous_module = Application.fetch_env!(:doctrans, :openai_module)
+      Application.put_env(:doctrans, :openai_module, OpenAICrashStub)
+      on_exit(fn -> Application.put_env(:doctrans, :openai_module, previous_module) end)
+
+      document = document_fixture(%{status: "processing", total_pages: 1})
+      page = page_fixture(document)
+      args = %{"page_id" => page.id, "generation" => page.processing_generation}
+
+      assert_raise RuntimeError, "extraction crashed", fn ->
+        perform_job(LlmProcessingJob, args, attempt: 1)
+      end
+
+      assert Documents.get_document!(document.id).status == "processing"
     end
   end
 

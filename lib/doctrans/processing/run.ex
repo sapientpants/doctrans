@@ -3,7 +3,7 @@ defmodule Doctrans.Processing.Run do
   import Ecto.Query
   alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Page}
+  alias Doctrans.Documents.{Document, Page, Pages}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
   alias Doctrans.Repo
 
@@ -31,11 +31,9 @@ defmodule Doctrans.Processing.Run do
   """
   def retry_pending?(document_id) do
     failed_page_ids =
-      from p in Page,
-        where: p.document_id == ^document_id,
-        where: p.translation_status != "completed",
-        where: p.extraction_status == "error" or p.translation_status == "error",
-        select: type(p.id, :string)
+      document_id
+      |> Pages.failed_pages_query()
+      |> select([p], type(p.id, :string))
 
     from(j in Oban.Job,
       where: j.state in ^@active,
