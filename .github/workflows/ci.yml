@@ -61,7 +61,7 @@ jobs:
         run: pip install pre-commit
 
       - name: Restore pre-commit cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -69,7 +69,7 @@ jobs:
             pre-commit-
 
       - name: Restore dependencies cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             deps
@@ -79,7 +79,7 @@ jobs:
             ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
 
       - name: Restore Dialyzer PLT cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: priv/plts
           key: ${{ runner.os }}-plt-v2-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
@@ -115,7 +115,7 @@ jobs:
           fi
 
       - name: Save dependencies cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always()
         with:
           path: |
@@ -124,7 +124,7 @@ jobs:
           key: ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
 
       - name: Save Dialyzer PLT cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always()
         with:
           path: priv/plts
