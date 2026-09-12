@@ -35,21 +35,22 @@ jobs:
 
     env:
       MIX_ENV: test
-      # Pinned here rather than in a single-entry `strategy.matrix`: a matrix
-      # interpolates the versions into the job name, so bumping the toolchain
-      # would rename the check and silently detach the branch ruleset from it.
-      ELIXIR_VERSION: '1.20.3'
-      OTP_VERSION: '29.0.5'
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # `mise.toml` is the single source of truth for the toolchain. Reading it
+      # here rather than restating the versions keeps CI, Docker, and local
+      # tooling from drifting, and avoids a `strategy.matrix`, which would
+      # interpolate the versions into the job name and detach the branch
+      # ruleset from the required check on every bump.
       - name: Set up Elixir
+        id: beam
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
+          version-file: mise.toml
+          version-type: strict
 
       - name: Set up Python for pre-commit
         uses: actions/setup-python@v5
@@ -73,17 +74,17 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+            ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
 
       - name: Restore Dialyzer PLT cache
         uses: actions/cache/restore@v4
         with:
           path: priv/plts
-          key: ${{ runner.os }}-plt-v2-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-plt-v2-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-plt-v2-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+            ${{ runner.os }}-plt-v2-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
 
       - name: Install dependencies
         run: mix deps.get --check-locked
@@ -120,14 +121,14 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
 
       - name: Save Dialyzer PLT cache
         uses: actions/cache/save@v4
         if: always()
         with:
           path: priv/plts
-          key: ${{ runner.os }}-plt-v2-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-plt-v2-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
 
   docker:
     name: Verify Docker Build

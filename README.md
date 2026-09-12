@@ -26,8 +26,9 @@ to your device or a trusted network.
 
 ## Prerequisites
 
-- **Erlang/OTP** 29 (CI uses 29.0.5)
-- **Elixir** 1.20+ (`mix.exs` requires `~> 1.20`; CI and Docker use 1.20.3)
+- **Erlang/OTP** and **Elixir** - exact versions are pinned in [`mise.toml`](mise.toml),
+  which CI and local tooling both read; run `mise install` to match them
+  (`mix.exs` independently requires `~> 1.20`)
 - **PostgreSQL** with pgvector extension (CI uses PostgreSQL 17; Docker Compose uses 18)
 - **poppler-utils** - for PDF page extraction (`pdftoppm`)
 - **LibreOffice** (optional) - for DOCX, DOC, ODT, and RTF conversion
