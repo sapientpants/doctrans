@@ -32,61 +32,57 @@ defmodule DoctransWeb.SearchLive do
   def handle_params(%{"q" => query} = params, _uri, socket) when query != "" do
     case Validation.validate_search_query(query) do
       {:ok, validated_query} ->
-        page = parse_page(params["page"])
-        offset = max(0, (page - 1) * @per_page)
-
-        socket =
-          socket
-          |> assign(:query, validated_query)
-          |> assign(:page, page)
-          |> assign(:searching, true)
-          |> assign(:search_error, false)
-
-        # Get total count and search results
-        with {:ok, total_count} <- Search.count_results(validated_query),
-             {:ok, results} <-
-               Search.search(validated_query, limit: @per_page, offset: offset) do
-          {:noreply,
-           assign(socket,
-             results: results,
-             total_count: total_count,
-             searching: false,
-             searched: true
-           )}
-        else
-          {:error, reason} ->
-            Logger.warning("Search failed: #{inspect(reason)}")
-
-            socket =
-              socket
-              |> assign(
-                results: [],
-                total_count: 0,
-                searching: false,
-                searched: true,
-                search_error: true
-              )
-              |> put_flash(
-                :error,
-                ErrorMessages.message(:search_failed)
-              )
-
-            {:noreply, socket}
-        end
+        run_search(socket, validated_query, parse_page(params["page"]))
 
       {:error, reason} ->
-        {:noreply,
-         socket
-         |> assign(:query, query)
-         |> assign(:searched, true)
-         |> assign(:results, [])
-         |> assign(:total_count, 0)
-         |> put_flash(:error, ErrorMessages.message(reason))}
+        {:noreply, reject_query(socket, query, reason)}
     end
   end
 
   def handle_params(_params, _uri, socket) do
     {:noreply, socket}
+  end
+
+  defp run_search(socket, query, page) do
+    socket =
+      socket
+      |> assign(:query, query)
+      |> assign(:page, page)
+      |> assign(:searching, true)
+      |> assign(:search_error, false)
+
+    offset = max(0, (page - 1) * @per_page)
+
+    # Get total count and search results
+    with {:ok, total_count} <- Search.count_results(query),
+         {:ok, results} <- Search.search(query, limit: @per_page, offset: offset) do
+      {:noreply,
+       assign(socket,
+         results: results,
+         total_count: total_count,
+         searching: false,
+         searched: true
+       )}
+    else
+      {:error, reason} -> {:noreply, search_failed(socket, reason)}
+    end
+  end
+
+  defp search_failed(socket, reason) do
+    Logger.warning("Search failed: #{inspect(reason)}")
+
+    socket
+    |> assign(results: [], total_count: 0, searching: false, searched: true, search_error: true)
+    |> put_flash(:error, ErrorMessages.message(:search_failed))
+  end
+
+  defp reject_query(socket, query, reason) do
+    socket
+    |> assign(:query, query)
+    |> assign(:searched, true)
+    |> assign(:results, [])
+    |> assign(:total_count, 0)
+    |> put_flash(:error, ErrorMessages.message(reason))
   end
 
   defp parse_page(nil), do: 1

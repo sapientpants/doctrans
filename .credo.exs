@@ -106,8 +106,8 @@
           {Credo.Check.Refactor.WithClauses, []},
           # Limit module dependencies to reduce coupling
           {Credo.Check.Refactor.ModuleDependencies, [max_deps: 20]},
-          # ABC complexity metric
-          {Credo.Check.Refactor.ABCSize, [max_size: 50]},
+          # Credo's default; see Refactor.Nesting for the same reasoning.
+          {Credo.Check.Refactor.ABCSize, [max_size: 30]},
           # Detect inefficient list appends
           {Credo.Check.Refactor.AppendSingleItem, []},
           # Simplify double boolean negation

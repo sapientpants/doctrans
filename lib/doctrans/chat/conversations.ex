@@ -159,14 +159,16 @@ defmodule Doctrans.Chat.Conversations do
 
     messages
     |> Enum.filter(&(&1.role == "assistant" and &1.completed))
-    |> Enum.flat_map(fn answer ->
-      case Map.fetch(questions, answer.question_id) do
-        {:ok, question} -> [[question, answer]]
-        :error -> []
-      end
-    end)
+    |> Enum.flat_map(&paired_exchange(&1, questions))
     |> Enum.take(-8)
     |> List.flatten()
     |> Enum.map(&Map.take(&1, [:role, :content]))
+  end
+
+  defp paired_exchange(answer, questions) do
+    case Map.fetch(questions, answer.question_id) do
+      {:ok, question} -> [[question, answer]]
+      :error -> []
+    end
   end
 end

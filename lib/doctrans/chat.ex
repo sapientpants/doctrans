@@ -137,25 +137,21 @@ defmodule Doctrans.Chat do
   def build_context(results) do
     results
     |> Enum.group_by(& &1.page_number)
-    |> Enum.sort_by(fn {page_num, _} -> page_num end)
-    |> Enum.map(fn {page_number, items} ->
-      content =
-        items
-        |> Enum.sort_by(&(Map.get(&1, :chunk_index) || 0))
-        |> Enum.map(fn item ->
-          String.trim(context_content(item) || "")
-        end)
-        |> Enum.reject(&(&1 == ""))
-        |> Enum.join("\n\n")
-
-      if content != "" do
-        "[Page #{page_number}]\n#{content}"
-      else
-        nil
-      end
-    end)
+    |> Enum.sort_by(fn {page_number, _items} -> page_number end)
+    |> Enum.map(fn {page_number, items} -> page_section(page_number, items) end)
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n\n---\n\n")
+  end
+
+  defp page_section(page_number, items) do
+    content =
+      items
+      |> Enum.sort_by(&(Map.get(&1, :chunk_index) || 0))
+      |> Enum.map(fn item -> String.trim(context_content(item) || "") end)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n\n")
+
+    if content != "", do: "[Page #{page_number}]\n#{content}"
   end
 
   # Old saved chunk context can still contain translations paired by index.
