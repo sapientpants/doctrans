@@ -62,6 +62,12 @@ defmodule Doctrans.Search.RetrievalAlignmentTest do
                MapSet.new(Enum.map(chunks, & &1.content))
 
       assert Enum.all?(results, &is_nil(&1.translated_markdown))
+
+      assert Enum.all?(
+               results,
+               &(&1.content_revision == Repo.get!(Page, page.id).content_revision)
+             )
+
       assert Chat.build_context(results) == "[Page 1]\n" <> source
 
       # Persisted conversation context predating this fix still has the bad pairing.

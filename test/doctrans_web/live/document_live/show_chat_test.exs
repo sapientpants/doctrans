@@ -51,11 +51,14 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       assert has_element?(view, "#chat-interrupted")
       view |> element(toggle) |> render_click()
 
+      page = Documents.get_page_by_number(document.id, 1)
+
       context = [
         %{
-          page_id: Ecto.UUID.generate(),
+          page_id: page.id,
           page_number: 1,
           chunk_index: 0,
+          content_revision: page.content_revision,
           similarity: 0.9,
           original_markdown: "Source from another tab",
           translated_markdown: nil
@@ -70,6 +73,38 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.chat_history == Conversations.load(document.id).history
       assert assigns.chat_retrieved_context == context
+    end
+
+    test "a page corrected elsewhere drops that page's accumulated context", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      page = Documents.get_page_by_number(document.id, 1)
+
+      other =
+        Repo.insert!(%Doctrans.Documents.Page{
+          document_id: document.id,
+          page_number: 2,
+          image_path: "documents/#{document.id}/pages/page_2.png",
+          original_markdown: "Unrelated",
+          extraction_status: "completed",
+          translation_status: "completed"
+        })
+
+      socket =
+        :sys.get_state(view.pid).socket
+        |> Phoenix.Component.assign(:chat_retrieved_context, [
+          context_chunk(page, "Assets are 10"),
+          context_chunk(other, "Unrelated")
+        ])
+
+      {:ok, corrected} = Documents.reset_page_for_reprocessing(page)
+      refute corrected.content_revision == page.content_revision
+
+      {:noreply, updated} = Show.handle_info({:page_updated, corrected}, socket)
+
+      assert Enum.map(updated.assigns.chat_retrieved_context, & &1.page_id) == [other.id]
     end
 
     test "reopening chat during generation preserves the active turn's state", %{
@@ -231,6 +266,18 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   end
 
   # Helper functions
+
+  defp context_chunk(page, content) do
+    %{
+      page_id: page.id,
+      page_number: page.page_number,
+      chunk_index: 0,
+      content_revision: page.content_revision,
+      similarity: 0.9,
+      original_markdown: content,
+      translated_markdown: nil
+    }
+  end
 
   defp create_completed_document_with_embeddings do
     {:ok, document} =

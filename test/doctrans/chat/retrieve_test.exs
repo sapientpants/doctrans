@@ -60,6 +60,14 @@ defmodule Doctrans.Chat.RetrieveTest do
     assert_in_delta score, 2 / 61, 1.0e-12
   end
 
+  test "retrieved context carries the source page revision", %{document: document} do
+    page = Documents.get_page_by_number(document.id, 1)
+
+    assert {:ok, [result]} = Chat.retrieve(document.id, "original question", [], limit: 1)
+    assert result.content_revision == page.content_revision
+    assert Chat.current_context([result]) == [result]
+  end
+
   test "embeds the grader's single refined query during agent retrieval", %{document: document} do
     assert {:ok, "Answer.", [_]} =
              Agent.run(document, "assess the balance sheet", [], [], fn _ -> :ok end)

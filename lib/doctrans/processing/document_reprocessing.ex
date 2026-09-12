@@ -1,6 +1,7 @@
 defmodule Doctrans.Processing.DocumentReprocessing do
   @moduledoc "Atomically replaces generated document content and starts a fresh run."
   import Ecto.Query
+  alias Doctrans.Chat.Session
   alias Doctrans.Documents
   alias Doctrans.Documents.{Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
@@ -25,7 +26,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
       _ = from(p in Page, where: p.document_id == ^document.id) |> Repo.delete_all()
 
       _ =
-        from(s in Doctrans.Chat.Session, where: s.document_id == ^document.id)
+        from(s in Session, where: s.document_id == ^document.id)
         |> Repo.update_all(set: [retrieved_context: []])
 
       attrs =
@@ -57,6 +58,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
           do: Repo.rollback(:already_processing)
 
         {:ok, updated} = Documents.reset_page_for_reprocessing(current)
+        _ = purge_page_context(document.id, current.id)
         choices = Run.choices(opts)
 
         updated =
@@ -91,6 +93,21 @@ defmodule Doctrans.Processing.DocumentReprocessing do
       error ->
         error
     end
+  end
+
+  # The page's saved chunks are gone; leaving their text in the conversation
+  # context would answer the next question from the content just discarded.
+  # The document lock held here also serializes this with in-flight answers.
+  defp purge_page_context(document_id, page_id) do
+    from(s in Session, where: s.document_id == ^document_id, lock: "FOR UPDATE")
+    |> Repo.all()
+    |> Enum.each(fn session ->
+      kept = Enum.reject(session.retrieved_context, &(&1["page_id"] == page_id))
+
+      if length(kept) != length(session.retrieved_context) do
+        Repo.update!(Ecto.Changeset.change(session, retrieved_context: kept))
+      end
+    end)
   end
 
   defp validate_models!(opts) do

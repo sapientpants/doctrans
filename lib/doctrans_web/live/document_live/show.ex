@@ -276,7 +276,7 @@ defmodule DoctransWeb.DocumentLive.Show do
           assign(socket, :progress_refresh_pending, true)
         end
 
-      {:noreply, maybe_refresh_embeddings_status(socket)}
+      {:noreply, socket |> prune_chat_context(page) |> maybe_refresh_embeddings_status()}
     else
       {:noreply, socket}
     end
@@ -358,6 +358,19 @@ defmodule DoctransWeb.DocumentLive.Show do
       [] ->
         socket |> assign(:processing_progress, 0.0) |> assign(:failed_pages, [])
     end
+  end
+
+  # Another tab may have reprocessed this page. The accumulated context lives in
+  # this socket, so a revision change has to evict it here too; the next answer
+  # would otherwise still be grounded in the text that was just replaced.
+  defp prune_chat_context(socket, page) do
+    context =
+      Enum.reject(socket.assigns.chat_retrieved_context, fn chunk ->
+        Map.get(chunk, :page_id) == page.id and
+          Map.get(chunk, :content_revision) != page.content_revision
+      end)
+
+    assign(socket, :chat_retrieved_context, context)
   end
 
   defp interrupt_chat(socket) do

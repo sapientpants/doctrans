@@ -11,17 +11,19 @@ defmodule Doctrans.Chat.ConversationsTest do
         target_language: "de"
       })
 
-    %{document: document}
+    %{document: document, page: Doctrans.Fixtures.completed_page_fixture(document)}
   end
 
   test "restores completed history and context but excludes failed and unfinished questions", %{
-    document: document
+    document: document,
+    page: page
   } do
     context = [
       %{
-        page_id: Ecto.UUID.generate(),
+        page_id: page.id,
         page_number: 1,
         chunk_index: 0,
+        content_revision: page.content_revision,
         similarity: 0.9,
         original_markdown: "Source",
         translated_markdown: nil

@@ -167,11 +167,17 @@ defmodule Doctrans.Chat do
   Merges newly retrieved chunks into the prior accumulated conversation context.
 
   Dedups by chunk identity `{page_id, chunk_index}` (chunk_index is nil for
-  page-level results), keeping the higher-`similarity` copy on collision, sorts
-  by similarity descending, and retains whole chunks within both `:max_chunks`
-  (default 16) and `:max_bytes` (default 32,000). The byte budget counts both
-  markdown fields plus page labels and separators, bounding stored source text
-  as well as rendered retrieval context. This is not a model token limit.
+  page-level results) and drops every chunk superseded by a newer
+  `:content_revision` of the same page, so a reprocessed page cannot keep
+  serving its previous text. Revision wins over similarity: a higher-ranked
+  copy of an older revision is obsolete, not preferable. Chunks carrying no
+  revision predate revision tracking and rank below any known revision.
+
+  The surviving chunks are sorted by similarity descending and retained within
+  both `:max_chunks` (default 16) and `:max_bytes` (default 32,000). The byte
+  budget counts both markdown fields plus page labels and separators, bounding
+  stored source text as well as rendered retrieval context. This is not a model
+  token limit.
 
   Chunks that do not fit are dropped, allowing smaller, lower-ranked chunks to
   use the remaining budget. Budget drops are logged without document content.
@@ -185,7 +191,8 @@ defmodule Doctrans.Chat do
     ranked =
       (prior_chunks ++ new_chunks)
       |> Enum.group_by(&chunk_identity/1)
-      |> Enum.map(fn {_id, dupes} -> Enum.max_by(dupes, & &1.similarity) end)
+      |> Enum.map(fn {_id, dupes} -> Enum.max_by(dupes, &{revision(&1), &1.similarity}) end)
+      |> drop_superseded()
       |> Enum.sort_by(& &1.similarity, :desc)
 
     {kept, _bytes, count} =
@@ -216,6 +223,67 @@ defmodule Doctrans.Chat do
   end
 
   defp chunk_identity(chunk), do: {chunk.page_id, Map.get(chunk, :chunk_index)}
+
+  # Chunk identity cannot fence a reprocessed page on its own: re-extraction
+  # deletes and rebuilds chunks, so corrected text can arrive under a different
+  # chunk index while the stale chunk keeps its own identity and rank.
+  defp drop_superseded(chunks) do
+    latest =
+      Enum.reduce(chunks, %{}, fn chunk, acc ->
+        Map.update(acc, chunk.page_id, revision(chunk), &max(&1, revision(chunk)))
+      end)
+
+    Enum.filter(chunks, fn chunk -> revision(chunk) == Map.fetch!(latest, chunk.page_id) end)
+  end
+
+  defp revision(chunk), do: Map.get(chunk, :content_revision) || -1
+
+  @doc """
+  Keeps only the chunks that still match their source page's current revision.
+
+  Retrieval context outlives the text it was built from: a single-page
+  reprocess replaces a page's content while accumulated context, saved context,
+  and in-flight answers still hold the previous text. Chunks whose page was
+  deleted, reprocessed, or predates revision tracking cannot be shown to be
+  current and are dropped.
+  """
+  def current_context([]), do: []
+
+  def current_context(chunks) do
+    import Ecto.Query
+
+    page_ids =
+      chunks
+      |> Enum.flat_map(fn chunk ->
+        case Ecto.UUID.cast(Map.get(chunk, :page_id)) do
+          {:ok, id} -> [id]
+          :error -> []
+        end
+      end)
+      |> Enum.uniq()
+
+    revisions =
+      from(p in Doctrans.Documents.Page,
+        where: p.id in ^page_ids,
+        select: {p.id, p.content_revision}
+      )
+      |> Doctrans.Repo.all()
+      |> Map.new()
+
+    kept =
+      Enum.filter(chunks, fn chunk ->
+        current = Map.get(revisions, Map.get(chunk, :page_id))
+        not is_nil(current) and current == Map.get(chunk, :content_revision)
+      end)
+
+    if length(kept) < length(chunks) do
+      Logger.info(
+        "Chat context dropped #{length(chunks) - length(kept)} chunks from stale page revisions"
+      )
+    end
+
+    kept
+  end
 
   @doc """
   Checks if a document has any chunks or pages with embeddings ready for chat.

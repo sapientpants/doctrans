@@ -257,6 +257,47 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     end)
   end
 
+  test "reprocessing one page invalidates only that page's chat context", c do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      other =
+        page_fixture(c.document, %{
+          page_number: 2,
+          extraction_status: "completed",
+          translation_status: "completed",
+          original_markdown: "Unrelated",
+          image_path: "documents/#{c.document.id}/pages/page_2.png"
+        })
+
+      context = [page_context(c.page, "Assets are 10"), page_context(other, "Unrelated")]
+      answered = Conversations.start_question(c.document.id, "How much are assets?")
+      assert {:ok, _} = Conversations.finish(answered, "assistant", "10", context, c.document)
+      assert length(Conversations.load(c.document.id).context) == 2
+
+      # An answer grounded in the old page is still generating when the page is corrected.
+      in_flight = Conversations.start_question(c.document.id, "And after the correction?")
+      assert {:ok, _} = DocumentReprocessing.reprocess_page(c.page.id)
+      assert [%{page_id: kept}] = Conversations.load(c.document.id).context
+      assert kept == other.id
+
+      assert {:ok, _} =
+               Conversations.finish(in_flight, "assistant", "Still 10", context, c.document)
+
+      assert [%{page_id: ^kept}] = Conversations.load(c.document.id).context
+    end)
+  end
+
+  defp page_context(page, content) do
+    %{
+      page_id: page.id,
+      page_number: page.page_number,
+      chunk_index: 0,
+      content_revision: page.content_revision,
+      similarity: 1.0,
+      original_markdown: content,
+      translated_markdown: nil
+    }
+  end
+
   test "missing original, invalid models, and duplicate submissions do not reset results", c do
     Oban.Testing.with_testing_mode(:manual, fn ->
       assert {:error, :invalid_model} =
