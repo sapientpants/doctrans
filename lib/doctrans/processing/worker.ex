@@ -10,12 +10,14 @@ defmodule Doctrans.Processing.Worker do
   require Logger
 
   alias Doctrans.Documents
-  alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
+  alias Doctrans.Jobs.{DocumentExtractionJob, Keys, LlmProcessingJob}
   alias Doctrans.Processing.StartupRecovery
   import Ecto.Query
 
-  @document_id_key DocumentExtractionJob.document_id_key()
-  @page_id_key LlmProcessingJob.page_id_key()
+  # Read from Keys, not from the job modules: a compile-time call to either job
+  # is the edge that makes worker.ex part of a compile-connected cycle.
+  @document_id_key Keys.document_id()
+  @page_id_key Keys.page_id()
   @document_id_match "?->>'#{@document_id_key}' = ?"
   @page_id_match "?->>'#{@page_id_key}' = ANY(?)"
 

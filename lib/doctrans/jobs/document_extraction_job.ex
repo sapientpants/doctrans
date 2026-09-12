@@ -18,14 +18,12 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.DocumentProcessor
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
-  @document_id_key "document_id"
-
-  @doc false
-  def document_id_key, do: @document_id_key
+  @document_id_key Keys.document_id()
 
   def enqueue_document(document_id, file_path) do
     Repo.transaction(fn ->

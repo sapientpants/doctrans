@@ -17,17 +17,33 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.{LlmProcessor, Run}
 
-  @page_id_key "page_id"
-
-  @doc false
-  def page_id_key, do: @page_id_key
+  @page_id_key Keys.page_id()
 
   def model_args(opts) do
     opts
     |> Keyword.take([:extraction_model, :translation_model])
     |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
+  end
+
+  @doc """
+  Builds the argument map `perform/1` destructures.
+
+  Stated here so that every enqueue site agrees with the consumer on the shape
+  and on the key names, rather than each restating them.
+  """
+  @spec page_args(Documents.Page.t(), integer() | nil, map()) :: map()
+  def page_args(page, generation, model_args) do
+    Map.merge(
+      %{
+        @page_id_key => page.id,
+        "page_number" => page.page_number,
+        "generation" => generation
+      },
+      model_args
+    )
   end
 
   @impl true

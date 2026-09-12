@@ -10,7 +10,7 @@ defmodule Doctrans.Documents do
   import Ecto.Query
 
   alias Doctrans.Config.Uploads
-  alias Doctrans.Documents.{Document, Page, Pages, Summary}
+  alias Doctrans.Documents.{Chunk, Document, Page, Pages, Summary}
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
   alias Doctrans.Validation
@@ -21,6 +21,7 @@ defmodule Doctrans.Documents do
   defdelegate get_page_by_number(document_id, page_number), to: Pages
   defdelegate get_page_by_number!(document_id, page_number), to: Pages
   defdelegate list_pages(document_id), to: Pages
+  defdelegate page_content_state(page_ids), to: Pages
   defdelegate create_page(document, attrs), to: Pages
   defdelegate create_pages(document, page_attrs_list), to: Pages
   defdelegate update_page(page, attrs), to: Pages
@@ -159,6 +160,36 @@ defmodule Doctrans.Documents do
     |> where([d], d.status in ["processing", "queued"])
     |> order_by([d], asc: d.inserted_at)
     |> Repo.all()
+  end
+
+  @doc """
+  Returns true when the document has embeddings ready to answer questions.
+
+  Prefers chunk-level embeddings and falls back to page-level ones, which is the
+  granularity documents indexed before chunking still carry.
+  """
+  @spec embeddings_ready?(Document.t() | Ecto.UUID.t()) :: boolean()
+  def embeddings_ready?(%Document{id: document_id}), do: embeddings_ready?(document_id)
+
+  def embeddings_ready?(document_id) do
+    chunks_embedded?(document_id) or pages_embedded?(document_id)
+  end
+
+  defp chunks_embedded?(document_id) do
+    Chunk
+    |> join(:inner, [c], p in assoc(c, :page))
+    |> where([c, p], p.document_id == ^document_id)
+    |> where([c], c.embedding_status == "completed")
+    |> where([c], not is_nil(c.embedding))
+    |> Repo.exists?()
+  end
+
+  defp pages_embedded?(document_id) do
+    Page
+    |> where([p], p.document_id == ^document_id)
+    |> where([p], p.embedding_status == "completed")
+    |> where([p], not is_nil(p.embedding))
+    |> Repo.exists?()
   end
 
   @doc """

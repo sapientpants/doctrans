@@ -2,10 +2,13 @@ defmodule Doctrans.Jobs.RunCleanupJob do
   @moduledoc "Removes superseded derived files while preserving the original upload."
   use Oban.Worker, queue: :pdf_extraction, max_attempts: 5
   alias Doctrans.Documents
+  alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.Run
 
+  @document_id_key Keys.document_id()
+
   @impl true
-  def perform(%Oban.Job{args: %{"document_id" => id}}) do
+  def perform(%Oban.Job{args: %{@document_id_key => id}}) do
     case Documents.get_document(id) do
       nil -> :ok
       document -> Run.with_current(document, &clean/1)

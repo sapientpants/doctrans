@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G15 are implemented; G16–G19 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G16 are implemented; G17–G19 remain.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -551,8 +551,8 @@ worse than an absent one, because it is counted as evidence. Items G01–G15 are
   warning classes had to be muted for that one file.
   `document_orchestrator.ex` had six specs referencing `Doctrans.Documents.t()`, a type that does not
   exist — `Doctrans.Documents` is a context module with no `@type t`, and the schema is
-  `Doctrans.Documents.Document` in `documents/book.ex:36`. Dialyzer resolved it to `any()` and checked
-  nothing, while an `:unknown_type` filter hid that fact.
+  `Doctrans.Documents.Document` in `documents/document.ex:19` (named `documents/book.ex` until G16).
+  Dialyzer resolved it to `any()` and checked nothing, while an `:unknown_type` filter hid that fact.
   Implemented: the error branch now logs and returns `""`; the bogus option is removed; the six specs point
   at `Documents.Document.t()` and `Documents.Page` gained `@type t`. The five suppressions covering those
   three bugs are deleted, and fixing the specs made a sixth filter provably dead, which
@@ -869,7 +869,7 @@ worse than an absent one, because it is counted as evidence. Items G01–G15 are
   non-positive `--max-lines`, an unrecognised option, an explicitly named `.exs`, a path that does not
   exist, and a directory holding no `.ex` files.
 
-- [ ] **G16 · P2 · Gate compile-time cycles with `mix xref`; do not adopt Boundary.**
+- [x] **G16 · P2 · Gate compile-time cycles with `mix xref`; do not adopt Boundary.**
   Architectural enforcement was assessed and **Boundary is rejected** on evidence. The violations it would
   catch do not exist: `lib/doctrans/` references `DoctransWeb` in exactly three places, all correct
   (PubSub/Endpoint broadcasts); `Doctrans.Repo` is never called from web code; no schema module is used
@@ -882,10 +882,31 @@ worse than an absent one, because it is counted as evidence. Items G01–G15 are
   Adopt the native gate instead: `mix xref graph --format cycles --label compile-connected --fail-above 0`
   as a pre-commit hook. It ships with Elixir, so it has no compatibility surface of its own. Confirm the
   baseline is zero before enabling.
-  Alongside it, take the small structural fixes the review surfaced: the unsupervised reschedule in
-  `worker.ex:17-18`, three queries in `chat.ex:322,376,388` that belong behind the `Documents` API, and
-  `git mv lib/doctrans/documents/book.ex lib/doctrans/documents/document.ex` so the filename matches
-  `Doctrans.Documents.Document` — a naming mismatch that already contributed to G02's broken specs.
+  Implemented. The baseline was **not** zero: one cycle of eleven modules spanning `documents.ex`,
+  both job modules and the whole of `processing/`, held together by a single compile edge —
+  `worker.ex:17-18`, where `@document_id_key DocumentExtractionJob.document_id_key()` and its page
+  counterpart read a constant from the job module at compile time. (The item described those two lines as
+  an "unsupervised reschedule"; that is a mis-transcription. The reschedule at `worker.ex:211-218` is a
+  real but separate defect, owned by Q03, and is untouched here.) One compile-time call to a job module
+  made every module that job reaches at runtime recompile together. The fix states the keys once in a
+  dependency-free `Doctrans.Jobs.Keys` — the same centralisation the accessors were added for (#55),
+  without the compile edge that attempt introduced. Every producer and consumer of those two Oban
+  argument keys now reads them from `Keys`, since a register with copies elsewhere is not one: both job
+  modules, `worker.ex`, `startup_recovery.ex` (two `fragment/1` templates and one job-args map),
+  `run.ex` (three `fragment/1` templates and `args/1`, the producer feeding
+  `DocumentExtractionJob.new/1`), and `run_cleanup_job.ex`'s `perform/1` pattern match. The two sites
+  that built `LlmProcessingJob`'s argument map by hand — `document_reprocessing.ex:106` and
+  `startup_recovery.ex:134` — now call `LlmProcessingJob.page_args/3`, so the job states the shape of
+  its own arguments once and the enqueue sites cannot drift from the consumer. The `"page_id"` at `document_reprocessing.ex:121`
+  is deliberately **not** folded in: it keys a chat-session `retrieved_context` entry, a different
+  register that happens to share a name, as are the raw-SQL result columns in `search.ex`.
+  The three `chat.ex` queries moved behind the context: page revision lookup is
+  `Documents.page_content_state/1` and `embeddings_ready?/1` now lives in `Doctrans.Documents`, where its
+  two counting queries became `Repo.exists?`. `Doctrans.Chat` retains both public functions and no longer
+  imports `Ecto.Query` or names `Doctrans.Repo` at all. `book.ex` is renamed to `document.ex`.
+  Acceptance: full `mix precommit` green with the hook enabled. Verified the gate is not passing vacuously
+  by adding one compile-time call to `LlmProcessingJob` back into `worker.ex`, which reproduces the same
+  eleven-module cycle and fails the hook.
 
 - [ ] **G17 · P3 · Prefer the settings toggle over a new secret-scanning tool.**
   The reference report's gitleaks recommendation is largely redundant here and partly outdated. GitHub

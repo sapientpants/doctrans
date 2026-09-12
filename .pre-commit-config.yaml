@@ -164,6 +164,22 @@ repos:
         pass_filenames: false
         files: ^(lib/.*\.ex|scripts/check_module_size\.exs)$
 
+      # 3.7. Compile-time dependency cycles. Architectural enforcement was assessed
+      # and Boundary rejected (PLAN.md G16): the violations it would catch do not
+      # exist here, and it is an unmaintained compiler-tracer dependency with no
+      # upper version bound. `mix xref` ships with Elixir, so it adds no
+      # compatibility surface. A compile-connected cycle means a change to any
+      # module in it recompiles all of them, and it is how one accidental
+      # compile-time call spreads -- a module attribute reading another module's
+      # function is enough. The baseline is zero and must stay zero.
+      - id: xref-cycles
+        name: Check for compile-time dependency cycles
+        entry: mix xref graph --format cycles --label compile-connected --fail-above 0
+        language: system
+        pass_filenames: false
+        # test/support is on elixirc_paths under MIX_ENV=test, so it feeds the graph too.
+        files: ^(lib/|test/support/|mix\.exs$)
+
       # 4. Static code analysis with Credo (medium speed)
       - id: credo
         name: Credo strict mode
