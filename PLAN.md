@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G12 are implemented; G13–G18 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G13 are implemented; G14–G19 remain.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -736,14 +736,42 @@ worse than an absent one, because it is counted as evidence. Items G01–G12 are
   unregistered file, a second site in a registered file, and a stale register entry whose site was removed.
   Verified overall: `mix sobelow --config` reports zero findings and exits 0.
 
-- [ ] **G13 · P2 · Pin actions by SHA and stop persisting credentials.**
+- [x] **G13 · P2 · Pin actions by SHA and stop persisting credentials.**
   Every `uses:` in `ci.yml` floats on a mutable major tag, `erlef/setup-beam@v1` most notably. Neither
   checkout sets `persist-credentials: false`, so a `GITHUB_TOKEN` is written into `.git/config` for the whole
   job — and that job downloads and executes hook code from five external repositories. The token is
   `contents: read`, which caps the blast radius, hence P2 rather than P1.
-  Pin every action to a full commit SHA with a version comment and add `persist-credentials: false`. Land
-  this together with G03's `github-actions` Dependabot ecosystem — pinning without it merely trades a
-  supply-chain risk for a staleness risk.
+  Implemented: all eleven `uses:` references pinned to a full commit SHA with a `# vX.Y.Z` comment, and
+  `persist-credentials: false` on both checkouts. Each is pinned at the current latest major rather than at
+  the tip of the major it was floating on: `actions/checkout` v7.0.1, `erlef/setup-beam` v1.24.1,
+  `actions/setup-python` v7.0.0, `actions/cache` v6.1.0 (shared by the bare, `/restore`, and `/save` entry
+  points, which are one repository), `docker/setup-buildx-action` v4.3.0, `docker/build-push-action` v7.3.0.
+  Pinning a stale major would have been the smaller change but the worse resting state: a SHA does not
+  expire on its own, so whatever it names is what runs until someone acts, and three of the six were several
+  majors behind.
+  The upgrade was checked against release notes rather than assumed. The majors crossed are almost entirely
+  Node 20 → Node 24 runtime bumps plus an ESM migration, requiring Actions Runner ≥ 2.327.1, which
+  `ubuntu-latest` satisfies; there are no self-hosted runners. The removals in those notes are all of inputs
+  this workflow does not set — `setup-python`'s `pip-install`, `setup-buildx-action`'s deprecated
+  inputs/outputs, `build-push-action`'s `DOCKER_BUILD_NO_SUMMARY` and `DOCKER_BUILD_EXPORT_RETENTION_DAYS`.
+  `checkout` v7 blocks fork-PR checkout under `pull_request_target` and `workflow_run`, neither of which
+  this workflow triggers on. `persist-credentials` is still an input on v7 and still defaults to `true`,
+  and `actions/cache` v6 still ships the `restore` and `save` sub-actions — both verified at the pinned SHA
+  rather than taken from the README.
+  One correction the upgrade forced: `checkout` v6 moved the persisted token out of `.git/config` and into a
+  credentials file under `RUNNER_TEMP` that `.git/config` includes. It is out of the repository but still
+  readable by any step in the same job, so the item's premise holds and the mitigation is unchanged — but
+  the comment justifying it would have been false as written, which is the failure mode G02 and G18 are
+  about. It now describes v7's actual mechanism.
+  Freshness from here is G03's `github-actions` Dependabot ecosystem, already landed. The version comment is
+  load-bearing for that: Dependabot reads it to know what a SHA-pinned action currently is, and rewrites
+  both halves together.
+  Neither rule survives on care alone — every action's README documents the floating-tag form, so the
+  regression is one paste away — so `scripts/check_action_pins.exs` pins both invariants and runs in
+  pre-commit, in the same idiom as `check_toolchain_pins.exs` and `check_raw_call_sites.exs`.
+  Acceptance: verified the check fails on each divergence mode — a floating tag, a SHA with no version
+  comment, a checkout missing `persist-credentials: false` — in both the `- name:`/`uses:` and bare
+  `- uses:` step forms, and that it reports zero with the workflow as committed.
 
 - [ ] **G14 · P2 · Give suppressions an owner and an expiry.**
   Every remaining `.dialyzer_ignore.exs` entry is `{file, warning_class}`, the broadest granularity dialyxir

@@ -37,8 +37,23 @@ jobs:
       MIX_ENV: test
 
     steps:
+      # Actions are pinned to a full commit SHA: a mutable major tag like `@v7` can
+      # be repointed at any commit by anyone who can push to that repository, and this
+      # job downloads and executes hook code from five external repositories on top
+      # of that. The trailing comment records the human-readable version, which is
+      # what Dependabot's `github-actions` ecosystem reads and bumps.
+      #
+      # `persist-credentials: false` stops checkout leaving the job's GITHUB_TOKEN
+      # behind for later steps to read — including the third-party action and hook
+      # code above. Since v6 the token is written to a credentials file under
+      # RUNNER_TEMP that `.git/config` includes, rather than to `.git/config`
+      # itself; that moves it out of the repository but not out of reach of a step
+      # running in the same job. Nothing here pushes or calls the API — the
+      # remaining git commands are local (`git status`, `git diff`).
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # `mise.toml` is the single source of truth for the toolchain. Reading it
       # here rather than restating the versions keeps CI, Docker, and local
@@ -47,13 +62,13 @@ jobs:
       # ruleset from the required check on every bump.
       - name: Set up Elixir
         id: beam
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: mise.toml
           version-type: strict
 
       - name: Set up Python for pre-commit
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
@@ -61,7 +76,7 @@ jobs:
         run: pip install pre-commit
 
       - name: Restore pre-commit cache
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -69,7 +84,7 @@ jobs:
             pre-commit-
 
       - name: Restore dependencies cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             deps
@@ -79,7 +94,7 @@ jobs:
             ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
 
       - name: Restore Dialyzer PLT cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: priv/plts
           key: ${{ runner.os }}-plt-v2-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
@@ -115,7 +130,7 @@ jobs:
           fi
 
       - name: Save dependencies cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: always()
         with:
           path: |
@@ -124,7 +139,7 @@ jobs:
           key: ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
 
       - name: Save Dialyzer PLT cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: always()
         with:
           path: priv/plts
@@ -137,13 +152,15 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Build Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ./Dockerfile.dev
