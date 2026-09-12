@@ -58,7 +58,7 @@ defmodule ActionPinChecker do
         IO.puts(
           IO.ANSI.yellow() <>
             "Pin every action to a full commit SHA with a version comment, e.g.\n" <>
-            "  uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0\n" <>
+            "  uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n" <>
             "Resolve a tag with:\n" <>
             "  gh api repos/OWNER/REPO/commits/TAG --jq .sha\n" <>
             "and give every actions/checkout step `persist-credentials: false`." <>

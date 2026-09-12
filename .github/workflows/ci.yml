@@ -37,18 +37,21 @@ jobs:
       MIX_ENV: test
 
     steps:
-      # Actions are pinned to a full commit SHA: a mutable tag like `@v4` can be
-      # repointed at any commit by anyone who can push to that repository, and this
+      # Actions are pinned to a full commit SHA: a mutable major tag like `@v7` can
+      # be repointed at any commit by anyone who can push to that repository, and this
       # job downloads and executes hook code from five external repositories on top
       # of that. The trailing comment records the human-readable version, which is
       # what Dependabot's `github-actions` ecosystem reads and bumps.
       #
-      # `persist-credentials: false` stops checkout writing the job's GITHUB_TOKEN
-      # into `.git/config`, where every later step — including third-party action
-      # and hook code — could read it. Nothing here pushes or calls the API; the
+      # `persist-credentials: false` stops checkout leaving the job's GITHUB_TOKEN
+      # behind for later steps to read — including the third-party action and hook
+      # code above. Since v6 the token is written to a credentials file under
+      # RUNNER_TEMP that `.git/config` includes, rather than to `.git/config`
+      # itself; that moves it out of the repository but not out of reach of a step
+      # running in the same job. Nothing here pushes or calls the API — the
       # remaining git commands are local (`git status`, `git diff`).
       - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -65,7 +68,7 @@ jobs:
           version-type: strict
 
       - name: Set up Python for pre-commit
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
@@ -73,7 +76,7 @@ jobs:
         run: pip install pre-commit
 
       - name: Restore pre-commit cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -81,7 +84,7 @@ jobs:
             pre-commit-
 
       - name: Restore dependencies cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             deps
@@ -91,7 +94,7 @@ jobs:
             ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
 
       - name: Restore Dialyzer PLT cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: priv/plts
           key: ${{ runner.os }}-plt-v2-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
@@ -127,7 +130,7 @@ jobs:
           fi
 
       - name: Save dependencies cache
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: always()
         with:
           path: |
@@ -136,7 +139,7 @@ jobs:
           key: ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
 
       - name: Save Dialyzer PLT cache
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: always()
         with:
           path: priv/plts
@@ -149,15 +152,15 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Build Docker image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ./Dockerfile.dev
