@@ -2,15 +2,19 @@ defmodule Doctrans.Processing.StartupRecovery do
   @moduledoc """
   Recovers work in batches of at most 50 jobs. Cursors keep each startup pass
   finite, while active Oban jobs are left to Oban's own retry/recovery lifecycle.
+
+  The final phase queues nothing: it reconciles documents whose pages all
+  settled while the document row never learned of it.
   """
 
   require Logger
 
   import Ecto.Query
+  import Doctrans.Documents.Page, only: [settled?: 1]
 
   alias Doctrans.Documents.{Document, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, Keys, LlmProcessingJob}
-  alias Doctrans.Processing.Run
+  alias Doctrans.Processing.{DocumentOrchestrator, Run}
   alias Doctrans.Repo
 
   @batch_size 50
@@ -32,6 +36,7 @@ defmodule Doctrans.Processing.StartupRecovery do
           {:documents, Ecto.UUID.t() | nil}
           | {:pages, Ecto.UUID.t() | nil}
           | {:embeddings, Ecto.UUID.t() | nil}
+          | {:completion, Ecto.UUID.t() | nil}
           | :done
 
   @doc "Returns the next cursor, or :done when the startup pass is complete."
@@ -109,7 +114,52 @@ defmodule Doctrans.Processing.StartupRecovery do
 
     Enum.each(rows, &recover_embedding/1)
 
-    next_cursor(rows, :embeddings, :done)
+    next_cursor(rows, :embeddings, {:completion, nil})
+  end
+
+  # A page's last write and its document's completion are separate transactions,
+  # so a crash between them leaves a `processing` document whose pages have all
+  # settled. Nothing else revisits it: the page phase above finds no page to
+  # resume, and a replayed page job that skips both stages used to return
+  # without rechecking. This phase resolves those documents from the rows that
+  # are already saved — the states C03 defined — and so queues no work and makes
+  # no model request.
+  #
+  # It runs last on purpose. The page phase resets a failed page to `pending`
+  # and queues a retry, which unsettles the document again; settling failures
+  # before that ran would report an error for a page about to be retried.
+  def run_batch({:completion, after_id}) do
+    rows =
+      from(d in Document,
+        as: :document,
+        where: d.status == "processing",
+        # A document that does not know how many pages to expect is never
+        # terminal, so there is nothing for this phase to resolve.
+        where: d.total_pages > 0,
+        where:
+          not exists(
+            from(p in Page,
+              where: p.document_id == parent_as(:document).id,
+              where: not settled?(p),
+              select: 1
+            )
+          ),
+        select: %{id: d.id}
+      )
+      |> fetch_batch(after_id)
+
+    Enum.each(rows, &reconcile_completion/1)
+
+    next_cursor(rows, :completion, :done)
+  end
+
+  # The orchestrator holds the rules: it locks the document, completes it only
+  # when every expected page succeeded, records the failed page numbers when
+  # they all settled with a failure, and leaves a document alone while a retry
+  # of a failed page is still pending.
+  defp reconcile_completion(row) do
+    _ = DocumentOrchestrator.check_document_completion(row.id)
+    :ok
   end
 
   # One page per transaction: these rows are independent, so a row that cannot be

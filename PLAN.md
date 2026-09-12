@@ -233,14 +233,35 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Evidence: `lib/doctrans/search/indexer.ex` (`finish_page_level_embedding/3`), `lib/doctrans/search.ex:336`.
   Reproduced in a database test that fails only the call carrying the whole page's text.
 
-- [ ] **R03 · P2 · Reconcile document completion on replay and restart.**
+- [x] **R03 · P2 · Reconcile document completion on replay and restart.**
   The last translation is saved before document completion is updated. A crash between those writes leaves
   a processing document whose resumed job skips completed stages and whose pages startup recovery excludes.
   Recheck completion on every successful replay and reconcile eligible documents during startup.
   Acceptance: a processing document with all final pages saved reaches the correct terminal state after
   job replay or startup, without making another model request. Cover failed pages using C03's status semantics.
-  Evidence: `lib/doctrans/processing/llm_processor.ex:121,245,257`,
-  `lib/doctrans/processing/startup_recovery.ex:26,68`. Reproduced in a rolled-back database test.
+  Implemented: the completion check moved out of the two branches that happened to write the last
+  translation and into `do_process_page/2`, so it runs once on every successful page job — including the
+  replay that skips both stages because they are already saved. That replay used to return `:ok` without
+  ever looking at the document again, which is what made the crash window permanent rather than
+  self-healing; resolving it costs one query and no model call.
+  Startup recovery gained a fourth phase, `{:completion, cursor}`, batched and cursored like the others.
+  It selects `processing` documents with a known page count and no unsettled page, and hands each to
+  `DocumentOrchestrator.check_document_completion/1`, so C03's rules — success only when every expected
+  page succeeded, `{:pages_failed, ...}` when they all settled with a failure, and no change while a
+  failed page's retry is still pending — decide the outcome. The phase queues nothing.
+  It runs last on purpose. The page phase resets a failed page to `pending` and queues a retry, which
+  unsettles the document again; settling failures before that ran would record an error for a page that
+  recovery is about to reprocess. Documents already in `error` are deliberately left out: only a
+  `processing` document is mid-run, and reconciling an `error` document would resurrect one an operator
+  or a document-level failure deliberately stopped.
+  "Settled" is now a query-land predicate, `Page.settled?/1`, defined as the union of success and the
+  existing `failed?/1` so the recovery filter and `Pages.completion_state/1` cannot drift apart.
+  Evidence: `lib/doctrans/processing/llm_processor.ex` (`do_process_page/2`),
+  `lib/doctrans/processing/startup_recovery.ex` (`run_batch({:completion, _})`),
+  `lib/doctrans/documents/page.ex` (`settled?/1`). Reproduced in database tests: a replay of a fully
+  saved page completes its document against an OpenAI stub that raises on any call, the same replay
+  settles a document whose other page failed, and the startup phase completes, settles, or leaves each
+  document alone according to C03's states.
   Dependency: C03.
 
 - [ ] **R04 · P2 · Bound PDF subprocess execution and resources.**

@@ -74,9 +74,21 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   defp do_process_page(page, opts) do
     with :ok <- maybe_extract(page, opts),
-         page <- Documents.get_page!(page.id) do
-      maybe_translate(page, opts)
+         extracted <- Documents.get_page!(page.id),
+         :ok <- maybe_translate(extracted, opts) do
+      reconcile_document(page.id)
     end
+  end
+
+  # The final page write and the document's completion are separate
+  # transactions, so a crash between them leaves a processing document whose
+  # pages are all saved. A replay skips both stages and would return `:ok`
+  # without ever revisiting the document, which is why the check belongs to
+  # every successful run of this job rather than to the run that happened to
+  # save the last translation. Resolving it costs one query and no model call.
+  defp reconcile_document(page_id) do
+    _ = DocumentOrchestrator.check_document_completion(Documents.get_page!(page_id))
+    :ok
   end
 
   # A retried or rescued Oban job may have left a stage processing or errored.
@@ -113,9 +125,6 @@ defmodule Doctrans.Processing.LlmProcessor do
     Logger.warning("Page #{page.page_number} has no content to translate, marking as completed")
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "completed"})
     Topics.broadcast_page_update(page)
-
-    # Check if all pages are complete and mark document as completed if so
-    _ = DocumentOrchestrator.check_document_completion(page)
 
     :ok
   end
@@ -265,9 +274,6 @@ defmodule Doctrans.Processing.LlmProcessor do
           })
 
         Topics.broadcast_page_update(page)
-
-        # Check if all pages are complete and mark document as completed if so
-        _ = DocumentOrchestrator.check_document_completion(page)
 
         :ok
 
