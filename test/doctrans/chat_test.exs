@@ -73,13 +73,14 @@ defmodule Doctrans.ChatTest do
   end
 
   describe "merge_context/3" do
-    defp chunk(page_id, chunk_index, similarity) do
+    defp chunk(page_id, chunk_index, similarity, opts \\ []) do
       %{
         page_id: page_id,
         page_number: 1,
         chunk_index: chunk_index,
+        content_revision: Keyword.get(opts, :content_revision),
         similarity: similarity,
-        translated_markdown: "content",
+        translated_markdown: Keyword.get(opts, :content, "content"),
         original_markdown: nil
       }
     end
@@ -135,6 +136,34 @@ defmodule Doctrans.ChatTest do
       assert Chat.merge_context([low], [oversized, high]) == [high, low]
     end
 
+    test "a newer page revision wins over a higher-ranked older copy" do
+      prior = [chunk("p1", 0, 0.95, content_revision: 1, content: "Assets are 10")]
+      new = [chunk("p1", 0, 0.40, content_revision: 2, content: "Assets are 100")]
+
+      assert [%{translated_markdown: "Assets are 100", content_revision: 2}] =
+               Chat.merge_context(prior, new)
+    end
+
+    test "a newer revision supersedes older chunks of the same page under other indexes" do
+      prior = [chunk("p1", 0, 0.95, content_revision: 1, content: "Assets are 10")]
+
+      new = [
+        chunk("p1", 2, 0.40, content_revision: 2, content: "Assets are 100"),
+        chunk("p2", 0, 0.90, content_revision: 7, content: "Other page")
+      ]
+
+      merged = Chat.merge_context(prior, new)
+
+      assert Enum.map(merged, & &1.translated_markdown) == ["Other page", "Assets are 100"]
+    end
+
+    test "context predating revision tracking loses to any known revision of its page" do
+      prior = [chunk("p1", 0, 0.99, content: "Legacy")]
+      new = [chunk("p1", 1, 0.10, content_revision: 0, content: "Current")]
+
+      assert [%{translated_markdown: "Current"}] = Chat.merge_context(prior, new)
+    end
+
     test "repeated turns stay within the byte budget even below the chunk limit" do
       context =
         Enum.reduce(1..40, [], fn i, prior ->
@@ -147,6 +176,45 @@ defmodule Doctrans.ChatTest do
         end)
 
       assert Enum.map(context, & &1.page_id) == ["p40", "p39", "p38"]
+    end
+  end
+
+  describe "current_context/1" do
+    setup do
+      document = create_document(status: "completed")
+
+      page =
+        create_page(document,
+          page_number: 1,
+          extraction_status: "completed",
+          original_markdown: "Assets are 10"
+        )
+
+      %{document: document, page: page}
+    end
+
+    test "keeps chunks matching the page's current revision", %{page: page} do
+      context = [chunk(page.id, 0, 0.9, content_revision: page.content_revision)]
+
+      assert Chat.current_context(context) == context
+    end
+
+    test "drops chunks whose page has been reprocessed since retrieval", %{page: page} do
+      context = [chunk(page.id, 0, 0.9, content_revision: page.content_revision)]
+
+      {:ok, _reset} = Documents.reset_page_for_reprocessing(page)
+
+      assert Chat.current_context(context) == []
+    end
+
+    test "drops chunks from deleted pages and chunks without a revision", %{page: page} do
+      assert Chat.current_context([chunk(page.id, 0, 0.9)]) == []
+
+      assert Chat.current_context([chunk(Ecto.UUID.generate(), 0, 0.9, content_revision: 0)]) ==
+               []
+
+      assert Chat.current_context([chunk("not-a-uuid", 0, 0.9, content_revision: 0)]) == []
+      assert Chat.current_context([]) == []
     end
   end
 

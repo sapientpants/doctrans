@@ -5,6 +5,10 @@ defmodule Doctrans.Chat.Conversations do
   Questions are saved before generation and answers only when finalized. Reloads
   restore completed history and bounded retrieval context; unfinished questions
   remain visible but are never sent as completed history to the model.
+
+  Retrieval context is stored with the page revision each chunk was read from,
+  and chunks whose page has since been reprocessed are dropped on both write and
+  read, so a corrected page cannot keep answering with its previous text.
   """
   import Ecto.Query
   alias Doctrans.Chat
@@ -12,7 +16,7 @@ defmodule Doctrans.Chat.Conversations do
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
-  @context_fields ~w(page_id page_number chunk_index similarity original_markdown translated_markdown)a
+  @context_fields ~w(page_id page_number chunk_index content_revision similarity original_markdown translated_markdown)a
 
   def load(document_id) do
     case Repo.get_by(Session, document_id: document_id) do
@@ -47,6 +51,8 @@ defmodule Doctrans.Chat.Conversations do
 
   Lock the document before the session, matching document reprocessing, so a
   restart either clears this result's context afterwards or rejects the result.
+  Single-page reprocessing takes the same document lock, so context outdated by
+  a page reset is already visible here and is discarded rather than saved.
   """
   def finish(question, role, content, context, document) do
     Run.with_current(document, fn _current ->
@@ -77,7 +83,7 @@ defmodule Doctrans.Chat.Conversations do
             })
 
           if role == "assistant" do
-            bounded = Chat.merge_context([], context)
+            bounded = Chat.merge_context([], Chat.current_context(context))
 
             _ =
               Repo.update!(
@@ -123,9 +129,11 @@ defmodule Doctrans.Chat.Conversations do
     history = completed_history(messages)
 
     context =
-      Enum.map(session.retrieved_context, fn chunk ->
+      session.retrieved_context
+      |> Enum.map(fn chunk ->
         Map.new(@context_fields, fn key -> {key, Map.get(chunk, Atom.to_string(key))} end)
       end)
+      |> Chat.current_context()
 
     %{
       messages: messages,

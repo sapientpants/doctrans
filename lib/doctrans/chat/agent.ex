@@ -63,7 +63,9 @@ defmodule Doctrans.Chat.Agent do
   defp do_run(document, question, chat_history, opts, on_event) do
     context_limit = Keyword.get(opts, :context_limit, 8)
     min_similarity = Keyword.get(opts, :min_similarity)
-    prior_context = Keyword.get(opts, :retrieved_context, [])
+    # The caller's context can predate a single-page reprocess that finished
+    # while this socket held it; re-check it against current page revisions.
+    prior_context = opts |> Keyword.get(:retrieved_context, []) |> Chat.current_context()
 
     search_opts =
       [limit: context_limit]

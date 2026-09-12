@@ -97,7 +97,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `lib/doctrans/processing/document_orchestrator.ex:50`, `lib/doctrans/processing/llm_processor.ex:220`.
   Reproduced in a database test using a rolled-back transaction.
 
-- [ ] **C04 · P1 · Invalidate stale chat context after single-page reprocessing.**
+- [x] **C04 · P1 · Invalidate stale chat context after single-page reprocessing.**
   Whole-document reprocessing clears saved retrieval context; single-page reprocessing does not.
   Saved context lacks page revisions, and merging retains the higher-similarity copy even when it is obsolete.
   A probe merging corrected `Assets are 100` into higher-ranked old `Assets are 10` retained the old value.
@@ -105,6 +105,16 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   answers from being saved as current when a supporting page generation changes.
   Acceptance: correcting a page updates the next answer after reload and in another open tab;
   an in-flight answer based on the old page cannot restore obsolete context.
+  Implemented: chunk and page retrieval now select `pages.content_revision`, and the revision is stored
+  with every persisted context chunk. `Chat.merge_context/3` ranks revision before similarity and drops
+  chunks superseded by a newer revision of the same page, so re-extraction under a different chunk index
+  can no longer leave the old text behind a higher score. `Chat.current_context/1` re-checks chunks
+  against current page revisions and drops chunks whose page was reprocessed, deleted, or predates
+  revision tracking; it runs when a conversation is loaded, before an answer's context is saved, and on
+  the prior context the agent is handed. `reprocess_page/2` deletes that page's saved context under the
+  document lock that `Conversations.finish/5` also takes, so an in-flight answer either saves before the
+  reset or has its obsolete chunks discarded. Open tabs evict the page's accumulated context from the
+  socket on the existing `{:page_updated, page}` broadcast.
   Evidence: `lib/doctrans/processing/document_reprocessing.ex:59`, `lib/doctrans/chat.ex:179`,
   `lib/doctrans/chat/conversations.ex:15,79`. Merge behavior reproduced; persistence gap traced.
 

@@ -23,6 +23,7 @@ defmodule Doctrans.Search do
           :original_markdown => String.t() | nil,
           :translated_markdown => String.t() | nil,
           :similarity => float(),
+          :content_revision => integer() | nil,
           optional(:chunk_id) => Ecto.UUID.t() | nil,
           optional(:chunk_index) => non_neg_integer()
         }
@@ -97,6 +98,7 @@ defmodule Doctrans.Search do
   - `:page_number` - Page number in the document
   - `:original_markdown` - Original extracted text
   - `:translated_markdown` - Translated text (if available)
+  - `:content_revision` - Source page revision the text came from
   - `:similarity` - Cosine similarity score (0-1, higher is better)
   """
   @spec search_in_document(Ecto.UUID.t(), String.t() | nil, keyword()) ::
@@ -150,6 +152,7 @@ defmodule Doctrans.Search do
       c.content as original_markdown,
       NULL::text as translated_markdown,
       c.chunk_index,
+      p.content_revision,
       1 - (c.embedding <=> $1::vector) as similarity
     FROM chunks c
     JOIN pages p ON c.page_id = p.id
@@ -179,6 +182,7 @@ defmodule Doctrans.Search do
       p.page_number,
       p.original_markdown,
       p.translated_markdown,
+      p.content_revision,
       1 - (p.embedding <=> $1::vector) as similarity
     FROM pages p
     WHERE p.document_id = $2
@@ -210,6 +214,7 @@ defmodule Doctrans.Search do
       original_markdown: result["original_markdown"],
       translated_markdown: result["translated_markdown"],
       chunk_index: result["chunk_index"],
+      content_revision: result["content_revision"],
       similarity: to_float(result["similarity"])
     }
   end
@@ -222,6 +227,7 @@ defmodule Doctrans.Search do
       page_number: result["page_number"],
       original_markdown: result["original_markdown"],
       translated_markdown: result["translated_markdown"],
+      content_revision: result["content_revision"],
       similarity: to_float(result["similarity"])
     }
   end
