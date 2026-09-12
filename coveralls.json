@@ -6,7 +6,6 @@
     "lib/doctrans/processing/worker.ex",
     "lib/doctrans/processing/llm_processor.ex",
     "lib/doctrans/documents/sweeper_worker.ex",
-    "lib/doctrans/search/embedding_worker.ex",
     "lib/doctrans/resilience/health_check.ex",
     "lib/doctrans/resilience/health_check_worker.ex",
     "test/support/embedding_stub.ex",

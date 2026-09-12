@@ -160,9 +160,6 @@ defmodule DoctransWeb.Telemetry do
       counter("doctrans.processing.timeout.count",
         description: "Page processing timeouts"
       ),
-      counter("doctrans.embedding.crashed.count",
-        description: "Embedding task crashes"
-      ),
       counter("doctrans.sweeper.completed.count",
         description: "Successful sweeper runs"
       ),

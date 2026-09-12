@@ -157,15 +157,44 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
 
 ## Phase 2 — Recoverable processing and indexing
 
-- [ ] **R01 · P2 · Move indexing to durable, bounded jobs.**
+- [x] **R01 · P2 · Move indexing to durable, bounded jobs.**
   Embedding requests and pending work exist only in a GenServer and supervised tasks.
   Startup recovery does not recover indexing for fully translated pages. Restart, task failure, or exhausted
   retries can leave completed documents unavailable to semantic search/chat until manually reprocessed.
   Use Oban with page-generation-aware uniqueness, bounded concurrency, and pending/error reconciliation.
   Acceptance: restart during indexing eventually restores search/chat; transient failure retries persist;
   duplicate requests do not create duplicate work; obsolete generations cannot overwrite current vectors.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:37,46`,
-  `lib/doctrans/processing/startup_recovery.ex:67`. Code-based finding.
+  Implemented: an indexing request is now a row. `Doctrans.Jobs.EmbeddingJob` runs on a new
+  `embedding_generation` queue at concurrency 2 — bounded, where the GenServer started one supervised task
+  per page with no ceiling — and `Doctrans.Search.Indexer` holds the chunking and embedding that used to
+  live in `EmbeddingWorker`, which is gone along with its coalescing state and its supervision-tree entry.
+  The page generation the job is keyed on is `content_revision`, the column the database trigger already
+  advances whenever a page's source text changes; `processing_generation` fences a *processing* run and
+  says nothing about whether the text changed, so it is the wrong fence for vectors. Uniqueness over
+  `[page_id, revision]` across all active states makes a repeated request for a revision already queued
+  or running a no-op, while a re-extraction queues a genuinely distinct unit of work. The superseded job
+  cannot win if the two overlap: every write the indexer makes still passes `with_current_revision/2`,
+  and a run whose fence fails now reports `{:cancel, :stale_page}` rather than the `:ok` it used to
+  report after writing nothing — including on the final "completed" write, which previously let a
+  superseded run claim an index it never wrote.
+  Retries moved out of the process and into the schedule: the in-task `Process.sleep` loop over
+  `@max_retries` is gone, a transient chunk failure is returned as `{:error, reason}` for Oban to retry
+  across restarts, and `ErrorClassifier.permanent?/1` becomes `{:cancel, reason}` so a 4xx is not retried
+  at all. A retry only re-embeds chunks that still have no vector. Ownership of the circuit breaker
+  around an already-melting client is untouched and stays with R06.
+  Startup recovery gained a third phase, `{:embeddings, cursor}`, running after documents and pages with
+  the same batch size and cursor. It queues every page whose extraction completed and whose
+  `embedding_status` is not `completed` — pending, errored, or left `processing` by a restart — with no
+  active indexing job, and it reads the revision under a row lock so a page rewritten since selection is
+  queued at the revision it now holds. Unlike the page phase it does not filter on document status, which
+  is what left fully translated pages of completed documents unrecovered.
+  `doctrans.embedding.crashed.count` was dropped from telemetry: the GenServer `:DOWN` handler that
+  emitted it no longer exists, and Oban reports job failures through its own events.
+  Evidence: `lib/doctrans/jobs/embedding_job.ex`, `lib/doctrans/search/indexer.ex`,
+  `lib/doctrans/processing/startup_recovery.ex:88`, `config/config.exs:98`. Reproduced in database tests:
+  a job carrying a superseded revision cancels and leaves the current vectors untouched, a transient
+  failure is reported for retry and succeeds on the next attempt, and recovery queues indexing for a
+  completed document the page phase never looks at.
 
 - [ ] **R02 · P2 · Track failed page embeddings accurately.**
   Successful chunk embeddings are followed by a page embedding call whose failure is only logged;
@@ -173,7 +202,8 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Track/retry page indexing separately, or standardize global search on chunk retrieval.
   Acceptance: chunk success plus page embedding failure cannot report complete global indexing;
   retry restores semantic search without rerunning OCR/translation.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:151,320`. Implement with R01.
+  Evidence: `lib/doctrans/search/indexer.ex:111,249`. R01 moved this code to `Search.Indexer` and
+  left the behavior unchanged.
 
 - [ ] **R03 · P2 · Reconcile document completion on replay and restart.**
   The last translation is saved before document completion is updated. A crash between those writes leaves
@@ -211,8 +241,8 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: one transient operation failure counts once; permanent API errors do not open the circuit;
   permanent failures do not receive ordinary transient job retries; cancellation does not wait through
   unnecessary nested sleeps. Preserve existing error-code conventions.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:282`, `lib/doctrans/processing/openai.ex:480`.
-  Coordinate with R01.
+  Evidence: `lib/doctrans/search/indexer.ex:225`, `lib/doctrans/processing/openai.ex:480`.
+  R01 moved indexing retries to Oban; the duplicate breaker accounting is what remains.
 
 ## Phase 3 — Search relevance and responsiveness
 

@@ -13,10 +13,10 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Processing.DocumentOrchestrator
   alias Doctrans.Processing.Run
   alias Doctrans.Resilience.{Backoff, ErrorClassifier}
-  alias Doctrans.Search.EmbeddingWorker
 
   @max_retries 3
 
@@ -148,7 +148,7 @@ defmodule Doctrans.Processing.LlmProcessor do
           })
 
         Topics.broadcast_page_update(page)
-        EmbeddingWorker.generate_embedding(page.id)
+        _ = EmbeddingJob.enqueue_page(page)
         :ok
 
       {:error, reason} ->

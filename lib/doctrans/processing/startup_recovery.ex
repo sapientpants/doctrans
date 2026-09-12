@@ -7,7 +7,7 @@ defmodule Doctrans.Processing.StartupRecovery do
   import Ecto.Query
 
   alias Doctrans.Documents.{Document, Page, Topics}
-  alias Doctrans.Jobs.{DocumentExtractionJob, Keys, LlmProcessingJob}
+  alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, Keys, LlmProcessingJob}
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
@@ -17,7 +17,11 @@ defmodule Doctrans.Processing.StartupRecovery do
   @page_id_match "?->>'#{Keys.page_id()}' = ?::text"
 
   @typedoc "Where the next batch resumes: a phase with the last id handled, or :done."
-  @type cursor :: {:documents, Ecto.UUID.t() | nil} | {:pages, Ecto.UUID.t() | nil} | :done
+  @type cursor ::
+          {:documents, Ecto.UUID.t() | nil}
+          | {:pages, Ecto.UUID.t() | nil}
+          | {:embeddings, Ecto.UUID.t() | nil}
+          | :done
 
   @doc "Returns the next cursor, or :done when the startup pass is complete."
   @spec run_batch(cursor()) :: cursor()
@@ -52,8 +56,6 @@ defmodule Doctrans.Processing.StartupRecovery do
   end
 
   def run_batch({:pages, after_id}) do
-    worker = Oban.Worker.to_string(LlmProcessingJob)
-
     rows =
       from(p in Page,
         as: :page,
@@ -61,19 +63,12 @@ defmodule Doctrans.Processing.StartupRecovery do
         on: d.id == p.document_id,
         where: d.status == "processing",
         where: p.extraction_status != "completed" or p.translation_status != "completed",
-        where:
-          not exists(
-            from(j in Oban.Job,
-              where: j.worker == ^worker and j.state in ^@active_states,
-              where: fragment(@page_id_match, j.args, parent_as(:page).id),
-              select: 1
-            )
-          ),
         select: %{
           id: p.id,
           document_id: p.document_id
         }
       )
+      |> without_active_job(LlmProcessingJob)
       |> fetch_batch(after_id)
 
     pages =
@@ -84,7 +79,48 @@ defmodule Doctrans.Processing.StartupRecovery do
       |> unwrap!()
 
     Enum.each(pages, &Topics.broadcast_page_update/1)
-    next_cursor(rows, :pages, :done)
+    next_cursor(rows, :pages, {:embeddings, nil})
+  end
+
+  # Indexing is recovered for every extracted page, whatever its document's status:
+  # a document that finished translating still loses semantic search and chat when
+  # its indexing was interrupted, and the page phase above never looks at it.
+  def run_batch({:embeddings, after_id}) do
+    rows =
+      from(p in Page,
+        as: :page,
+        where: p.extraction_status == "completed",
+        where: p.embedding_status != "completed",
+        select: %{id: p.id}
+      )
+      |> without_active_job(EmbeddingJob)
+      |> fetch_batch(after_id)
+
+    Repo.transact(fn ->
+      Enum.each(rows, &recover_embedding/1)
+      {:ok, :queued}
+    end)
+    |> unwrap!()
+
+    next_cursor(rows, :embeddings, :done)
+  end
+
+  # Read the revision under a lock, so a page rewritten since it was selected is
+  # queued at the revision it now holds rather than one the job would cancel on.
+  defp recover_embedding(row) do
+    page = from(p in Page, where: p.id == ^row.id, lock: "FOR UPDATE") |> Repo.one()
+
+    case page do
+      %Page{extraction_status: "completed", embedding_status: status}
+      when status != "completed" ->
+        page
+        |> EmbeddingJob.page_args()
+        |> EmbeddingJob.new(meta: %{recovered: true})
+        |> Oban.insert!()
+
+      _ ->
+        :ok
+    end
   end
 
   defp recover_document(row) do
@@ -99,6 +135,22 @@ defmodule Doctrans.Processing.StartupRecovery do
       _ ->
         :ok
     end
+  end
+
+  # A page already owned by an active job of `module` is that job's to finish.
+  defp without_active_job(query, module) do
+    worker = Oban.Worker.to_string(module)
+
+    from(p in query,
+      where:
+        not exists(
+          from(j in Oban.Job,
+            where: j.worker == ^worker and j.state in ^@active_states,
+            where: fragment(@page_id_match, j.args, parent_as(:page).id),
+            select: 1
+          )
+        )
+    )
   end
 
   defp fetch_batch(query, nil) do
