@@ -124,19 +124,23 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp extract_pages_progressively(document, pdf_path, pages_dir, page_count) do
     result =
       Enum.reduce_while(1..page_count, :ok, fn page_number, :ok ->
-        with {:ok, page} <- ensure_page(document, pdf_path, pages_dir, page_number),
-             :ok <-
-               Run.with_current(document, fn current ->
-                 queue_page_for_processing(page, current)
-               end) do
-          {:cont, :ok}
-        else
-          {:error, reason} ->
-            {:halt, {:error, reason}}
+        case extract_and_queue_page(document, pdf_path, pages_dir, page_number) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
         end
       end)
 
     if result == :ok, do: finish_extraction(document), else: result
+  end
+
+  defp extract_and_queue_page(document, pdf_path, pages_dir, page_number) do
+    case ensure_page(document, pdf_path, pages_dir, page_number) do
+      {:ok, page} ->
+        Run.with_current(document, fn current -> queue_page_for_processing(page, current) end)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   defp finish_extraction(document) do
@@ -193,17 +197,19 @@ defmodule Doctrans.Processing.PdfProcessor do
     case pdf_extractor_module().extract_page(pdf_path, pages_dir, page_number, []) do
       {:ok, image_path} ->
         relative_path = Path.relative_to(image_path, Documents.uploads_dir())
-        page_attrs = %{page_number: page_number, image_path: relative_path}
+        save_current_page(document, page, %{page_number: page_number, image_path: relative_path})
 
-        case Run.with_current(document, fn current -> save_page(current, page, page_attrs) end) do
-          {:ok, page} ->
-            # Broadcast page creation for progressive UI updates
-            Topics.broadcast_page_update(page)
-            {:ok, page}
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
-          {:error, reason} ->
-            {:error, reason}
-        end
+  defp save_current_page(document, page, attrs) do
+    case Run.with_current(document, fn current -> save_page(current, page, attrs) end) do
+      {:ok, saved} ->
+        # Broadcast page creation for progressive UI updates
+        Topics.broadcast_page_update(saved)
+        {:ok, saved}
 
       {:error, reason} ->
         {:error, reason}

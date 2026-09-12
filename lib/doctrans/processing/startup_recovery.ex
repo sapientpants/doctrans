@@ -37,18 +37,7 @@ defmodule Doctrans.Processing.StartupRecovery do
       |> fetch_batch(after_id)
 
     Repo.transact(fn ->
-      Enum.each(rows, fn document ->
-        case Repo.one(from(d in Document, where: d.id == ^document.id, lock: "FOR UPDATE")) do
-          %Document{status: status} = current when status in ["queued", "extracting"] ->
-            Run.args(current)
-            |> DocumentExtractionJob.new(meta: %{recovered: true})
-            |> Oban.insert!()
-
-          _ ->
-            :ok
-        end
-      end)
-
+      Enum.each(rows, &recover_document/1)
       {:ok, :queued}
     end)
     |> unwrap!()
@@ -90,6 +79,20 @@ defmodule Doctrans.Processing.StartupRecovery do
 
     Enum.each(pages, &Topics.broadcast_page_update/1)
     next_cursor(rows, :pages, :done)
+  end
+
+  defp recover_document(row) do
+    locked = from(d in Document, where: d.id == ^row.id, lock: "FOR UPDATE") |> Repo.one()
+
+    case locked do
+      %Document{status: status} = current when status in ["queued", "extracting"] ->
+        Run.args(current)
+        |> DocumentExtractionJob.new(meta: %{recovered: true})
+        |> Oban.insert!()
+
+      _ ->
+        :ok
+    end
   end
 
   defp fetch_batch(query, nil) do

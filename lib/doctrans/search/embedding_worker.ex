@@ -124,50 +124,57 @@ defmodule Doctrans.Search.EmbeddingWorker do
         {:ok, page_id}
 
       {:ok, page} ->
-        # Create chunks from page content
-        chunks =
-          case with_current_revision(page, &ensure_chunks/1) do
-            {:ok, chunks} -> chunks
-            {:error, :stale_entry} -> []
-          end
+        embed_page_chunks(page, page_id, attempt)
+    end
+  end
 
-        if chunks == [] do
-          Logger.info("No chunks to embed for page #{page_id} (empty content)")
+  defp embed_page_chunks(page, page_id, attempt) do
+    case current_chunks(page) do
+      [] ->
+        Logger.info("No chunks to embed for page #{page_id} (empty content)")
+        _ = safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}), page)
+        {:ok, page_id}
 
-          _ = safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}), page)
+      chunks ->
+        chunks
+        |> embed_each(page, attempt)
+        |> finish_page_embedding(page, page_id, length(chunks))
+    end
+  end
 
-          {:ok, page_id}
-        else
-          # Build chunk data for overlap computation
-          chunk_data = Chunker.chunk(page.original_markdown)
+  # Create chunks from page content
+  defp current_chunks(page) do
+    case with_current_revision(page, &ensure_chunks/1) do
+      {:ok, chunks} -> chunks
+      {:error, :stale_entry} -> []
+    end
+  end
 
-          # Embed each chunk (with overlap context for embedding quality)
-          results =
-            Enum.map(chunks, fn chunk ->
-              embed_content = Chunker.content_for_embedding(chunk_data, chunk.chunk_index)
-              embed_chunk(chunk, embed_content, attempt, page)
-            end)
+  defp embed_each(chunks, page, attempt) do
+    # Build chunk data for overlap computation
+    chunk_data = Chunker.chunk(page.original_markdown)
 
-          if Enum.all?(results, &match?({:ok, _}, &1)) do
-            # Also generate page-level embedding for hybrid search fallback
-            _ = generate_page_embedding(page)
+    # Embed each chunk (with overlap context for embedding quality)
+    Enum.map(chunks, fn chunk ->
+      embed_content = Chunker.content_for_embedding(chunk_data, chunk.chunk_index)
+      embed_chunk(chunk, embed_content, attempt, page)
+    end)
+  end
 
-            _ =
-              safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}), page)
+  defp finish_page_embedding(results, page, page_id, chunk_count) do
+    if Enum.all?(results, &match?({:ok, _}, &1)) do
+      # Also generate page-level embedding for hybrid search fallback
+      _ = generate_page_embedding(page)
+      _ = safe_update!(Page.embedding_changeset(page, %{embedding_status: "completed"}), page)
+      Logger.info("Generated embeddings for #{chunk_count} chunks on page #{page_id}")
+      {:ok, page_id}
+    else
+      failed_count = Enum.count(results, &match?({:error, _}, &1))
 
-            Logger.info("Generated embeddings for #{length(chunks)} chunks on page #{page_id}")
-            {:ok, page_id}
-          else
-            failed_count = Enum.count(results, &match?({:error, _}, &1))
+      Logger.error("#{failed_count}/#{chunk_count} chunk embeddings failed for page #{page_id}")
 
-            Logger.error(
-              "#{failed_count}/#{length(chunks)} chunk embeddings failed for page #{page_id}"
-            )
-
-            _ = mark_embedding_error(page)
-            {:error, :chunk_embedding_failed}
-          end
-        end
+      _ = mark_embedding_error(page)
+      {:error, :chunk_embedding_failed}
     end
   end
 

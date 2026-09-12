@@ -97,8 +97,9 @@
           {Credo.Check.Refactor.MatchInCondition, []},
           {Credo.Check.Refactor.NegatedConditionsInUnless, []},
           {Credo.Check.Refactor.NegatedConditionsWithElse, []},
-          # Strict nesting limit
-          {Credo.Check.Refactor.Nesting, [max_nesting: 3]},
+          # Credo's default. Deeper nesting is extracted into named helpers
+          # rather than granted a higher ceiling.
+          {Credo.Check.Refactor.Nesting, [max_nesting: 2]},
           {Credo.Check.Refactor.RedundantWithClauseResult, []},
           {Credo.Check.Refactor.RejectReject, []},
           {Credo.Check.Refactor.UnlessWithElse, []},

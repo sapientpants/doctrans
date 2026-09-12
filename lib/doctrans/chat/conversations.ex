@@ -69,36 +69,38 @@ defmodule Doctrans.Chat.Conversations do
 
       # A slow answer must not resurrect a question already removed by rotation.
       case Repo.get(Message, question.id) do
-        nil ->
-          %Message{id: "expired-#{question.id}", role: role, content: content}
-
-        saved ->
-          _ = Repo.update!(Ecto.Changeset.change(saved, completed: role == "assistant"))
-
-          message =
-            Repo.insert!(%Message{
-              chat_session_id: session.id,
-              question_id: saved.id,
-              role: role,
-              content: content,
-              completed: role == "assistant"
-            })
-
-          if role == "assistant" do
-            bounded = Chat.merge_context([], Chat.current_context(context))
-
-            _ =
-              Repo.update!(
-                Ecto.Changeset.change(session,
-                  retrieved_context: Enum.map(bounded, &Map.take(&1, @context_fields))
-                )
-              )
-          end
-
-          rotate(session.id)
-          message
+        nil -> %Message{id: "expired-#{question.id}", role: role, content: content}
+        saved -> record_answer(session, saved, role, content, context)
       end
     end)
+  end
+
+  defp record_answer(session, question, role, content, context) do
+    _ = Repo.update!(Ecto.Changeset.change(question, completed: role == "assistant"))
+
+    message =
+      Repo.insert!(%Message{
+        chat_session_id: session.id,
+        question_id: question.id,
+        role: role,
+        content: content,
+        completed: role == "assistant"
+      })
+
+    if role == "assistant", do: save_context(session, context)
+
+    rotate(session.id)
+    message
+  end
+
+  defp save_context(session, context) do
+    bounded = Chat.merge_context([], Chat.current_context(context))
+
+    Repo.update!(
+      Ecto.Changeset.change(session,
+        retrieved_context: Enum.map(bounded, &Map.take(&1, @context_fields))
+      )
+    )
   end
 
   defp lock_session(document_id) do

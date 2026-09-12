@@ -160,22 +160,10 @@ defmodule DoctransWeb.DocumentLive.Show do
       # sent back to this LiveView process via the on_event callback; the task's
       # return value carries the final answer + updated context for history and
       # accumulation.
-      lv = self()
       chat_token = make_ref()
 
       task =
-        Task.Supervisor.async_nolink(
-          Doctrans.TaskSupervisor,
-          fn ->
-            Chat.Agent.run(
-              document,
-              trimmed_message,
-              chat_history,
-              [retrieved_context: retrieved_context],
-              fn event -> send(lv, {:chat_event, chat_token, event}) end
-            )
-          end
-        )
+        start_chat_task(document, trimmed_message, chat_history, retrieved_context, chat_token)
 
       socket =
         socket
@@ -186,6 +174,23 @@ defmodule DoctransWeb.DocumentLive.Show do
 
       {:noreply, socket}
     end
+  end
+
+  # Runs the agentic pipeline off-process. Stage/token events are relayed to this
+  # LiveView via `on_event`; the task's return value carries the final answer.
+  defp start_chat_task(document, question, chat_history, retrieved_context, chat_token) do
+    lv = self()
+    on_event = fn event -> send(lv, {:chat_event, chat_token, event}) end
+
+    Task.Supervisor.async_nolink(Doctrans.TaskSupervisor, fn ->
+      Chat.Agent.run(
+        document,
+        question,
+        chat_history,
+        [retrieved_context: retrieved_context],
+        on_event
+      )
+    end)
   end
 
   defp restore_chat_messages(%{assigns: %{chat_open: true}} = socket) do
