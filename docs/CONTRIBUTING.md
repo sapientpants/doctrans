@@ -39,6 +39,11 @@ finishing a change.
 
 ## Test coverage
 
+The quality gate is defined once, in `.pre-commit-config.yaml`. `mix precommit` is
+a thin wrapper around `pre-commit run --all-files`, and CI invokes the same command,
+so the local and CI check sets cannot drift apart. Add or change a check there, not
+in the Mix alias.
+
 `mix precommit`, the test pre-commit hook, and CI run `mix test --cover` with
 ExCoveralls. CI runs coverage on every pull request and push to `main`, including
 configuration-only changes. Tests run once in CI; its pre-commit invocation skips
@@ -52,7 +57,9 @@ expanding exclusions. Use `mix coveralls.html` for a local report in `cover/`.
 ## Static type checks
 
 `mix precommit` runs Dialyzer in the test environment with the project's strict
-warning flags, including test support modules. For a focused run, use
+warning flags, including test support modules. The gate passes
+`--list-unused-filters`, so a suppression in `.dialyzer_ignore.exs` that no longer
+matches anything fails the build instead of lingering. For a focused run, use
 `MIX_ENV=test mix dialyzer`. The first run builds the PLT and can take longer;
 `MIX_ENV=test mix dialyzer --plt` builds it without running analysis. CI restores
 and warms the PLT before analysis, caching it by OS, OTP, Elixir, and dependency

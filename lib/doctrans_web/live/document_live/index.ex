@@ -323,7 +323,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   defp validate_disk_size(path, max_size) do
     path = to_string(path)
 
-    case File.stat(path, size: true) do
+    case File.stat(path) do
       {:ok, %{size: size}} when size <= max_size ->
         :ok
 

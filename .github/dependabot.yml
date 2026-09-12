@@ -5,7 +5,20 @@
 
 version: 2
 updates:
-  - package-ecosystem: "hex"
+  # The ecosystem identifier for Elixir/Hex is "mix" (the manifest is mix.exs).
+  # "hex" is not a valid value and is silently ignored.
+  - package-ecosystem: "mix"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      mix-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Keeps SHA-pinned workflow actions current.
+  - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"

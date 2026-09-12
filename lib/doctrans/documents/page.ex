@@ -47,6 +47,8 @@ defmodule Doctrans.Documents.Page do
     timestamps()
   end
 
+  @type t :: %__MODULE__{}
+
   @doc """
   Query-land predicate for a page whose content failed.
 

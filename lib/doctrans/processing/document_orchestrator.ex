@@ -131,7 +131,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   @doc """
   Recovers incomplete documents on startup.
   """
-  @spec recover_incomplete_documents() :: [Doctrans.Documents.t()] | []
+  @spec recover_incomplete_documents() :: [Doctrans.Documents.Document.t()] | []
   def recover_incomplete_documents do
     # Find documents that need processing (processing or queued status)
     incomplete_docs = Documents.list_incomplete_documents()
@@ -202,7 +202,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   @doc """
   Starts document processing.
   """
-  @spec start_document_processing(Doctrans.Documents.t()) ::
+  @spec start_document_processing(Doctrans.Documents.Document.t()) ::
           {:ok, :processing_started} | {:error, atom()}
   def start_document_processing(document) do
     # First check if document exists
@@ -236,7 +236,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   @doc """
   Completes document processing.
   """
-  @spec complete_document_processing(Doctrans.Documents.t()) ::
+  @spec complete_document_processing(Doctrans.Documents.Document.t()) ::
           {:ok, :completed} | {:error, atom()}
   def complete_document_processing(document) do
     # First check if document exists
@@ -263,7 +263,10 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   @doc """
   Fails document processing with an error message.
   """
-  @spec fail_document_processing(Doctrans.Documents.t(), Doctrans.Errors.reason() | String.t()) ::
+  @spec fail_document_processing(
+          Doctrans.Documents.Document.t(),
+          Doctrans.Errors.reason() | String.t()
+        ) ::
           {:ok, :failed} | {:error, atom()}
   def fail_document_processing(document, error_message) do
     # First check if document exists
@@ -287,7 +290,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   @doc """
   Resets document for retry.
   """
-  @spec reset_document_for_retry(Doctrans.Documents.t()) ::
+  @spec reset_document_for_retry(Doctrans.Documents.Document.t()) ::
           {:ok, :reset} | {:error, atom()}
   def reset_document_for_retry(document) do
     # First check if document exists
@@ -311,7 +314,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   @doc """
   Checks if a document can be processed.
   """
-  @spec can_process_document?(Doctrans.Documents.t()) :: boolean()
+  @spec can_process_document?(Doctrans.Documents.Document.t()) :: boolean()
   def can_process_document?(document) do
     document.status in ["queued", "extracting"]
   end

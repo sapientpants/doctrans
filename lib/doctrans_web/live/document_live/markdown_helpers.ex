@@ -6,6 +6,8 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpers do
   rendering and security sanitization across the document viewer.
   """
 
+  require Logger
+
   @doc """
   Renders Markdown text to sanitized HTML.
 
@@ -32,8 +34,14 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpers do
 
   def render_markdown(text, opts) do
     case MDEx.to_html(text, mdex_options(opts)) do
-      {:ok, html} -> sanitize_html(html)
-      {:error, html} -> sanitize_html(html)
+      {:ok, html} ->
+        sanitize_html(html)
+
+      {:error, error} ->
+        # MDEx returns an exception struct, not HTML. Rendering must degrade to
+        # empty content rather than passing a struct to the sanitizer.
+        Logger.warning("Markdown rendering failed: #{Exception.message(error)}")
+        ""
     end
   end
 

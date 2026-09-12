@@ -7,6 +7,10 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  # A new advisory can affect an unchanged lockfile, so re-audit on a schedule.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 jobs:
   verify:
@@ -82,7 +86,7 @@ jobs:
             ${{ runner.os }}-plt-v2-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: Install dependencies
-        run: mix deps.get
+        run: mix deps.get --check-locked
 
       - name: Compile dependencies
         run: mix deps.compile
@@ -98,9 +102,6 @@ jobs:
 
       - name: Test with 80% coverage gate
         run: mix test --cover
-
-      - name: Run Dialyzer
-        run: mix dialyzer --format dialyxir
 
       - name: Check for uncommitted changes
         run: |

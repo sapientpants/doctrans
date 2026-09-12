@@ -267,11 +267,11 @@ for documents in another source language.
 
 ```bash
 mix test              # Run tests
-mix precommit         # Compile, unused deps, audit, format, Credo, Sobelow, Dialyzer, tests with coverage
+mix precommit         # Run the full quality gate (defined in .pre-commit-config.yaml)
 mix credo --strict    # Static code analysis
 mix sobelow --config  # Security analysis
 mix dialyzer          # Type checking (first run builds PLT)
-mix deps.audit        # Dependency vulnerability scanning
+mix hex.audit         # Security advisories and retired packages
 mix coveralls.html    # Test coverage report (80% minimum required)
 iex -S mix phx.server # Interactive console
 ```

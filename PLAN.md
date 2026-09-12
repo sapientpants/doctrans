@@ -1,7 +1,8 @@
 # Doctrans improvement plan
 
-Status: implementation in progress; C01–C04 completed.
+Status: implementation in progress; C01–C05 and Q01 completed, plus Phase 6 items G01–G08.
 Base: `main` at `6953656`, reviewed on 11 September 2026.
+Phase 6 added 12 September 2026 from a quality-gate, toolchain, and supply-chain review.
 Branch: `plan/project-improvements`.
 
 The README describes a local, single-user application for translating documents with local AI,
@@ -344,12 +345,19 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
 
 ## Phase 5 — Verification and maintenance
 
-- [ ] **Q01 · P2 · Correct the warnings-as-errors compiler flag.**
+- [x] **Q01 · P2 · Correct the warnings-as-errors compiler flag.**
   Both precommit paths use `--warning-as-errors`; installed Mix recognizes `--warnings-as-errors`.
   Correct both invocations and decide explicitly whether test-load warnings must also fail validation.
   Acceptance: a project compilation warning fails each quality entry point; the normal project passes.
   Evidence: `mix.exs:132`, `.pre-commit-config.yaml:116`.
   Verified against local `mix help compile` and compiler option parsing. Do this before the main fix batches.
+  Implemented: both call sites corrected. The unknown switch was measured, not assumed — in a scratch
+  project carrying a deliberate unused-variable warning, `--warning-as-errors` exits 0 and
+  `--warnings-as-errors` exits 1, and the singular form behaves identically to a nonsense switch such as
+  `--banana`. Mix neither rejects nor warns about it, so this gate had never failed a build since it was
+  introduced. Fixing it unmasked no backlog: `mix compile --force --warnings-as-errors` is clean in both
+  `dev` and `test` (86 and 100 files). The test-load question is deliberately left open as Q07, because
+  `mix compile` never sees `test/**/*.exs` and exactly one warning hides in that blind spot.
 
 - [ ] **Q02 · P2 · Include critical workers in meaningful coverage.**
   The reported percentage excludes Worker, LlmProcessor, EmbeddingWorker, and health/sweeper workers.
@@ -359,6 +367,26 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: critical processing/indexing behavior contributes to the coverage gate;
   CI and local checks use the same configuration without hiding new gaps.
   Evidence: `coveralls.json:5`, `.coveragerc`, `.gitignore:46`.
+  Measured 12 September 2026 by overriding the ExCoveralls config path at the BEAM level
+  (`ELIXIR_ERL_OPTIONS='-excoveralls config_file ...'`) and re-running with `skip_files` emptied,
+  so no tracked file was touched. Honest coverage of all of `lib/` is **86.2%** (2871 relevant lines,
+  397 missed); the measured subset reports 89.6%; the excluded files sit at **66.2%**. Because 86.2%
+  clears the existing 80% gate, the seven production exclusions can be deleted outright with no
+  threshold change and no new tests — do that first, then close the gaps below.
+  Per-file reality: `health_check_worker.ex` 37.2%, `embedding_worker.ex` 59.1%, `llm_processor.ex` 67.5%,
+  `sweeper_worker.ex` 70.0%, `health_check.ex` 78.2%, `worker.ex` 95.9%. Two entries
+  (`processing/ollama.ex`, `test/support/ollama_stub.ex`) named files that no longer exist and were
+  removed in G07.
+  What the exclusion hides is exactly the reliability logic this plan prioritizes, all of it unexecuted:
+  both retry-with-backoff and permanent-failure arms in `llm_processor.ex:183-215,292-324`; the whole of
+  `handle_chunk_error/5` and the `Ecto.StaleEntryError` rescue in `embedding_worker.ex:286-345`;
+  `chunks_match_page_content?/2` at `embedding_worker.ex:185-206`, which is the C01 alignment decision;
+  and the entire check cycle in `health_check_worker.ex:98-180`, which never runs because
+  `config/test.exs:60` disables the worker. The retry paths are cheap to cover — `config/test.exs:52-55`
+  already sets `max_attempts: 2, base_delay_ms: 10`, so a retry test costs about 20 ms.
+  `.coveragerc` is dead configuration: it is a `coverage.py` filename holding Elixir list syntax, nothing
+  reads it, and `grep -r coveragerc` matches only this plan. Delete it rather than reconciling it — a
+  second exclusion list that cannot take effect makes the real one look reviewed.
 
 - [ ] **Q03 · P2 · Assert successful outcomes and control test background work.**
   Some search tests allow either results or no results and conditionally skip link assertions.
@@ -369,6 +397,369 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   restart and reprocessing boundary regressions are covered without live model dependencies.
   Evidence: `test/doctrans_web/live/search_live_test.exs:107,139,192`, `test/support/`,
   and the baseline precommit run.
+  Diagnosed 12 September 2026. A passing run logs **17 `DBConnection.OwnershipError`s** from two sources.
+  First, `Doctrans.Processing.Worker` reschedules startup recovery with
+  `Process.send_after(self(), {:recover_batch, next}, 1_000)` (`lib/doctrans/processing/worker.ex:209-216`);
+  a test that enables `background_processes` lets recovery begin, the test ends, and the message lands
+  1 s later with no sandbox owner, so the GenServer crashes and the supervisor restarts it mid-suite.
+  `test/doctrans/processing/worker_test.exs:9-30` already compensates with a `Process.sleep(50)` and an
+  `ensure_worker_responsive/1` helper that retries on `:exit` — the suite is working around a bug it causes.
+  Second, `EmbeddingWorker` tasks spawned under `Doctrans.TaskSupervisor` inherit no ownership
+  (`embedding_worker.ex:104,129,146,153,156,254,343`).
+  The fix already exists and is dead code: `test/support/worker_helpers.ex:20` calls
+  `Ecto.Adapters.SQL.Sandbox.allow/3` correctly, but `grep -rn "WorkerHelpers\|setup_worker_sandbox"`
+  matches only its own definition. That single call site is the only `Sandbox.allow/3` in the tree.
+  Oban is `testing: :inline` (`config/test.exs:66`), so job bodies are fine; the gap is the four always-on
+  GenServers. Fixing this also removes the 0.3% run-to-run coverage jitter that would eventually make a
+  threshold gate fail spuriously.
+  Related cleanup in the same pass — tests that cannot fail:
+  `test/doctrans/search/embedding_worker_test.exs` is 26 lines covering a 361-line module and asserts that
+  `GenServer.cast` returns `:ok` and that the compiler compiled;
+  `test/doctrans/resilience/health_check_worker_test.exs` is 7 `Map.has_key?` assertions on a static struct
+  plus `interval_ms == 60_000`; `test/doctrans/processing/pdf_extractor_test.exs:65-108` wraps three error
+  tests in `rescue ErlangError -> :ok`, so any unexpected crash is rescued into a pass;
+  `test/doctrans/processing/openai_test.exs:30-47` asserts `is_boolean(...)` and reaches the live network;
+  and `worker_test.exs` has five `is_map(status)` assertions each preceded by a sleep.
+  Of 13 `Process.sleep` calls in tests, 11 are races being papered over; the two in
+  `document_converter_test.exs:253,419` and two in `openai_request_test.exs:642,644` are legitimate fixture
+  behavior. Only 8% of suite wall time is parallel (0.9 s async vs 55.8 s sync), mostly because
+  `Application.put_env` on `:openai`/`:uploads`/`:pdf_extractor_module` forces `async: false`.
+
+- [ ] **Q04 · P2 · Fix chunk byte offsets and assert them with a property.**
+  `Chunker` writes `start_offset`/`end_offset` to the `chunks` table, and they do not slice back to the
+  chunk content. A probe against the real module produced 14/14 mismatched offsets for a long single
+  paragraph and 6/6 for ordinary paragraphs; chunk 1 of the first case has content starting
+  `"Sentence number 38 has…"` while `binary_part(text, start_offset, len)` yields `"e number 37 has…"`,
+  with drift compounding across chunks. Two causes: `split_long_paragraph` advances offsets by
+  `byte_size(Enum.join(sentences, " "))`, discarding the original separators, and `finalize_paras` joins
+  on a literal `"\n\n"` when the source may have `"\n\n\n"`.
+  Word counts are preserved in every case, so no text is lost and retrieval quality is unaffected; nothing
+  currently reads the offsets back. This is therefore a latent data defect, not a user-visible one — but it
+  is a P1 test-quality defect, because the three tests named "byte offsets are consistent",
+  "byte offsets are correct for multi-byte characters", and "preserves start and end offsets" assert only
+  `start_offset >= 0` and `end_offset > start_offset`, on single-chunk inputs. They are the clearest
+  instance in the repo of a test that cannot fail.
+  Fix the offset arithmetic, then replace those three tests with the property
+  `binary_part(trimmed, c.start_offset, c.end_offset - c.start_offset) == c.content` for every chunk.
+  Acceptance: the property holds for generated paragraph shapes including multi-byte content, repeated
+  blank lines, and paragraphs long enough to split; a deliberate reintroduction of either bug fails it.
+  Evidence: `lib/doctrans/search/chunker.ex:171-176,183-211`, `lib/doctrans/documents/chunk.ex:17-18`,
+  `test/doctrans/search/chunker_test.exs:74,84,95`. Reproduced with a probe against the real module.
+
+- [ ] **Q05 · P2 · Add property tests for the invariants that fixtures state only by example.**
+  Add `{:stream_data, "~> 1.4", only: [:dev, :test]}` and four properties, in value order.
+  `Chunker.chunk/1`: the offset round-trip above, plus word-multiset preservation, contiguous
+  `chunk_index` over `0..n-1`, and non-decreasing `start_offset` — this restates C01's "retain every
+  passage" acceptance criterion as an invariant instead of two fixtures, and guards the three-way `cond`
+  in `accumulate_paragraph/2` (`chunker.ex:131-145`).
+  `Validation.sanitize_filename_string/1`: for any binary, `Path.basename(r) == r`, no `/`, `\` or NUL,
+  no `..`, and `Path.expand(Path.join(dir, r))` stays under `dir`. Five example tests cover this today and
+  none states the last clause, which is the one that matters.
+  `Chunker.content_for_embedding/2`: the result always ends with the chunk's own content and any prepended
+  prefix is a suffix of the previous chunk — this is the embedded-versus-stored divergence surface from C01,
+  and `tail_words/2` (`chunker.ex:166-169`) re-joins on `" "`, the same bug class as Q04.
+  Explicitly not worth it: revision monotonicity (the failure mode is concurrency, already modelled by
+  `document_reprocessing_race_test.exs` and `embedding_worker_race_test.exs`, and a property would assert
+  `n + 1 > n`), changeset validation, and LiveView rendering — all small enumerable spaces better served by
+  table-driven examples.
+  Acceptance: each property fails when its invariant is deliberately broken; run counts and collection
+  sizes are bounded so pull-request latency stays predictable; minimal counterexamples are kept as
+  regression examples.
+
+- [ ] **Q06 · P2 · Cover the remaining trust boundaries and bound the inference client.**
+  Upload and image serving are the best-tested boundaries in the app and need only two additions: a
+  zero-byte file at the LiveView level (`validation_test.exs:215` covers the unit), and a corrupt PDF with
+  valid magic bytes but a garbage body, which passes `validate_file_content/2` and then fails at `pdfinfo`.
+  `endpoint_test.exs:41-116` already covers traversal, encoded traversal, and original-file access across
+  GET/HEAD, and `plugs/upload_images.ex` is at 100% — no action there.
+  Two real gaps remain on the inference client. A slow or drip-feeding endpoint is never caught: the
+  300 s `receive_timeout` is per receive, not a total deadline, `chat_stream` uses `into:` with the same
+  per-chunk semantics, and with `retry: :transient` a hung endpoint can hold a page for roughly 20 minutes.
+  There is also no response size bound — `grep max_response_size lib/` returns nothing, so a body is read
+  fully into memory. Add a total deadline and a size cap, each with a Bypass test.
+  SSRF needs no test: `base_url` resolves only from `Config.fetch!(:openai, :base_url)` and no request path
+  can set it. Command injection is not possible in the PDF path either, since `System.cmd/3` takes an
+  argument list — the gap there is the missing timeout, which is R04.
+  Model output reaching `raw/1` is correct by construction and well tested at the unit level
+  (`markdown_helpers_test.exs:7-31` uses LazyHTML and covers `<script>`, nested `<iframe srcdoc>`,
+  `onerror`, `onclick`, and `javascript:` hrefs). Add one end-to-end test driving a document whose
+  `translated_markdown` carries a payload through `DocumentLive.Show`, plus markdown-native vectors
+  (`[x](javascript:alert(1))`, `![](data:text/html;base64,…)`, reference-style links).
+  Acceptance: a hanging endpoint fails a page with an actionable error inside a bounded time; an oversized
+  response is rejected before it is buffered; the sanitizer wiring is proven end to end, not only in unit
+  isolation.
+  Evidence: `lib/doctrans/processing/openai.ex:126,183-188`, `config/openai.ex:23`,
+  `lib/doctrans_web/live/document_live/viewer_components.ex:101-103`,
+  `lib/doctrans_web/live/document_live/chat_components.ex:170-172`.
+
+- [ ] **Q07 · P3 · Close the test-file warning blind spot, then reconsider mutation testing.**
+  `mix compile` never loads `test/**/*.exs`, so Q01's corrected flag does not reach it. One warning lives
+  there today: `test/support/openai_stub_test.exs:23` asserts `is_list(models) and models != []`, which
+  the type checker proves always succeeds — a dead assertion that is also proof the blind spot is real.
+  Fix the assertion, then add `--warnings-as-errors` to the `test` alias so the gap closes permanently.
+  On mutation testing: do not pilot `muex` yet. Mutation testing grades assertions on code the suite
+  already executes, and the highest-value logic here has zero executions until Q02 lands, so every mutant
+  planted there would survive trivially. The runtime is also unfavourable (846 tests, 57 s, 98% of it
+  serial), and the suite is not yet deterministic enough to distinguish a surviving mutant from a flaky
+  kill while Q03's 17 ownership crashes and 11 timing sleeps remain. Revisit after Q02 and Q03, scoped to
+  `lib/doctrans/search/` and `lib/doctrans/resilience/`, where a full pass is minutes rather than hours.
+  Note that `muex` is real and current (0.10.0, released 12 September 2026) — the reason to wait is
+  sequencing, not tool maturity.
+
+## Phase 6 — Quality gates, toolchain, and supply chain
+
+Reviewed 12 September 2026 against a September 2026 Elixir/Phoenix CI reference report. Every claim below
+was verified against this repository rather than adopted from the report; where the report was wrong for
+this project, that is recorded with the item.
+
+The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
+worse than an absent one, because it is counted as evidence. Items G01–G08 are implemented; G09–G18 remain.
+
+- [x] **G01 · P1 · Make the dependency advisory gate real.**
+  The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
+  check named "Hex security audit". Its comment claimed CI ran `mix hex.audit`; CI never did. Its stated
+  justification, that `hex.audit` "cannot ignore specific packages", was obsolete: Hex 2.5.1 added
+  `ignore_advisories`/`ignore_retirements` in the `:hex` project section.
+  Meanwhile `mix deps.audit` reported "No vulnerabilities found" and exited 0 while `mix hex.audit` exited
+  1 with **five advisories**, including **`mint 1.9.3` EEF-CVE-2026-82728 (HIGH)**, an unbounded
+  HTTP/1 status-line and chunk-extension buffering DoS. `mint` is a runtime dependency via `req` → `finch`.
+  The divergence is not the known mix_audit sync bug (issue 61, real and open, but the local advisory clone
+  was healthy at `5246bcc`, 4 September 2026). Two different causes: the mint advisories are EEF/OSV-only
+  and absent from the GitHub Advisory Database that mix_audit reads, and mirego's cowlib entry encodes
+  `>= 2.9.0, <= 2.16.1` while its own description says the flaw affects 2.9.0 onward, so the locked 2.19.0
+  falls outside the range.
+  Implemented: the hook now runs `mix hex.audit`; `mint` updated to 1.10.0, which clears both mint
+  advisories; the three remaining `cowlib` advisories are acknowledged in `mix.exs` with a dated
+  `REVIEW BY 2026-12-12` comment, because cowlib reaches the project only through `:bypass` (test-only) —
+  production serves with Bandit, not Cowboy — and upstream has published no fixed version. Hex warns when
+  an acknowledgement stops matching the lockfile, so the register cleans itself.
+  `mix deps.audit` is deliberately retained alongside it: the two tools read different advisory sources and
+  neither is a superset, so the supplementary signal is worth its cost now that it is no longer the only one.
+  Acceptance: a new advisory in the lockfile fails the gate; acknowledged entries are listed, dated, and
+  warn when they go stale. Verified: `mix hex.audit` exits 0 with all three cowlib findings under
+  "Ignored advisories".
+
+- [x] **G02 · P1 · Restore Dialyzer to a working gate.**
+  `.dialyzer_ignore.exs` suppressed **49 of 49 findings**. `mix dialyzer` was a 3-second no-op that always
+  printed "passed successfully", and `--list-unused-filters` reported zero unused filters only because
+  every filter was broad enough that nothing could go stale. Three of the suppressed findings were real:
+  `markdown_helpers.ex:36` passed an `MDEx` exception struct to `HtmlSanitizeEx.basic_html/1`, which takes a
+  binary — so **any MDEx failure while rendering a document page or chat message raised** instead of
+  degrading. The ignore comment blamed the sanitizer's return type; the defect was the argument.
+  `index.ex:326` called `File.stat(path, size: true)`; `size` is not a `stat_option` and was silently
+  discarded, which marked `validate_disk_size/2` and its caller `no_return` and was why three separate
+  warning classes had to be muted for that one file.
+  `document_orchestrator.ex` had six specs referencing `Doctrans.Documents.t()`, a type that does not
+  exist — `Doctrans.Documents` is a context module with no `@type t`, and the schema is
+  `Doctrans.Documents.Document` in `documents/book.ex:36`. Dialyzer resolved it to `any()` and checked
+  nothing, while an `:unknown_type` filter hid that fact.
+  Implemented: the error branch now logs and returns `""`; the bogus option is removed; the six specs point
+  at `Documents.Document.t()` and `Documents.Page` gained `@type t`. The five suppressions covering those
+  three bugs are deleted, and fixing the specs made a sixth filter provably dead, which
+  `--list-unused-filters` then reported and which is also deleted. Findings fell 49 → 31, all remaining ones
+  genuinely third-party or flag-induced. The gate now runs
+  `mix dialyzer --format dialyxir --list-unused-filters`, so a stale suppression fails the build instead of
+  lingering.
+
+- [x] **G03 · P1 · Fix the Dependabot ecosystem identifier.**
+  `.github/dependabot.yml` used `package-ecosystem: "hex"`. The valid identifier for Elixir is **`mix`**;
+  `hex` exists only as the `hex-organization`/`hex-repository` private-registry types. The config has been
+  silently inert since it was added on 6 December 2025 — `gh pr list --author app/dependabot --state all`
+  returns zero PRs across the repository's entire history, which is also why nothing surfaced the mint
+  advisory. Dependabot *security* updates are alert-driven and do still function, so this was a gap in
+  version updates specifically; note that GitHub's alert feed did not flag the mint HIGH either, so alerts
+  are not a substitute for the lockfile audit.
+  Implemented: ecosystem corrected to `mix`, minor and patch updates grouped into one weekly PR to keep
+  review volume sane for a single maintainer, and a `github-actions` ecosystem added, which G13 depends on.
+  An npm ecosystem was considered and rejected: there is no `package.json` or JS lockfile anywhere in the
+  repo — `assets/vendor/*.js` is vendored and `esbuild`/`tailwind` are standalone binaries — so it would be
+  a no-op.
+
+- [x] **G04 · P2 · Collapse the quality gate to one definition.**
+  The gate was defined in five places — `mix.exs`, `.pre-commit-config.yaml`, `ci.yml`,
+  `docs/CONTRIBUTING.md`, and `README.md:270` — and they had already drifted: the Mix alias ran Dialyzer but
+  neither `check_translations.exs` nor `check_module_size.exs`; the hook list ran the reverse. A developer
+  following `AGENTS.md` and running `mix precommit` therefore ran a strictly different check set from the one
+  that fires on their commit and in CI. That the `--warning-as-errors` typo appeared identically in both
+  files is direct evidence the lists were copy-pasted rather than derived.
+  Implemented: `.pre-commit-config.yaml` is the single definition and `mix precommit` reduces to
+  `["cmd pre-commit run --all-files"]`. Dialyzer moved into the hook list, since the alias no longer runs it,
+  and the now-redundant duplicate Dialyzer step was removed from CI. CI continues to invoke
+  `pre-commit run --all-files`, so local and CI runs execute the same list by construction.
+
+- [x] **G05 · P2 · Close the formatter's silent scope gap.**
+  `mix format --check-formatted` passed while two tracked files were unformatted. `.formatter.exs` inputs
+  covered neither `scripts/` nor any dotfile, and `Path.wildcard/1` does not match a leading dot without
+  `match_dot: true`, so `.credo.exs` and `.dialyzer_ignore.exs` — the two files most likely to be hand-edited
+  under pressure — sat outside the formatting gate.
+  Implemented: `scripts/` added and the dotfiles listed explicitly rather than globbed, since an explicit
+  list cannot silently miss a file. `scripts/check_module_size.exs` and `scripts/check_translations.exs`
+  reformatted accordingly.
+
+- [x] **G06 · P2 · Verify the locked dependency set and re-audit on a schedule.**
+  CI ran a bare `mix deps.get`, so a pull request editing `mix.exs` without regenerating `mix.lock` resolved
+  fresh versions and rewrote the lockfile mid-run — caught only afterwards by the uncommitted-changes step,
+  and misreported there as "please run mix precommit". The workflow also had no schedule, which is precisely
+  the gap the mint HIGH sat in: an unchanged lockfile gives CI no reason to run, so an advisory disclosed
+  after the last commit goes unnoticed indefinitely. CodeQL's weekly default setup does not close this —
+  **CodeQL has no Elixir support at all**, so it analyses only the workflow files and vendored JS.
+  Implemented: `mix deps.get --check-locked`, plus a Monday 06:00 UTC `schedule` and `workflow_dispatch`.
+
+- [x] **G07 · P3 · Remove stale and misleading tool configuration.**
+  `mix.exs` allowed `{:sobelow, "~> 0.14"}` while the lockfile resolved 0.15.0. Since several 0.15.0 fixes
+  are specifically cases where a scan **exited 0 having scanned nothing** (a corrupt version-check cache, and
+  a `--save-config`-written `version` key), permitting resolution back to 0.14.x risked silently
+  reintroducing a false-green security scan. Pinned to `~> 0.15`. Confirmed `.sobelow-conf` carries no stray
+  `version` key. Also dropped two `coveralls.json` exclusions naming files that no longer exist
+  (`processing/ollama.ex`, `test/support/ollama_stub.ex`).
+
+- [x] **G08 · P1 · Correct the compiler flag.** See Q01.
+
+- [ ] **G09 · P1 · Require status checks before merge.**
+  Ruleset 10866831 on `main` enforces deletion, non-fast-forward, linear history, signatures, and a pull
+  request — but contains **no `required_status_checks` rule**, and `branches/main/protection` returns
+  404. A pull request with a red CI run is mergeable today, which means every other item in this phase is
+  advisory until this lands. This is the highest-value change in the phase and the only one requiring
+  repository settings rather than a code change.
+  It has a prerequisite: the check is currently named `Run Pre-commit Checks (1.20.3, 29.0.5)` because the
+  single-entry `strategy.matrix` interpolates versions into the job name. Requiring that name means the gate
+  silently stops matching — and therefore stops applying — the day the toolchain is bumped. Drop the matrix
+  (it has one entry and serves no purpose) or add a small `gate` job that `needs:` the others and require
+  only its stable name.
+  Acceptance: a pull request whose CI fails cannot be merged, and a toolchain bump does not detach the
+  requirement.
+
+- [ ] **G10 · P1 · Bump the toolchain and pin it in one place.**
+  The pins are Elixir 1.20.3 and OTP 29.0.5. **Elixir 1.20.4 is a security release (CVE-2026-75758,
+  recursion in `List.to_string/1` and `to_charlist/1`) and OTP 29.0.6 carries CVE-2026-75538.** Both should
+  be adopted. This was deliberately excluded from the current change because a toolchain bump cannot be
+  verified locally without installing it, and it deserves its own CI run.
+  The version is currently stated in five places: `mise.toml:2-3`, the CI matrix, `Dockerfile.dev:2`,
+  `mix.exs:10` (a `~> 1.20` range, intentionally), and `README.md:30` prose. `erlef/setup-beam` accepts
+  `version-file: mise.toml` with `version-type: strict`, which deletes the CI copy and, as a side effect,
+  removes the job-name instability blocking G09.
+  Acceptance: one authoritative version file; CI, Docker, and local tooling agree without hand-copying.
+
+- [ ] **G11 · P2 · Tighten the subjective Credo checks to honest thresholds.**
+  Four checks are labelled "strict" in `.credo.exs` while being configured **looser than Credo's own
+  defaults**: `Refactor.Nesting` 3 (default 2), `CyclomaticComplexity` 10 (default 9), `ABCSize` 50
+  (default 30), `ModuleDependencies` 20 (default 10). They pass unconditionally and teach nothing.
+  `Design.DuplicatedCode` is the clearest case: 0 issues at `mass_threshold: 30`, **146 at 12** — a cliff
+  that shows the number was fitted to the codebase rather than chosen.
+  Decision taken 12 September 2026: keep these blocking and move them to Credo's defaults, accepting the
+  backlog rather than demoting them to advisory. Measured cost at default thresholds: **16** cyclomatic
+  complexity, **9** nesting, **31** ABC size, **17** module-dependency findings, plus whatever
+  `DuplicatedCode` surfaces below 30. Stage it — one threshold per change, each with its refactor — rather
+  than tightening all five at once; and treat the module-size cap (G15) as part of the same conversation,
+  since `index.ex` is at 96% of it and is also the file carrying the most real defects.
+  Acceptance: every threshold is at or below Credo's default, no threshold is loosened to make a change pass,
+  and `mix credo --strict` is clean at the new values.
+
+- [ ] **G12 · P2 · Make Sobelow findings explicit rather than tolerated.**
+  `exit: "high"` means four Low-Confidence `SQL.Query` findings in `lib/doctrans/search.ex:167,196,301,414`
+  print on every run and never block. All four were read and are genuine false positives — heredocs with
+  `$1..$4` placeholders passed to `Repo.query/2` with no interpolation, flagged only because the query is
+  bound to a variable named `sql`. The problem is the disposal method: a fifth low-confidence finding, real
+  this time, would join the noise unnoticed.
+  Annotate the four sites with `# sobelow_skip ["SQL.Query"]` and a justification, then set `exit: "low"`
+  so any *new* low-confidence finding fails the build.
+  Separately, the 18 existing `# sobelow_skip` annotations suppress nothing — toggling `skip` on and off
+  yields the same four findings, because eight sit on `defp` (excluded entirely by `private: false`) and the
+  other ten suppress a `Traversal.FileModule` check that never fires in a LiveView app with no
+  `conn`-derived paths. Their prose justifications are genuinely good and should be kept; either drop the
+  inert `sobelow_skip` markers or set `private: true` so the annotations become load-bearing. Prefer the
+  latter, and triage the resulting findings once.
+  Keep `Config.CSP` and `Config.HTTPS` ignored — they are correct for a loopback-bound single-user app — but
+  record why, and what would invalidate it. The app does render LLM-extracted content from arbitrary uploads
+  through `raw/1` at exactly two sites, both routed through one `HtmlSanitizeEx.basic_html/1` helper; CSP is
+  the defense-in-depth for a sanitizer bug, and there is no second layer. A pre-commit grep for any *third*
+  `raw(` call site guards that invariant more cheaply than adopting CSP.
+
+- [ ] **G13 · P2 · Pin actions by SHA and stop persisting credentials.**
+  Every `uses:` in `ci.yml` floats on a mutable major tag, `erlef/setup-beam@v1` most notably. Neither
+  checkout sets `persist-credentials: false`, so a `GITHUB_TOKEN` is written into `.git/config` for the whole
+  job — and that job downloads and executes hook code from five external repositories. The token is
+  `contents: read`, which caps the blast radius, hence P2 rather than P1.
+  Pin every action to a full commit SHA with a version comment and add `persist-credentials: false`. Land
+  this together with G03's `github-actions` Dependabot ecosystem — pinning without it merely trades a
+  supply-chain risk for a staleness risk.
+
+- [ ] **G14 · P2 · Give suppressions an owner and an expiry.**
+  Every remaining `.dialyzer_ignore.exs` entry is `{file, warning_class}`, the broadest granularity dialyxir
+  offers, with no owner, date, upstream link, or expiry. The file header recommends auditing with
+  `--list-unused-filters`, but that command cannot detect an over-broad filter — only a completely dead one.
+  G02 demonstrated the failure mode concretely: two entries carried confident, plausible, and wrong
+  diagnoses of bugs nobody had actually investigated.
+  Narrow the keys to `{file, description, line}` so a filter dies when the code moves; require owner, expiry,
+  upstream link, and rationale per entry; and enforce expiry with a small script alongside
+  `check_module_size.exs`. Cap the register, so adding the next entry is a decision rather than a reflex.
+  Also drop `:underspecs` from the Dialyzer flags: it is the sole source of the remaining
+  `contract_supertype` findings, so removing one flag removes several file-level mutes. Prefer one explicit
+  decision over three suppressions.
+  Acceptance: no file-level class mute remains without a dated justification; an expired entry fails the gate.
+
+- [ ] **G15 · P2 · State the module-size limit once, and decide what it is for.**
+  Three limits exist for one rule: `scripts/check_module_size.exs` defaults to 500, pre-commit passes
+  `--max-lines 600`, and the Mix alias did not run it at all before G04. The script also miscounts by one
+  (`String.split("\n")` on a trailing-newline file) and skips `.exs` undocumented.
+  More importantly the gate fires on line count, which is uncorrelated with the property of interest, and
+  fires hardest on the worst file: `index.ex` is at 576/600 — 96% — and is the same file that carried three
+  Dialyzer suppressions and a real bug. The next feature touching it hits the wall at the moment careful
+  attention is least available.
+  Make `--max-lines` required with no default, or hoist the number into one config read by both callers.
+  Then decide deliberately whether this stays blocking under G11's honest-thresholds policy or becomes the
+  one advisory metric.
+
+- [ ] **G16 · P2 · Gate compile-time cycles with `mix xref`; do not adopt Boundary.**
+  Architectural enforcement was assessed and **Boundary is rejected** on evidence. The violations it would
+  catch do not exist: `lib/doctrans/` references `DoctransWeb` in exactly three places, all correct
+  (PubSub/Endpoint broadcasts); `Doctrans.Repo` is never called from web code; no schema module is used
+  directly from a LiveView or controller. Against that, boundary 0.10.4 last released September 2024, its
+  upstream CI has **no version matrix at all** and is pinned to Elixir 1.15.4, and a tracer
+  misclassification regression landed at Elixir 1.19 and survives on 1.20 unreported — bisected during this
+  review, narrow in blast radius and harmless to this codebase, but invisible to anyone watching. Taking a
+  compiler-tracer dependency with no upper version bound to re-assert facts a `grep` already confirms is the
+  wrong trade for a single-maintainer project.
+  Adopt the native gate instead: `mix xref graph --format cycles --label compile-connected --fail-above 0`
+  as a pre-commit hook. It ships with Elixir, so it has no compatibility surface of its own. Confirm the
+  baseline is zero before enabling.
+  Alongside it, take the small structural fixes the review surfaced: the unsupervised reschedule in
+  `worker.ex:17-18`, three queries in `chat.ex:322,376,388` that belong behind the `Documents` API, and
+  `git mv lib/doctrans/documents/book.ex lib/doctrans/documents/document.ex` so the filename matches
+  `Doctrans.Documents.Document` — a naming mismatch that already contributed to G02's broken specs.
+
+- [ ] **G17 · P3 · Prefer the settings toggle over a new secret-scanning tool.**
+  The reference report's gitleaks recommendation is largely redundant here and partly outdated. GitHub
+  secret scanning **and push protection** are already enabled on this repository, which blocks a
+  provider-pattern secret before it reaches the remote — strictly stronger than a post-hoc CI job — and
+  pre-commit already runs `detect-private-key`. Gitleaks upstream now declares itself feature-complete,
+  security-patches-only, with development moved to a successor project, so adopting it would add a frozen
+  dependency.
+  The actual residual gap is `secret_scanning_non_provider_patterns`, currently disabled, which is what would
+  cover a custom `OPENAI_API_KEY`-style token. Enable that toggle and re-evaluate only if it proves
+  insufficient. Expect some false positives on fixtures; that is still cheaper than owning a scanner config.
+
+- [ ] **G18 · P3 · Reconcile the spec policy with reality.**
+  `.credo.exs` disables `Readability.Specs` with the comment "Specs are enforced by Dialyzer, not Credo".
+  That is false: Dialyzer never requires a spec to exist — it infers success typings and checks only the
+  specs present. Measured: 78 `@spec` against 499 public `def` in `lib/`, roughly 30% coverage even crediting
+  all 73 `@impl` callbacks. `Doctrans.Documents` has 18 public functions and zero specs, which is the same
+  context whose nonexistent `.t()` type G02 found in six orchestrator specs.
+  Either enable the check scoped to `lib/doctrans/` (excluding `lib/doctrans_web/`, where 36 HEEx function
+  components would generate low-value specs) and accept the backlog, or keep it disabled and correct the
+  comment to say specs are optional by choice. Do not leave a false justification in place — that is the
+  same failure mode G02 found in the Dialyzer ignore file.
+
+- [ ] **G19 · P3 · Minor CI and container hygiene.**
+  Add a `concurrency` group with `cancel-in-progress` so superseded pushes stop burning a full run. Change
+  the dependency cache's `actions/cache/save` from `if: always()` to `if: success()` so a half-compiled
+  `_build` is not cached. Pin `Dockerfile.dev:2` (`FROM elixir:1.20.3-otp-29`) by digest and add
+  `--check-locked` to its `mix deps.get`, since `Dockerfile.dev` is what `docker compose up` actually runs
+  and is therefore the shipped artifact. Remove `/coveralls.json` from `.gitignore`, where it contradicts the
+  tracked file.
+  Container CVE scanning was considered and **rejected**: nothing is released — there is no production
+  Dockerfile, no `rel/`, no registry push — so image scanning would surface base-image noise that cannot be
+  actioned for a loopback-only app.
 
 ## Optional product backlog — design after the defect fixes
 
