@@ -23,6 +23,28 @@ defmodule Doctrans.Processing.Run do
     |> Repo.exists?()
   end
 
+  @doc """
+  True when a failed page of the document still has an active LLM job.
+
+  A scheduled or retryable job may still turn the page into a success, so its
+  failure is not terminal for the document yet.
+  """
+  def retry_pending?(document_id) do
+    failed_page_ids =
+      from p in Page,
+        where: p.document_id == ^document_id,
+        where: p.translation_status != "completed",
+        where: p.extraction_status == "error" or p.translation_status == "error",
+        select: type(p.id, :string)
+
+    from(j in Oban.Job,
+      where: j.state in ^@active,
+      where: j.worker == ^Oban.Worker.to_string(LlmProcessingJob),
+      where: fragment("?->>'page_id'", j.args) in subquery(failed_page_ids)
+    )
+    |> Repo.exists?()
+  end
+
   def choices(opts \\ []) do
     %{
       extraction_model: Keyword.get(opts, :extraction_model) || OpenAI.vision_model(),

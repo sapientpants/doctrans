@@ -313,9 +313,9 @@ defmodule Doctrans.Documents.PagesTest do
       refute Pages.all_pages_completed?(doc.id)
     end
 
-    test "extraction errors count as done but translation errors do not" do
+    test "failed pages never count as completed" do
       doc = document_fixture(%{total_pages: 2})
-      page_fixture(doc, %{extraction_status: "error"})
+      failed = page_fixture(doc, %{extraction_status: "error"})
 
       page =
         page_fixture(doc, %{
@@ -326,7 +326,48 @@ defmodule Doctrans.Documents.PagesTest do
 
       refute Pages.all_pages_completed?(doc.id)
       {:ok, _} = Pages.update_page_translation(page, %{translation_status: "completed"})
+      refute Pages.all_pages_completed?(doc.id)
+
+      {:ok, failed} = Pages.update_page_extraction(failed, %{extraction_status: "completed"})
+      {:ok, _} = Pages.update_page_translation(failed, %{translation_status: "completed"})
       assert Pages.all_pages_completed?(doc.id)
+    end
+  end
+
+  describe "completion_state/1" do
+    test "is incomplete while pages are missing or unfinished" do
+      doc = document_fixture(%{total_pages: 2})
+      assert Pages.completion_state(doc.id) == :incomplete
+
+      page_fixture(doc, %{extraction_status: "error"})
+      assert Pages.completion_state(doc.id) == :incomplete
+
+      page_fixture(doc, %{page_number: 2, extraction_status: "completed"})
+      assert Pages.completion_state(doc.id) == :incomplete
+    end
+
+    test "is failed once every page settled and one of them failed" do
+      doc = document_fixture(%{total_pages: 2})
+      page_fixture(doc, %{extraction_status: "error"})
+      completed_page_fixture(doc, %{page_number: 2})
+
+      assert Pages.completion_state(doc.id) == :failed
+      assert Pages.failed_page_numbers(doc.id) == [1]
+    end
+
+    test "is completed only when every page succeeded" do
+      doc = document_fixture(%{total_pages: 2})
+      completed_page_fixture(doc, %{page_number: 1})
+      completed_page_fixture(doc, %{page_number: 2})
+
+      assert Pages.completion_state(doc.id) == :completed
+      assert Pages.failed_page_numbers(doc.id) == []
+    end
+
+    test "is incomplete for an unknown page count" do
+      doc = document_fixture()
+      completed_page_fixture(doc)
+      assert Pages.completion_state(doc.id) == :incomplete
     end
   end
 

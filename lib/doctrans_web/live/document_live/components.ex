@@ -90,7 +90,13 @@ defmodule DoctransWeb.DocumentLive.Components do
         {gettext("Finished with page errors")}
       </p>
       <p :if={@document.status == "error"} class="text-xs text-error">
-        {gettext("Processing failed. You can reprocess the document when its jobs have finished.")}
+        {if @progress > 0,
+          do:
+            gettext(
+              "Some pages could not be processed. Reprocess the failed pages, or the whole document once its jobs have finished."
+            ),
+          else:
+            gettext("Processing failed. You can reprocess the document when its jobs have finished.")}
       </p>
     </div>
     """

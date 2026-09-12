@@ -29,6 +29,8 @@ defmodule Doctrans.Documents do
   defdelegate get_next_page_for_extraction(document_id), to: Pages
   defdelegate get_next_page_for_translation(document_id), to: Pages
   defdelegate all_pages_completed?(document_id), to: Pages
+  defdelegate completion_state(document_id), to: Pages
+  defdelegate failed_page_numbers(document_id), to: Pages
   defdelegate reset_page_for_reprocessing(page), to: Pages
 
   # ============================================================================

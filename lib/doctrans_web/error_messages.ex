@@ -64,6 +64,14 @@ defmodule DoctransWeb.ErrorMessages do
         reason: binding(bindings, :reason)
       )
 
+  def message({:pages_failed, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "Processing failed on page(s) %{page_numbers}. Reprocess those pages to finish this document.",
+        page_numbers: binding(bindings, :page_numbers)
+      )
+
   def message({:unsupported_format, bindings}),
     do:
       dgettext("errors", "Unsupported file format: %{format}", format: binding(bindings, :format))

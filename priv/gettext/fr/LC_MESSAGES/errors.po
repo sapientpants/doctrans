@@ -101,7 +101,7 @@ msgstr "doit être supérieur ou égal à %{number}"
 msgid "must be equal to %{number}"
 msgstr "doit être égal à %{number}"
 
-#: lib/doctrans_web/error_messages.ex:74
+#: lib/doctrans_web/error_messages.ex:89
 #, elixir-autogen, elixir-format
 msgid "Could not parse page count from pdfinfo output"
 msgstr "Impossible d'analyser le nombre de pages depuis la sortie pdfinfo"
@@ -111,72 +111,72 @@ msgstr "Impossible d'analyser le nombre de pages depuis la sortie pdfinfo"
 msgid "Document not found"
 msgstr "Document non trouvé"
 
-#: lib/doctrans_web/error_messages.ex:68
+#: lib/doctrans_web/error_messages.ex:83
 #, elixir-autogen, elixir-format
 msgid "PDF extraction failed: %{error}"
 msgstr "Échec de l'extraction PDF : %{error}"
 
-#: lib/doctrans_web/error_messages.ex:65
+#: lib/doctrans_web/error_messages.ex:80
 #, elixir-autogen, elixir-format
 msgid "PDF extraction failed: %{reason}"
 msgstr "Échec de l'extraction PDF : %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:48
+#: lib/doctrans_web/error_messages.ex:55
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} extraction failed: %{reason}"
 msgstr "Échec de l'extraction de la page %{page_number} : %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:55
+#: lib/doctrans_web/error_messages.ex:62
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} translation failed: %{reason}"
 msgstr "Échec de la traduction de la page %{page_number} : %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:77
+#: lib/doctrans_web/error_messages.ex:92
 #, elixir-autogen, elixir-format
 msgid "pdfinfo failed: %{error}"
 msgstr "Échec de pdfinfo : %{error}"
 
-#: lib/doctrans_web/error_messages.ex:85
+#: lib/doctrans_web/error_messages.ex:100
 #, elixir-autogen, elixir-format
 msgid "Conversion completed but PDF file not found"
 msgstr "Conversion terminée mais fichier PDF introuvable"
 
-#: lib/doctrans_web/error_messages.ex:89
+#: lib/doctrans_web/error_messages.ex:104
 #, elixir-autogen, elixir-format
 msgid "Document conversion failed: %{error}"
 msgstr "Échec de la conversion du document: %{error}"
 
-#: lib/doctrans_web/error_messages.ex:99
+#: lib/doctrans_web/error_messages.ex:114
 #, elixir-autogen, elixir-format
 msgid "Document conversion timed out"
 msgstr "Délai de conversion du document dépassé"
 
-#: lib/doctrans_web/error_messages.ex:79
+#: lib/doctrans_web/error_messages.ex:94
 #, elixir-autogen, elixir-format
 msgid "LibreOffice is not installed"
 msgstr "LibreOffice n'est pas installé"
 
-#: lib/doctrans_web/error_messages.ex:71
+#: lib/doctrans_web/error_messages.ex:86
 #, elixir-autogen, elixir-format
 msgid "Page image not found after extraction"
 msgstr "Page image not found after extraction"
 
-#: lib/doctrans_web/error_messages.ex:44
+#: lib/doctrans_web/error_messages.ex:51
 #, elixir-autogen, elixir-format
 msgid "Page not found"
 msgstr "Page not found"
 
-#: lib/doctrans_web/error_messages.ex:82
+#: lib/doctrans_web/error_messages.ex:97
 #, elixir-autogen, elixir-format
 msgid "Source file not found: %{path}"
 msgstr "Fichier source introuvable: %{path}"
 
-#: lib/doctrans_web/error_messages.ex:62
+#: lib/doctrans_web/error_messages.ex:77
 #, elixir-autogen, elixir-format
 msgid "Unsupported file format: %{format}"
 msgstr "Format de fichier non pris en charge: %{format}"
 
-#: lib/doctrans_web/error_messages.ex:93
+#: lib/doctrans_web/error_messages.ex:108
 #, elixir-autogen, elixir-format
 msgid "Failed to start LibreOffice: %{error}"
 msgstr "Impossible de démarrer LibreOffice : %{error}"
@@ -246,17 +246,17 @@ msgstr "Le titre est obligatoire et doit être une chaîne de caractères"
 msgid "Unsupported language: %{language}"
 msgstr "Langue non prise en charge : %{language}"
 
-#: lib/doctrans_web/error_messages.ex:110
+#: lib/doctrans_web/error_messages.ex:125
 #, elixir-autogen, elixir-format
 msgid "Could not read uploaded file"
 msgstr "Impossible de lire le fichier téléversé"
 
-#: lib/doctrans_web/error_messages.ex:114
+#: lib/doctrans_web/error_messages.ex:129
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
 msgstr "Fichier trop volumineux (%{size}Mo, maximum %{max}Mo)"
 
-#: lib/doctrans_web/error_messages.ex:97
+#: lib/doctrans_web/error_messages.ex:112
 #, elixir-autogen, elixir-format
 msgid "LibreOffice process terminated unexpectedly"
 msgstr "Le processus LibreOffice s’est arrêté de manière inattendue"
@@ -265,3 +265,8 @@ msgstr "Le processus LibreOffice s’est arrêté de manière inattendue"
 #, elixir-autogen, elixir-format
 msgid "The model did not return complete final text. Use a model with a larger output budget or split the page into smaller sections, then reprocess. The provider must return finish_reason=stop."
 msgstr "Le modèle n’a pas renvoyé de texte final complet. Utilisez un modèle avec une limite de sortie plus élevée ou divisez la page en sections plus petites, puis relancez le traitement. Le fournisseur doit renvoyer finish_reason=stop."
+
+#: lib/doctrans_web/error_messages.ex:69
+#, elixir-autogen, elixir-format
+msgid "Processing failed on page(s) %{page_numbers}. Reprocess those pages to finish this document."
+msgstr "Le traitement a échoué sur la ou les pages %{page_numbers}. Retraitez ces pages pour terminer ce document."
