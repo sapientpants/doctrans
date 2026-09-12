@@ -173,6 +173,11 @@ defmodule Doctrans.Chat do
   copy of an older revision is obsolete, not preferable. Chunks carrying no
   revision predate revision tracking and rank below any known revision.
 
+  Within one revision, a page-level copy carrying the page's translation
+  outranks a copy retrieved before that translation was written: writing a
+  translation does not advance the revision, so similarity alone would keep
+  serving the untranslated text.
+
   The surviving chunks are sorted by similarity descending and retained within
   both `:max_chunks` (default 16) and `:max_bytes` (default 32,000). The byte
   budget counts both markdown fields plus page labels and separators, bounding
@@ -188,14 +193,31 @@ defmodule Doctrans.Chat do
     max_chunks = Keyword.get(opts, :max_chunks, @max_context_chunks)
     max_bytes = Keyword.get(opts, :max_bytes, @max_context_bytes)
 
-    ranked =
-      (prior_chunks ++ new_chunks)
-      |> Enum.group_by(&chunk_identity/1)
-      |> Enum.map(fn {_id, dupes} -> Enum.max_by(dupes, &{revision(&1), &1.similarity}) end)
-      |> drop_superseded()
-      |> Enum.sort_by(& &1.similarity, :desc)
+    ranked = rank_context(prior_chunks ++ new_chunks)
+    kept = fit_context(ranked, max_chunks, max_bytes)
 
-    {kept, _bytes, count} =
+    if length(kept) < length(ranked) do
+      Logger.info(
+        "Chat context budget dropped #{length(ranked) - length(kept)} chunks " <>
+          "(max_chunks=#{max_chunks}, max_bytes=#{max_bytes})"
+      )
+    end
+
+    kept
+  end
+
+  defp rank_context(chunks) do
+    chunks
+    |> Enum.group_by(&chunk_identity/1)
+    |> Enum.map(fn {_id, dupes} ->
+      Enum.max_by(dupes, &{revision(&1), translation_rank(&1), &1.similarity})
+    end)
+    |> drop_superseded()
+    |> Enum.sort_by(& &1.similarity, :desc)
+  end
+
+  defp fit_context(ranked, max_chunks, max_bytes) do
+    {kept, _bytes, _count} =
       Enum.reduce(ranked, {[], 0, 0}, fn chunk, {kept, bytes, count} = acc ->
         size = context_chunk_bytes(chunk)
 
@@ -205,13 +227,6 @@ defmodule Doctrans.Chat do
           acc
         end
       end)
-
-    if count < length(ranked) do
-      Logger.info(
-        "Chat context budget dropped #{length(ranked) - count} chunks " <>
-          "(max_chunks=#{max_chunks}, max_bytes=#{max_bytes})"
-      )
-    end
 
     Enum.reverse(kept)
   end
@@ -238,14 +253,30 @@ defmodule Doctrans.Chat do
 
   defp revision(chunk), do: Map.get(chunk, :content_revision) || -1
 
+  # Page embeddings are generated as soon as extraction completes, so the same
+  # page can be retrieved twice at one revision: once before its translation is
+  # written and once after. Only page-level results render `translated_markdown`,
+  # since chunk results always carry nil, so chunk ranking is left untouched.
+  defp translation_rank(chunk) do
+    if page_level?(chunk) and not is_nil(Map.get(chunk, :translated_markdown)), do: 1, else: 0
+  end
+
+  defp page_level?(chunk), do: is_nil(Map.get(chunk, :chunk_index))
+
   @doc """
-  Keeps only the chunks that still match their source page's current revision.
+  Keeps only the chunks that still match their source page's current text.
 
   Retrieval context outlives the text it was built from: a single-page
   reprocess replaces a page's content while accumulated context, saved context,
   and in-flight answers still hold the previous text. Chunks whose page was
   deleted, reprocessed, or predates revision tracking cannot be shown to be
   current and are dropped.
+
+  A matching revision is not sufficient for page-level context. `content_revision`
+  advances on extraction, not on translation, and page embeddings are generated
+  as soon as extraction completes, so a page answered between the two is stored
+  untranslated at a revision that stays current once the translation lands. Such
+  context is dropped as well; the next turn retrieves the translated page.
   """
   def current_context([]), do: []
 
@@ -262,27 +293,45 @@ defmodule Doctrans.Chat do
       end)
       |> Enum.uniq()
 
-    revisions =
+    pages =
       from(p in Doctrans.Documents.Page,
         where: p.id in ^page_ids,
-        select: {p.id, p.content_revision}
+        select: {p.id, {p.content_revision, p.translated_markdown}}
       )
       |> Doctrans.Repo.all()
       |> Map.new()
 
     kept =
       Enum.filter(chunks, fn chunk ->
-        current = Map.get(revisions, Map.get(chunk, :page_id))
-        not is_nil(current) and current == Map.get(chunk, :content_revision)
+        case Map.get(pages, Map.get(chunk, :page_id)) do
+          nil -> false
+          {revision, translation} -> current_chunk?(chunk, revision, translation)
+        end
       end)
 
     if length(kept) < length(chunks) do
       Logger.info(
-        "Chat context dropped #{length(chunks) - length(kept)} chunks from stale page revisions"
+        "Chat context dropped #{length(chunks) - length(kept)} chunks from stale page content"
       )
     end
 
     kept
+  end
+
+  @doc """
+  Checks one accumulated chunk against a page an update was broadcast for.
+
+  A socket keeps its retrieval context between turns, so a page changed in
+  another tab has to be evicted where it is held. Applies `current_context/1`'s
+  test to callers that already hold the updated page.
+  """
+  def superseded_by?(chunk, page) do
+    not current_chunk?(chunk, page.content_revision, page.translated_markdown)
+  end
+
+  defp current_chunk?(chunk, revision, translation) do
+    Map.get(chunk, :content_revision) == revision and
+      (not page_level?(chunk) or Map.get(chunk, :translated_markdown) == translation)
   end
 
   @doc """

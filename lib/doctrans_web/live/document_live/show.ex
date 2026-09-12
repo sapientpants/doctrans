@@ -360,14 +360,15 @@ defmodule DoctransWeb.DocumentLive.Show do
     end
   end
 
-  # Another tab may have reprocessed this page. The accumulated context lives in
-  # this socket, so a revision change has to evict it here too; the next answer
-  # would otherwise still be grounded in the text that was just replaced.
+  # Another tab may have reprocessed this page, and its translation may have
+  # landed after context was retrieved from the untranslated page. The
+  # accumulated context lives in this socket, so a content change has to evict
+  # it here too; the next answer would otherwise still be grounded in the text
+  # that was just replaced.
   defp prune_chat_context(socket, page) do
     context =
       Enum.reject(socket.assigns.chat_retrieved_context, fn chunk ->
-        Map.get(chunk, :page_id) == page.id and
-          Map.get(chunk, :content_revision) != page.content_revision
+        Map.get(chunk, :page_id) == page.id and Chat.superseded_by?(chunk, page)
       end)
 
     assign(socket, :chat_retrieved_context, context)

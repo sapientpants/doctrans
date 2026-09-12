@@ -144,6 +144,13 @@ defmodule Doctrans.ChatTest do
                Chat.merge_context(prior, new)
     end
 
+    test "prefers the translated page copy over an untranslated one of the same revision" do
+      prior = [chunk("p1", nil, 0.95, content_revision: 1, content: nil)]
+      new = [chunk("p1", nil, 0.40, content_revision: 1, content: "Assets are 100")]
+
+      assert [%{translated_markdown: "Assets are 100"}] = Chat.merge_context(prior, new)
+    end
+
     test "a newer revision supersedes older chunks of the same page under other indexes" do
       prior = [chunk("p1", 0, 0.95, content_revision: 1, content: "Assets are 10")]
 
@@ -205,6 +212,52 @@ defmodule Doctrans.ChatTest do
       {:ok, _reset} = Documents.reset_page_for_reprocessing(page)
 
       assert Chat.current_context(context) == []
+    end
+
+    test "drops page context retrieved before the page was translated", %{page: page} do
+      context = [chunk(page.id, nil, 0.9, content_revision: page.content_revision, content: nil)]
+
+      assert Chat.current_context(context) == context
+
+      {:ok, translated} =
+        Documents.update_page_translation(page, %{
+          translation_status: "completed",
+          translated_markdown: "Aktiva sind 10"
+        })
+
+      assert translated.content_revision == page.content_revision
+      assert Chat.current_context(context) == []
+    end
+
+    test "keeps page context carrying the page's current translation", %{page: page} do
+      {:ok, translated} =
+        Documents.update_page_translation(page, %{
+          translation_status: "completed",
+          translated_markdown: "Aktiva sind 10"
+        })
+
+      context = [
+        chunk(page.id, nil, 0.9,
+          content_revision: translated.content_revision,
+          content: "Aktiva sind 10"
+        )
+      ]
+
+      assert Chat.current_context(context) == context
+    end
+
+    # Chunk retrieval never carries a translation, so translation freshness
+    # cannot be read from a nil `translated_markdown` there.
+    test "keeps chunk context of a page translated after retrieval", %{page: page} do
+      context = [chunk(page.id, 0, 0.9, content_revision: page.content_revision, content: nil)]
+
+      {:ok, _translated} =
+        Documents.update_page_translation(page, %{
+          translation_status: "completed",
+          translated_markdown: "Aktiva sind 10"
+        })
+
+      assert Chat.current_context(context) == context
     end
 
     test "drops chunks from deleted pages and chunks without a revision", %{page: page} do

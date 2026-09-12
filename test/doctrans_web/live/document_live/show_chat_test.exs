@@ -108,6 +108,46 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       assert Enum.map(updated.assigns.chat_retrieved_context, & &1.page_id) == [other.id]
     end
 
+    test "a page translated elsewhere drops that page's untranslated context", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+
+      # Extracted but not yet translated: page embeddings are ready in this
+      # window, so a turn can retrieve the page before its translation exists.
+      untranslated =
+        Repo.insert!(%Doctrans.Documents.Page{
+          document_id: document.id,
+          page_number: 2,
+          image_path: "documents/#{document.id}/pages/page_2.png",
+          original_markdown: "Aktiva sind 10",
+          extraction_status: "completed",
+          translation_status: "processing"
+        })
+
+      socket =
+        :sys.get_state(view.pid).socket
+        |> Phoenix.Component.assign(:chat_retrieved_context, [
+          page_context_chunk(untranslated),
+          context_chunk(untranslated, "Aktiva sind 10")
+        ])
+
+      {:ok, translated} =
+        Documents.update_page_translation(untranslated, %{
+          translation_status: "completed",
+          translated_markdown: "Assets are 10"
+        })
+
+      assert translated.content_revision == untranslated.content_revision
+
+      {:noreply, updated} = Show.handle_info({:page_updated, translated}, socket)
+
+      # The page-level copy is untranslated and gone; chunk context, which never
+      # carries a translation, is untouched.
+      assert Enum.map(updated.assigns.chat_retrieved_context, & &1.chunk_index) == [0]
+    end
+
     test "an answer finishing after a page correction keeps neither socket nor saved context", %{
       conn: conn,
       document: document
@@ -312,6 +352,12 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       original_markdown: content,
       translated_markdown: nil
     }
+  end
+
+  defp page_context_chunk(page) do
+    page
+    |> context_chunk(page.original_markdown)
+    |> Map.merge(%{chunk_index: nil, translated_markdown: page.translated_markdown})
   end
 
   defp create_completed_document_with_embeddings do

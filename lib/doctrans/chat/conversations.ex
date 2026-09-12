@@ -8,7 +8,9 @@ defmodule Doctrans.Chat.Conversations do
 
   Retrieval context is stored with the page revision each chunk was read from,
   and chunks whose page has since been reprocessed are dropped on both write and
-  read, so a corrected page cannot keep answering with its previous text.
+  read, so a corrected page cannot keep answering with its previous text. Page
+  context read between extraction and translation is dropped the same way once
+  the translation lands, since translating does not advance the revision.
   """
   import Ecto.Query
   alias Doctrans.Chat
