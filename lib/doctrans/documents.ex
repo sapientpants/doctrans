@@ -69,55 +69,59 @@ defmodule Doctrans.Documents do
   and its associated page query for paginated callers.
   """
   def list_documents_with_progress(opts \\ []) do
-    query = ordered_documents(Document, opts)
+    documents =
+      Document
+      |> ordered_documents(opts)
+      |> filter_document_ids(opts)
+      |> limit_documents(opts)
+      |> offset(^Keyword.get(opts, :offset, 0))
+      |> Repo.all()
 
-    query =
-      case Keyword.fetch(opts, :document_ids) do
-        {:ok, ids} -> where(query, [d], d.id in ^ids)
-        :error -> query
-      end
-
-    query =
-      case Keyword.fetch(opts, :limit) do
-        {:ok, count} -> limit(query, ^count)
-        :error -> query
-      end
-
-    offset = Keyword.get(opts, :offset, 0)
-    documents = query |> offset(^offset) |> Repo.all()
-
-    document_ids = Enum.map(documents, & &1.id)
-
-    # Load only the page fields needed for progress, in a single query,
-    # instead of preloading every page's full markdown content.
-    pages =
-      if document_ids == [] do
-        []
-      else
-        query =
-          from(p in Page,
-            where: p.document_id in ^document_ids,
-            # Only the fields needed for progress + the first-page thumbnail;
-            # the heavy markdown fields are not selected
-            select: %{
-              id: p.id,
-              document_id: p.document_id,
-              page_number: p.page_number,
-              extraction_status: p.extraction_status,
-              translation_status: p.translation_status,
-              image_path: p.image_path
-            },
-            order_by: [p.document_id, p.page_number]
-          )
-
-        Repo.all(query)
-      end
-
-    pages_by_document = Enum.group_by(pages, & &1.document_id)
+    pages_by_document =
+      documents
+      |> Enum.map(& &1.id)
+      |> progress_pages()
+      |> Enum.group_by(& &1.document_id)
 
     Enum.map(documents, fn document ->
       Summary.new(document, Map.get(pages_by_document, document.id, []))
     end)
+  end
+
+  defp filter_document_ids(query, opts) do
+    case Keyword.fetch(opts, :document_ids) do
+      {:ok, ids} -> where(query, [d], d.id in ^ids)
+      :error -> query
+    end
+  end
+
+  defp limit_documents(query, opts) do
+    case Keyword.fetch(opts, :limit) do
+      {:ok, count} -> limit(query, ^count)
+      :error -> query
+    end
+  end
+
+  # Load only the page fields needed for progress, in a single query,
+  # instead of preloading every page's full markdown content.
+  defp progress_pages([]), do: []
+
+  defp progress_pages(document_ids) do
+    from(p in Page,
+      where: p.document_id in ^document_ids,
+      # Only the fields needed for progress + the first-page thumbnail;
+      # the heavy markdown fields are not selected
+      select: %{
+        id: p.id,
+        document_id: p.document_id,
+        page_number: p.page_number,
+        extraction_status: p.extraction_status,
+        translation_status: p.translation_status,
+        image_path: p.image_path
+      },
+      order_by: [p.document_id, p.page_number]
+    )
+    |> Repo.all()
   end
 
   @doc """

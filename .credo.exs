@@ -86,8 +86,8 @@
           #
           {Credo.Check.Refactor.Apply, []},
           {Credo.Check.Refactor.CondStatements, []},
-          # Strict cyclomatic complexity limit
-          {Credo.Check.Refactor.CyclomaticComplexity, [max_complexity: 10]},
+          # Credo's default; see Refactor.Nesting for the same reasoning.
+          {Credo.Check.Refactor.CyclomaticComplexity, [max_complexity: 9]},
           {Credo.Check.Refactor.FilterCount, []},
           {Credo.Check.Refactor.FilterFilter, []},
           # Limit function arity
@@ -97,16 +97,31 @@
           {Credo.Check.Refactor.MatchInCondition, []},
           {Credo.Check.Refactor.NegatedConditionsInUnless, []},
           {Credo.Check.Refactor.NegatedConditionsWithElse, []},
-          # Strict nesting limit
-          {Credo.Check.Refactor.Nesting, [max_nesting: 3]},
+          # Credo's default. Deeper nesting is extracted into named helpers
+          # rather than granted a higher ceiling.
+          {Credo.Check.Refactor.Nesting, [max_nesting: 2]},
           {Credo.Check.Refactor.RedundantWithClauseResult, []},
           {Credo.Check.Refactor.RejectReject, []},
           {Credo.Check.Refactor.UnlessWithElse, []},
           {Credo.Check.Refactor.WithClauses, []},
-          # Limit module dependencies to reduce coupling
-          {Credo.Check.Refactor.ModuleDependencies, [max_deps: 20]},
-          # ABC complexity metric
-          {Credo.Check.Refactor.ABCSize, [max_size: 50]},
+          # Credo's default max_deps, counting first-party modules only.
+          # The check counts every module name in the body, so without
+          # `dependency_namespaces` the score is dominated by Enum/Map/String
+          # and by framework macros: `DocumentConverter` scored 15 with one
+          # first-party dependency, and `Endpoint` 19 with three, all of them
+          # Plug/Phoenix entries the plug pipeline requires. Namespacing makes
+          # the number mean what the check claims to measure.
+          # `Doctrans.Application` is exempt: a supervision tree must name its
+          # children, and three of its eleven "dependencies" are registered
+          # process names rather than modules.
+          {Credo.Check.Refactor.ModuleDependencies,
+           [
+             max_deps: 10,
+             dependency_namespaces: ["Doctrans"],
+             excluded_namespaces: ["Doctrans.Application"]
+           ]},
+          # Credo's default; see Refactor.Nesting for the same reasoning.
+          {Credo.Check.Refactor.ABCSize, [max_size: 30]},
           # Detect inefficient list appends
           {Credo.Check.Refactor.AppendSingleItem, []},
           # Simplify double boolean negation

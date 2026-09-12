@@ -2,8 +2,6 @@ defmodule DoctransWeb.DocumentLive.Show do
   @moduledoc "Document Viewer LiveView with split-screen layout."
   use DoctransWeb, :live_view
 
-  alias Doctrans.Chat
-  alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Processing.Run
@@ -34,34 +32,18 @@ defmodule DoctransWeb.DocumentLive.Show do
         :ok
       end
 
-    conversation = Conversations.load(document.id)
-
     socket =
       socket
       |> assign(:document, document)
       |> assign(:source_available, Run.source_available?(document))
       |> assign(:progress_refresh_pending, false)
-      |> assign(:chat_task_pid, nil)
-      |> assign(:chat_token, nil)
       |> refresh_progress()
       |> PageViewer.init()
       |> assign(:from, nil)
       |> assign(:search_query, nil)
       |> assign(:search_page, nil)
       |> ReprocessModal.init()
-      # Chat state
-      |> assign(:chat_open, false)
-      |> assign(:chat_loading, false)
-      |> assign(:chat_history, conversation.history)
-      |> assign(:chat_task_ref, nil)
-      |> assign(:chat_last_question, nil)
-      |> assign(:chat_stage, nil)
-      |> assign(:chat_streaming_content, "")
-      |> assign(:chat_retrieved_context, conversation.context)
-      |> assign(:chat_interrupted, conversation.interrupted?)
-      |> assign(:chat_question, nil)
-      |> assign(:embeddings_ready, Chat.embeddings_ready?(document))
-      |> stream(:chat_messages, conversation.messages)
+      |> ChatSession.init(document)
 
     {:ok, socket}
   end
@@ -120,98 +102,12 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def handle_event("toggle_chat", _params, socket) do
-    socket =
-      socket
-      |> assign(:chat_open, !socket.assigns.chat_open)
-      # Refresh embeddings status when opening chat
-      |> maybe_refresh_embeddings_status()
-      |> restore_chat_messages()
-
-    {:noreply, socket}
+    {:noreply, ChatSession.toggle_open(socket)}
   end
 
   @impl true
   def handle_event("send_chat_message", %{"message" => message}, socket) do
-    trimmed_message = String.trim(message || "")
-
-    # Guard against empty messages and double submits
-    if trimmed_message == "" or socket.assigns.chat_loading do
-      {:noreply, socket}
-    else
-      document = socket.assigns.document
-
-      # Add user message to stream
-      user_msg = Conversations.start_question(document.id, trimmed_message)
-
-      socket =
-        socket
-        |> stream_insert(:chat_messages, user_msg)
-        |> assign(:chat_question, user_msg)
-        |> assign(:chat_interrupted, false)
-        |> assign(:chat_loading, true)
-        |> assign(:chat_stage, :understanding)
-        |> assign(:chat_streaming_content, "")
-
-      # Get existing chat history and accumulated retrieval context
-      chat_history = socket.assigns.chat_history
-      retrieved_context = socket.assigns.chat_retrieved_context
-
-      # Spawn async task running the agentic pipeline. Stage/token events are
-      # sent back to this LiveView process via the on_event callback; the task's
-      # return value carries the final answer + updated context for history and
-      # accumulation.
-      lv = self()
-      chat_token = make_ref()
-
-      task =
-        Task.Supervisor.async_nolink(
-          Doctrans.TaskSupervisor,
-          fn ->
-            Chat.Agent.run(
-              document,
-              trimmed_message,
-              chat_history,
-              [retrieved_context: retrieved_context],
-              fn event -> send(lv, {:chat_event, chat_token, event}) end
-            )
-          end
-        )
-
-      socket =
-        socket
-        |> assign(:chat_token, chat_token)
-        |> assign(:chat_task_ref, task.ref)
-        |> assign(:chat_task_pid, task.pid)
-        |> assign(:chat_last_question, trimmed_message)
-
-      {:noreply, socket}
-    end
-  end
-
-  defp restore_chat_messages(%{assigns: %{chat_open: true}} = socket) do
-    conversation = Conversations.load(socket.assigns.document.id)
-
-    socket =
-      if socket.assigns.chat_loading do
-        socket
-      else
-        socket
-        |> assign(:chat_history, conversation.history)
-        |> assign(:chat_retrieved_context, conversation.context)
-        |> assign(:chat_interrupted, conversation.interrupted?)
-      end
-
-    stream(socket, :chat_messages, conversation.messages, reset: true)
-  end
-
-  defp restore_chat_messages(socket), do: socket
-
-  defp maybe_refresh_embeddings_status(socket) do
-    if socket.assigns.chat_open do
-      assign(socket, :embeddings_ready, Chat.embeddings_ready?(socket.assigns.document))
-    else
-      socket
-    end
+    {:noreply, ChatSession.ask(socket, message)}
   end
 
   # PubSub Handlers
@@ -276,7 +172,8 @@ defmodule DoctransWeb.DocumentLive.Show do
           assign(socket, :progress_refresh_pending, true)
         end
 
-      {:noreply, socket |> prune_chat_context(page) |> maybe_refresh_embeddings_status()}
+      {:noreply,
+       socket |> ChatSession.prune_context(page) |> ChatSession.refresh_embeddings_status()}
     else
       {:noreply, socket}
     end
@@ -325,7 +222,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   @impl true
   def handle_info({ref, {:error, reason}}, socket) when socket.assigns.chat_task_ref == ref do
     Process.demonitor(ref, [:flush])
-    {:noreply, ChatSession.put_error(socket, ErrorMessages.message(reason))}
+    {:noreply, ChatSession.put_failure(socket, reason)}
   end
 
   @impl true
@@ -334,7 +231,7 @@ defmodule DoctransWeb.DocumentLive.Show do
     # :normal = success (result already handled); only error on crashes
     if reason == :normal,
       do: {:noreply, socket},
-      else: {:noreply, ChatSession.put_error(socket, ErrorMessages.message(:unknown))}
+      else: {:noreply, ChatSession.put_failure(socket, :unknown)}
   end
 
   # Catch-all handlers for stale task refs
@@ -358,17 +255,6 @@ defmodule DoctransWeb.DocumentLive.Show do
       [] ->
         socket |> assign(:processing_progress, 0.0) |> assign(:failed_pages, [])
     end
-  end
-
-  # Another tab may have reprocessed this page, and its translation may have
-  # landed after context was retrieved from the untranslated page. The
-  # accumulated context lives in this socket, so a content change has to evict
-  # it here too; the next answer would otherwise still be grounded in the text
-  # that was just replaced.
-  defp prune_chat_context(socket, page) do
-    context = Enum.reject(socket.assigns.chat_retrieved_context, &Chat.superseded_by?(&1, page))
-
-    assign(socket, :chat_retrieved_context, context)
   end
 
   defp interrupt_chat(socket) do

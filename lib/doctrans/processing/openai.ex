@@ -162,47 +162,19 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp do_chat_stream(messages, on_delta, opts) do
-    request_body = build_request_body(opts ++ [messages: messages, stream: true])
     fuse = :openai_api
     collector = SSECollector.new(on_delta)
-
-    # Stream the response body chunk by chunk: each raw chunk is fed into the
-    # SSE collector (kept in resp.body), which parses complete `data:` frames
-    # and invokes on_delta/1 as soon as content arrives.
-    into = fn
-      {:data, data}, {req, resp} ->
-        state =
-          if is_map(resp.body),
-            do: SSECollector.feed(resp.body, data),
-            else: SSECollector.feed(collector, data)
-
-        {:cont, {req, %{resp | body: state}}}
-    end
 
     case build_base_req()
          |> Req.post(
            url: api_url("/v1/chat/completions"),
-           json: request_body,
+           json: build_request_body(opts ++ [messages: messages, stream: true]),
            receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
            retry: :transient,
-           into: into
+           into: stream_into(collector)
          ) do
       {:ok, %Req.Response{status: 200} = resp} ->
-        # resp.body holds the collector state once any chunk arrived; it is
-        # still the default "" (not a map) if the stream had no data frames.
-        state = if is_map(resp.body), do: resp.body, else: collector
-
-        content =
-          state
-          |> SSECollector.finish()
-          |> String.trim()
-          |> strip_code_fences()
-
-        if content == "" do
-          {:error, :empty_response}
-        else
-          {:ok, content}
-        end
+        collected_content(resp.body, collector)
 
       {:ok, %Req.Response{} = resp} ->
         handle_api_error(fuse, {:http_status, resp.status, resp})
@@ -210,6 +182,34 @@ defmodule Doctrans.Processing.OpenAI do
       {:error, reason} ->
         handle_api_error(fuse, reason)
     end
+  end
+
+  # Stream the response body chunk by chunk: each raw chunk is fed into the
+  # SSE collector (kept in resp.body), which parses complete `data:` frames
+  # and invokes on_delta/1 as soon as content arrives.
+  defp stream_into(collector) do
+    fn {:data, data}, {req, resp} ->
+      state =
+        if is_map(resp.body),
+          do: SSECollector.feed(resp.body, data),
+          else: SSECollector.feed(collector, data)
+
+      {:cont, {req, %{resp | body: state}}}
+    end
+  end
+
+  # `body` holds the collector state once any chunk arrived; it is still the
+  # default "" (not a map) if the stream had no data frames.
+  defp collected_content(body, collector) do
+    state = if is_map(body), do: body, else: collector
+
+    content =
+      state
+      |> SSECollector.finish()
+      |> String.trim()
+      |> strip_code_fences()
+
+    if content == "", do: {:error, :empty_response}, else: {:ok, content}
   end
 
   @impl true

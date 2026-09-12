@@ -31,38 +31,7 @@ defmodule Doctrans.Chat.MultiSearch do
 
   def search_with_queries(document_id, queries, opts) when is_list(queries) do
     limit = Keyword.get(opts, :limit, 3)
-    # Fetch more per-query so RRF has enough candidates to rank
-    per_query_limit = limit + 2
-
-    search_opts =
-      opts
-      |> Keyword.put(:limit, per_query_limit)
-      |> Keyword.delete(:context_limit)
-
-    ranked_lists =
-      queries
-      |> Task.async_stream(
-        fn query ->
-          with {:ok, embedding} <- embedding_module().generate(query, []) do
-            Search.search_by_embedding(document_id, embedding, search_opts)
-          end
-        end,
-        timeout: :infinity,
-        max_concurrency: length(queries)
-      )
-      |> Enum.flat_map(fn
-        {:ok, {:ok, results}} ->
-          [results]
-
-        {:ok, {:error, reason}} ->
-          Logger.warning("Multi-search query failed: #{inspect(reason)}")
-          []
-
-        {:exit, reason} ->
-          Logger.warning("Multi-search task exited: #{inspect(reason)}")
-          []
-      end)
-
+    ranked_lists = ranked_lists(document_id, queries, per_query_opts(opts, limit))
     merged = merge_with_rrf(ranked_lists, limit)
 
     Logger.info(
@@ -72,27 +41,67 @@ defmodule Doctrans.Chat.MultiSearch do
     {:ok, merged}
   end
 
+  defp per_query_opts(opts, limit) do
+    opts
+    # Fetch more per-query so RRF has enough candidates to rank
+    |> Keyword.put(:limit, limit + 2)
+    |> Keyword.delete(:context_limit)
+  end
+
+  defp ranked_lists(document_id, queries, search_opts) do
+    queries
+    |> Task.async_stream(&search_one(document_id, &1, search_opts),
+      timeout: :infinity,
+      max_concurrency: length(queries)
+    )
+    |> Enum.flat_map(&collect_results/1)
+  end
+
+  defp search_one(document_id, query, search_opts) do
+    with {:ok, embedding} <- embedding_module().generate(query, []) do
+      Search.search_by_embedding(document_id, embedding, search_opts)
+    end
+  end
+
+  defp collect_results({:ok, {:ok, results}}), do: [results]
+
+  defp collect_results({:ok, {:error, reason}}) do
+    Logger.warning("Multi-search query failed: #{inspect(reason)}")
+    []
+  end
+
+  defp collect_results({:exit, reason}) do
+    Logger.warning("Multi-search task exited: #{inspect(reason)}")
+    []
+  end
+
+  # For each ranked list, assign RRF scores based on position
+  # Then sum scores per unique chunk (or fallback page) across all lists
   defp merge_with_rrf(ranked_lists, limit) do
-    # For each ranked list, assign RRF scores based on position
-    # Then sum scores per unique chunk (or fallback page) across all lists
     ranked_lists
-    |> Enum.flat_map(fn results ->
-      results
-      |> Enum.with_index(1)
-      |> Enum.map(fn {result, rank} ->
-        identity = {result.page_id, Map.get(result, :chunk_index)}
-        {identity, 1.0 / (@rrf_k + rank), result}
-      end)
-    end)
+    |> Enum.flat_map(&score_list/1)
     |> Enum.group_by(fn {identity, _score, _result} -> identity end)
-    |> Enum.map(fn {_identity, entries} ->
-      total_score = Enum.reduce(entries, 0.0, fn {_, score, _}, acc -> acc + score end)
-      # Keep the result data with the best similarity across queries
-      {_, _, best_result} = Enum.max_by(entries, fn {_, _, result} -> result.similarity end)
-      Map.put(best_result, :rrf_score, total_score)
-    end)
+    |> Enum.map(fn {_identity, entries} -> best_scoring(entries) end)
     |> Enum.sort_by(& &1.rrf_score, :desc)
     |> Enum.take(limit)
+  end
+
+  defp score_list(results) do
+    results
+    |> Enum.with_index(1)
+    |> Enum.map(fn {result, rank} ->
+      identity = {result.page_id, Map.get(result, :chunk_index)}
+      {identity, 1.0 / (@rrf_k + rank), result}
+    end)
+  end
+
+  defp best_scoring(entries) do
+    total_score =
+      Enum.reduce(entries, 0.0, fn {_identity, score, _result}, acc -> acc + score end)
+
+    # Keep the result data with the best similarity across queries
+    {_identity, _score, best} = Enum.max_by(entries, fn {_, _, result} -> result.similarity end)
+    Map.put(best, :rrf_score, total_score)
   end
 
   defp embedding_module do

@@ -56,52 +56,57 @@ defmodule Doctrans.Chat do
     if trimmed_question == "" do
       {:error, :empty_question}
     else
-      context_limit = Keyword.get(opts, :context_limit, 5)
-      min_similarity = Keyword.get(opts, :min_similarity)
+      answer_question(document, trimmed_question, chat_history, opts)
+    end
+  end
 
-      Logger.info(
-        "Processing chat question for document #{document.id}: #{String.slice(trimmed_question, 0, 100)}"
-      )
+  defp answer_question(document, question, chat_history, opts) do
+    Logger.info(
+      "Processing chat question for document #{document.id}: #{String.slice(question, 0, 100)}"
+    )
 
-      # Expand the query: reformulate with chat context + generate alternative phrasings
-      {standalone_question, queries} = QueryExpander.expand(trimmed_question, chat_history, opts)
+    # Expand the query: reformulate with chat context + generate alternative phrasings
+    {standalone_question, queries} = QueryExpander.expand(question, chat_history, opts)
 
-      search_opts =
-        [limit: context_limit]
-        |> then(fn o ->
-          if min_similarity, do: Keyword.put(o, :min_similarity, min_similarity), else: o
-        end)
+    # Search with all query variants and merge via RRF
+    case retrieve(document.id, standalone_question, queries, search_opts(opts)) do
+      {:ok, pages} ->
+        log_search_results(pages, document.id)
+        request_answer(document, pages, standalone_question, chat_history, opts)
 
-      # Search with all query variants and merge via RRF
-      search_result = retrieve(document.id, standalone_question, queries, search_opts)
+      {:error, reason} = error ->
+        Logger.error("Chat search failed for document #{document.id}: #{inspect(reason)}")
+        error
+    end
+  end
 
-      case search_result do
-        {:ok, pages} ->
-          log_search_results(pages, document.id)
+  defp search_opts(opts) do
+    base = [limit: Keyword.get(opts, :context_limit, 5)]
 
-          context = build_context(pages)
+    case Keyword.get(opts, :min_similarity) do
+      nil -> base
+      min_similarity -> Keyword.put(base, :min_similarity, min_similarity)
+    end
+  end
 
-          Logger.debug(
-            "Chat context (#{String.length(context)} chars):\n#{String.slice(context, 0, 500)}..."
-          )
+  defp request_answer(document, pages, standalone_question, chat_history, opts) do
+    context = build_context(pages)
 
-          system_prompt = build_system_prompt(document.title, context)
-          # Use the standalone question so the LLM sees a clear, contextual question
-          messages = build_messages(system_prompt, chat_history, standalone_question)
+    Logger.debug(
+      "Chat context (#{String.length(context)} chars):\n#{String.slice(context, 0, 500)}..."
+    )
 
-          case openai_module().chat(messages, opts) do
-            {:ok, response} ->
-              {:ok, response}
+    system_prompt = build_system_prompt(document.title, context)
+    # Use the standalone question so the LLM sees a clear, contextual question
+    messages = build_messages(system_prompt, chat_history, standalone_question)
 
-            {:error, reason} = error ->
-              Logger.error("Chat failed for document #{document.id}: #{inspect(reason)}")
-              error
-          end
+    case openai_module().chat(messages, opts) do
+      {:ok, response} ->
+        {:ok, response}
 
-        {:error, reason} = error ->
-          Logger.error("Chat search failed for document #{document.id}: #{inspect(reason)}")
-          error
-      end
+      {:error, reason} = error ->
+        Logger.error("Chat failed for document #{document.id}: #{inspect(reason)}")
+        error
     end
   end
 
@@ -132,25 +137,21 @@ defmodule Doctrans.Chat do
   def build_context(results) do
     results
     |> Enum.group_by(& &1.page_number)
-    |> Enum.sort_by(fn {page_num, _} -> page_num end)
-    |> Enum.map(fn {page_number, items} ->
-      content =
-        items
-        |> Enum.sort_by(&(Map.get(&1, :chunk_index) || 0))
-        |> Enum.map(fn item ->
-          String.trim(context_content(item) || "")
-        end)
-        |> Enum.reject(&(&1 == ""))
-        |> Enum.join("\n\n")
-
-      if content != "" do
-        "[Page #{page_number}]\n#{content}"
-      else
-        nil
-      end
-    end)
+    |> Enum.sort_by(fn {page_number, _items} -> page_number end)
+    |> Enum.map(fn {page_number, items} -> page_section(page_number, items) end)
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n\n---\n\n")
+  end
+
+  defp page_section(page_number, items) do
+    content =
+      items
+      |> Enum.sort_by(&(Map.get(&1, :chunk_index) || 0))
+      |> Enum.map(fn item -> String.trim(context_content(item) || "") end)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n\n")
+
+    if content != "", do: "[Page #{page_number}]\n#{content}"
   end
 
   # Old saved chunk context can still contain translations paired by index.

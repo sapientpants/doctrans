@@ -125,24 +125,33 @@ defmodule Doctrans.Search.Chunker do
     Enum.reverse(all_chunks)
   end
 
-  defp accumulate_paragraph({para_text, para_start, para_end}, {chunks, current}) do
+  defp accumulate_paragraph({para_text, para_start, _para_end} = para, {chunks, current}) do
     para_words = word_count(para_text)
 
     cond do
       # Long paragraph on its own: split at sentences
       para_words > @target_words and current == [] ->
-        sentence_chunks = split_long_paragraph(para_text, para_start)
-        {Enum.reverse(sentence_chunks) ++ chunks, []}
+        split_alone(para_text, para_start, chunks)
 
       # Adding this paragraph would exceed target and we have content: emit current, start new
-      current != [] and current_word_count(current) + para_words > @target_words ->
-        chunk = finalize_paras(Enum.reverse(current))
-        {[chunk | chunks], [{para_text, para_start, para_end}]}
+      exceeds_target?(current, para_words) ->
+        {[finalize_paras(Enum.reverse(current)) | chunks], [para]}
 
       # Accumulate (prepend, reverse later)
       true ->
-        {chunks, [{para_text, para_start, para_end} | current]}
+        {chunks, [para | current]}
     end
+  end
+
+  defp split_alone(para_text, para_start, chunks) do
+    sentence_chunks = split_long_paragraph(para_text, para_start)
+    {Enum.reverse(sentence_chunks) ++ chunks, []}
+  end
+
+  defp exceeds_target?([], _para_words), do: false
+
+  defp exceeds_target?(current, para_words) do
+    current_word_count(current) + para_words > @target_words
   end
 
   # Assign indexes to raw chunks
@@ -181,35 +190,39 @@ defmodule Doctrans.Search.Chunker do
 
   # Split a long paragraph at sentence boundaries into chunks
   defp split_long_paragraph(text, base_offset) do
-    sentences = split_sentences(text)
-
     {chunks, current_sentences, _current_words, current_offset} =
-      Enum.reduce(sentences, {[], [], 0, base_offset}, fn sentence,
-                                                          {completed, current, current_words,
-                                                           offset} ->
-        sentence_words = word_count(sentence)
-        new_words = current_words + sentence_words
+      text
+      |> split_sentences()
+      |> Enum.reduce({[], [], 0, base_offset}, &accumulate_sentence/2)
 
-        if new_words >= @target_words and current != [] do
-          chunk_text = Enum.join(Enum.reverse(current), " ")
-          chunk = {chunk_text, offset, offset + byte_size(chunk_text)}
-          next_offset = offset + byte_size(chunk_text)
-          {[chunk | completed], [sentence], sentence_words, next_offset}
-        else
-          {completed, [sentence | current], new_words, offset}
-        end
-      end)
+    chunks
+    |> emit_remaining(current_sentences, current_offset)
+    |> Enum.reverse()
+  end
 
-    all_chunks =
-      if current_sentences != [] do
-        chunk_text = Enum.join(Enum.reverse(current_sentences), " ")
-        chunk = {chunk_text, current_offset, current_offset + byte_size(chunk_text)}
-        [chunk | chunks]
-      else
-        chunks
-      end
+  defp accumulate_sentence(sentence, {completed, current, current_words, offset}) do
+    sentence_words = word_count(sentence)
+    new_words = current_words + sentence_words
 
-    Enum.reverse(all_chunks)
+    if new_words >= @target_words and current != [] do
+      {chunk, next_offset} = close_sentence_chunk(current, offset)
+      {[chunk | completed], [sentence], sentence_words, next_offset}
+    else
+      {completed, [sentence | current], new_words, offset}
+    end
+  end
+
+  defp close_sentence_chunk(sentences, offset) do
+    chunk_text = Enum.join(Enum.reverse(sentences), " ")
+    end_offset = offset + byte_size(chunk_text)
+    {{chunk_text, offset, end_offset}, end_offset}
+  end
+
+  defp emit_remaining(chunks, [], _offset), do: chunks
+
+  defp emit_remaining(chunks, sentences, offset) do
+    {chunk, _next_offset} = close_sentence_chunk(sentences, offset)
+    [chunk | chunks]
   end
 
   defp split_sentences(text) do

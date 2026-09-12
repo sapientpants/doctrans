@@ -66,41 +66,47 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
 
   def handle_event(event, params, socket)
       when event in ["reprocess_page", "reprocess_document"] do
-    extraction_model = params["extraction_model"]
-    translation_model = params["translation_model"]
+    scope = if event == "reprocess_document", do: :document, else: :page
+
+    opts = [
+      extraction_model: params["extraction_model"],
+      translation_model: params["translation_model"]
+    ]
+
+    result =
+      if requested_scope?(socket, scope) and known_models?(socket, opts),
+        do: submit(socket, scope, opts),
+        else: {:error, :invalid_model}
+
+    {:noreply, apply_reprocess_result(socket, scope, result)}
+  end
+
+  defp requested_scope?(socket, scope), do: scope == socket.assigns.reprocess_scope
+
+  defp known_models?(socket, opts) do
     models = socket.assigns.available_models
-    expected_scope = if event == "reprocess_document", do: :document, else: :page
+    opts[:extraction_model] in models and opts[:translation_model] in models
+  end
 
-    valid? =
-      expected_scope == socket.assigns.reprocess_scope &&
-        extraction_model in models && translation_model in models
+  defp apply_reprocess_result(socket, scope, {:ok, result}) do
+    socket = if scope == :page, do: assign(socket, :current_page, result), else: socket
 
-    opts = [extraction_model: extraction_model, translation_model: translation_model]
-    result = if valid?, do: submit(socket, expected_scope, opts), else: {:error, :invalid_model}
+    message =
+      if scope == :document,
+        do: gettext("Document queued for reprocessing"),
+        else: gettext("Page queued for reprocessing")
 
-    case result do
-      {:ok, result} ->
-        socket =
-          if expected_scope == :page, do: assign(socket, :current_page, result), else: socket
+    socket |> close_reprocess_modal() |> put_flash(:info, message)
+  end
 
-        message =
-          if expected_scope == :document,
-            do: gettext("Document queued for reprocessing"),
-            else: gettext("Page queued for reprocessing")
+  defp apply_reprocess_result(socket, _scope, {:error, reason}) do
+    socket |> close_reprocess_modal() |> put_flash(:error, ErrorMessages.message(reason))
+  end
 
-        {:noreply,
-         socket
-         |> assign(:show_reprocess_modal, false)
-         |> assign(:reprocess_scope, :page)
-         |> put_flash(:info, message)}
-
-      {:error, reason} ->
-        {:noreply,
-         socket
-         |> assign(:show_reprocess_modal, false)
-         |> assign(:reprocess_scope, :page)
-         |> put_flash(:error, ErrorMessages.message(reason))}
-    end
+  defp close_reprocess_modal(socket) do
+    socket
+    |> assign(:show_reprocess_modal, false)
+    |> assign(:reprocess_scope, :page)
   end
 
   defp submit(socket, :document, opts),

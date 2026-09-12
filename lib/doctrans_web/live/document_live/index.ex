@@ -490,31 +490,35 @@ defmodule DoctransWeb.DocumentLive.Index do
   end
 
   defp update_documents(socket, summaries) do
-    previous_order = socket.assigns.document_order
     order = updated_document_order(socket, summaries)
 
-    # The client applies all deletions before insertions. Remove affected cards
-    # together, then reinsert from left to right at their final batch positions.
-    socket =
-      if order != previous_order do
-        Enum.reduce(summaries, socket, &stream_delete(&2, :documents, &1))
-      else
-        socket
-      end
+    socket
+    |> clear_reordered_cards(summaries, order != socket.assigns.document_order)
+    |> track_documents(order)
+    |> insert_in_order(order, Map.new(summaries, &{&1.id, &1}))
+  end
 
+  # The client applies all deletions before insertions. Remove affected cards
+  # together, then reinsert from left to right at their final batch positions.
+  defp clear_reordered_cards(socket, _summaries, false), do: socket
+
+  defp clear_reordered_cards(socket, summaries, true) do
+    Enum.reduce(summaries, socket, &stream_delete(&2, :documents, &1))
+  end
+
+  defp track_documents(socket, order) do
     topics = Enum.map(order, &elem(&1, 0))
 
     if connected?(socket),
       do: subscribe_to_documents_topics(topics -- socket.assigns.document_topics)
 
-    socket =
-      socket
-      |> assign(:document_order, order)
-      |> assign(:documents_count, length(order))
-      |> assign(:document_topics, topics)
+    socket
+    |> assign(:document_order, order)
+    |> assign(:documents_count, length(order))
+    |> assign(:document_topics, topics)
+  end
 
-    summaries_by_id = Map.new(summaries, &{&1.id, &1})
-
+  defp insert_in_order(socket, order, summaries_by_id) do
     order
     |> Enum.with_index()
     |> Enum.reduce(socket, fn {{id, _key}, index}, socket ->
