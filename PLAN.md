@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G16 are implemented; G17–G19 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G17 are resolved; G18–G19 remain.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -908,16 +908,39 @@ worse than an absent one, because it is counted as evidence. Items G01–G16 are
   by adding one compile-time call to `LlmProcessingJob` back into `worker.ex`, which reproduces the same
   eleven-module cycle and fails the hook.
 
-- [ ] **G17 · P3 · Prefer the settings toggle over a new secret-scanning tool.**
+- [x] **G17 · P3 · Prefer the settings toggle over a new secret-scanning tool.**
   The reference report's gitleaks recommendation is largely redundant here and partly outdated. GitHub
   secret scanning **and push protection** are already enabled on this repository, which blocks a
   provider-pattern secret before it reaches the remote — strictly stronger than a post-hoc CI job — and
-  pre-commit already runs `detect-private-key`. Gitleaks upstream now declares itself feature-complete,
-  security-patches-only, with development moved to a successor project, so adopting it would add a frozen
-  dependency.
-  The actual residual gap is `secret_scanning_non_provider_patterns`, currently disabled, which is what would
-  cover a custom `OPENAI_API_KEY`-style token. Enable that toggle and re-evaluate only if it proves
-  insufficient. Expect some false positives on fixtures; that is still cheaper than owning a scanner config.
+  pre-commit already runs `detect-private-key` (`.pre-commit-config.yaml:26`). Gitleaks upstream now
+  declares itself feature-complete, security-patches-only, with development moved to a successor project,
+  so adopting it would add a frozen dependency.
+  The stated remedy — enable `secret_scanning_non_provider_patterns` — **turned out not to be available on
+  this repository**, so the item's premise was wrong and nothing was enabled. `PATCH /repos/{owner}/{repo}`
+  returns `200 OK` and leaves the field `disabled`, across three attempts (the single field, the field with
+  its `secret_scanning` siblings restated, and a form-encoded variant); the token carries `repo` scope and
+  no code-security configuration is attached. The setting is also absent from the UI: Settings → Advanced
+  Security → Secret Protection offers only Secret Protection and Push protection, with no "Generic
+  patterns" row. GitHub documents generic-pattern scanning for organization-owned repositories on GitHub
+  Team with Secret Protection enabled, and this is a public repository on a personal account. A silent
+  `200` on an unavailable field is the same class of hazard the phase is about: had the toggle been
+  recorded as enabled from the API response alone, this register would have carried a gate that does not
+  exist.
+  The residual exposure is narrower than the item assumed. `openai_api_key` is a supported provider
+  pattern **with** push protection, so this project's actual credential is covered; what remains uncovered
+  is a self-invented token format, a connection string, or a bare HTTP authentication header. That gap is
+  accepted rather than filled with a scanner, for the reasons above and because a generic scanner is
+  weakest on exactly those shapes. `secret_scanning_validity_checks` remains disabled and is out of scope:
+  it tests whether a found credential is live, which changes nothing about detection, and GitHub does not
+  support it for generic patterns anyway.
+  Implemented: the finding, the three settings the gate rests on, the unavailable one, its re-check
+  command, and the fixture-false-positive procedure are recorded in `docs/CONTRIBUTING.md` under "Secret
+  scanning". No scanner and no configuration were added.
+  Acceptance: no secret-scanning tool is owned by this repository, and the platform gate's real coverage
+  and its one hole are written down rather than assumed. Verified: `gh api repos/sapientpants/doctrans
+  --jq '.security_and_analysis'` reports `secret_scanning` and `secret_scanning_push_protection` enabled,
+  `secret_scanning_non_provider_patterns` disabled and unsettable. Re-open only if the repository moves to
+  an organization, where the toggle becomes available.
 
 - [ ] **G18 · P3 · Reconcile the spec policy with reality.**
   `.credo.exs` disables `Readability.Specs` with the comment "Specs are enforced by Dialyzer, not Credo".
