@@ -12,6 +12,15 @@ defmodule Doctrans.Search.Chunker do
   @target_words 300
   @overlap_words 50
 
+  @typedoc "One chunk of a page's markdown, as stored in `Doctrans.Documents.Chunk`."
+  @type chunk :: %{
+          chunk_index: non_neg_integer(),
+          content: String.t(),
+          start_offset: non_neg_integer(),
+          end_offset: non_neg_integer(),
+          word_count: non_neg_integer()
+        }
+
   @doc """
   Splits text into chunks without overlap.
 
@@ -25,6 +34,7 @@ defmodule Doctrans.Search.Chunker do
   Use `content_for_embedding/2` to get content with overlap prepended,
   suitable for generating embeddings with surrounding context.
   """
+  @spec chunk(String.t() | nil) :: [chunk()]
   def chunk(nil), do: []
   def chunk(""), do: []
 
@@ -47,6 +57,7 @@ defmodule Doctrans.Search.Chunker do
   context, improving retrieval quality. The stored `content` field remains
   overlap-free to avoid duplication when building chat context.
   """
+  @spec content_for_embedding([chunk()], non_neg_integer()) :: String.t()
   def content_for_embedding(chunks, chunk_index) when chunk_index == 0 do
     case Enum.at(chunks, 0) do
       nil -> ""

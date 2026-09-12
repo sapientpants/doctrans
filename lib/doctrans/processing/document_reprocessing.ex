@@ -8,6 +8,8 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
+  @spec reprocess_document(Ecto.UUID.t(), keyword()) ::
+          {:ok, Documents.Document.t()} | {:error, Doctrans.Errors.reason()}
   def reprocess_document(document_id, opts \\ []) do
     transact(fn ->
       document = Run.lock(document_id) || Repo.rollback(:document_not_found)
@@ -51,6 +53,8 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     document
   end
 
+  @spec reprocess_page(Ecto.UUID.t(), keyword()) ::
+          {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
   def reprocess_page(page_id, opts \\ []) do
     case Documents.get_page(page_id) do
       nil -> {:error, :page_not_found}

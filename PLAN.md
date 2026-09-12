@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G17 are resolved; G18–G19 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G18 are resolved; G19 remains.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -942,16 +942,34 @@ worse than an absent one, because it is counted as evidence. Items G01–G17 are
   `secret_scanning_non_provider_patterns` disabled and unsettable. Re-open only if the repository moves to
   an organization, where the toggle becomes available.
 
-- [ ] **G18 · P3 · Reconcile the spec policy with reality.**
-  `.credo.exs` disables `Readability.Specs` with the comment "Specs are enforced by Dialyzer, not Credo".
+- [x] **G18 · P3 · Reconcile the spec policy with reality.**
+  `.credo.exs` disabled `Readability.Specs` with the comment "Specs are enforced by Dialyzer, not Credo".
   That is false: Dialyzer never requires a spec to exist — it infers success typings and checks only the
   specs present. Measured: 78 `@spec` against 499 public `def` in `lib/`, roughly 30% coverage even crediting
-  all 73 `@impl` callbacks. `Doctrans.Documents` has 18 public functions and zero specs, which is the same
+  all 73 `@impl` callbacks. `Doctrans.Documents` had 18 public functions and zero specs, which is the same
   context whose nonexistent `.t()` type G02 found in six orchestrator specs.
-  Either enable the check scoped to `lib/doctrans/` (excluding `lib/doctrans_web/`, where 36 HEEx function
-  components would generate low-value specs) and accept the backlog, or keep it disabled and correct the
-  comment to say specs are optional by choice. Do not leave a false justification in place — that is the
-  same failure mode G02 found in the Dialyzer ignore file.
+  Implemented: the check is enabled, scoped to `lib/doctrans/`, and the backlog it reported is gone.
+  `lib/doctrans_web/` stays out: its 36 HEEx function components would take low-value specs on assigns maps.
+  The comment now states the actual division of labour rather than a justification for the mute.
+  The backlog was 140 findings across 32 files. 133 are answered by a written `@spec`; the other seven are
+  behaviour callbacks (`PdfExtractor`'s six, `Embedding.generate/2`) that were missing `@impl true`, so the
+  contract already existed in the behaviour and the compiler now checks the implementation against it.
+  Eight types were added or named where the specs needed them to say anything: `Chat.message/0`,
+  `Chat.Grader.grade/0`, `Chat.Agent.event/0`, `Search.Chunker.chunk/0`, `Processing.SSECollector.t/0`,
+  `Processing.StartupRecovery.cursor/0`, `Resilience.HealthCheck.results/0`, and `@type t` on the `Chunk`
+  and `Message` schemas.
+  Writing the specs is what made Dialyzer check these functions at all, and it immediately found six defects
+  the inferred typings had hidden. Five are discarded error results — `report_missing_source/1`,
+  `document_orchestrator.ex:281` and `:308`, `document_processor.ex:104`, `pdf_processor.ex:56` all threw
+  away an `update_document_status/3` result that can be `{:error, _}`; each is now an explicit `_ =`.
+  The sixth is a pre-existing false spec of exactly this item's kind: three `pages.ex` specs said
+  `Uniq.UUID.t()`, which is `<<_::128>>` — the raw 128-bit UUID — while every caller passes the 36-character
+  string form. Dialyzer had no reason to object until `Run.retry_pending?/1` gained a spec and inherited the
+  raw-binary typing through `failed_pages_query/1`. All three now say `Ecto.UUID.t()`.
+  Acceptance: `mix credo --strict` reports no issues with the check enabled, so a new public function in
+  `lib/doctrans/` fails the gate until it is specified; `mix dialyzer --list-unused-filters` passes with the
+  register unchanged at 26 skips and 0 unused filters, which is what validates the 133 new specs;
+  `mix test` is green at 846 tests.
 
 - [ ] **G19 · P3 · Minor CI and container hygiene.**
   Add a `concurrency` group with `cancel-in-progress` so superseded pushes stop burning a full run. Change

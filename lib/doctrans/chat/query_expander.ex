@@ -33,6 +33,7 @@ defmodule Doctrans.Chat.QueryExpander do
 
   On any LLM failure, gracefully falls back to `{question, [question]}`.
   """
+  @spec expand(String.t(), [Doctrans.Chat.message()], keyword()) :: {String.t(), [String.t()]}
   def expand(question, chat_history, opts \\ [])
 
   def expand(question, chat_history, opts) do

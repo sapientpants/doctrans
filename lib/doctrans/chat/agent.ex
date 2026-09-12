@@ -26,8 +26,15 @@ defmodule Doctrans.Chat.Agent do
 
   alias Doctrans.Chat
   alias Doctrans.Chat.{Grader, QueryExpander}
+  alias Doctrans.Documents.Document
+  alias Doctrans.Search
 
   require Logger
+
+  @typedoc "Progress and streaming events reported to the caller's `on_event` callback."
+  @type event ::
+          {:stage, :understanding | :retrieving | :assessing | :generating}
+          | {:delta, String.t()}
 
   # Extra retrieval rounds the grader may trigger when context is insufficient
   # (on top of the initial planned multi-query search).
@@ -43,6 +50,8 @@ defmodule Doctrans.Chat.Agent do
   Returns `{:ok, full_answer, merged_context}` or `{:error, reason}`, where
   `merged_context` is the updated accumulated context to feed into the next turn.
   """
+  @spec run(Document.t(), String.t() | nil, [Chat.message()], keyword(), (event() -> any())) ::
+          {:ok, String.t(), [Search.document_result()]} | {:error, Doctrans.Errors.reason()}
   def run(document, question, chat_history \\ [], opts \\ [], on_event)
 
   def run(_document, question, _chat_history, _opts, _on_event)

@@ -25,7 +25,9 @@ defmodule Doctrans.Search do
           :similarity => float(),
           :content_revision => integer() | nil,
           optional(:chunk_id) => Ecto.UUID.t() | nil,
-          optional(:chunk_index) => non_neg_integer()
+          optional(:chunk_index) => non_neg_integer(),
+          # Present only on results fused by `Doctrans.Chat.MultiSearch`.
+          optional(:rrf_score) => float()
         }
 
   alias Doctrans.Repo

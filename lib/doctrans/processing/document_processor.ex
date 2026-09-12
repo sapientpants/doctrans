@@ -34,6 +34,12 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   Returns `:ok`, `:cancelled`, or `{:error, reason}`.
   """
+  @spec extract_document(
+          Ecto.UUID.t(),
+          String.t(),
+          MapSet.t(Ecto.UUID.t()),
+          Documents.Document.t() | nil
+        ) :: :ok | :cancelled | {:error, Doctrans.Errors.reason()}
   def extract_document(document_id, file_path, cancelled_documents, document \\ nil) do
     document = document || Documents.get_document(document_id)
 
@@ -95,7 +101,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
       {:error, reason} ->
         Logger.error("Failed to convert document #{document_id}: #{inspect(reason)}")
         # Preserve the source for the persisted job's next attempt or manual recovery.
-        publish_conversion_error(document, reason)
+        _ = publish_conversion_error(document, reason)
         {:error, reason}
     end
   end
@@ -110,6 +116,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
   @doc """
   Checks if the document processor can handle a given file type.
   """
+  @spec supported_format?(String.t()) :: boolean()
   def supported_format?(file_path) do
     extension = file_path |> Path.extname() |> String.downcase()
     extension in [".pdf", ".docx", ".doc", ".odt", ".rtf"]
@@ -118,6 +125,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
   @doc """
   Returns a list of supported file extensions.
   """
+  @spec supported_extensions() :: [String.t()]
   def supported_extensions do
     [".pdf", ".docx", ".doc", ".odt", ".rtf"]
   end

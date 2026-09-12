@@ -30,6 +30,12 @@ defmodule Doctrans.Processing.PdfProcessor do
   """
   # pdf_path is the stored original upload or the converter output in the same document
   # directory; the File calls themselves live further down the do_extract/3 chain.
+  @spec extract_document(
+          Ecto.UUID.t(),
+          String.t(),
+          MapSet.t(Ecto.UUID.t()),
+          Documents.Document.t() | nil
+        ) :: :ok | :cancelled | {:error, Doctrans.Errors.reason()}
   def extract_document(document_id, pdf_path, cancelled_documents, document \\ nil) do
     if MapSet.member?(cancelled_documents, document_id) do
       Logger.info("Document #{document_id} was cancelled, skipping PDF extraction")
@@ -47,7 +53,7 @@ defmodule Doctrans.Processing.PdfProcessor do
     else
       {:error, reason} ->
         Logger.error("Failed to extract PDF for document #{document_id}: #{inspect(reason)}")
-        maybe_update_error(document, reason)
+        _ = maybe_update_error(document, reason)
         {:error, reason}
     end
   end
@@ -82,6 +88,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   upload directory and document ID. Note that this returns the expected path
   regardless of whether the file actually exists on disk.
   """
+  @spec get_pdf_path(Ecto.UUID.t()) :: String.t()
   def get_pdf_path(document_id) do
     Path.join([
       Uploads.upload_dir(),

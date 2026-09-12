@@ -20,6 +20,12 @@ defmodule Doctrans.Chat.Conversations do
 
   @context_fields ~w(page_id page_number chunk_index content_revision similarity original_markdown translated_markdown)a
 
+  @spec load(Ecto.UUID.t()) :: %{
+          messages: [Message.t()],
+          history: [Chat.message()],
+          context: [Doctrans.Search.document_result()],
+          interrupted?: boolean()
+        }
   def load(document_id) do
     case Repo.get_by(Session, document_id: document_id) do
       nil -> %{messages: [], history: [], context: [], interrupted?: false}
@@ -27,6 +33,7 @@ defmodule Doctrans.Chat.Conversations do
     end
   end
 
+  @spec start_question(Ecto.UUID.t(), String.t()) :: Message.t()
   def start_question(document_id, content) do
     {:ok, message} =
       Repo.transaction(fn ->
@@ -56,12 +63,21 @@ defmodule Doctrans.Chat.Conversations do
   Single-page reprocessing takes the same document lock, so context outdated by
   a page reset is already visible here and is discarded rather than saved.
   """
+  @spec finish(
+          Message.t(),
+          String.t(),
+          String.t(),
+          [Doctrans.Search.document_result()],
+          Doctrans.Documents.Document.t()
+        ) :: {:ok, Message.t()} | {:error, term()}
   def finish(question, role, content, context, document) do
     Run.with_current(document, fn _current ->
       finish(question, role, content, context)
     end)
   end
 
+  @spec finish(Message.t(), String.t(), String.t(), [Doctrans.Search.document_result()]) ::
+          {:ok, Message.t()} | {:error, term()}
   def finish(question, role, content, context) do
     Repo.transaction(fn ->
       session =

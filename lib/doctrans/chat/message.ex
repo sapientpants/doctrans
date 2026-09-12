@@ -9,4 +9,6 @@ defmodule Doctrans.Chat.Message do
     field :content, :string
     field :completed, :boolean, default: false
   end
+
+  @type t :: %__MODULE__{}
 end

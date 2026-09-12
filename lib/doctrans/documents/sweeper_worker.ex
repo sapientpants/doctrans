@@ -28,6 +28,7 @@ defmodule Doctrans.Documents.SweeperWorker do
 
   # Client API
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -39,6 +40,7 @@ defmodule Doctrans.Documents.SweeperWorker do
   when the last sweep occurred. Works even when the worker is disabled
   (enabled: false only disables the scheduled sweeps).
   """
+  @spec sweep_now() :: :ok
   def sweep_now do
     GenServer.cast(__MODULE__, :sweep_now)
   end
@@ -46,6 +48,14 @@ defmodule Doctrans.Documents.SweeperWorker do
   @doc """
   Returns the current configuration and status.
   """
+  @spec status() :: %{
+          enabled: boolean(),
+          interval_hours: non_neg_integer(),
+          grace_period_hours: pos_integer(),
+          last_sweep: DateTime.t() | nil,
+          sweep_count: non_neg_integer(),
+          last_result: {:ok, non_neg_integer()} | {:error, String.t()} | nil
+        }
   def status do
     GenServer.call(__MODULE__, :status)
   end

@@ -22,6 +22,7 @@ defmodule Doctrans.Processing.PdfExtractor do
   """
   # output_dir is the generated document UUID/pages directory supplied by PdfProcessor.
   # sobelow_skip ["Traversal.FileModule"]
+  @impl true
   def extract_pages(pdf_path, output_dir, opts \\ []) do
     default_dpi = get_in(Application.get_env(:doctrans, :pdf_extraction, []), [:dpi]) || 200
     dpi = Keyword.get(opts, :dpi, default_dpi)
@@ -71,6 +72,7 @@ defmodule Doctrans.Processing.PdfExtractor do
   """
   # output_dir is the generated document UUID/pages directory; output names use a fixed page prefix.
   # sobelow_skip ["Traversal.FileModule"]
+  @impl true
   def extract_page(pdf_path, output_dir, page_number, opts \\ []) do
     default_dpi = get_in(Application.get_env(:doctrans, :pdf_extraction, []), [:dpi]) || 200
     dpi = Keyword.get(opts, :dpi, default_dpi)
@@ -112,6 +114,7 @@ defmodule Doctrans.Processing.PdfExtractor do
   @doc """
   Gets the number of pages in a PDF without extracting.
   """
+  @impl true
   def get_page_count(pdf_path) do
     # Preserve PATH for command lookup, but clear other potentially sensitive env vars
     case System.cmd("pdfinfo", [pdf_path],
@@ -134,6 +137,7 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   Page numbers are 1-indexed.
   """
+  @impl true
   def page_image_path(output_dir, page_number) do
     # pdftoppm generates files like page-01.png, page-02.png, etc.
     # The number of digits depends on the total page count
@@ -147,6 +151,7 @@ defmodule Doctrans.Processing.PdfExtractor do
   @doc """
   Lists all page image paths in order.
   """
+  @impl true
   def list_page_images(output_dir) do
     pattern = Path.join(output_dir, "page-*.png")
 
@@ -158,6 +163,7 @@ defmodule Doctrans.Processing.PdfExtractor do
   @doc """
   Checks if pdftoppm is available on the system.
   """
+  @impl true
   def available? do
     case System.find_executable("pdftoppm") do
       nil -> false

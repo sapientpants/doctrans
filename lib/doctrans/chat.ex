@@ -13,6 +13,13 @@ defmodule Doctrans.Chat do
 
   require Logger
 
+  @typedoc "A chat turn as the model sees it: saved history entries and request messages."
+  @type message :: %{
+          required(:role) => String.t(),
+          required(:content) => String.t(),
+          optional(atom()) => term()
+        }
+
   @doc """
   Sends a chat message and returns the LLM response.
 
@@ -41,6 +48,8 @@ defmodule Doctrans.Chat do
   - `{:ok, response_text}` on success
   - `{:error, reason}` on failure
   """
+  @spec send_message(Documents.Document.t(), String.t() | nil, [message()], keyword()) ::
+          {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def send_message(document, question, chat_history \\ [], opts \\ [])
 
   def send_message(_document, "", _chat_history, _opts) do
@@ -133,6 +142,7 @@ defmodule Doctrans.Chat do
   page number for citation. When multiple chunks come from the same page,
   they are sorted by chunk_index and joined together.
   """
+  @spec build_context([Search.document_result()]) :: String.t()
   def build_context([]), do: ""
 
   def build_context(results) do
@@ -193,6 +203,9 @@ defmodule Doctrans.Chat do
 
   Returns the merged chunk list, suitable for `build_context/1`.
   """
+  @spec merge_context([Search.document_result()], [Search.document_result()], keyword()) :: [
+          Search.document_result()
+        ]
   def merge_context(prior_chunks, new_chunks, opts \\ []) do
     max_chunks = Keyword.get(opts, :max_chunks, @max_context_chunks)
     max_bytes = Keyword.get(opts, :max_bytes, @max_context_bytes)
@@ -305,6 +318,7 @@ defmodule Doctrans.Chat do
   untranslated at a revision that stays current once the translation lands. Such
   context is dropped as well; the next turn retrieves the translated page.
   """
+  @spec current_context([Search.document_result()]) :: [Search.document_result()]
   def current_context([]), do: []
 
   def current_context(chunks) do
@@ -340,6 +354,7 @@ defmodule Doctrans.Chat do
   A chunk read from another page is never superseded by this one, so callers can
   pass their whole accumulated context without pre-filtering by `page_id`.
   """
+  @spec superseded_by?(Search.document_result(), Documents.Page.t()) :: boolean()
   def superseded_by?(chunk, page) do
     Map.get(chunk, :page_id) == page.id and
       not current_chunk?(chunk, page.content_revision, page.translated_markdown)
@@ -374,6 +389,8 @@ defmodule Doctrans.Chat do
   Returns `{:ok, pages}` or `{:error, reason}`.
   Shared by `send_message/4` and `Doctrans.Chat.Agent`.
   """
+  @spec retrieve(Ecto.UUID.t(), String.t(), [String.t()], keyword()) ::
+          {:ok, [Search.document_result()]} | {:error, Doctrans.Errors.reason()}
   def retrieve(document_id, standalone_question, queries, search_opts) do
     case queries do
       [] -> Search.search_in_document(document_id, standalone_question, search_opts)
@@ -383,6 +400,7 @@ defmodule Doctrans.Chat do
   end
 
   @doc false
+  @spec build_system_prompt(String.t(), String.t()) :: String.t()
   def build_system_prompt(document_title, context) when context == "" do
     """
     You answer questions about the document "#{document_title}".
@@ -413,6 +431,7 @@ defmodule Doctrans.Chat do
   end
 
   @doc false
+  @spec build_messages(String.t(), [message()], String.t()) :: [message()]
   def build_messages(system_prompt, chat_history, question) do
     # Start with system prompt
     system_message = %{role: "system", content: system_prompt}

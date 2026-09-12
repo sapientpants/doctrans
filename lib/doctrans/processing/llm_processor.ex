@@ -45,6 +45,8 @@ defmodule Doctrans.Processing.LlmProcessor do
   - `:extraction_model` - Override the default extraction model
   - `:translation_model` - Override the default translation model
   """
+  @spec process_page(Ecto.UUID.t(), MapSet.t(Ecto.UUID.t()), keyword()) ::
+          :ok | {:error, Doctrans.Errors.reason()}
   def process_page(page_id, cancelled_documents, opts \\ []) do
     generation = Keyword.fetch(opts, :generation)
     opts = Map.to_list(Run.choices(opts))

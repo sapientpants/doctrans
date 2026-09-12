@@ -16,7 +16,11 @@ defmodule Doctrans.Processing.StartupRecovery do
   @document_id_match "?->>'#{Keys.document_id()}' = ?::text"
   @page_id_match "?->>'#{Keys.page_id()}' = ?::text"
 
+  @typedoc "Where the next batch resumes: a phase with the last id handled, or :done."
+  @type cursor :: {:documents, Ecto.UUID.t() | nil} | {:pages, Ecto.UUID.t() | nil} | :done
+
   @doc "Returns the next cursor, or :done when the startup pass is complete."
+  @spec run_batch(cursor()) :: cursor()
   def run_batch(cursor \\ {:documents, nil})
 
   def run_batch({:documents, after_id}) do
