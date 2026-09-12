@@ -51,8 +51,9 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   retains its full translation. Expansion/contraction regression tests cover both indexing paths,
   passage preservation, vector retrieval, and legacy chat context. Existing vectors need no rebuild;
   README documents optional rechunking to remove stored legacy pairings.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:215,262`, `lib/doctrans/chat.ex:141`,
-  `lib/mix/tasks/rechunk_documents.ex`. Reproduced with a chunking probe.
+  Evidence: `lib/doctrans/search/indexer.ex` (`create_chunks/2`, `chunks_match_page_content?/2`),
+  `lib/doctrans/chat.ex:141`, `lib/mix/tasks/rechunk_documents.ex`. Reproduced with a chunking probe.
+  R01 moved this code out of the deleted `EmbeddingWorker`; the chunking decision is unchanged.
 
 - [x] **C02 · P1 · Reject incomplete or reasoning-only document output.**
   The shared API response parser ignores `finish_reason` and substitutes reasoning when final content is missing.
@@ -146,7 +147,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   copy from an open socket's accumulated context too; it returns false for a chunk read from another page,
   so callers pass their whole accumulated context without pre-filtering. `content_revision` was not reused
   to carry translation freshness: it fences in-flight embedding and page writes
-  (`EmbeddingWorker.with_current_revision/2`, `Run.with_page/2`), and advancing it on translation would
+  (`Indexer.with_current_revision/2`, `Run.with_page/2`), and advancing it on translation would
   discard the embeddings generated for that page. A separate `translation_revision` column would be inert
   with respect to both fences and remains open as a cheaper invariant if the text comparison ever costs
   too much; the content check was chosen because it needs no migration and also catches a translation
@@ -157,23 +158,80 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
 
 ## Phase 2 — Recoverable processing and indexing
 
-- [ ] **R01 · P2 · Move indexing to durable, bounded jobs.**
+- [x] **R01 · P2 · Move indexing to durable, bounded jobs.**
   Embedding requests and pending work exist only in a GenServer and supervised tasks.
   Startup recovery does not recover indexing for fully translated pages. Restart, task failure, or exhausted
   retries can leave completed documents unavailable to semantic search/chat until manually reprocessed.
   Use Oban with page-generation-aware uniqueness, bounded concurrency, and pending/error reconciliation.
   Acceptance: restart during indexing eventually restores search/chat; transient failure retries persist;
   duplicate requests do not create duplicate work; obsolete generations cannot overwrite current vectors.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:37,46`,
-  `lib/doctrans/processing/startup_recovery.ex:67`. Code-based finding.
+  Implemented: an indexing request is now a row. `Doctrans.Jobs.EmbeddingJob` runs on a new
+  `embedding_generation` queue at concurrency 2 — bounded, where the GenServer started one supervised task
+  per page with no ceiling — and `Doctrans.Search.Indexer` holds the chunking and embedding that used to
+  live in `EmbeddingWorker`, which is gone along with its coalescing state and its supervision-tree entry.
+  The page generation the job is keyed on is `content_revision`, the column the database trigger already
+  advances whenever a page's source text changes; `processing_generation` fences a *processing* run and
+  says nothing about whether the text changed, so it is the wrong fence for vectors. Uniqueness over
+  `[page_id, revision]` across all active states makes a repeated request for a revision already queued
+  or running a no-op, while a re-extraction queues a genuinely distinct unit of work. The superseded job
+  cannot win if the two overlap: every write the indexer makes still passes `with_current_revision/2`,
+  and a run whose fence fails now reports `{:cancel, :stale_page}` rather than the `:ok` it used to
+  report after writing nothing. The final "completed" write was fenced before this change too, so the
+  row state was never wrong; what changed is that the run no longer reports success for work it skipped.
+  Retries moved out of the process and into the schedule: the in-task `Process.sleep` loop over
+  `@max_retries` is gone and a transient chunk failure is returned as `{:error, reason}` for Oban to
+  retry across restarts. A page is cancelled only when *every* failure on it fails
+  `ErrorClassifier.retryable?/1`; classifying the page on whichever chunk happened to fail first would
+  let one oversized chunk strand the chunks that failed transiently beside it. A retry only re-embeds
+  chunks that still have no vector. The OpenAI client underneath still replays transient failures within
+  a single call, which is why the indexer passes `melt: false` rather than melting a fuse the client
+  already melts — see R06.
+  Startup recovery gained a third phase, `{:embeddings, cursor}`, running after documents and pages with
+  the same batch size and cursor. It queues every page whose extraction completed and whose
+  `embedding_status` is not `completed` — pending, errored, or left `processing` by a restart — and it
+  reads the revision under a row lock so a page rewritten since selection is queued at the revision it
+  now holds. Unlike the page phase it does not filter on document status, which is what left fully
+  translated pages of completed documents unrecovered.
+  That phase matches existing jobs on the page **and** the revision, unlike the page-keyed filter the
+  other phases use. A page-keyed filter is wrong for a revision-keyed worker: a job holding a superseded
+  revision cancels without indexing anything, so treating it as the page's owner skipped the revision
+  that replaced it and left the page unindexed until some later restart. Jobs that already settled the
+  current revision by being `cancelled` do suppress recovery, so a permanent failure is not re-queued and
+  re-charged to the API on every boot; `discarded` does not, because exhausted retries were retryable
+  failures and a restart is a fair new attempt. Retaining that evidence is why `Oban.Plugins.Pruner` now
+  keeps history for a week instead of its 60-second default, and each page is queued in its own
+  transaction so one unqueueable row costs that page rather than the batch.
+  `doctrans.embedding.crashed.count` was dropped from telemetry: the GenServer `:DOWN` handler that
+  emitted it no longer exists. Nothing in the app subscribed to Oban's events, so two replacements were
+  added rather than assumed. `EmbeddingJob.perform/1` emits `[:doctrans, :retry, :attempt]` and
+  `[:doctrans, :retry, :exhausted]` tagged `type: :embedding` — the series `DoctransWeb.Telemetry`
+  already declares alongside `:extraction` and `:translation`, and which would otherwise have gone
+  silently dead — and `job_metrics/0` adds `[:oban, :job, :stop]` and `[:oban, :job, :exception]` counters
+  by queue, which is how a crashed or cancelled job in any queue now surfaces. `Oban.Lifeline` drops from
+  a one-hour rescue window to fifteen minutes: an orphaned `executing` job blocks both recovery and
+  re-enqueue for the page it holds, and an hour is far longer than any real indexing run.
+  Evidence: `lib/doctrans/jobs/embedding_job.ex`, `lib/doctrans/search/indexer.ex`,
+  `lib/doctrans/processing/startup_recovery.ex:99`, `config/config.exs:121`. Reproduced in database tests:
+  a job carrying a superseded revision cancels and leaves the current vectors untouched, a transient
+  failure is reported for retry and succeeds on the next attempt, recovery queues indexing for a
+  completed document the page phase never looks at, and recovery still queues the current revision while
+  a superseded job for the same page is active — which fails against a page-keyed filter.
 
-- [ ] **R02 · P2 · Track failed page embeddings accurately.**
+- [x] **R02 · P2 · Track failed page embeddings accurately.**
   Successful chunk embeddings are followed by a page embedding call whose failure is only logged;
   the page is then marked indexed. Global search relies on page embeddings and silently loses semantic coverage.
   Track/retry page indexing separately, or standardize global search on chunk retrieval.
   Acceptance: chunk success plus page embedding failure cannot report complete global indexing;
   retry restores semantic search without rerunning OCR/translation.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:151,320`. Implement with R01.
+  Implemented: the page-level call's result is no longer discarded. A page whose chunks embedded but
+  whose page vector did not is reported as `{:error, reason}` or `{:cancel, reason}` like any other
+  failure and left at `embedding_status: "error"`, so Oban retries it and startup recovery — which keys
+  on that status — can still see it. Marking it `completed` was the trap: global search requires
+  `p.embedding IS NOT NULL`, so the page was absent from search with nothing left to notice it, and
+  R01's new recovery query would have made that permanent rather than merely long-lived. The chunk
+  vectors are kept, so the retry owes only the page-level call.
+  Evidence: `lib/doctrans/search/indexer.ex` (`finish_page_level_embedding/3`), `lib/doctrans/search.ex:336`.
+  Reproduced in a database test that fails only the call carrying the whole page's text.
 
 - [ ] **R03 · P2 · Reconcile document completion on replay and restart.**
   The last translation is saved before document completion is updated. A crash between those writes leaves
@@ -204,15 +262,20 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   originals and converted PDFs remain inaccessible through HTTP; image responses retain no-store headers.
   Evidence: `lib/doctrans_web/endpoint.ex:46`, `config/config.exs:47`.
 
-- [ ] **R06 · P2 · Give retries and circuit breakers clear ownership.**
-  EmbeddingWorker melts the breaker around a client that already classifies and melts failures.
+- [x] **R06 · P2 · Give retries and circuit breakers clear ownership.**
+  Indexing melted the breaker around a client that already classifies and melts failures.
   Transient errors can count twice, and permanent errors can count through the outer wrapper.
   Remove duplicate accounting and reconcile Req, processor, and Oban retry policies into documented bounds.
   Acceptance: one transient operation failure counts once; permanent API errors do not open the circuit;
   permanent failures do not receive ordinary transient job retries; cancellation does not wait through
   unnecessary nested sleeps. Preserve existing error-code conventions.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:282`, `lib/doctrans/processing/openai.ex:480`.
-  Coordinate with R01.
+  Implemented: both embedding calls in `Search.Indexer` now pass `melt: false`, matching the chat paths.
+  `OpenAI.embed/2` classifies its own failures and melts `:embedding_api` only for retryable ones, so the
+  outer wrapper was counting transient failures twice and melting on the 401s and 400s the client
+  deliberately ignores — blowing the fuse at roughly half its configured tolerance, on errors that a
+  fuse cannot help with. Retry ownership itself was settled by R01: Oban holds the schedule, the indexer
+  holds no loop, and Req still replays transient failures within one call.
+  Evidence: `lib/doctrans/search/indexer.ex` (`embed/1`), `lib/doctrans/processing/openai.ex:455-465`.
 
 ## Phase 3 — Search relevance and responsiveness
 
@@ -360,7 +423,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `mix compile` never sees `test/**/*.exs` and exactly one warning hides in that blind spot.
 
 - [ ] **Q02 · P2 · Include critical workers in meaningful coverage.**
-  The reported percentage excludes Worker, LlmProcessor, EmbeddingWorker, and health/sweeper workers.
+  The reported percentage excludes Worker, LlmProcessor, and the health/sweeper workers.
   Gradually remove production exclusions while adding behavior-focused tests; keep the 80% requirement.
   Remove obsolete Ollama exclusions, clarify the active coverage configuration, and correct the ignore rule
   that labels tracked coveralls.json as an artifact.
@@ -376,11 +439,14 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Per-file reality: `health_check_worker.ex` 37.2%, `embedding_worker.ex` 59.1%, `llm_processor.ex` 67.5%,
   `sweeper_worker.ex` 70.0%, `health_check.ex` 78.2%, `worker.ex` 95.9%. Two entries
   (`processing/ollama.ex`, `test/support/ollama_stub.ex`) named files that no longer exist and were
-  removed in G07.
+  removed in G07. Superseded in part by R01: `embedding_worker.ex` was deleted and its exclusion with it,
+  so its successors `search/indexer.ex` and `jobs/embedding_job.ex` are measured. Five production
+  exclusions remain; the measurement above predates that change.
   What the exclusion hides is exactly the reliability logic this plan prioritizes, all of it unexecuted:
   both retry-with-backoff and permanent-failure arms in `llm_processor.ex:183-215,292-324`; the whole of
-  `handle_chunk_error/5` and the `Ecto.StaleEntryError` rescue in `embedding_worker.ex:286-345`;
-  `chunks_match_page_content?/2` at `embedding_worker.ex:185-206`, which is the C01 alignment decision;
+  `handle_chunk_error/5` and the `Ecto.StaleEntryError` rescue, and `chunks_match_page_content?/2` (the
+  C01 alignment decision) — all three formerly in `embedding_worker.ex` and now measured in
+  `search/indexer.ex`;
   and the entire check cycle in `health_check_worker.ex:98-180`, which never runs because
   `config/test.exs:60` disables the worker. The retry paths are cheap to cover — `config/test.exs:52-55`
   already sets `max_attempts: 2, base_delay_ms: 10`, so a retry test costs about 20 ms.
@@ -404,8 +470,9 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   1 s later with no sandbox owner, so the GenServer crashes and the supervisor restarts it mid-suite.
   `test/doctrans/processing/worker_test.exs:9-30` already compensates with a `Process.sleep(50)` and an
   `ensure_worker_responsive/1` helper that retries on `:exit` — the suite is working around a bug it causes.
-  Second, `EmbeddingWorker` tasks spawned under `Doctrans.TaskSupervisor` inherit no ownership
-  (`embedding_worker.ex:104,129,146,153,156,254,343`).
+  The second source named in this diagnosis — `EmbeddingWorker` tasks spawned under
+  `Doctrans.TaskSupervisor` — no longer exists: R01 deleted the module, and indexing now runs inside an
+  Oban job. Re-measure before acting; only the `Processing.Worker` source above is known to remain.
   The fix already exists and is dead code: `test/support/worker_helpers.ex:20` calls
   `Ecto.Adapters.SQL.Sandbox.allow/3` correctly, but `grep -rn "WorkerHelpers\|setup_worker_sandbox"`
   matches only its own definition. That single call site is the only `Sandbox.allow/3` in the tree.
@@ -413,8 +480,8 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   GenServers. Fixing this also removes the 0.3% run-to-run coverage jitter that would eventually make a
   threshold gate fail spuriously.
   Related cleanup in the same pass — tests that cannot fail:
-  `test/doctrans/search/embedding_worker_test.exs` is 26 lines covering a 361-line module and asserts that
-  `GenServer.cast` returns `:ok` and that the compiler compiled;
+  `test/doctrans/search/embedding_worker_test.exs` was 26 lines covering a 361-line module, asserting that
+  `GenServer.cast` returns `:ok` and that the compiler compiled — deleted in R01 along with its subject;
   `test/doctrans/resilience/health_check_worker_test.exs` is 7 `Map.has_key?` assertions on a static struct
   plus `interval_ms == 60_000`; `test/doctrans/processing/pdf_extractor_test.exs:65-108` wraps three error
   tests in `rescue ErlangError -> :ok`, so any unexpected crash is rescued into a pass;
@@ -459,7 +526,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   prefix is a suffix of the previous chunk — this is the embedded-versus-stored divergence surface from C01,
   and `tail_words/2` (`chunker.ex:166-169`) re-joins on `" "`, the same bug class as Q04.
   Explicitly not worth it: revision monotonicity (the failure mode is concurrency, already modelled by
-  `document_reprocessing_race_test.exs` and `embedding_worker_race_test.exs`, and a property would assert
+  `document_reprocessing_race_test.exs` and `indexer_race_test.exs`, and a property would assert
   `n + 1 > n`), changeset validation, and LiveView rendering — all small enumerable spaces better served by
   table-driven examples.
   Acceptance: each property fails when its invariant is deliberately broken; run counts and collection

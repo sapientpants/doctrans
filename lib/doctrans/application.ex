@@ -23,8 +23,6 @@ defmodule Doctrans.Application do
       {Task.Supervisor, name: Doctrans.TaskSupervisor},
       # Background worker for processing books
       Doctrans.Processing.Worker,
-      # Background worker for generating embeddings
-      Doctrans.Search.EmbeddingWorker,
       # Scheduled worker for cleaning up orphaned files
       Doctrans.Documents.SweeperWorker,
       # Periodic health check worker

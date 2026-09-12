@@ -13,10 +13,10 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Processing.DocumentOrchestrator
   alias Doctrans.Processing.Run
   alias Doctrans.Resilience.{Backoff, ErrorClassifier}
-  alias Doctrans.Search.EmbeddingWorker
 
   @max_retries 3
 
@@ -148,11 +148,25 @@ defmodule Doctrans.Processing.LlmProcessor do
           })
 
         Topics.broadcast_page_update(page)
-        EmbeddingWorker.generate_embedding(page.id)
+        queue_indexing(page)
         :ok
 
       {:error, reason} ->
         handle_extraction_error(page, reason, retry_count, opts)
+    end
+  end
+
+  # The only other thing that queues indexing is startup recovery, which runs
+  # once per boot — so an enqueue lost here keeps the page out of search until
+  # the next restart. That is worth a line in the log rather than a dropped result.
+  defp queue_indexing(page) do
+    case EmbeddingJob.enqueue_page(page) do
+      {:ok, _job} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Could not queue indexing for page #{page.id}: #{inspect(reason)}")
+        :ok
     end
   end
 
