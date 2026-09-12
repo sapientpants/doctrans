@@ -6,6 +6,7 @@ defmodule Doctrans.Documents.Pages do
   """
 
   import Ecto.Query
+  import Doctrans.Documents.Page, only: [failed?: 1]
 
   alias Doctrans.Documents.{Document, Page}
   alias Doctrans.Processing.Run
@@ -137,26 +138,68 @@ defmodule Doctrans.Documents.Pages do
   end
 
   @doc """
-  Checks if all expected pages in a document exist and are fully processed.
+  Returns the terminal outcome of a document's pages.
 
-  Documents with an unknown or non-positive page count are not complete.
+  Documents with an unknown or non-positive page count, or with pages missing,
+  are never terminal.
 
-  A page is considered "done" if:
-  - translation_status = "completed", OR
-  - extraction_status = "error" (can't translate without successful extraction)
+  - `:completed` - every expected page finished translation successfully
+  - `:failed` - every expected page settled and at least one stage failed
+  - `:incomplete` - work is still outstanding (pending, processing, or missing)
+
+  A failed page is terminal for its own content only; whether the document may
+  still recover depends on retries, which callers resolve separately.
   """
-  def all_pages_completed?(document_id) do
+  @spec completion_state(Uniq.UUID.t()) :: :completed | :failed | :incomplete
+  def completion_state(document_id) do
+    case page_counts(document_id) do
+      %{total_pages: total, pages: total, succeeded: total} ->
+        :completed
+
+      %{total_pages: total, pages: total, succeeded: succeeded, failed: failed}
+      when succeeded + failed == total ->
+        :failed
+
+      _ ->
+        :incomplete
+    end
+  end
+
+  @doc """
+  Lists the page numbers whose extraction or translation failed, in page order.
+  """
+  @spec failed_page_numbers(Uniq.UUID.t()) :: [integer()]
+  def failed_page_numbers(document_id) do
+    document_id
+    |> failed_pages_query()
+    |> order_by([p], p.page_number)
+    |> select([p], p.page_number)
+    |> Repo.all()
+  end
+
+  @doc """
+  Query for the pages of a document whose extraction or translation failed.
+  """
+  @spec failed_pages_query(Uniq.UUID.t()) :: Ecto.Query.t()
+  def failed_pages_query(document_id) do
+    Page
+    |> where([p], p.document_id == ^document_id)
+    |> where([p], failed?(p))
+  end
+
+  # Success and failure stay disjoint so settled pages add up to the expected total.
+  defp page_counts(document_id) do
     Document
     |> where([d], d.id == ^document_id and d.total_pages > 0)
     |> join(:inner, [d], p in Page, on: p.document_id == d.id)
     |> group_by([d], [d.id, d.total_pages])
-    |> having([d, p], count(p.id) == d.total_pages)
-    |> having(
-      [d, p],
-      filter(count(p.id), p.translation_status == "completed" or p.extraction_status == "error") ==
-        d.total_pages
-    )
-    |> Repo.exists?()
+    |> select([d, p], %{
+      total_pages: d.total_pages,
+      pages: count(p.id),
+      succeeded: filter(count(p.id), p.translation_status == "completed"),
+      failed: filter(count(p.id), failed?(p))
+    })
+    |> Repo.one()
   end
 
   @doc """

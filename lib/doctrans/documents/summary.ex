@@ -7,15 +7,16 @@ defmodule Doctrans.Documents.Summary do
   identifies the summary in LiveView streams.
   """
 
-  alias Doctrans.Documents.{Document, Progress}
+  alias Doctrans.Documents.{Document, Page, Progress}
 
-  @enforce_keys [:id, :document, :progress, :thumbnail_path]
-  defstruct [:id, :document, :progress, :thumbnail_path]
+  @enforce_keys [:id, :document, :progress, :failed_pages, :thumbnail_path]
+  defstruct [:id, :document, :progress, :failed_pages, :thumbnail_path]
 
   @type t :: %__MODULE__{
           id: Ecto.UUID.t(),
           document: Document.t(),
           progress: float(),
+          failed_pages: [integer()],
           thumbnail_path: String.t() | nil
         }
 
@@ -28,6 +29,8 @@ defmodule Doctrans.Documents.Summary do
       id: document.id,
       document: document,
       progress: Progress.calculate(pages, document.total_pages),
+      # Lets the card name the pages to reprocess instead of guessing from progress.
+      failed_pages: pages |> Enum.filter(&Page.failed_status?/1) |> Enum.map(& &1.page_number),
       thumbnail_path: first_page && first_page.image_path
     }
   end

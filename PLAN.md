@@ -74,13 +74,25 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Evidence: `lib/doctrans/processing/openai.ex:154,177`,
   `test/doctrans/processing/openai_request_test.exs:299,336`. Confirmed by code and existing tests.
 
-- [ ] **C03 · P1 · Separate successful completion from failed pages and pending retries.**
+- [x] **C03 · P1 · Separate successful completion from failed pages and pending retries.**
   `all_pages_completed?/1` counts extraction errors as completed, including failures awaiting Oban retries.
   Another page finishing can overwrite an error document with `completed`.
   Require successful required stages for success; represent partial failure explicitly and preserve errors
   until retry outcomes justify changing the document state.
   Acceptance: a failed OCR page plus a successful page never produces a successful document;
   scheduled retries remain distinguishable from terminal failure; a successful retry reconciles status.
+  Implemented: `Pages.completion_state/1` replaces the boolean check and reports `:completed` only when
+  every expected page finished translation, `:failed` when every page settled with at least one failure,
+  and `:incomplete` otherwise; success and failure are disjoint so settled pages add up to the page count.
+  The orchestrator resolves that state under the existing document lock: success completes and clears the
+  diagnostic, an unsettled document is left alone, and a settled failure becomes `error` carrying the
+  failed page numbers (`{:pages_failed, ...}`) unless `Run.retry_pending?/1` finds an active job for a
+  failed page, which reports `:retrying` and preserves the current state. An error recorded by an
+  exhausted page job is never overwritten, and a successful retry or page reprocess reconciles the
+  document back to `completed`. A page job that crashes on its final attempt settles the document
+  too, instead of leaving it `processing` until the next startup recovery pass. The progress panel
+  names the pages to reprocess, from `Summary.failed_pages`, and falls back to the whole-document
+  message when no page failed.
   Evidence: `lib/doctrans/documents/pages.ex:156`,
   `lib/doctrans/processing/document_orchestrator.ex:50`, `lib/doctrans/processing/llm_processor.ex:220`.
   Reproduced in a database test using a rolled-back transaction.

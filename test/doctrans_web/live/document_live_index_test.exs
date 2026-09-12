@@ -24,6 +24,24 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     refute has_element?(view, "#documents-#{empty_document.id} img")
   end
 
+  test "an errored card names the pages to reprocess", %{conn: conn} do
+    document = document_with_pages_fixture(%{status: "error"}, 2)
+    [failed, done] = document.pages
+
+    {:ok, _} = Documents.update_page_extraction(failed, %{extraction_status: "error"})
+    {:ok, done} = Documents.update_page_extraction(done, %{extraction_status: "completed"})
+    {:ok, _} = Documents.update_page_translation(done, %{translation_status: "completed"})
+
+    whole = document_fixture(%{status: "error", total_pages: 2})
+
+    {:ok, view, _html} = live(conn, ~p"/")
+    failure = "#document-progress-#{document.id}-failure"
+
+    assert has_element?(view, "#{failure}[data-failed-pages='1']")
+    assert has_element?(view, failure, "page(s) 1")
+    assert has_element?(view, "#document-progress-#{whole.id}-failure[data-failed-pages='']")
+  end
+
   test "shows upload language errors in the selected locale", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/?lang=de")
 

@@ -4,6 +4,8 @@ defmodule DoctransWeb.DocumentLive.Components do
   """
   use DoctransWeb, :html
 
+  alias DoctransWeb.ErrorMessages
+
   @doc """
   Renders a document card for the dashboard grid.
   """
@@ -45,6 +47,7 @@ defmodule DoctransWeb.DocumentLive.Components do
           id={"document-progress-#{@document.id}"}
           document={@document}
           progress={@progress}
+          failed_pages={@summary.failed_pages}
         />
         <div class="card-actions justify-end mt-2">
           <button
@@ -67,6 +70,7 @@ defmodule DoctransWeb.DocumentLive.Components do
   attr :id, :string, required: true
   attr :document, :map, required: true
   attr :progress, :float, required: true
+  attr :failed_pages, :list, default: []
 
   def processing_progress(assigns) do
     ~H"""
@@ -86,11 +90,16 @@ defmodule DoctransWeb.DocumentLive.Components do
         value={if @document.total_pages || @document.status == "queued", do: @progress, else: nil}
         max="100"
       />
-      <p :if={@document.status == "completed" && @progress < 100} class="text-xs text-error">
-        {gettext("Finished with page errors")}
-      </p>
-      <p :if={@document.status == "error"} class="text-xs text-error">
-        {gettext("Processing failed. You can reprocess the document when its jobs have finished.")}
+      <p
+        :if={@document.status == "error"}
+        id={"#{@id}-failure"}
+        data-failed-pages={Enum.join(@failed_pages, ",")}
+        class="text-xs text-error"
+      >
+        {if @failed_pages == [],
+          do:
+            gettext("Processing failed. You can reprocess the document when its jobs have finished."),
+          else: ErrorMessages.message({:pages_failed, [page_numbers: Enum.join(@failed_pages, ", ")]})}
       </p>
     </div>
     """

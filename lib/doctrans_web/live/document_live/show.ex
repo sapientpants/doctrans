@@ -350,8 +350,13 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   defp refresh_progress(socket) do
     case Documents.list_documents_with_progress(document_ids: [socket.assigns.document.id]) do
-      [summary] -> assign(socket, :processing_progress, summary.progress)
-      [] -> assign(socket, :processing_progress, 0.0)
+      [summary] ->
+        socket
+        |> assign(:processing_progress, summary.progress)
+        |> assign(:failed_pages, summary.failed_pages)
+
+      [] ->
+        socket |> assign(:processing_progress, 0.0) |> assign(:failed_pages, [])
     end
   end
 

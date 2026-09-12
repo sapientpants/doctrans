@@ -71,6 +71,7 @@
           id="document-processing-progress"
           document={@document}
           progress={@processing_progress}
+          failed_pages={@failed_pages}
         />
         <p
           :if={!@source_available}

@@ -16,7 +16,11 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   alias Doctrans.Processing.Run
 
   @doc """
-  Checks if the current document is complete and handles completion.
+  Resolves the document state from its pages and applies terminal transitions.
+
+  Only fully successful pages complete a document. A document whose pages have
+  all settled with at least one failure becomes an error, unless a failed page
+  still has a pending retry that may yet succeed (`:retrying`).
   """
   @spec check_document_completion(
           Uniq.UUID.t()
@@ -24,7 +28,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
           | Documents.Document.t()
           | nil
         ) ::
-          :completed | :incomplete | {:error, :obsolete_run}
+          :completed | :failed | :retrying | :incomplete | {:error, :obsolete_run}
   def check_document_completion(nil), do: :incomplete
 
   def check_document_completion(%Documents.Page{} = page) do
@@ -47,18 +51,52 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   defp complete_locked_document(nil), do: :incomplete
 
   defp complete_locked_document(document) do
-    if Documents.all_pages_completed?(document.id) do
-      {:ok, document} = Documents.update_document_status(document, "completed")
-      {:completed, document}
-    else
-      :incomplete
+    case Documents.completion_state(document.id) do
+      :completed ->
+        {:ok, document} = Documents.update_document_status(document, "completed")
+        {:completed, document}
+
+      :failed ->
+        settle_failed_document(document)
+
+      :incomplete ->
+        :incomplete
     end
+  end
+
+  # Keep a scheduled retry distinguishable from terminal failure, and keep the
+  # diagnostic a failing page job already recorded.
+  defp settle_failed_document(document) do
+    cond do
+      Run.retry_pending?(document.id) ->
+        :retrying
+
+      document.status == "error" ->
+        :failed
+
+      true ->
+        {:ok, document} =
+          Documents.update_document_status(document, "error", page_failure_reason(document.id))
+
+        {:failed, document}
+    end
+  end
+
+  defp page_failure_reason(document_id) do
+    page_numbers = Documents.failed_page_numbers(document_id) |> Enum.join(", ")
+
+    {:pages_failed, [page_numbers: page_numbers]}
   end
 
   # Call after the run/page guard returns, so subscribers can read committed state.
   defp publish_completion({:completed, document}) do
     _ = Topics.broadcast_document_update(document)
     :completed
+  end
+
+  defp publish_completion({:failed, document}) do
+    _ = Topics.broadcast_document_update(document)
+    :failed
   end
 
   defp publish_completion(result), do: result

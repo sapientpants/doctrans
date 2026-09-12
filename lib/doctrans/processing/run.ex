@@ -3,7 +3,7 @@ defmodule Doctrans.Processing.Run do
   import Ecto.Query
   alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Page}
+  alias Doctrans.Documents.{Document, Page, Pages}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
   alias Doctrans.Repo
 
@@ -19,6 +19,26 @@ defmodule Doctrans.Processing.Run do
            fragment("?->>'document_id'", j.args) == ^document_id) or
           (j.worker == ^Oban.Worker.to_string(LlmProcessingJob) and
              fragment("?->>'page_id'", j.args) in subquery(page_ids))
+    )
+    |> Repo.exists?()
+  end
+
+  @doc """
+  True when a failed page of the document still has an active LLM job.
+
+  A scheduled or retryable job may still turn the page into a success, so its
+  failure is not terminal for the document yet.
+  """
+  def retry_pending?(document_id) do
+    failed_page_ids =
+      document_id
+      |> Pages.failed_pages_query()
+      |> select([p], type(p.id, :string))
+
+    from(j in Oban.Job,
+      where: j.state in ^@active,
+      where: j.worker == ^Oban.Worker.to_string(LlmProcessingJob),
+      where: fragment("?->>'page_id'", j.args) in subquery(failed_page_ids)
     )
     |> Repo.exists?()
   end

@@ -210,7 +210,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
           Documents.update_page_translation(remaining, %{translation_status: "completed"})
       end
 
-      assert :incomplete = DocumentOrchestrator.check_document_completion(run.id)
+      # Settled pages with a discarded failure are a terminal partial failure.
+      assert :failed = DocumentOrchestrator.check_document_completion(run.id)
+      assert Documents.get_document!(run.id).status == "error"
+      assert Documents.get_document!(run.id).error_message == failed.error_message
 
       Repo.update_all(from(j in Oban.Job, where: j.state == "available"),
         set: [state: "completed"]
