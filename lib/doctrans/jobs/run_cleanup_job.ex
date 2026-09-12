@@ -28,7 +28,8 @@ defmodule Doctrans.Jobs.RunCleanupJob do
       legacy_pages_dir(directory, document) ++ converted_pdf(directory, document)
   end
 
-  # sobelow_skip ["Traversal.FileModule"]
+  # `runs` is a fixed subdirectory of the configured document directory, and only
+  # entries that cast as UUIDs are returned.
   defp stale_run_dirs(runs, document) do
     entries =
       case File.ls(runs) do

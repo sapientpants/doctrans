@@ -242,8 +242,8 @@ defmodule Doctrans.Documents do
   2. Delete all page records (via cascade)
   3. Delete the document record
   """
-  # The directory comes from the persisted document UUID and configured upload root.
-  # sobelow_skip ["Traversal.FileModule"]
+  # The directory comes from the persisted document UUID and configured upload root;
+  # the File calls themselves live in delete_locked_document/1.
   def delete_document(%Document{} = document) do
     Repo.transaction(fn ->
       _ = Run.lock(document.id)
