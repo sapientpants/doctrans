@@ -3,7 +3,9 @@
 # `mise.toml` is the single source of truth for the Elixir/OTP versions. CI reads it
 # directly (`erlef/setup-beam` with `version-file: mise.toml`), but a Docker `FROM`
 # line cannot, so `Dockerfile.dev` restates the version and this check keeps that
-# restatement honest.
+# restatement honest. It also requires the base image to stay pinned by digest: the
+# tag is the readable half of the reference, but only the digest is immutable, and a
+# bump that drops it would otherwise pass unnoticed.
 #
 # Usage: elixir scripts/check_toolchain_pins.exs
 #
@@ -52,16 +54,31 @@ defmodule ToolchainPinChecker do
     }
   end
 
-  # The Docker tag can only express the OTP major (`-otp-29`), so the Elixir
-  # version is compared exactly and OTP only on its major.
+  # The reference is `elixir:<tag>@sha256:<digest>`. The tag can only express the OTP
+  # major (`-otp-29`), so the Elixir version is compared exactly and OTP only on its
+  # major; the digest is checked for presence and shape, since verifying which image
+  # it names needs a registry and this hook stays offline.
   defp check_dockerfile(elixir_version, otp_version) do
-    tag = extract!(read_file!(@dockerfile), ~r/^FROM\s+elixir:(\S+)/m, "FROM elixir:")
+    reference = extract!(read_file!(@dockerfile), ~r/^FROM\s+elixir:(\S+)/m, "FROM elixir:")
     expected = expected_docker_tag(elixir_version, otp_version)
 
-    if tag == expected do
+    case String.split(reference, "@", parts: 2) do
+      [^expected, digest] ->
+        check_digest(digest)
+
+      [^expected] ->
+        {:error, "#{@dockerfile} pins `elixir:#{expected}` by tag only; add an @sha256 digest"}
+
+      [tag | _] ->
+        {:error, "#{@dockerfile} pins `elixir:#{tag}`, expected `elixir:#{expected}`"}
+    end
+  end
+
+  defp check_digest(digest) do
+    if Regex.match?(~r/^sha256:[0-9a-f]{64}$/, digest) do
       :ok
     else
-      {:error, "#{@dockerfile} pins `elixir:#{tag}`, expected `elixir:#{expected}`"}
+      {:error, "#{@dockerfile} pins digest `#{digest}`, which is not a sha256:<64 hex> reference"}
     end
   end
 

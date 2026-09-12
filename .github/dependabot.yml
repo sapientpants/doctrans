@@ -22,3 +22,12 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+
+  # Keeps the digest-pinned base image in `Dockerfile.dev` current — a digest pin
+  # that nothing bumps only trades a mutable tag for a frozen, ageing image. The
+  # fetcher matches any filename containing "dockerfile", so `Dockerfile.dev` is
+  # picked up, and it rewrites the tag and the digest together.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
