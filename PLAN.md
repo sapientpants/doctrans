@@ -119,9 +119,9 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   session already dropped.
   Evidence: `lib/doctrans/processing/document_reprocessing.ex:59`, `lib/doctrans/chat.ex:179`,
   `lib/doctrans/chat/conversations.ex:15,79`. Merge behavior reproduced; persistence gap traced.
-  Residual: the revision fence does not cover translation-only changes — tracked as C05.
+  Residual: the revision fence does not cover translation-only changes — resolved in C05.
 
-- [ ] **C05 · P3 · Invalidate saved chat context when only a page's translation changes.**
+- [x] **C05 · P3 · Invalidate saved chat context when only a page's translation changes.**
   `content_revision` advances on `original_markdown` or an `extraction_status` leaving `completed`, and
   page embeddings are generated as soon as extraction completes, before translation is written. A chat
   turn in that window saves page-level context whose `translated_markdown` is still `nil` at the current
@@ -130,8 +130,29 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Advance a revision when translated text changes, or prefer the newer copy when revisions are equal.
   Acceptance: a question answered between extraction and translation leaves no untranslated saved context
   once translation completes.
-  Evidence: `priv/repo/migrations/20260909130000_track_page_content_revisions.exs:13`,
-  `lib/doctrans/processing/llm_processor.ex:149`, `lib/doctrans/chat.ex:194`. Traced, not reproduced.
+  Implemented: freshness is now decided on page text, not the revision alone. `Chat.current_context/1`
+  reads each source page's `translated_markdown` alongside its revision and drops page-level context whose
+  stored translation no longer matches the page, so context saved in the extraction-to-translation window
+  is discarded once the translation lands — on conversation load, before an answer's context is saved, and
+  on the prior context handed to the agent. Chunk-level context is exempt: chunk retrieval returns a nil
+  translation, and a translation on legacy saved chunk context is ignored for freshness just as
+  `context_content/1` already ignores it for rendering, so chunk freshness stays revision-only. `Chat.merge_context/3`
+  ranks a page copy carrying the translation above one retrieved without it at the same revision, ahead of
+  similarity, so a higher-scoring untranslated copy can no longer win the dedup; the surviving copy keeps
+  the best similarity recorded for its identity at that revision, so preferring the translation never costs
+  the page its rank or its place in the byte budget. The same test is exported as `Chat.superseded_by?/2`
+  and used by the document LiveView, so a translation completing in another tab evicts the untranslated
+  copy from an open socket's accumulated context too; it returns false for a chunk read from another page,
+  so callers pass their whole accumulated context without pre-filtering. `content_revision` was not reused
+  to carry translation freshness: it fences in-flight embedding and page writes
+  (`EmbeddingWorker.with_current_revision/2`, `Run.with_page/2`), and advancing it on translation would
+  discard the embeddings generated for that page. A separate `translation_revision` column would be inert
+  with respect to both fences and remains open as a cheaper invariant if the text comparison ever costs
+  too much; the content check was chosen because it needs no migration and also catches a translation
+  rewritten at one revision.
+  Evidence: `lib/doctrans/chat.ex:224,285,356`, `lib/doctrans_web/live/document_live/show.ex:368`.
+  Reproduced in a database test: page context saved before translation survives the revision check and is
+  dropped by the content check.
 
 ## Phase 2 — Recoverable processing and indexing
 
