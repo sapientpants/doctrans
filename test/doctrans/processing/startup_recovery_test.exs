@@ -176,6 +176,78 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
     end)
   end
 
+  # A job holding a superseded revision cancels rather than indexing, so treating
+  # it as the owner of the page — as a page-keyed filter does — strands the
+  # revision that replaced it until some later restart. Oban's uniqueness cannot
+  # account for this outcome: the job recovery must insert is for a revision no
+  # existing job holds.
+  test "recovers the current revision while a superseded job is still active" do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      document = document_fixture(%{status: "completed"})
+      page = completed_page_fixture(document)
+
+      stale_job = page |> EmbeddingJob.page_args() |> EmbeddingJob.new() |> Oban.insert!()
+
+      {:ok, rewritten} =
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "Rewritten while the old job waited"
+        })
+
+      assert rewritten.content_revision > page.content_revision
+
+      assert :done = StartupRecovery.run_batch({:embeddings, nil})
+
+      assert Repo.aggregate(Oban.Job, :count) == 2
+      assert [recovered] = Repo.all(from j in Oban.Job, where: j.id != ^stale_job.id)
+      assert recovered.args["revision"] == rewritten.content_revision
+      assert recovered.meta["recovered"] == true
+    end)
+  end
+
+  # `cancelled` is not one of the worker's unique states, so nothing but the
+  # recovery filter can keep this page from being queued again on every boot.
+  test "leaves a revision that a cancelled job already gave up on alone" do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      document = document_fixture(%{status: "completed"})
+      page = completed_page_fixture(document)
+      Repo.update!(Page.embedding_changeset(page, %{embedding_status: "error"}))
+
+      page
+      |> EmbeddingJob.page_args()
+      |> EmbeddingJob.new()
+      |> Oban.insert!()
+      |> Ecto.Changeset.change(state: "cancelled")
+      |> Repo.update!()
+
+      assert :done = StartupRecovery.run_batch({:embeddings, nil})
+      assert Repo.aggregate(Oban.Job, :count) == 1
+    end)
+  end
+
+  # Exhausted retries are not a verdict on the content the way a cancel is: those
+  # failures were classified retryable, so a restart is a fair new attempt.
+  test "re-queues a revision whose retries were exhausted" do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      document = document_fixture(%{status: "completed"})
+      page = completed_page_fixture(document)
+      Repo.update!(Page.embedding_changeset(page, %{embedding_status: "error"}))
+
+      page
+      |> EmbeddingJob.page_args()
+      |> EmbeddingJob.new()
+      |> Oban.insert!()
+      |> Ecto.Changeset.change(state: "discarded")
+      |> Repo.update!()
+
+      assert :done = StartupRecovery.run_batch({:embeddings, nil})
+
+      assert Repo.aggregate(Oban.Job, :count) == 2
+      assert [recovered] = Repo.all(from j in Oban.Job, where: j.state == "available")
+      assert recovered.meta["recovered"] == true
+    end)
+  end
+
   test "bounds the embedding batch and resumes from the cursor" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_fixture(%{status: "completed"})

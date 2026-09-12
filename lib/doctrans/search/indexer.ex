@@ -6,9 +6,12 @@ defmodule Doctrans.Search.Indexer do
   that revision, so a call that started before the page changed cannot write
   vectors for text that is no longer there.
 
-  Nothing here retries or sleeps. A transient failure is reported to the caller —
-  `Doctrans.Jobs.EmbeddingJob`, which owns the retry schedule — and work that no
-  longer applies is reported as `{:cancel, reason}` so it is not retried at all.
+  This module adds no retry loop of its own: a transient failure is reported to
+  the caller — `Doctrans.Jobs.EmbeddingJob`, which owns the retry schedule — and
+  work that no longer applies is reported as `{:cancel, reason}` so it is not
+  retried at all. The OpenAI client underneath still replays transient failures
+  within a single call (`retry: :transient`) and melts the `:embedding_api` fuse
+  itself, which is why the calls here pass `melt: false`.
   """
 
   require Logger
@@ -75,14 +78,20 @@ defmodule Doctrans.Search.Indexer do
       {:error, :stale_entry} ->
         stale(page)
 
-      {:ok, []} ->
+      {:ok, {[], _chunk_data}} ->
         Logger.info("No chunks to embed for page #{page.id} (empty content)")
-        mark_page_indexed(page, 0)
+        finish_page_embedding([], page, 0, 0)
 
-      {:ok, chunks} ->
-        chunks
-        |> embed_pending(page)
-        |> finish_page_embedding(page, length(chunks))
+      {:ok, {chunks, chunk_data}} ->
+        # Chunks already carrying a vector are left alone, so a retry costs only
+        # the chunks that have not been embedded yet.
+        pending = Enum.reject(chunks, & &1.embedding)
+
+        pending
+        |> Enum.map(fn chunk ->
+          embed_chunk(chunk, Chunker.content_for_embedding(chunk_data, chunk.chunk_index), page)
+        end)
+        |> finish_page_embedding(page, length(pending), length(chunks))
     end
   end
 
@@ -92,56 +101,75 @@ defmodule Doctrans.Search.Indexer do
     {:cancel, :stale_page}
   end
 
-  # Chunks already carrying a vector are left alone, so a retry costs only the
-  # chunks that have not been embedded yet.
-  defp embed_pending(chunks, page) do
-    chunk_data = Chunker.chunk(page.original_markdown)
-
-    chunks
-    |> Enum.reject(& &1.embedding)
-    |> Enum.map(fn chunk ->
-      embed_chunk(chunk, Chunker.content_for_embedding(chunk_data, chunk.chunk_index), page)
-    end)
-  end
-
-  defp finish_page_embedding(results, page, chunk_count) do
-    case Enum.filter(results, &match?({:error, _}, &1)) do
+  defp finish_page_embedding(results, page, attempted, total) do
+    case Enum.flat_map(results, fn
+           {:error, reason} -> [reason]
+           _ok -> []
+         end) do
       [] ->
-        # Page-level failure is only logged; see PLAN.md R02.
-        _ = generate_page_embedding(page)
-        mark_page_indexed(page, chunk_count)
+        finish_page_level_embedding(page, attempted, total)
 
-      [{:error, reason} | _] = failures ->
+      reasons ->
         Logger.error(
-          "#{length(failures)}/#{chunk_count} chunk embeddings failed for page #{page.id}"
+          "#{length(reasons)}/#{attempted} chunk embeddings failed for page #{page.id}"
         )
 
-        _ = fenced_update(Page.embedding_changeset(page, %{embedding_status: "error"}), page)
-        retry_or_cancel(reason)
+        mark_page_errored(page)
+        retry_or_cancel(reasons)
+    end
+  end
+
+  # The page-level vector is what global semantic search ranks on
+  # (`Doctrans.Search` requires `p.embedding IS NOT NULL`), so losing it is not a
+  # detail to log past: a page marked "completed" without one would be silently
+  # absent from search and would never be picked up again by startup recovery,
+  # which keys on the status. Reporting the failure keeps the page recoverable.
+  defp finish_page_level_embedding(page, attempted, total) do
+    case generate_page_embedding(page) do
+      :ok ->
+        mark_page_indexed(page, attempted, total)
+
+      {:error, reason} ->
+        Logger.error("Page-level embedding failed for page #{page.id}: #{inspect(reason)}")
+        mark_page_errored(page)
+        retry_or_cancel([reason])
     end
   end
 
   # The final write is fenced like every other one, so a page that changed or was
   # deleted while its chunks were embedding reports the run as superseded rather
   # than as a completed index it never wrote.
-  defp mark_page_indexed(page, chunk_count) do
+  defp mark_page_indexed(page, attempted, total) do
     case fenced_update(Page.embedding_changeset(page, %{embedding_status: "completed"}), page) do
       {:error, :stale_entry} ->
         stale(page)
 
       {:ok, _page} ->
-        Logger.info("Indexed #{chunk_count} chunks on page #{page.id}")
+        Logger.info("Indexed #{attempted} of #{total} chunks on page #{page.id}")
         :ok
     end
   end
 
-  defp retry_or_cancel(reason) do
-    if ErrorClassifier.retryable?(reason),
-      do: {:error, Errors.normalize(reason)},
-      else: {:cancel, Errors.normalize(reason)}
+  defp mark_page_errored(page) do
+    _ = fenced_update(Page.embedding_changeset(page, %{embedding_status: "error"}), page)
+    :ok
   end
 
+  # A page is given up on only when *every* failure on it is permanent. One
+  # oversized chunk must not strand the chunks that failed transiently beside it,
+  # which is what classifying on the first failure alone used to do.
+  defp retry_or_cancel([_ | _] = reasons) do
+    case Enum.find(reasons, &ErrorClassifier.retryable?/1) do
+      nil -> {:cancel, Errors.normalize(hd(reasons))}
+      retryable -> {:error, Errors.normalize(retryable)}
+    end
+  end
+
+  # Chunking is the one place the page's text is split, and the result is carried
+  # through to embedding rather than recomputed per caller.
   defp ensure_chunks(page) do
+    chunk_data = Chunker.chunk(page.original_markdown)
+
     existing =
       Chunk
       |> where([c], c.page_id == ^page.id)
@@ -150,38 +178,27 @@ defmodule Doctrans.Search.Indexer do
 
     cond do
       existing == [] ->
-        create_chunks(page)
+        {create_chunks(page.id, chunk_data), chunk_data}
 
-      chunks_match_page_content?(existing, page.original_markdown) ->
-        existing
+      chunks_match_page_content?(existing, chunk_data) ->
+        {existing, chunk_data}
 
       true ->
-        recreate_chunks(page.id)
+        {recreate_chunks(page.id, chunk_data), chunk_data}
     end
   end
 
-  defp chunks_match_page_content?(existing_chunks, original_markdown) do
-    current_chunk_data =
-      original_markdown
-      |> Chunker.chunk()
-      |> Enum.map(fn data ->
-        %{chunk_index: data.chunk_index, content: data.content}
-      end)
+  defp chunks_match_page_content?(existing_chunks, chunk_data) do
+    current = Enum.map(chunk_data, &%{chunk_index: &1.chunk_index, content: &1.content})
+    stored = Enum.map(existing_chunks, &%{chunk_index: &1.chunk_index, content: &1.content})
 
-    existing_chunk_data =
-      Enum.map(existing_chunks, fn chunk ->
-        %{chunk_index: chunk.chunk_index, content: chunk.content}
-      end)
-
-    current_chunk_data == existing_chunk_data
+    current == stored
   end
 
-  defp create_chunks(page) do
-    chunk_data = Chunker.chunk(page.original_markdown)
-
+  defp create_chunks(page_id, chunk_data) do
     # Source and translation boundaries are not aligned. Store source chunks only.
     Enum.each(chunk_data, fn data ->
-      %Chunk{page_id: page.id}
+      %Chunk{page_id: page_id}
       |> Chunk.changeset(data)
       |> Repo.insert!(
         on_conflict: :nothing,
@@ -191,28 +208,26 @@ defmodule Doctrans.Search.Indexer do
 
     # Re-fetch to get actual records (on_conflict: :nothing may return empty struct)
     Chunk
-    |> where([c], c.page_id == ^page.id)
+    |> where([c], c.page_id == ^page_id)
     |> order_by([c], c.chunk_index)
     |> Repo.all()
   end
 
-  @doc """
-  Recreates chunks for a page, deleting any existing ones.
-  Used when page content changes (e.g., re-extraction).
-  """
-  @spec recreate_chunks(Ecto.UUID.t()) :: [Chunk.t()]
-  def recreate_chunks(page_id) do
+  # Only reached from `ensure_chunks/1`, which holds the page lock — the delete
+  # and the re-insert must not be visible to another run as an empty page.
+  defp recreate_chunks(page_id, chunk_data) do
     Chunk |> where([c], c.page_id == ^page_id) |> Repo.delete_all()
-    page = Repo.get!(Page, page_id)
-    create_chunks(page)
+    create_chunks(page_id, chunk_data)
   end
 
   defp embed_chunk(chunk, embed_content, page) do
     case fenced_update(Chunk.embedding_changeset(chunk, %{embedding_status: "processing"}), page) do
       {:error, :stale_entry} ->
-        # The page-level write below is fenced too, so letting the caller finish
-        # costs one no-op update and keeps the failure count honest.
-        Logger.debug("Chunk #{chunk.id} was deleted before embedding; skipping")
+        # Either the page moved to a new revision or this chunk row is gone.
+        # Either way there is nothing left to embed, and the fenced page-level
+        # write in `mark_page_indexed/3` sees the same staleness and reports the
+        # run as superseded — so this is not a failure to count against the page.
+        Logger.debug("Chunk #{chunk.id} is no longer current; skipping")
         {:ok, chunk.id}
 
       {:ok, chunk} ->
@@ -221,12 +236,7 @@ defmodule Doctrans.Search.Indexer do
   end
 
   defp embed_current_chunk(chunk, embed_content, page) do
-    result =
-      CircuitBreaker.call(:embedding_api, fn ->
-        embedding_module().generate(embed_content, [])
-      end)
-
-    case result do
+    case embed(embed_content) do
       {:ok, embedding} ->
         _ =
           fenced_update(
@@ -247,40 +257,53 @@ defmodule Doctrans.Search.Indexer do
   end
 
   defp generate_page_embedding(page) do
-    result =
-      CircuitBreaker.call(:embedding_api, fn ->
-        embedding_module().generate(page.original_markdown, [])
-      end)
-
-    case result do
+    case embed(page.original_markdown) do
       {:ok, embedding} ->
         _ = fenced_update(Page.embedding_changeset(page, %{embedding: embedding}), page)
+        :ok
 
       {:error, reason} ->
-        Logger.warning("Page-level embedding failed for page #{page.id}: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
-  # `Repo.update!` raises `Ecto.StaleEntryError` when the row is deleted while
-  # indexing is in flight (e.g. the user removes the document mid-embedding). The
-  # row is gone, so there is nothing to update — treat it as a no-op.
+  # `melt: false`: the client this wraps classifies its own failures and melts
+  # the same fuse, so melting here too would count every failure twice and would
+  # push the fuse toward blown on permanent errors it deliberately ignores.
+  defp embed(content) do
+    CircuitBreaker.call(:embedding_api, fn -> embedding_module().generate(content, []) end,
+      melt: false
+    )
+  end
+
+  # `Repo.update!` raises `Ecto.StaleEntryError` when the row it targets is gone
+  # by the time the UPDATE runs. `with_current_revision/2` holds the page, so in
+  # practice this is a chunk row deleted under a still-current page. Nothing was
+  # written — treat it as a no-op.
   defp fenced_update(changeset, page) do
     with_current_revision(page, fn _current -> Repo.update!(changeset) end)
   rescue
     Ecto.StaleEntryError -> {:error, :stale_entry}
   end
 
-  # Serialize writes with content invalidation, without holding a lock during API calls.
+  # Serialize writes with content invalidation, without holding a lock during API
+  # calls. The stale branch reports itself through the return value rather than
+  # `Repo.rollback/1` so that this composes: rolling back would abort an
+  # enclosing transaction the caller owns, for what is a routine, expected miss.
   defp with_current_revision(page, fun) do
     Repo.transaction(fn ->
       current = Repo.one(from p in Page, where: p.id == ^page.id, lock: "FOR UPDATE")
 
       if current && current.content_revision == page.content_revision &&
            current.extraction_status == "completed" do
-        fun.(current)
+        {:ok, fun.(current)}
       else
-        Repo.rollback(:stale_entry)
+        {:error, :stale_entry}
       end
     end)
+    |> unwrap_transaction()
   end
+
+  defp unwrap_transaction({:ok, {:ok, value}}), do: {:ok, value}
+  defp unwrap_transaction({:ok, {:error, reason}}), do: {:error, reason}
 end

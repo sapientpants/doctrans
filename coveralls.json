@@ -9,6 +9,7 @@
     "lib/doctrans/resilience/health_check.ex",
     "lib/doctrans/resilience/health_check_worker.ex",
     "test/support/embedding_stub.ex",
+    "test/support/embedding_error_stub.ex",
     "test/support/pdf_extractor_stub.ex",
     "test/support/worker_helpers.ex",
     "lib/mix/",

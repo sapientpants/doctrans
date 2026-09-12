@@ -100,8 +100,19 @@ config :doctrans, :embedding,
 config :doctrans, Oban,
   repo: Doctrans.Repo,
   plugins: [
-    Oban.Plugins.Pruner,
-    {Oban.Lifeline, rescue_after: {1, :hour}},
+    # Oban prunes after 60 seconds by default, which is too eager to be useful
+    # here: a settled indexing job is the record that says "this revision was
+    # already given up on", and startup recovery reads it to avoid re-queueing
+    # the same failure on every boot. A week of history costs little for a
+    # single-user app and makes a failed run diagnosable after the fact.
+    {Oban.Plugins.Pruner, max_age: {7, :days}},
+    # An orphaned `executing` job — one whose node was killed rather than shut
+    # down — blocks both recovery and re-enqueue for the page it holds until it
+    # is rescued, so the window should not be much longer than the work itself.
+    # A page's chunks are embedded one at a time against a 60s-per-call timeout
+    # and a dense page yields a handful of chunks, so 15 minutes leaves a wide
+    # margin over a realistic run while cutting the stall from an hour.
+    {Oban.Lifeline, rescue_after: {15, :minutes}},
     {Oban.Plugins.Cron, crontab: [{"* * * * *", Doctrans.Jobs.HealthCheckJob}]}
   ],
   queues: [

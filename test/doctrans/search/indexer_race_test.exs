@@ -102,13 +102,13 @@ defmodule Doctrans.Search.IndexerRaceTest do
   test "content changes invalidate completed chunks and page vectors atomically" do
     document = document_fixture()
     page = page_fixture(document, %{extraction_status: "completed", original_markdown: "Old OCR"})
-    vector = Pgvector.new(List.duplicate(0.1, 1024))
 
-    Repo.update!(
-      Page.embedding_changeset(page, %{embedding: vector, embedding_status: "completed"})
-    )
+    assert :ok = Indexer.index_page(page.id)
 
-    Indexer.recreate_chunks(page.id)
+    indexed = Repo.get!(Page, page.id)
+    assert indexed.embedding_status == "completed"
+    assert indexed.embedding != nil
+    assert page |> chunks_for() |> Repo.exists?()
 
     # A bulk update also advances the revision and removes obsolete search data.
     Page

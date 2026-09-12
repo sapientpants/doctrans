@@ -26,7 +26,8 @@ defmodule DoctransWeb.Telemetry do
       circuit_breaker_metrics() ++
       retry_metrics() ++
       health_check_metrics() ++
-      processing_metrics()
+      processing_metrics() ++
+      job_metrics()
   end
 
   # Phoenix Metrics
@@ -119,6 +120,41 @@ defmodule DoctransWeb.Telemetry do
       counter("doctrans.circuit_breaker.rejected.count",
         tags: [:fuse_name],
         description: "Requests rejected due to open circuit"
+      )
+    ]
+  end
+
+  # Background Job Metrics
+  #
+  # Indexing, extraction and translation all run as Oban jobs, so a job that
+  # crashes, exhausts its attempts, or is cancelled is the way those failures
+  # surface. Nothing else in the app subscribes to Oban's events, which is why
+  # these are tagged by queue and worker rather than per-pipeline counters.
+  defp job_metrics do
+    [
+      counter("oban.job.stop.duration",
+        event_name: [:oban, :job, :stop],
+        measurement: :duration,
+        tags: [:queue, :state],
+        description: "Jobs that finished, by queue and outcome"
+      ),
+      summary("oban.job.stop.duration",
+        tags: [:queue],
+        unit: {:native, :millisecond},
+        description: "Job execution time by queue"
+      ),
+      counter("oban.job.exception.duration",
+        event_name: [:oban, :job, :exception],
+        measurement: :duration,
+        tags: [:queue, :state],
+        description: "Jobs that raised or exited, by queue"
+      ),
+      summary("oban.job.queue_time",
+        event_name: [:oban, :job, :stop],
+        measurement: :queue_time,
+        tags: [:queue],
+        unit: {:native, :millisecond},
+        description: "Time spent waiting in the queue before execution"
       )
     ]
   end

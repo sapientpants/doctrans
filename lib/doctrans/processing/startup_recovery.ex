@@ -4,6 +4,8 @@ defmodule Doctrans.Processing.StartupRecovery do
   finite, while active Oban jobs are left to Oban's own retry/recovery lifecycle.
   """
 
+  require Logger
+
   import Ecto.Query
 
   alias Doctrans.Documents.{Document, Page, Topics}
@@ -13,8 +15,17 @@ defmodule Doctrans.Processing.StartupRecovery do
 
   @batch_size 50
   @active_states ~w(available scheduled executing retryable suspended)
+  # A cancelled indexing job reported that the revision it held cannot be indexed
+  # as it stands. Re-queueing that same revision on every boot would repeat the
+  # failure and the API calls it costs, so a cancelled run settles the revision;
+  # a content change produces a new one, which is recovered normally. Exhausted
+  # retries (`discarded`) are deliberately not settled: those failures were
+  # classified retryable, and a restart is a fair new attempt.
+  @settled_states ~w(cancelled)
+  @indexing_owned_states @active_states ++ @settled_states
   @document_id_match "?->>'#{Keys.document_id()}' = ?::text"
   @page_id_match "?->>'#{Keys.page_id()}' = ?::text"
+  @revision_match "?->>'#{Keys.revision()}' = ?::text"
 
   @typedoc "Where the next batch resumes: a phase with the last id handled, or :done."
   @type cursor ::
@@ -93,32 +104,45 @@ defmodule Doctrans.Processing.StartupRecovery do
         where: p.embedding_status != "completed",
         select: %{id: p.id}
       )
-      |> without_active_job(EmbeddingJob)
+      |> without_indexing_job()
       |> fetch_batch(after_id)
 
-    Repo.transact(fn ->
-      Enum.each(rows, &recover_embedding/1)
-      {:ok, :queued}
-    end)
-    |> unwrap!()
+    Enum.each(rows, &recover_embedding/1)
 
     next_cursor(rows, :embeddings, :done)
   end
 
-  # Read the revision under a lock, so a page rewritten since it was selected is
-  # queued at the revision it now holds rather than one the job would cancel on.
+  # One page per transaction: these rows are independent, so a row that cannot be
+  # queued should cost that page rather than the whole batch, and the lock below
+  # is then held across one insert instead of fifty.
+  #
+  # Read the revision under that lock, so a page rewritten since it was selected
+  # is queued at the revision it now holds rather than one the job would cancel on.
   defp recover_embedding(row) do
-    page = from(p in Page, where: p.id == ^row.id, lock: "FOR UPDATE") |> Repo.one()
+    Repo.transact(fn ->
+      page = from(p in Page, where: p.id == ^row.id, lock: "FOR UPDATE") |> Repo.one()
 
-    case page do
-      %Page{extraction_status: "completed", embedding_status: status}
-      when status != "completed" ->
-        page
-        |> EmbeddingJob.page_args()
-        |> EmbeddingJob.new(meta: %{recovered: true})
-        |> Oban.insert!()
+      case page do
+        %Page{extraction_status: "completed", embedding_status: status}
+        when status != "completed" ->
+          page
+          |> EmbeddingJob.page_args()
+          |> EmbeddingJob.new(meta: %{recovered: true})
+          |> Oban.insert()
 
-      _ ->
+        _ ->
+          {:ok, :skipped}
+      end
+    end)
+    |> case do
+      {:ok, _result} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Startup recovery could not queue indexing for page #{row.id}: #{inspect(reason)}"
+        )
+
         :ok
     end
   end
@@ -135,6 +159,27 @@ defmodule Doctrans.Processing.StartupRecovery do
       _ ->
         :ok
     end
+  end
+
+  # `EmbeddingJob` is keyed on the page *and* its revision, so unlike a page-keyed
+  # job an active one does not necessarily own the page's current work: a job
+  # holding a superseded revision cancels without indexing anything. Matching the
+  # revision as well is what stops such a job from suppressing recovery of the
+  # revision that replaced it — the failure R01 exists to close.
+  defp without_indexing_job(query) do
+    worker = Oban.Worker.to_string(EmbeddingJob)
+
+    from(p in query,
+      where:
+        not exists(
+          from(j in Oban.Job,
+            where: j.worker == ^worker and j.state in ^@indexing_owned_states,
+            where: fragment(@page_id_match, j.args, parent_as(:page).id),
+            where: fragment(@revision_match, j.args, parent_as(:page).content_revision),
+            select: 1
+          )
+        )
+    )
   end
 
   # A page already owned by an active job of `module` is that job's to finish.
