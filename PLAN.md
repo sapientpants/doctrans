@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G11 are implemented; G12–G18 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G12 are implemented; G13–G18 remain.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -699,25 +699,42 @@ worse than an absent one, because it is counted as evidence. Items G01–G11 are
   `DocumentLive.Show` fails the dependency gate, so it is not passing vacuously.
   G15 is now more pressing, not less: `index.ex` sits at **580/600** lines after this work.
 
-- [ ] **G12 · P2 · Make Sobelow findings explicit rather than tolerated.**
+- [x] **G12 · P2 · Make Sobelow findings explicit rather than tolerated.**
   `exit: "high"` means four Low-Confidence `SQL.Query` findings in `lib/doctrans/search.ex:167,196,301,414`
   print on every run and never block. All four were read and are genuine false positives — heredocs with
   `$1..$4` placeholders passed to `Repo.query/2` with no interpolation, flagged only because the query is
   bound to a variable named `sql`. The problem is the disposal method: a fifth low-confidence finding, real
   this time, would join the noise unnoticed.
-  Annotate the four sites with `# sobelow_skip ["SQL.Query"]` and a justification, then set `exit: "low"`
-  so any *new* low-confidence finding fails the build.
-  Separately, the 18 existing `# sobelow_skip` annotations suppress nothing — toggling `skip` on and off
-  yields the same four findings, because eight sit on `defp` (excluded entirely by `private: false`) and the
-  other ten suppress a `Traversal.FileModule` check that never fires in a LiveView app with no
-  `conn`-derived paths. Their prose justifications are genuinely good and should be kept; either drop the
-  inert `sobelow_skip` markers or set `private: true` so the annotations become load-bearing. Prefer the
-  latter, and triage the resulting findings once.
-  Keep `Config.CSP` and `Config.HTTPS` ignored — they are correct for a loopback-bound single-user app — but
-  record why, and what would invalidate it. The app does render LLM-extracted content from arbitrary uploads
-  through `raw/1` at exactly two sites, both routed through one `HtmlSanitizeEx.basic_html/1` helper; CSP is
-  the defense-in-depth for a sanitizer bug, and there is no second layer. A pre-commit grep for any *third*
-  `raw(` call site guards that invariant more cheaply than adopting CSP.
+  Implemented: the four sites carry `# sobelow_skip ["SQL.Query"]` with a per-site justification naming
+  which parameters are bound, and `exit: "low"` now makes every confidence level block.
+  Acceptance: deleting one of the four annotations fails the gate with exit 1 on a single low-confidence
+  finding, so it is not passing vacuously.
+
+  **The plan's second paragraph was wrong and is corrected here.** It claimed the 18 existing
+  `# sobelow_skip` annotations suppress nothing, that eight are excluded by `private: false`, and that the
+  ten `Traversal.FileModule` ones cover a check that never fires. Measured against this repository on
+  Sobelow 0.15.0: toggling `skip` yields **23 findings off, 4 on** — the annotations were already
+  load-bearing and suppressed 19 findings, all of them `Traversal.FileModule`, which fires freely.
+  `private` is not a private-function switch at all: its only effect (`sobelow.ex:691`) is to suppress the
+  version-check phone-home and the write to `~/.sobelow`. Setting `private: true` changes the finding count
+  by zero — verified at all four combinations of `private` × `skip`. It is set anyway, on its own merit: a
+  quality gate should not reach the network to run.
+  The real defect in that register was smaller and different. Removing each of the 19 annotations one at a
+  time and re-scanning shows **four suppress nothing**: `documents.ex:246` (`delete_document`),
+  `document_processor.ex:72` (`extract_convertible_document`), `pdf_processor.ex:32` (`extract_document`),
+  and `run_cleanup_job.ex:31` (`stale_run_dirs`). The first three delegate and contain no `File` call; the
+  fourth calls `File.ls`, which is absent from `Traversal.FileModule`'s `@file_funcs`. Those four markers are
+  deleted and their justification prose kept as plain comments, per the plan's instruction. All 19 remaining
+  annotations are confirmed live, each mapping to at least one finding.
+
+  `Config.CSP` and `Config.HTTPS` stay ignored — correct for a loopback-bound single-user app — with the
+  rationale and its invalidating conditions now recorded in `.sobelow-conf`. The app renders LLM-extracted
+  content from arbitrary uploads through `raw/1` at exactly two sites, both routed through
+  `MarkdownHelpers.sanitize_html/1`; CSP would be the defence-in-depth for a sanitizer bug and there is no
+  second layer. `scripts/check_raw_call_sites.exs` pins that invariant as a register of file → call-site
+  count, wired into pre-commit. Verified it fails on all three divergence modes: a `raw(` site in an
+  unregistered file, a second site in a registered file, and a stale register entry whose site was removed.
+  Verified overall: `mix sobelow --config` reports zero findings and exits 0.
 
 - [ ] **G13 · P2 · Pin actions by SHA and stop persisting credentials.**
   Every `uses:` in `ci.yml` floats on a mutable major tag, `erlef/setup-beam@v1` most notably. Neither

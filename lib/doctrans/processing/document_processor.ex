@@ -68,8 +68,8 @@ defmodule Doctrans.Processing.DocumentProcessor do
     end
   end
 
-  # The job path is the fixed original.<validated extension> path created during upload.
-  # sobelow_skip ["Traversal.FileModule"]
+  # The job path is the fixed original.<validated extension> path created during upload;
+  # the File calls themselves live in do_convert_and_extract/4.
   defp extract_convertible_document(document_id, file_path, cancelled_documents, document) do
     if MapSet.member?(cancelled_documents, document_id) do
       Logger.info("Document #{document_id} was cancelled, skipping conversion")

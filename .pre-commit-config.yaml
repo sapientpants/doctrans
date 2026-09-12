@@ -153,13 +153,26 @@ repos:
         pass_filenames: false
         files: ^(lib/|test/).*\.ex$
 
-      # 5. Security-focused static analysis (medium speed)
+      # 5. Security-focused static analysis (medium speed).
+      # .sobelow-conf sets exit: "low", so every confidence level blocks. Known-good
+      # sites carry a `# sobelow_skip` annotation and a justification on the function
+      # that owns the call; a new finding fails here instead of printing as noise.
       - id: sobelow
         name: Sobelow security analysis
         entry: mix sobelow --config
         language: system
         pass_filenames: false
         files: ^(lib/|config/)
+
+      # 5.2. raw/1 call-site register. .sobelow-conf ignores Config.CSP because the app
+      # is loopback-bound, which leaves the HTML sanitizer as the only layer in front of
+      # LLM-extracted upload content. This pins the two sites that depend on it.
+      - id: check-raw-call-sites
+        name: Check raw/1 call sites
+        entry: elixir scripts/check_raw_call_sites.exs
+        language: system
+        pass_filenames: false
+        files: ^(lib/.*\.(ex|exs|heex)|scripts/check_raw_call_sites\.exs)$
 
       # 5.5. Static type analysis. --list-unused-filters makes a stale entry in
       # .dialyzer_ignore.exs fail the gate instead of lingering unnoticed.

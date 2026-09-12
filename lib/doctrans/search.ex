@@ -143,6 +143,9 @@ defmodule Doctrans.Search do
     end
   end
 
+  # Static heredoc; every value reaches Postgres as a bound parameter ($1..$4) via
+  # Repo.query/2. Flagged only because the query is bound to a variable named `sql`.
+  # sobelow_skip ["SQL.Query"]
   defp execute_chunk_search(document_id, query_embedding, limit, min_similarity) do
     sql = """
     SELECT
@@ -175,6 +178,8 @@ defmodule Doctrans.Search do
     end
   end
 
+  # Static heredoc; $1..$4 are bound parameters, nothing is interpolated into the SQL.
+  # sobelow_skip ["SQL.Query"]
   defp execute_page_search(document_id, query_embedding, limit, min_similarity) do
     sql = """
     SELECT
@@ -255,6 +260,9 @@ defmodule Doctrans.Search do
     end
   end
 
+  # Static heredoc; the user's search text arrives as bound parameter $2 and is only
+  # ever read by plainto_tsquery, never spliced into the statement.
+  # sobelow_skip ["SQL.Query"]
   defp execute_count_query(query, query_embedding, rrf_k) do
     sql = """
     WITH semantic_ranked AS (
@@ -309,6 +317,9 @@ defmodule Doctrans.Search do
     end
   end
 
+  # Static heredoc; $1..$6 are bound parameters, including the user's search text ($2)
+  # and the pagination values ($5, $6). No interpolation anywhere in the statement.
+  # sobelow_skip ["SQL.Query"]
   defp execute_hybrid_search(query, query_embedding, rrf_k, limit, offset) do
     # Use CTE-based query for efficient RRF calculation
     # - semantic_ranked: pages ranked by embedding similarity (IDs and ranks only)
