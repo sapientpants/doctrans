@@ -1,6 +1,6 @@
 # Doctrans improvement plan
 
-Status: implementation in progress; C01 completed.
+Status: implementation in progress; C01–C04 completed.
 Base: `main` at `6953656`, reviewed on 11 September 2026.
 Branch: `plan/project-improvements`.
 
@@ -114,9 +114,24 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   the prior context the agent is handed. `reprocess_page/2` deletes that page's saved context under the
   document lock that `Conversations.finish/5` also takes, so an in-flight answer either saves before the
   reset or has its obsolete chunks discarded. Open tabs evict the page's accumulated context from the
-  socket on the existing `{:page_updated, page}` broadcast.
+  socket on the existing `{:page_updated, page}` broadcast, and a turn that finishes after such a reset
+  filters its context once more before it reaches the socket, so the socket never keeps chunks the saved
+  session already dropped.
   Evidence: `lib/doctrans/processing/document_reprocessing.ex:59`, `lib/doctrans/chat.ex:179`,
   `lib/doctrans/chat/conversations.ex:15,79`. Merge behavior reproduced; persistence gap traced.
+  Residual: the revision fence does not cover translation-only changes — tracked as C05.
+
+- [ ] **C05 · P3 · Invalidate saved chat context when only a page's translation changes.**
+  `content_revision` advances on `original_markdown` or an `extraction_status` leaving `completed`, and
+  page embeddings are generated as soon as extraction completes, before translation is written. A chat
+  turn in that window saves page-level context whose `translated_markdown` is still `nil` at the current
+  revision, so `Chat.current_context/1` reads it as fresh and `Chat.merge_context/3` can keep it over a
+  later, fully translated copy of the same revision that happens to score lower.
+  Advance a revision when translated text changes, or prefer the newer copy when revisions are equal.
+  Acceptance: a question answered between extraction and translation leaves no untranslated saved context
+  once translation completes.
+  Evidence: `priv/repo/migrations/20260909130000_track_page_content_revisions.exs:13`,
+  `lib/doctrans/processing/llm_processor.ex:149`, `lib/doctrans/chat.ex:194`. Traced, not reproduced.
 
 ## Phase 2 — Recoverable processing and indexing
 

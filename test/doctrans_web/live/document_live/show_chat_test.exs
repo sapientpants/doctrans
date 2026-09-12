@@ -6,6 +6,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Repo
+  alias DoctransWeb.DocumentLive.ChatSession
   alias DoctransWeb.DocumentLive.Show
 
   describe "chat panel" do
@@ -105,6 +106,40 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:noreply, updated} = Show.handle_info({:page_updated, corrected}, socket)
 
       assert Enum.map(updated.assigns.chat_retrieved_context, & &1.page_id) == [other.id]
+    end
+
+    test "an answer finishing after a page correction keeps neither socket nor saved context", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      page = Documents.get_page_by_number(document.id, 1)
+
+      other =
+        Repo.insert!(%Doctrans.Documents.Page{
+          document_id: document.id,
+          page_number: 2,
+          image_path: "documents/#{document.id}/pages/page_2.png",
+          original_markdown: "Unrelated",
+          extraction_status: "completed",
+          translation_status: "completed"
+        })
+
+      question = Conversations.start_question(document.id, "How much are assets?")
+      context = [context_chunk(page, "Assets are 10"), context_chunk(other, "Unrelated")]
+
+      socket =
+        :sys.get_state(view.pid).socket
+        |> Phoenix.Component.assign(:chat_question, question)
+        |> Phoenix.Component.assign(:chat_last_question, question.content)
+
+      # The page is corrected while this answer is still generating.
+      {:ok, _corrected} = Documents.reset_page_for_reprocessing(page)
+
+      assert {:ok, answered} = ChatSession.put_response(socket, "Assets are 10", context)
+
+      assert Enum.map(answered.assigns.chat_retrieved_context, & &1.page_id) == [other.id]
+      assert Enum.map(Conversations.load(document.id).context, & &1.page_id) == [other.id]
     end
 
     test "reopening chat during generation preserves the active turn's state", %{

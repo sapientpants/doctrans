@@ -12,6 +12,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   import Phoenix.Component, only: [assign: 3]
   import Phoenix.LiveView, only: [stream_insert: 3]
 
+  alias Doctrans.Chat
   alias Doctrans.Chat.Conversations
 
   # Keep the last 8 exchanges (user + assistant) as history for future turns.
@@ -23,17 +24,26 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   Inserts the assistant message, resets the transient streaming assigns, appends
   the exchange to the capped history, and stores the accumulated retrieval
   context for the next turn.
+
+  A page reprocessed while the answer was generating leaves obsolete chunks in
+  the returned context, so it is filtered before it is both saved and kept for
+  the next turn; the socket would otherwise hold chunks the database already
+  dropped. `Conversations.finish/5` filters again under the document lock, which
+  is what actually fences a concurrent reset — this pass only keeps the socket
+  and the saved session in agreement.
   """
   def put_response(socket, response, retrieved_context) do
+    context = Chat.current_context(retrieved_context)
+
     with {:ok, assistant_msg} <-
            Conversations.finish(
              socket.assigns.chat_question,
              "assistant",
              response,
-             retrieved_context,
+             context,
              socket.assigns.document
            ) do
-      {:ok, apply_response(socket, assistant_msg, response, retrieved_context)}
+      {:ok, apply_response(socket, assistant_msg, response, context)}
     end
   end
 
