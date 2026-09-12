@@ -129,7 +129,8 @@ repos:
 
       # 3.55. Toolchain pin agreement. mise.toml is authoritative; CI reads it
       # directly via erlef/setup-beam's `version-file`, but a Docker `FROM` line
-      # cannot, so this keeps Dockerfile.dev's restated version honest.
+      # cannot, so this keeps Dockerfile.dev's restated version honest — and keeps
+      # its base image pinned by digest, since only the digest is immutable.
       - id: check-toolchain-pins
         name: Check toolchain pins match mise.toml
         entry: elixir scripts/check_toolchain_pins.exs

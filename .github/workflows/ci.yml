@@ -12,6 +12,16 @@ on:
     - cron: "0 6 * * 1"
   workflow_dispatch:
 
+# A push that supersedes an earlier push to the same ref makes the earlier run's
+# verdict irrelevant, so cancel it rather than pay for a full 30-minute job. The
+# group includes `github.event_name` as well as the ref because a pull request and
+# a push to `main` report different refs but a schedule run and a `main` push do
+# not, and a weekly advisory re-audit must not cancel — or be cancelled by — an
+# unrelated push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     name: Run Pre-commit Checks
@@ -129,9 +139,14 @@ jobs:
             exit 1
           fi
 
+      # Only a run that finished every check has a `_build` worth keeping: a job
+      # that failed mid-compile can leave partially written artifacts, and this
+      # key is the one every later run restores from. The PLT cache below keeps
+      # `if: always()` on purpose — it is written by its own `mix dialyzer --plt`
+      # step, which either succeeds before the checks run or fails the job outright.
       - name: Save dependencies cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: always()
+        if: success()
         with:
           path: |
             deps

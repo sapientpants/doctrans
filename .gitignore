@@ -43,9 +43,6 @@ npm-debug.log
 /priv/plts/*.plt
 /priv/plts/*.plt.hash
 
-# Excoveralls artifacts
-/coveralls.json
-
 # Claude Code local settings (user-specific)
 .claude/settings.local.json
 

@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G18 are resolved; G19 remains.
+worse than an absent one, because it is counted as evidence. Items G01–G19 are all resolved.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -971,7 +971,7 @@ worse than an absent one, because it is counted as evidence. Items G01–G18 are
   register unchanged at 26 skips and 0 unused filters, which is what validates the 133 new specs;
   `mix test` is green at 846 tests.
 
-- [ ] **G19 · P3 · Minor CI and container hygiene.**
+- [x] **G19 · P3 · Minor CI and container hygiene.**
   Add a `concurrency` group with `cancel-in-progress` so superseded pushes stop burning a full run. Change
   the dependency cache's `actions/cache/save` from `if: always()` to `if: success()` so a half-compiled
   `_build` is not cached. Pin `Dockerfile.dev:2` (`FROM elixir:1.20.4-otp-29`) by digest and add
@@ -981,6 +981,35 @@ worse than an absent one, because it is counted as evidence. Items G01–G18 are
   Container CVE scanning was considered and **rejected**: nothing is released — there is no production
   Dockerfile, no `rel/`, no registry push — so image scanning would surface base-image noise that cannot be
   actioned for a loopback-only app.
+  Implemented, with one addition and one correction to the item as written. The concurrency group is
+  `${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}`, not workflow-and-ref: a schedule run
+  and a push to `main` report the same `github.ref`, so a ref-only group would let the weekly advisory
+  re-audit cancel — or be cancelled by — an unrelated push, which is precisely the run that must not be
+  silently dropped. Only the dependency cache's save moves to `if: success()`; the PLT cache keeps
+  `if: always()` deliberately, because it is written by its own `mix dialyzer --plt` step that either
+  succeeds before any check runs or fails the job, so there is no partial state for a later run to restore.
+  The addition is a `docker` ecosystem entry in `.github/dependabot.yml`: a digest pin nothing bumps only
+  trades a mutable tag for a frozen, ageing base image, and the same reasoning already justifies the
+  `github-actions` entry that keeps G13's SHA pins current. Dependabot's docker file fetcher matches any
+  filename containing "dockerfile" (`DOCKER_REGEXP = /dockerfile|containerfile/i`), so `Dockerfile.dev` is
+  in scope and the tag and digest are rewritten together — the tag stays in the reference for readability
+  and must remain in step with `mise.toml`.
+  The `.gitignore` entry was not merely redundant: `coveralls.json` is excoveralls' **configuration** file
+  — it carries the 80% `minimum_coverage` gate and the `skip_files` register — not an artifact, so the
+  "Excoveralls artifacts" rule described it wrongly and would have hidden an edit to the coverage gate from
+  anyone who cloned and re-added it.
+  The digest also had to be taught to `scripts/check_toolchain_pins.exs`, which compared the whole `FROM`
+  reference against `mise.toml` and so failed on the pin it was meant to protect. It now splits the
+  reference, compares the tag exactly as before, and additionally **requires** a well-formed
+  `@sha256:<64 hex>` digest — a bump that silently drops the pin is now a failure rather than a pass. What
+  the digest names cannot be checked without a registry, and this hook stays offline.
+  Acceptance: full `mix precommit` green. Both workflow files parse; the pinned digest `sha256:321ba132…`
+  is the multi-architecture index, so it resolves on `ubuntu-latest` and Apple silicon alike, verified by
+  running `mix deps.get --check-locked` inside a container started from that digest, which exits 0 against
+  the current lockfile. The extended pin hook was verified non-vacuous against three mutations — tag
+  without digest, malformed digest, and a wrong Elixir version carrying a valid digest — each of which
+  exits 1 with its own message. The `Verify Docker Build` job builds `Dockerfile.dev` on every run, so the
+  digest and the new flag are gated by CI rather than by assertion.
 
 ## Optional product backlog — design after the defect fixes
 
