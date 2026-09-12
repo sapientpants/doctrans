@@ -24,14 +24,17 @@ defmodule Doctrans.Resilience.HealthCheck do
   alias Doctrans.Repo
   alias Doctrans.Resilience.CircuitBreaker
 
-  @doc """
-  Runs all health checks and returns results.
-  """
-  @spec check_all() :: %{
+  @typedoc "One verdict per checked dependency."
+  @type results :: %{
           openai: {:ok, map()} | {:error, term()},
           database: :ok | {:error, term()},
           filesystem: :ok | {:error, term()}
         }
+
+  @doc """
+  Runs all health checks and returns results.
+  """
+  @spec check_all() :: results()
   def check_all do
     %{
       openai: check_openai(),

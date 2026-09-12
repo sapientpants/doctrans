@@ -7,6 +7,7 @@ defmodule Doctrans.Chat.LineParser do
   """
 
   @doc "Splits text into trimmed, non-empty lines."
+  @spec lines(String.t()) :: [String.t()]
   def lines(text) do
     text
     |> String.split("\n")
@@ -15,6 +16,7 @@ defmodule Doctrans.Chat.LineParser do
   end
 
   @doc "Extracts the value following `prefix` from a list of lines, or `nil`."
+  @spec extract_field([String.t()], String.t()) :: String.t() | nil
   def extract_field(lines, prefix) do
     case Enum.find(lines, &String.starts_with?(&1, prefix)) do
       nil -> nil

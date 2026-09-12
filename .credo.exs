@@ -71,6 +71,11 @@
           {Credo.Check.Readability.PreferImplicitTry, []},
           {Credo.Check.Readability.RedundantBlankLines, []},
           {Credo.Check.Readability.Semicolons, []},
+          # Dialyzer never requires a spec to exist: it infers success typings and
+          # checks only the specs that are written. Requiring them is Credo's job.
+          # Scoped to the domain layer; lib/doctrans_web is excluded because its
+          # HEEx function components would take low-value specs on assigns maps.
+          {Credo.Check.Readability.Specs, [files: %{included: ["lib/doctrans/"]}]},
           {Credo.Check.Readability.SpaceAfterCommas, []},
           {Credo.Check.Readability.StringSigils, []},
           {Credo.Check.Readability.TrailingBlankLine, []},
@@ -195,8 +200,6 @@
           {Credo.Check.Readability.SingleFunctionToBlockPipe, []},
           # SinglePipe is controversial - short pipes are fine
           {Credo.Check.Readability.SinglePipe, []},
-          # Specs are enforced by Dialyzer, not Credo
-          {Credo.Check.Readability.Specs, []},
           # WithCustomTaggedTuple is too opinionated
           {Credo.Check.Readability.WithCustomTaggedTuple, []},
           # IoPuts is fine in scripts

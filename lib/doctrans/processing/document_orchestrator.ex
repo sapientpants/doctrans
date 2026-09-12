@@ -278,7 +278,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
         # Use the existing document from database
         case existing_doc.status do
           "processing" ->
-            Documents.update_document_status(existing_doc, "error", error_message)
+            _ = Documents.update_document_status(existing_doc, "error", error_message)
             {:ok, :failed}
 
           _ ->
@@ -305,7 +305,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
             {:error, :cannot_reset_completed}
 
           _ ->
-            Documents.update_document_status(existing_doc, "queued")
+            _ = Documents.update_document_status(existing_doc, "queued")
             {:ok, :reset}
         end
     end

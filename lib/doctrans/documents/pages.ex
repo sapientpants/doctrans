@@ -15,16 +15,19 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Gets a single page by ID, returns nil if not found.
   """
+  @spec get_page(Ecto.UUID.t()) :: Page.t() | nil
   def get_page(id), do: Repo.get(Page, id)
 
   @doc """
   Gets a single page by ID, raises if not found.
   """
+  @spec get_page!(Ecto.UUID.t()) :: Page.t()
   def get_page!(id), do: Repo.get!(Page, id)
 
   @doc """
   Gets a page by document ID and page number.
   """
+  @spec get_page_by_number(Ecto.UUID.t(), integer()) :: Page.t() | nil
   def get_page_by_number(document_id, page_number) do
     Repo.get_by(Page, document_id: document_id, page_number: page_number)
   end
@@ -32,6 +35,7 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Gets a page by document ID and page number, raises if not found.
   """
+  @spec get_page_by_number!(Ecto.UUID.t(), integer()) :: Page.t()
   def get_page_by_number!(document_id, page_number) do
     Repo.get_by!(Page, document_id: document_id, page_number: page_number)
   end
@@ -39,6 +43,7 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Lists all pages for a document, ordered by page number.
   """
+  @spec list_pages(Ecto.UUID.t()) :: [Page.t()]
   def list_pages(document_id) do
     Page
     |> where([p], p.document_id == ^document_id)
@@ -84,6 +89,7 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Creates a new page for a document.
   """
+  @spec create_page(Document.t(), map()) :: {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
   def create_page(document, attrs) do
     %Page{}
     |> Page.changeset(attrs)
@@ -95,6 +101,7 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Creates multiple pages for a document in a single transaction.
   """
+  @spec create_pages(Document.t(), [map()]) :: {non_neg_integer(), [term()] | nil}
   def create_pages(document, page_attrs_list) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
@@ -118,6 +125,7 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Updates a page.
   """
+  @spec update_page(Page.t(), map()) :: {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
   def update_page(%Page{} = page, attrs) do
     page
     |> Page.changeset(attrs)
@@ -128,6 +136,8 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Updates extraction results for a page.
   """
+  @spec update_page_extraction(Page.t(), map()) ::
+          {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
   def update_page_extraction(%Page{} = page, attrs) do
     Run.with_page(page, fn current ->
       current
@@ -140,6 +150,8 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Updates translation results for a page.
   """
+  @spec update_page_translation(Page.t(), map()) ::
+          {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
   def update_page_translation(%Page{} = page, attrs) do
     Run.with_page(page, fn current ->
       current
@@ -152,6 +164,7 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Gets the next page that needs extraction.
   """
+  @spec get_next_page_for_extraction(Ecto.UUID.t()) :: Page.t() | nil
   def get_next_page_for_extraction(document_id) do
     Page
     |> where([p], p.document_id == ^document_id and p.extraction_status == "pending")
@@ -163,6 +176,7 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Gets the next page that needs translation.
   """
+  @spec get_next_page_for_translation(Ecto.UUID.t()) :: Page.t() | nil
   def get_next_page_for_translation(document_id) do
     Page
     |> where([p], p.document_id == ^document_id)
@@ -185,7 +199,7 @@ defmodule Doctrans.Documents.Pages do
   A failed page is terminal for its own content only; whether the document may
   still recover depends on retries, which callers resolve separately.
   """
-  @spec completion_state(Uniq.UUID.t()) :: :completed | :failed | :incomplete
+  @spec completion_state(Ecto.UUID.t()) :: :completed | :failed | :incomplete
   def completion_state(document_id) do
     case page_counts(document_id) do
       %{total_pages: total, pages: total, succeeded: total} ->
@@ -203,7 +217,7 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Lists the page numbers whose extraction or translation failed, in page order.
   """
-  @spec failed_page_numbers(Uniq.UUID.t()) :: [integer()]
+  @spec failed_page_numbers(Ecto.UUID.t()) :: [integer()]
   def failed_page_numbers(document_id) do
     document_id
     |> failed_pages_query()
@@ -215,7 +229,7 @@ defmodule Doctrans.Documents.Pages do
   @doc """
   Query for the pages of a document whose extraction or translation failed.
   """
-  @spec failed_pages_query(Uniq.UUID.t()) :: Ecto.Query.t()
+  @spec failed_pages_query(Ecto.UUID.t()) :: Ecto.Query.t()
   def failed_pages_query(document_id) do
     Page
     |> where([p], p.document_id == ^document_id)
@@ -244,6 +258,8 @@ defmodule Doctrans.Documents.Pages do
   Uses `Ecto.Changeset.change/2` to directly update all fields including
   embedding fields that aren't in the standard changeset.
   """
+  @spec reset_page_for_reprocessing(Page.t()) ::
+          {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
   def reset_page_for_reprocessing(%Page{} = page) do
     page
     |> Ecto.Changeset.change(%{

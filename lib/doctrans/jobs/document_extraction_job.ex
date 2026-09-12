@@ -25,6 +25,8 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   @document_id_key Keys.document_id()
 
+  @spec enqueue_document(Ecto.UUID.t(), String.t()) ::
+          {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
   def enqueue_document(document_id, file_path) do
     Repo.transaction(fn ->
       document = Run.lock(document_id) || Repo.rollback(:document_not_found)
@@ -92,10 +94,11 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   end
 
   defp report_missing_source(document) do
-    with {:ok, updated} <-
-           Documents.update_document_status(document, "error", :document_file_not_found) do
-      Topics.broadcast_document_update(updated)
-    end
+    _ =
+      with {:ok, updated} <-
+             Documents.update_document_status(document, "error", :document_file_not_found) do
+        Topics.broadcast_document_update(updated)
+      end
 
     {:error, :document_file_not_found}
   end

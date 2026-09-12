@@ -45,6 +45,7 @@ defmodule Doctrans.Documents do
   - `:sort_by` - Field to sort by: `:inserted_at` (default) or `:title`
   - `:sort_dir` - Sort direction: `:desc` (default) or `:asc`
   """
+  @spec list_documents(keyword()) :: [Document.t()]
   def list_documents(opts \\ []) do
     sort_by = Keyword.get(opts, :sort_by, :inserted_at)
     sort_dir = Keyword.get(opts, :sort_dir, :desc)
@@ -69,6 +70,7 @@ defmodule Doctrans.Documents do
   affected cards. Optional `:limit` and `:offset` bound the document query
   and its associated page query for paginated callers.
   """
+  @spec list_documents_with_progress(keyword()) :: [Summary.t()]
   def list_documents_with_progress(opts \\ []) do
     documents =
       Document
@@ -132,6 +134,7 @@ defmodule Doctrans.Documents do
   only the supplied snapshot so unrelated, unhandled changes cannot reorder
   dashboard cards. No document rows or pages are loaded.
   """
+  @spec sort_document_order([{Ecto.UUID.t(), term()}], keyword()) :: [{Ecto.UUID.t(), term()}]
   def sort_document_order(entries, opts \\ [])
   def sort_document_order([], _opts), do: []
 
@@ -155,6 +158,7 @@ defmodule Doctrans.Documents do
   Lists documents that need processing (status is "processing" or "queued").
   Used by Worker for startup recovery.
   """
+  @spec list_incomplete_documents() :: [Document.t()]
   def list_incomplete_documents do
     Document
     |> where([d], d.status in ["processing", "queued"])
@@ -197,11 +201,13 @@ defmodule Doctrans.Documents do
 
   Raises `Ecto.NoResultsError` if the Document does not exist.
   """
+  @spec get_document!(Ecto.UUID.t()) :: Document.t()
   def get_document!(id), do: Repo.get!(Document, id)
 
   @doc """
   Gets a single document by ID, returns nil if not found or the ID is invalid.
   """
+  @spec get_document(String.t()) :: Document.t() | nil
   def get_document(id) do
     case Ecto.UUID.cast(id) do
       {:ok, id} -> Repo.get(Document, id)
@@ -212,6 +218,7 @@ defmodule Doctrans.Documents do
   @doc """
   Gets a document with ordered pages, or nil for a missing or invalid ID.
   """
+  @spec get_document_with_pages(String.t()) :: Document.t() | nil
   def get_document_with_pages(id) do
     id
     |> get_document()
@@ -221,6 +228,7 @@ defmodule Doctrans.Documents do
   @doc """
   Gets a document with its pages preloaded.
   """
+  @spec get_document_with_pages!(Ecto.UUID.t()) :: Document.t()
   def get_document_with_pages!(id) do
     Document
     |> Repo.get!(id)
@@ -230,6 +238,7 @@ defmodule Doctrans.Documents do
   @doc """
   Creates a document with validation.
   """
+  @spec create_document(map()) :: {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def create_document(attrs \\ %{}) do
     with {:ok, validated_attrs} <- Validation.validate_document_attrs(attrs) do
       %Document{}
@@ -242,6 +251,8 @@ defmodule Doctrans.Documents do
   @doc """
   Updates a document.
   """
+  @spec update_document(Document.t(), map()) ::
+          {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def update_document(%Document{} = document, attrs) do
     Run.with_current(document, fn current ->
       current
@@ -254,6 +265,8 @@ defmodule Doctrans.Documents do
   @doc """
   Updates a document's status.
   """
+  @spec update_document_status(Document.t(), String.t(), term()) ::
+          {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def update_document_status(%Document{} = document, status, error_message \\ nil) do
     Run.with_current(document, fn current ->
       current
@@ -275,6 +288,7 @@ defmodule Doctrans.Documents do
   """
   # The directory comes from the persisted document UUID and configured upload root;
   # the File calls themselves live in delete_locked_document/1.
+  @spec delete_document(Document.t()) :: {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def delete_document(%Document{} = document) do
     Repo.transaction(fn ->
       _ = Run.lock(document.id)
@@ -314,6 +328,7 @@ defmodule Doctrans.Documents do
   @doc """
   Returns the upload directory for a document.
   """
+  @spec document_upload_dir(Ecto.UUID.t()) :: String.t()
   def document_upload_dir(document_id) do
     Path.join([uploads_dir(), "documents", to_string(document_id)])
   end
@@ -321,6 +336,7 @@ defmodule Doctrans.Documents do
   @doc """
   Returns the pages directory for a document.
   """
+  @spec document_pages_dir(Ecto.UUID.t()) :: String.t()
   def document_pages_dir(document_id) do
     Path.join([document_upload_dir(document_id), "pages"])
   end
@@ -328,6 +344,7 @@ defmodule Doctrans.Documents do
   @doc """
   Returns the base uploads directory.
   """
+  @spec uploads_dir() :: String.t()
   def uploads_dir do
     Uploads.upload_dir()
   end
@@ -337,6 +354,7 @@ defmodule Doctrans.Documents do
   """
   # Callers supply generated or persisted document UUIDs; the only suffix is pages.
   # sobelow_skip ["Traversal.FileModule"]
+  @spec ensure_document_dirs!(Ecto.UUID.t()) :: String.t()
   def ensure_document_dirs!(document_id) do
     pages_dir = document_pages_dir(document_id)
     File.mkdir_p!(pages_dir)

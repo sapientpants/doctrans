@@ -25,6 +25,8 @@ defmodule Doctrans.Chat.MultiSearch do
   - `:limit` - Maximum number of results to return (default: 3)
   - `:min_similarity` - Minimum cosine similarity threshold (default: Search default)
   """
+  @spec search_with_queries(Ecto.UUID.t(), [String.t()], keyword()) ::
+          {:ok, [Search.document_result()]}
   def search_with_queries(document_id, queries, opts \\ [])
 
   def search_with_queries(_document_id, [], _opts), do: {:ok, []}

@@ -8,6 +8,7 @@ defmodule Doctrans.Documents.Topics do
   @doc """
   Subscribes to updates for all documents (for dashboard).
   """
+  @spec subscribe_documents() :: :ok | {:error, term()}
   def subscribe_documents do
     Phoenix.PubSub.subscribe(Doctrans.PubSub, "documents")
   end
@@ -15,10 +16,12 @@ defmodule Doctrans.Documents.Topics do
   @doc """
   Subscribes to updates for a specific document.
   """
+  @spec subscribe_document(Ecto.UUID.t()) :: :ok | {:error, term()}
   def subscribe_document(document_id) do
     Phoenix.PubSub.subscribe(Doctrans.PubSub, "document:#{document_id}")
   end
 
+  @spec unsubscribe_document(Ecto.UUID.t()) :: :ok
   def unsubscribe_document(document_id) do
     Phoenix.PubSub.unsubscribe(Doctrans.PubSub, "document:#{document_id}")
   end
@@ -26,6 +29,7 @@ defmodule Doctrans.Documents.Topics do
   @doc """
   Broadcasts a document update event.
   """
+  @spec broadcast_document_update(Document.t()) :: :ok | {:error, term()}
   def broadcast_document_update(%Document{} = document) do
     Logger.debug("Broadcasting document_updated for #{document.id} to documents topic")
 
@@ -44,6 +48,7 @@ defmodule Doctrans.Documents.Topics do
   @doc """
   Broadcasts a page update event.
   """
+  @spec broadcast_page_update(Page.t()) :: :ok
   def broadcast_page_update(%Page{} = page) do
     Logger.debug(
       "Broadcasting page_updated for page #{page.page_number} of document #{page.document_id}"

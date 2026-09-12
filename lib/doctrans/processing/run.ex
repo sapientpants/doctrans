@@ -11,6 +11,7 @@ defmodule Doctrans.Processing.Run do
   @document_id_arg "?->>'#{Keys.document_id()}'"
   @page_id_arg "?->>'#{Keys.page_id()}'"
 
+  @spec active?(Ecto.UUID.t()) :: boolean()
   def active?(document_id) do
     page_ids = from p in Page, where: p.document_id == ^document_id, select: type(p.id, :string)
 
@@ -31,6 +32,7 @@ defmodule Doctrans.Processing.Run do
   A scheduled or retryable job may still turn the page into a success, so its
   failure is not terminal for the document yet.
   """
+  @spec retry_pending?(Ecto.UUID.t()) :: boolean()
   def retry_pending?(document_id) do
     failed_page_ids =
       document_id
@@ -45,6 +47,7 @@ defmodule Doctrans.Processing.Run do
     |> Repo.exists?()
   end
 
+  @spec choices(keyword()) :: %{extraction_model: String.t(), translation_model: String.t()}
   def choices(opts \\ []) do
     %{
       extraction_model: Keyword.get(opts, :extraction_model) || OpenAI.vision_model(),
@@ -52,8 +55,14 @@ defmodule Doctrans.Processing.Run do
     }
   end
 
+  @spec new_attrs(keyword()) :: %{
+          extraction_model: String.t(),
+          translation_model: String.t(),
+          processing_run_id: Ecto.UUID.t()
+        }
   def new_attrs(opts \\ []), do: Map.put(choices(opts), :processing_run_id, Uniq.UUID.uuid7())
 
+  @spec model_opts(Document.t()) :: keyword(String.t())
   def model_opts(document) do
     Enum.reject(
       [
@@ -64,6 +73,7 @@ defmodule Doctrans.Processing.Run do
     )
   end
 
+  @spec page_model_args(Page.t(), Document.t()) :: %{String.t() => String.t()}
   def page_model_args(page, document) do
     overrides =
       Enum.reject(
@@ -80,9 +90,11 @@ defmodule Doctrans.Processing.Run do
     |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
   end
 
+  @spec args(Document.t()) :: %{String.t() => Ecto.UUID.t() | nil}
   def args(document),
     do: %{Keys.document_id() => document.id, "run_id" => document.processing_run_id}
 
+  @spec source_path(Document.t()) :: String.t() | nil
   def source_path(document) do
     # Older documents predate source metadata; retain their filename fallback.
     extension =
@@ -94,6 +106,7 @@ defmodule Doctrans.Processing.Run do
     end
   end
 
+  @spec source_available?(Document.t()) :: boolean()
   def source_available?(document) do
     case source_path(document) do
       nil ->
@@ -107,6 +120,7 @@ defmodule Doctrans.Processing.Run do
     end
   end
 
+  @spec output_dir(Document.t()) :: String.t()
   def output_dir(%{processing_run_id: nil} = document),
     do: Documents.document_upload_dir(document.id)
 
@@ -114,14 +128,19 @@ defmodule Doctrans.Processing.Run do
     do:
       Path.join([Documents.document_upload_dir(document.id), "runs", document.processing_run_id])
 
+  @spec pages_dir(Document.t()) :: String.t()
   def pages_dir(document), do: Path.join(output_dir(document), "pages")
 
+  @spec lock(Ecto.UUID.t()) :: Document.t() | nil
   def lock(document_id) do
     from(d in Document, where: d.id == ^document_id, lock: "FOR UPDATE") |> Repo.one()
   end
 
+  @spec current?(Document.t() | nil, Ecto.UUID.t() | nil) :: boolean() | nil
   def current?(document, run_id), do: document && document.processing_run_id == run_id
 
+  @spec with_current(Document.t(), (Document.t() -> result)) :: result | {:error, term()}
+        when result: var
   def with_current(document, fun) do
     Repo.transaction(fn ->
       current = lock(document.id)
@@ -135,6 +154,7 @@ defmodule Doctrans.Processing.Run do
 
   # A full restart creates new page IDs. Locking the parent serializes page writes
   # with replacement; checking the content revision also fences single-page resets.
+  @spec with_page(Page.t(), (Page.t() -> result)) :: result | {:error, term()} when result: var
   def with_page(page, fun) do
     Repo.transaction(fn ->
       document = lock(page.document_id)

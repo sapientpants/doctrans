@@ -55,6 +55,7 @@ defmodule Doctrans.Processing.DocumentConverter do
   #   3. Absolute executable entries in `:search_paths`.
   #
   # Returns `{:ok, path}` or `{:error, :soffice_not_found}`.
+  @spec resolve_soffice_path() :: {:ok, String.t()} | {:error, :soffice_not_found}
   def resolve_soffice_path do
     config = Application.get_env(:doctrans, :document_conversion, [])
     configured = Keyword.get(config, :soffice_path)

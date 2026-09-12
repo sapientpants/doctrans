@@ -22,6 +22,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
     Application.get_env(:doctrans, :embedding_module, Doctrans.Search.Embedding)
   end
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -29,6 +30,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
   @doc """
   Queue a page for chunk creation and embedding generation.
   """
+  @spec generate_embedding(Ecto.UUID.t()) :: :ok
   def generate_embedding(page_id) do
     GenServer.cast(__MODULE__, {:generate, page_id})
   end
@@ -237,6 +239,7 @@ defmodule Doctrans.Search.EmbeddingWorker do
   Recreates chunks for a page, deleting any existing ones.
   Used when page content changes (e.g., re-extraction).
   """
+  @spec recreate_chunks(Ecto.UUID.t()) :: [Chunk.t()]
   def recreate_chunks(page_id) do
     Chunk |> where([c], c.page_id == ^page_id) |> Repo.delete_all()
     page = Repo.get!(Page, page_id)

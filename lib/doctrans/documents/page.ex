@@ -79,6 +79,7 @@ defmodule Doctrans.Documents.Page do
   end
 
   @doc false
+  @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(page, attrs) do
     page
     |> cast(attrs, [
@@ -97,6 +98,7 @@ defmodule Doctrans.Documents.Page do
   @doc """
   Changeset for updating extraction results.
   """
+  @spec extraction_changeset(t(), map()) :: Ecto.Changeset.t()
   def extraction_changeset(page, attrs) do
     page
     |> cast(attrs, [:original_markdown, :extraction_status, :extraction_model])
@@ -106,6 +108,7 @@ defmodule Doctrans.Documents.Page do
   @doc """
   Changeset for updating translation results.
   """
+  @spec translation_changeset(t(), map()) :: Ecto.Changeset.t()
   def translation_changeset(page, attrs) do
     page
     |> cast(attrs, [:translated_markdown, :translation_status, :translation_model])
@@ -115,6 +118,7 @@ defmodule Doctrans.Documents.Page do
   @doc """
   Changeset for updating embedding results.
   """
+  @spec embedding_changeset(t(), map()) :: Ecto.Changeset.t()
   def embedding_changeset(page, attrs) do
     page
     |> cast(attrs, [:embedding, :embedding_status])

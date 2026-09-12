@@ -22,6 +22,7 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
 
   @page_id_key Keys.page_id()
 
+  @spec model_args(keyword()) :: %{String.t() => String.t()}
   def model_args(opts) do
     opts
     |> Keyword.take([:extraction_model, :translation_model])

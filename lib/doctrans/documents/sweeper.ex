@@ -31,6 +31,7 @@ defmodule Doctrans.Documents.Sweeper do
 
   Returns a list of directory paths that are orphaned.
   """
+  @spec find_orphaned_directories(keyword()) :: [String.t()]
   def find_orphaned_directories(opts \\ []) do
     grace_period_hours = Keyword.get(opts, :grace_period_hours, @default_grace_period_hours)
     uploads_dir = Documents.uploads_dir()
@@ -67,6 +68,7 @@ defmodule Doctrans.Documents.Sweeper do
 
   Returns `{:ok, deleted_count}`.
   """
+  @spec sweep(keyword()) :: {:ok, non_neg_integer()}
   def sweep(opts \\ []) do
     dry_run = Keyword.get(opts, :dry_run, false)
     orphaned = find_orphaned_directories(opts)
