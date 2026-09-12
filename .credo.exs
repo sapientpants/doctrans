@@ -86,8 +86,8 @@
           #
           {Credo.Check.Refactor.Apply, []},
           {Credo.Check.Refactor.CondStatements, []},
-          # Strict cyclomatic complexity limit
-          {Credo.Check.Refactor.CyclomaticComplexity, [max_complexity: 10]},
+          # Credo's default; see Refactor.Nesting for the same reasoning.
+          {Credo.Check.Refactor.CyclomaticComplexity, [max_complexity: 9]},
           {Credo.Check.Refactor.FilterCount, []},
           {Credo.Check.Refactor.FilterFilter, []},
           # Limit function arity
