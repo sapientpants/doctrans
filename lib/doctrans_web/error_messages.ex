@@ -41,6 +41,13 @@ defmodule DoctransWeb.ErrorMessages do
 
   def message(:document_not_found), do: dgettext("errors", "Document not found")
 
+  def message(:incomplete_output),
+    do:
+      dgettext(
+        "errors",
+        "The model did not return complete final text. Use a model with a larger output budget or split the page into smaller sections, then reprocess. The provider must return finish_reason=stop."
+      )
+
   def message(:page_not_found), do: dgettext("errors", "Page not found")
 
   def message({:page_extraction_failed, bindings}),

@@ -108,7 +108,7 @@ msgstr ""
 msgid "Extracting text from page..."
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:123
+#: lib/doctrans_web/error_messages.ex:130
 #, elixir-autogen, elixir-format
 msgid "Failed to delete document"
 msgstr ""
@@ -409,7 +409,7 @@ msgstr ""
 msgid "Extraction Model"
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:124
+#: lib/doctrans_web/error_messages.ex:131
 #, elixir-autogen, elixir-format
 msgid "Failed to reset page for reprocessing"
 msgstr ""
@@ -420,7 +420,7 @@ msgstr ""
 msgid "Go to page %{page}"
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:109
+#: lib/doctrans_web/error_messages.ex:116
 #, elixir-autogen, elixir-format
 msgid "Invalid model selection"
 msgstr ""
@@ -460,7 +460,7 @@ msgstr ""
 msgid "Reprocess this page"
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:122
+#: lib/doctrans_web/error_messages.ex:129
 #, elixir-autogen, elixir-format
 msgid "Search is temporarily unavailable. Please try again."
 msgstr ""
@@ -531,7 +531,7 @@ msgstr ""
 msgid "Document is still being processed. Chat will be available soon."
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:121
+#: lib/doctrans_web/error_messages.ex:128
 #, elixir-autogen, elixir-format
 msgid "Failed to search the document. Please try again."
 msgstr ""
@@ -541,7 +541,7 @@ msgstr ""
 msgid "I'll find relevant content and answer based on it."
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:119
+#: lib/doctrans_web/error_messages.ex:126
 #, elixir-autogen, elixir-format
 msgid "Please enter a question."
 msgstr ""
@@ -556,7 +556,7 @@ msgstr ""
 msgid "Send message"
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:126
+#: lib/doctrans_web/error_messages.ex:133
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr ""
@@ -581,7 +581,7 @@ msgstr ""
 msgid "Checking the sources..."
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:125
+#: lib/doctrans_web/error_messages.ex:132
 #, elixir-autogen, elixir-format
 msgid "Failed to fetch models from OpenAI"
 msgstr ""
@@ -636,7 +636,7 @@ msgstr ""
 msgid "Finished with page errors"
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:102
+#: lib/doctrans_web/error_messages.ex:109
 #: lib/doctrans_web/live/document_live/show.html.heex:36
 #: lib/doctrans_web/live/document_live/show.html.heex:80
 #, elixir-autogen, elixir-format
@@ -674,12 +674,12 @@ msgstr ""
 msgid "Run every processing step again from the original upload. Existing pages and search results will be replaced. This may take some time."
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:107
+#: lib/doctrans_web/error_messages.ex:114
 #, elixir-autogen, elixir-format
 msgid "The document has changed. Please try again."
 msgstr ""
 
-#: lib/doctrans_web/error_messages.ex:105
+#: lib/doctrans_web/error_messages.ex:112
 #, elixir-autogen, elixir-format
 msgid "This document still has active processing jobs. Please wait for them to finish."
 msgstr ""

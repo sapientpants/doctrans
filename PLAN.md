@@ -53,7 +53,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Evidence: `lib/doctrans/search/embedding_worker.ex:215,262`, `lib/doctrans/chat.ex:141`,
   `lib/mix/tasks/rechunk_documents.ex`. Reproduced with a chunking probe.
 
-- [ ] **C02 · P1 · Reject incomplete or reasoning-only document output.**
+- [x] **C02 · P1 · Reject incomplete or reasoning-only document output.**
   The shared API response parser ignores `finish_reason` and substitutes reasoning when final content is missing.
   OCR and translation can therefore persist truncated text or model reasoning as completed document content.
   Existing tests explicitly accept partial output with `finish_reason: length` and reasoning-only responses.
@@ -61,6 +61,16 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   or return an actionable incomplete-output error. Review streaming completion separately for chat.
   Acceptance: truncated and reasoning-only OCR/translation never become completed/indexed text;
   valid final responses still work; provider compatibility is covered by representative response fixtures.
+  Implemented: non-streaming responses require explicit `finish_reason: stop` and non-empty
+  final text after removing leading, unfenced thinking blocks and response code fences.
+  Literal thinking tags within final document text and code examples are preserved.
+  Missing/unknown completion markers,
+  truncation, filtering, tool calls, reasoning-only output, and unclosed thinking blocks return
+  `incomplete_output`, with recovery guidance in the UI and no immediate unchanged-request retries.
+  HTTP/database regression fixtures cover OCR and translation persistence and final-content variants.
+  Streaming review: chat uses a separate SSE collector that ignores finish reasons and the DONE marker;
+  it can still accept a disconnected/truncated stream. Stream completion tracking and partial-answer
+  presentation remain a separate chat follow-up; this change covers non-streaming calls only.
   Evidence: `lib/doctrans/processing/openai.ex:154,177`,
   `test/doctrans/processing/openai_request_test.exs:299,336`. Confirmed by code and existing tests.
 

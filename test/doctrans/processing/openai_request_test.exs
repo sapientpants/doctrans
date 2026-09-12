@@ -139,7 +139,9 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
   end
 
   defp completion_response(conn, _) do
-    json(conn, 200, %{"choices" => [%{"message" => %{"content" => "hello"}}]})
+    json(conn, 200, %{
+      "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "hello"}}]
+    })
   end
 
   defp restore_env(key, value) do
@@ -214,7 +216,10 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
         json(conn, 200, %{
           "choices" => [
-            %{"message" => %{"role" => "assistant", "content" => "  Hello from model  "}}
+            %{
+              "finish_reason" => "stop",
+              "message" => %{"role" => "assistant", "content" => "  Hello from model  "}
+            }
           ]
         })
       end)
@@ -237,7 +242,10 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         send(test_pid, {:chat_body, body})
-        json(conn, 200, %{"choices" => [%{"message" => %{"content" => "ok"}}]})
+
+        json(conn, 200, %{
+          "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "ok"}}]
+        })
       end)
 
       assert {:ok, "ok"} =
@@ -257,7 +265,10 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         send(test_pid, {:chat_body, body})
-        json(conn, 200, %{"choices" => [%{"message" => %{"content" => "ok"}}]})
+
+        json(conn, 200, %{
+          "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "ok"}}]
+        })
       end)
 
       assert {:ok, "ok"} =
@@ -271,61 +282,76 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
     test "returns error when content is empty", %{bypass: bypass} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
-        json(conn, 200, %{"choices" => [%{"message" => %{"content" => "  "}}]})
+        json(conn, 200, %{
+          "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "  "}}]
+        })
       end)
 
-      assert {:error, :empty_response} =
+      assert {:error, :incomplete_output} =
                OpenAI.chat([%{role: "user", content: "x"}])
     end
 
     test "returns error when message has no content key", %{bypass: bypass} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
-        json(conn, 200, %{"choices" => [%{"message" => %{"role" => "assistant"}}]})
+        json(conn, 200, %{
+          "choices" => [%{"finish_reason" => "stop", "message" => %{"role" => "assistant"}}]
+        })
       end)
 
-      assert {:error, :missing_api_response} =
+      assert {:error, :incomplete_output} =
                OpenAI.chat([%{role: "user", content: "x"}])
     end
 
     test "returns error for empty message map", %{bypass: bypass} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
-        json(conn, 200, %{"choices" => [%{"message" => %{}}]})
+        json(conn, 200, %{"choices" => [%{"finish_reason" => "stop", "message" => %{}}]})
       end)
 
-      assert {:error, :missing_api_response} =
+      assert {:error, :incomplete_output} =
                OpenAI.chat([%{role: "user", content: "x"}])
     end
 
-    test "returns reasoning content when content is missing", %{bypass: bypass} do
+    test "rejects reasoning-only responses when content is missing", %{bypass: bypass} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
         json(
           conn,
           200,
-          %{"choices" => [%{"message" => %{"reasoning_content" => "Thought it through"}}]}
+          %{
+            "choices" => [
+              %{
+                "finish_reason" => "stop",
+                "message" => %{"reasoning_content" => "Thought it through"}
+              }
+            ]
+          }
         )
       end)
 
-      assert {:ok, "Thought it through"} = OpenAI.chat([%{role: "user", content: "x"}])
+      assert {:error, :incomplete_output} = OpenAI.chat([%{role: "user", content: "x"}])
     end
 
-    test "returns reasoning content when content is blank", %{bypass: bypass} do
+    test "rejects reasoning-only responses when content is blank", %{bypass: bypass} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
         json(
           conn,
           200,
-          %{"choices" => [%{"message" => %{"content" => "", "reasoning" => "hmm"}}]}
+          %{
+            "choices" => [
+              %{"finish_reason" => "stop", "message" => %{"content" => "", "reasoning" => "hmm"}}
+            ]
+          }
         )
       end)
 
-      assert {:ok, "hmm"} = OpenAI.chat([%{role: "user", content: "x"}])
+      assert {:error, :incomplete_output} = OpenAI.chat([%{role: "user", content: "x"}])
     end
 
     test "uses first choice when multiple are returned", %{bypass: bypass} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
         json(conn, 200, %{
           "choices" => [
-            %{"message" => %{"content" => "first"}},
-            %{"message" => %{"content" => "second"}}
+            %{"finish_reason" => "stop", "message" => %{"content" => "first"}},
+            %{"finish_reason" => "stop", "message" => %{"content" => "second"}}
           ]
         })
       end)
@@ -333,7 +359,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert {:ok, "first"} = OpenAI.chat([%{role: "user", content: "x"}])
     end
 
-    test "returns content when truncated at length", %{bypass: bypass} do
+    test "rejects content when truncated at length", %{bypass: bypass} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
         json(conn, 200, %{
           "choices" => [
@@ -342,7 +368,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         })
       end)
 
-      assert {:ok, "partial"} = OpenAI.chat([%{role: "user", content: "x"}])
+      assert {:error, :incomplete_output} = OpenAI.chat([%{role: "user", content: "x"}])
     end
 
     test "returns error for invalid response format", %{bypass: bypass} do
@@ -357,7 +383,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     test "returns error and melts fuse on non-200 status", %{bypass: bypass} do
       # stub (not expect): :transient retries POSTs on 5xx, so the route may hit multiple times
       Bypass.stub(bypass, "POST", "/v1/chat/completions", fn conn ->
-        json(conn, 500, %{"error" => %{"message" => "boom"}})
+        json(conn, 500, %{"error" => %{"finish_reason" => "stop", "message" => "boom"}})
       end)
 
       assert {:error, reason} = OpenAI.chat([%{role: "user", content: "x"}])
@@ -390,7 +416,10 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
         send(test_pid, {:chat_headers, conn.req_headers})
-        json(conn, 200, %{"choices" => [%{"message" => %{"content" => "ok"}}]})
+
+        json(conn, 200, %{
+          "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "ok"}}]
+        })
       end)
 
       assert {:ok, "ok"} = OpenAI.chat([%{role: "user", content: "x"}])
@@ -411,7 +440,11 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         send(test_pid, {:extract_body, body})
 
-        json(conn, 200, %{"choices" => [%{"message" => %{"content" => "```markdown\n# Title\n"}}]})
+        json(conn, 200, %{
+          "choices" => [
+            %{"finish_reason" => "stop", "message" => %{"content" => "```markdown\n# Title\n"}}
+          ]
+        })
       end)
 
       assert {:ok, "# Title"} = OpenAI.extract_markdown(path)
@@ -431,7 +464,10 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         send(test_pid, {:extract_body, body})
-        json(conn, 200, %{"choices" => [%{"message" => %{"content" => "content"}}]})
+
+        json(conn, 200, %{
+          "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "content"}}]
+        })
       end)
 
       assert {:ok, "content"} = OpenAI.extract_markdown(path)
@@ -449,10 +485,12 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       path = write_tmp_image(".png")
 
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
-        json(conn, 200, %{"choices" => [%{"message" => %{"content" => "   "}}]})
+        json(conn, 200, %{
+          "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "   "}}]
+        })
       end)
 
-      assert {:error, :empty_image_response} = OpenAI.extract_markdown(path)
+      assert {:error, :incomplete_output} = OpenAI.extract_markdown(path)
     end
 
     test "returns error on non-200 status", %{bypass: bypass} do
@@ -489,7 +527,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
         json(conn, 200, %{
           "choices" => [
-            %{"message" => %{"content" => "\nTranslated text\n"}}
+            %{"finish_reason" => "stop", "message" => %{"content" => "\nTranslated text\n"}}
           ]
         })
       end)
@@ -505,7 +543,9 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
     test "honours explicit model override in translation", %{bypass: bypass} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
-        json(conn, 200, %{"choices" => [%{"message" => %{"content" => "ok"}}]})
+        json(conn, 200, %{
+          "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "ok"}}]
+        })
       end)
 
       assert {:ok, "ok"} =
