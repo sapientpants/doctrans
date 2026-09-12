@@ -99,3 +99,36 @@ notice. Model history uses the last eight complete question/answer pairs, ordere
 by answer completion, so overlapping turns from different tabs stay paired.
 Messages saved before question links were introduced remain visible, but are
 excluded from model history because their pairing cannot be recovered reliably.
+
+## Secret scanning
+
+Secret detection is a platform gate, not a repository tool. GitHub secret scanning
+and **push protection** are enabled on this repository, so a detected secret is
+blocked before it reaches the remote rather than reported after the fact. That
+covers the credential this project actually uses: `openai_api_key` is a supported
+provider pattern with push protection, so a real OpenAI key cannot be pushed here.
+Pre-commit adds `detect-private-key` locally.
+
+Generic — formerly "non-provider" — patterns, which would cover a homegrown token
+format, a connection string, or a bare HTTP authentication header, are **not
+available on this repository**. The row does not appear under Settings → Advanced
+Security → Secret Protection, and `PATCH /repos/{owner}/{repo}` returns `200 OK`
+while leaving `secret_scanning_non_provider_patterns` disabled. GitHub documents
+generic-pattern scanning for organization-owned repositories on GitHub Team with
+Secret Protection enabled; `doctrans` is a public repository on a personal account.
+Re-check if the repository ever moves to an organization:
+
+```bash
+gh api repos/sapientpants/doctrans --jq '.security_and_analysis'
+```
+
+Do not add a scanner such as gitleaks to fill that gap. It duplicates push
+protection with a weaker, post-hoc check, upstream declares itself
+feature-complete with security patches only, and the uncovered case — a
+self-invented credential format — is exactly the case a generic scanner is worst
+at. Keep credentials in the environment instead, and never in fixtures: a value
+that is not in the tree needs no pattern to catch it.
+
+A push-protection block is a real finding until proven otherwise. If it is
+genuinely a fixture, close it as used-in-tests through the alert UI rather than
+weakening a setting, and prefer fixture values that cannot read as credentials.
