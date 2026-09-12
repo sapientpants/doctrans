@@ -171,13 +171,14 @@ repos:
       # compatibility surface. A compile-connected cycle means a change to any
       # module in it recompiles all of them, and it is how one accidental
       # compile-time call spreads -- a module attribute reading another module's
-      # function is enough. The baseline is zero.
+      # function is enough. The baseline is zero and must stay zero.
       - id: xref-cycles
         name: Check for compile-time dependency cycles
         entry: mix xref graph --format cycles --label compile-connected --fail-above 0
         language: system
         pass_filenames: false
-        files: ^(lib/.*\.ex|mix\.exs)$
+        # test/support is on elixirc_paths under MIX_ENV=test, so it feeds the graph too.
+        files: ^(lib/|test/support/|mix\.exs$)
 
       # 4. Static code analysis with Credo (medium speed)
       - id: credo

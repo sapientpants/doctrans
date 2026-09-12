@@ -28,6 +28,24 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
     |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
   end
 
+  @doc """
+  Builds the argument map `perform/1` destructures.
+
+  Stated here so that every enqueue site agrees with the consumer on the shape
+  and on the key names, rather than each restating them.
+  """
+  @spec page_args(Documents.Page.t(), integer() | nil, map()) :: map()
+  def page_args(page, generation, model_args) do
+    Map.merge(
+      %{
+        @page_id_key => page.id,
+        "page_number" => page.page_number,
+        "generation" => generation
+      },
+      model_args
+    )
+  end
+
   @impl true
   def perform(%Oban.Job{args: %{@page_id_key => page_id} = args} = job) do
     # Oban persists JSON with string keys; the processor expects keyword options.

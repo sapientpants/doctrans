@@ -104,12 +104,9 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   end
 
   defp page_job_args(page, updated, choices) do
-    Map.merge(
-      %{
-        "page_id" => page.id,
-        "page_number" => page.page_number,
-        "generation" => updated.processing_generation
-      },
+    LlmProcessingJob.page_args(
+      page,
+      updated.processing_generation,
       LlmProcessingJob.model_args(Map.to_list(choices))
     )
   end

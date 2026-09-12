@@ -353,8 +353,10 @@ defmodule Doctrans.Chat do
   @doc """
   Checks if a document has any chunks or pages with embeddings ready for chat.
 
-  Prefers chunks (fine-grained), falls back to page-level embeddings.
+  Prefers chunks (fine-grained), falls back to page-level embeddings. Accepts a
+  `Document` struct or a bare document id.
   """
+  @spec embeddings_ready?(Documents.Document.t() | Ecto.UUID.t()) :: boolean()
   defdelegate embeddings_ready?(document), to: Documents
 
   # Private functions

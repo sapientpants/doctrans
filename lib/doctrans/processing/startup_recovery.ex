@@ -132,12 +132,11 @@ defmodule Doctrans.Processing.StartupRecovery do
     # Insert before changing statuses: uniqueness also covers jobs queued since
     # candidate selection. A conflicting job owns this page's processing state.
     job =
-      %{
-        Keys.page_id() => page.id,
-        "page_number" => page.page_number,
-        "generation" => page.processing_generation
-      }
-      |> Map.merge(Run.page_model_args(page, document))
+      page
+      |> LlmProcessingJob.page_args(
+        page.processing_generation,
+        Run.page_model_args(page, document)
+      )
       |> LlmProcessingJob.new(priority: 2, meta: %{recovered: true})
       |> Oban.insert!()
 

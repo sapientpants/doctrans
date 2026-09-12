@@ -4,10 +4,12 @@ defmodule Doctrans.Processing.Run do
   alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Page, Pages}
-  alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
+  alias Doctrans.Jobs.{DocumentExtractionJob, Keys, LlmProcessingJob}
   alias Doctrans.Repo
 
   @active ~w(available scheduled executing retryable suspended)
+  @document_id_arg "?->>'#{Keys.document_id()}'"
+  @page_id_arg "?->>'#{Keys.page_id()}'"
 
   def active?(document_id) do
     page_ids = from p in Page, where: p.document_id == ^document_id, select: type(p.id, :string)
@@ -16,9 +18,9 @@ defmodule Doctrans.Processing.Run do
       where: j.state in ^@active,
       where:
         (j.worker == ^Oban.Worker.to_string(DocumentExtractionJob) and
-           fragment("?->>'document_id'", j.args) == ^document_id) or
+           fragment(@document_id_arg, j.args) == ^document_id) or
           (j.worker == ^Oban.Worker.to_string(LlmProcessingJob) and
-             fragment("?->>'page_id'", j.args) in subquery(page_ids))
+             fragment(@page_id_arg, j.args) in subquery(page_ids))
     )
     |> Repo.exists?()
   end
@@ -38,7 +40,7 @@ defmodule Doctrans.Processing.Run do
     from(j in Oban.Job,
       where: j.state in ^@active,
       where: j.worker == ^Oban.Worker.to_string(LlmProcessingJob),
-      where: fragment("?->>'page_id'", j.args) in subquery(failed_page_ids)
+      where: fragment(@page_id_arg, j.args) in subquery(failed_page_ids)
     )
     |> Repo.exists?()
   end
@@ -78,7 +80,8 @@ defmodule Doctrans.Processing.Run do
     |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
   end
 
-  def args(document), do: %{"document_id" => document.id, "run_id" => document.processing_run_id}
+  def args(document),
+    do: %{Keys.document_id() => document.id, "run_id" => document.processing_run_id}
 
   def source_path(document) do
     # Older documents predate source metadata; retain their filename fallback.

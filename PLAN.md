@@ -551,7 +551,7 @@ worse than an absent one, because it is counted as evidence. Items G01–G16 are
   warning classes had to be muted for that one file.
   `document_orchestrator.ex` had six specs referencing `Doctrans.Documents.t()`, a type that does not
   exist — `Doctrans.Documents` is a context module with no `@type t`, and the schema is
-  `Doctrans.Documents.Document` in `documents/document.ex:36` (named `documents/book.ex` until G16).
+  `Doctrans.Documents.Document` in `documents/document.ex:19` (named `documents/book.ex` until G16).
   Dialyzer resolved it to `any()` and checked nothing, while an `:unknown_type` filter hid that fact.
   Implemented: the error branch now logs and returns `""`; the bogus option is removed; the six specs point
   at `Documents.Document.t()` and `Documents.Page` gained `@type t`. The five suppressions covering those
@@ -886,13 +886,20 @@ worse than an absent one, because it is counted as evidence. Items G01–G16 are
   both job modules and the whole of `processing/`, held together by a single compile edge —
   `worker.ex:17-18`, where `@document_id_key DocumentExtractionJob.document_id_key()` and its page
   counterpart read a constant from the job module at compile time. (The item described those two lines as
-  an "unsupervised reschedule"; that is a mis-transcription. The reschedule at `worker.ex:209-216` is a
+  an "unsupervised reschedule"; that is a mis-transcription. The reschedule at `worker.ex:211-218` is a
   real but separate defect, owned by Q03, and is untouched here.) One compile-time call to a job module
   made every module that job reaches at runtime recompile together. The fix states the keys once in a
-  dependency-free `Doctrans.Jobs.Keys`, which both job modules, `worker.ex` and `startup_recovery.ex`
-  now read — the same centralisation the accessors were added for, without the compile edge. Two raw
-  `"document_id"`/`"page_id"` literals in `startup_recovery.ex`'s `fragment/1` templates were folded in
-  at the same time, since a register with copies elsewhere is not one.
+  dependency-free `Doctrans.Jobs.Keys` — the same centralisation the accessors were added for (#55),
+  without the compile edge that attempt introduced. Every producer and consumer of those two Oban
+  argument keys now reads them from `Keys`, since a register with copies elsewhere is not one: both job
+  modules, `worker.ex`, `startup_recovery.ex` (two `fragment/1` templates and one job-args map),
+  `run.ex` (three `fragment/1` templates and `args/1`, the producer feeding
+  `DocumentExtractionJob.new/1`), and `run_cleanup_job.ex`'s `perform/1` pattern match. The two sites
+  that built `LlmProcessingJob`'s argument map by hand — `document_reprocessing.ex:106` and
+  `startup_recovery.ex:134` — now call `LlmProcessingJob.page_args/3`, so the job states the shape of
+  its own arguments once and the enqueue sites cannot drift from the consumer. The `"page_id"` at `document_reprocessing.ex:121`
+  is deliberately **not** folded in: it keys a chat-session `retrieved_context` entry, a different
+  register that happens to share a name, as are the raw-SQL result columns in `search.ex`.
   The three `chat.ex` queries moved behind the context: page revision lookup is
   `Documents.page_content_state/1` and `embeddings_ready?/1` now lives in `Doctrans.Documents`, where its
   two counting queries became `Repo.exists?`. `Doctrans.Chat` retains both public functions and no longer
