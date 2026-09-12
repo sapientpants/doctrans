@@ -85,11 +85,12 @@ repos:
   - repo: local
     hooks:
       # 1. Security audit (fast - runs first for quick feedback on vulnerabilities)
-      # NOTE: mix hex.audit in CI checks advisories and cannot ignore specific packages.
-      # Vulnerability checking is handled by the separate deps-audit hook.
+      # Hex 2.5.1+ reports retired packages AND security advisories, exiting
+      # non-zero for either. Acknowledged advisories live in the :hex section of
+      # mix.exs; Hex warns when an entry stops matching the lockfile.
       - id: hex-audit
-        name: Hex security audit (skipped - retired packages only)
-        entry: "true"
+        name: Hex security audit (advisories and retirements)
+        entry: mix hex.audit
         language: system
         pass_filenames: false
         files: ^(mix\.exs|mix\.lock)$
@@ -113,7 +114,7 @@ repos:
       # 4. Compilation with warnings as errors (medium speed)
       - id: mix-compile
         name: Mix compile with warnings as errors
-        entry: mix compile --warning-as-errors --all-warnings
+        entry: mix compile --warnings-as-errors --all-warnings
         language: system
         pass_filenames: false
         files: ^(lib/|test/|config/|mix\.exs)
@@ -149,6 +150,15 @@ repos:
         language: system
         pass_filenames: false
         files: ^(lib/|config/)
+
+      # 5.5. Static type analysis. --list-unused-filters makes a stale entry in
+      # .dialyzer_ignore.exs fail the gate instead of lingering unnoticed.
+      - id: dialyzer
+        name: Dialyzer type analysis
+        entry: env MIX_ENV=test mix dialyzer --format dialyxir --list-unused-filters
+        language: system
+        pass_filenames: false
+        files: ^(lib/|test/support/|mix\.exs|mix\.lock|\.dialyzer_ignore\.exs)$
 
       # 6. Test suite with coverage (slow - runs last)
       - id: mix-test-coverage

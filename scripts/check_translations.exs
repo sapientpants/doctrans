@@ -35,7 +35,10 @@ defmodule TranslationChecker do
       |> Enum.sort()
 
     if language_dirs == [] do
-      IO.puts(IO.ANSI.yellow() <> "No language directories found in #{gettext_path}" <> IO.ANSI.reset())
+      IO.puts(
+        IO.ANSI.yellow() <> "No language directories found in #{gettext_path}" <> IO.ANSI.reset()
+      )
+
       System.halt(0)
     end
 
@@ -49,7 +52,12 @@ defmodule TranslationChecker do
 
     case all_issues do
       [] ->
-        IO.puts(IO.ANSI.green() <> "All translations are complete for #{length(language_dirs)} languages." <> IO.ANSI.reset())
+        IO.puts(
+          IO.ANSI.green() <>
+            "All translations are complete for #{length(language_dirs)} languages." <>
+            IO.ANSI.reset()
+        )
+
         System.halt(0)
 
       issues ->
@@ -60,13 +68,16 @@ defmodule TranslationChecker do
         |> Enum.group_by(fn {lang, _domain, _msgid} -> lang end)
         |> Enum.sort()
         |> Enum.each(fn {lang, lang_issues} ->
-          IO.puts("  #{IO.ANSI.cyan()}#{lang}#{IO.ANSI.reset()} (#{length(lang_issues)} missing):")
+          IO.puts(
+            "  #{IO.ANSI.cyan()}#{lang}#{IO.ANSI.reset()} (#{length(lang_issues)} missing):"
+          )
 
           lang_issues
           |> Enum.group_by(fn {_lang, domain, _msgid} -> domain end)
           |> Enum.sort()
           |> Enum.each(fn {domain, domain_issues} ->
             IO.puts("    #{domain}:")
+
             Enum.each(domain_issues, fn {_lang, _domain, msgid} ->
               truncated = truncate(msgid, 60)
               IO.puts("      - #{inspect(truncated)}")
@@ -77,9 +88,12 @@ defmodule TranslationChecker do
         end)
 
         total = length(issues)
-        IO.puts(IO.ANSI.yellow() <>
-          "Total: #{total} missing translation(s). Run 'mix gettext.merge priv/gettext' to add missing entries." <>
-          IO.ANSI.reset())
+
+        IO.puts(
+          IO.ANSI.yellow() <>
+            "Total: #{total} missing translation(s). Run 'mix gettext.merge priv/gettext' to add missing entries." <>
+            IO.ANSI.reset()
+        )
 
         System.halt(1)
     end
@@ -163,7 +177,14 @@ defmodule TranslationChecker do
     end
   end
 
-  defp parse_entries([line | rest], acc, current_msgid, current_msgid_plural, is_plural, translations) do
+  defp parse_entries(
+         [line | rest],
+         acc,
+         current_msgid,
+         current_msgid_plural,
+         is_plural,
+         translations
+       ) do
     line = String.trim(line)
 
     cond do

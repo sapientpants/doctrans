@@ -15,6 +15,17 @@ defmodule Doctrans.MixProject do
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
       test_coverage: [tool: ExCoveralls],
+      hex: [
+        # cowlib reaches the project only through :bypass (test-only); production
+        # serves with Bandit, not Cowboy, so these are not reachable at runtime.
+        # Upstream has published no fixed cowlib version as of 2026-09-12.
+        # REVIEW BY 2026-12-12: drop these once a fixed cowlib ships.
+        ignore_advisories: [
+          "CVE-2026-43971",
+          "CVE-2026-43966",
+          "CVE-2026-43969"
+        ]
+      ],
       preferred_cli_env: [
         coveralls: :test,
         "coveralls.detail": :test,
@@ -99,7 +110,7 @@ defmodule Doctrans.MixProject do
       {:oban, "~> 2.20"},
       # Code quality tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.15", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
@@ -128,16 +139,9 @@ defmodule Doctrans.MixProject do
         "esbuild doctrans --minify",
         "phx.digest"
       ],
-      precommit: [
-        "compile --warning-as-errors --all-warnings",
-        "deps.unlock --unused",
-        "deps.audit",
-        "format --check-formatted",
-        "credo --strict",
-        "sobelow --config",
-        "dialyzer",
-        "test --cover"
-      ]
+      # The quality gate is defined once, in .pre-commit-config.yaml, so the
+      # local command and CI cannot drift apart. Do not re-list checks here.
+      precommit: ["cmd pre-commit run --all-files"]
     ]
   end
 end

@@ -33,7 +33,11 @@ defmodule ModuleSizeChecker do
 
     case violations do
       [] ->
-        IO.puts(IO.ANSI.green() <> "All modules are within the #{max_lines} line limit." <> IO.ANSI.reset())
+        IO.puts(
+          IO.ANSI.green() <>
+            "All modules are within the #{max_lines} line limit." <> IO.ANSI.reset()
+        )
+
         System.halt(0)
 
       violations ->
@@ -46,9 +50,11 @@ defmodule ModuleSizeChecker do
           IO.puts("")
         end)
 
-        IO.puts(IO.ANSI.yellow() <>
-          "Consider breaking these modules into smaller, focused modules." <>
-          IO.ANSI.reset())
+        IO.puts(
+          IO.ANSI.yellow() <>
+            "Consider breaking these modules into smaller, focused modules." <>
+            IO.ANSI.reset()
+        )
 
         System.halt(1)
     end
