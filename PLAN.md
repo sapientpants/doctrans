@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G13 are implemented; G14–G19 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G14 are implemented; G15–G19 remain.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -773,7 +773,7 @@ worse than an absent one, because it is counted as evidence. Items G01–G13 are
   comment, a checkout missing `persist-credentials: false` — in both the `- name:`/`uses:` and bare
   `- uses:` step forms, and that it reports zero with the workflow as committed.
 
-- [ ] **G14 · P2 · Give suppressions an owner and an expiry.**
+- [x] **G14 · P2 · Give suppressions an owner and an expiry.**
   Every remaining `.dialyzer_ignore.exs` entry is `{file, warning_class}`, the broadest granularity dialyxir
   offers, with no owner, date, upstream link, or expiry. The file header recommends auditing with
   `--list-unused-filters`, but that command cannot detect an over-broad filter — only a completely dead one.
@@ -785,7 +785,33 @@ worse than an absent one, because it is counted as evidence. Items G01–G13 are
   Also drop `:underspecs` from the Dialyzer flags: it is the sole source of the remaining
   `contract_supertype` findings, so removing one flag removes several file-level mutes. Prefer one explicit
   decision over three suppressions.
-  Acceptance: no file-level class mute remains without a dated justification; an expired entry fails the gate.
+  Implemented: `:underspecs` is gone, and with it all five `contract_supertype` findings and both resilience
+  file mutes — one flag decision for two suppressions, as predicted. The register is now six
+  `{file, warning_class, line}` entries, each preceded by `owner`, `expires`, `upstream`, and `rationale`
+  comments, enforced by `scripts/check_dialyzer_filters.exs` in the same idiom as `check_action_pins.exs`.
+  The cap is 8: the ninth entry has to raise it on purpose.
+  Narrowing the keys surfaced a detail the dialyxir README does not state: the filter's third element is
+  compared verbatim against the warning's location term, and a warning that carries a column reports
+  `{line, column}`, not `line`. An integer-line filter for those warnings matches nothing and is silently
+  useless — confirmed by running both forms side by side, where `{"lib/doctrans/validation.ex",
+  :pattern_match_cov, 224}` was reported under "Unused filters" while the `{224, 8}` form matched.
+  `upstream` is `none` on all six entries, which is the honest value: five are first-party, and for the
+  `Gettext.Plural.plural/3` opaque call — generated code, reported at line 1 of `gettext.ex`, once per
+  plural form in `priv/gettext` — no upstream issue was found. Inventing a plausible link would be the
+  exact G02 failure mode this item exists to prevent, so the rationale says to recheck after the next
+  gettext/expo bump instead.
+  Two entries (`fixtures.ex:40`, `worker_helpers.ex:16`) are one `_ =` binding away from deletion. They are
+  documented rather than fixed, so that this item changes the gate and not the test-support code; their
+  expiry is when that trade gets re-decided. All six expire 2026-12-12, matching G01's acknowledgement
+  cadence.
+  The hook is `always_run: true`, unlike its siblings: an expiry is a date, not a file change, and a register
+  nobody touches is exactly the one that goes stale. `--list-unused-filters` stays alongside it — it
+  retires a filter whose code moved, which the register check cannot see, and the register check reads the
+  justification, which `--list-unused-filters` cannot.
+  Acceptance: verified `MIX_ENV=test mix dialyzer --list-unused-filters` reports 0 warnings and 0 unused
+  filters with the register as committed, and that the check fails on each divergence mode — an expired
+  entry (`--today 2027-01-01`), a missing `# owner:`, a non-ISO expiry, a `{file, class}` two-tuple, a bare
+  string filter, a regex filter, a filter naming a file that no longer exists, and a ninth entry over the cap.
 
 - [ ] **G15 · P2 · State the module-size limit once, and decide what it is for.**
   Three limits exist for one rule: `scripts/check_module_size.exs` defaults to 500, pre-commit passes
