@@ -127,6 +127,16 @@ repos:
         pass_filenames: false
         files: ^(mix\.exs|mix\.lock)$
 
+      # 3.55. Toolchain pin agreement. mise.toml is authoritative; CI reads it
+      # directly via erlef/setup-beam's `version-file`, but a Docker `FROM` line
+      # cannot, so this keeps Dockerfile.dev's restated version honest.
+      - id: check-toolchain-pins
+        name: Check toolchain pins match mise.toml
+        entry: elixir scripts/check_toolchain_pins.exs
+        language: system
+        pass_filenames: false
+        files: ^(mise\.toml|Dockerfile\.dev|scripts/check_toolchain_pins\.exs)$
+
       # 3.6. Module size check (600 lines max)
       - id: check-module-size
         name: Check module size limits

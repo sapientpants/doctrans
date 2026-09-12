@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G09 are implemented; G10–G18 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G10 are implemented; G11–G18 remain.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -642,16 +642,29 @@ worse than an absent one, because it is counted as evidence. Items G01–G09 are
   requirement. Verified: `gh api repos/sapientpants/doctrans/rulesets/10866831` lists the rule, and the
   pull request implementing this item reports `Quality Gate` as a required check.
 
-- [ ] **G10 · P1 · Bump the toolchain and pin it in one place.**
-  The pins are Elixir 1.20.3 and OTP 29.0.5. **Elixir 1.20.4 is a security release (CVE-2026-75758,
-  recursion in `List.to_string/1` and `to_charlist/1`) and OTP 29.0.6 carries CVE-2026-75538.** Both should
-  be adopted. This was deliberately excluded from the current change because a toolchain bump cannot be
-  verified locally without installing it, and it deserves its own CI run.
-  The version is currently stated in five places: `mise.toml:2-3`, the CI matrix, `Dockerfile.dev:2`,
-  `mix.exs:10` (a `~> 1.20` range, intentionally), and `README.md:30` prose. `erlef/setup-beam` accepts
-  `version-file: mise.toml` with `version-type: strict`, which deletes the CI copy and, as a side effect,
-  removes the job-name instability blocking G09.
+- [x] **G10 · P1 · Bump the toolchain and pin it in one place.**
+  The pins were Elixir 1.20.3 and OTP 29.0.5. **Elixir 1.20.4 is a security release (CVE-2026-75758,
+  recursion in `List.to_string/1` and `to_charlist/1`) and OTP 29.0.6 carries CVE-2026-75538.** Both are now
+  adopted. The version was stated in five places: `mise.toml:2-3`, the CI job's `env` block, `Dockerfile.dev:2`,
+  `mix.exs:10` (a `~> 1.20` range, intentionally), and `README.md:30` prose.
+  Implemented: `mise.toml` is the single source of truth at `elixir = "1.20.4-otp-29"` / `erlang = "29.0.6"`.
+  The CI copy is deleted — the `Set up Elixir` step reads `version-file: mise.toml` with
+  `version-type: strict`, and the dependency and PLT cache keys, which previously interpolated the `env`
+  pins, now interpolate `steps.beam.outputs.otp-version` / `elixir-version`, so the keys still segment by
+  toolchain without restating it. The `README.md` copy is deleted too: the prerequisite now points at
+  `mise.toml` and `mise install` rather than naming versions. `mix.exs` keeps its `~> 1.20` range, which is
+  a compatibility floor rather than a pin and is deliberately not single-sourced.
+  That leaves one unavoidable copy. A Docker `FROM` line cannot read a version file, and parameterising it
+  with a build `ARG` would only move the literal into the default value while letting
+  `docker compose up` drift silently. Instead the copy is made load-bearing: a new
+  `check-toolchain-pins` pre-commit hook runs `scripts/check_toolchain_pins.exs`, which treats `mise.toml`
+  as authoritative and fails when `Dockerfile.dev`'s tag disagrees. It compares the Elixir version exactly
+  and OTP on its major only, since the Docker tag can express no more than `-otp-29`.
   Acceptance: one authoritative version file; CI, Docker, and local tooling agree without hand-copying.
+  Verified: both versions exist as `erlef/setup-beam` builds for `ubuntu-24.04` (`OTP-29.0.6`,
+  `v1.20.4-otp-29`) and as the `elixir:1.20.4-otp-29` Docker tag; `mise install` resolves to Elixir 1.20.4
+  on erts-17.0.6; `mix precommit` passes on the new toolchain; and reverting the `Dockerfile.dev` tag alone
+  fails the new hook.
 
 - [ ] **G11 · P2 · Tighten the subjective Credo checks to honest thresholds.**
   Four checks are labelled "strict" in `.credo.exs` while being configured **looser than Credo's own
@@ -766,7 +779,7 @@ worse than an absent one, because it is counted as evidence. Items G01–G09 are
 - [ ] **G19 · P3 · Minor CI and container hygiene.**
   Add a `concurrency` group with `cancel-in-progress` so superseded pushes stop burning a full run. Change
   the dependency cache's `actions/cache/save` from `if: always()` to `if: success()` so a half-compiled
-  `_build` is not cached. Pin `Dockerfile.dev:2` (`FROM elixir:1.20.3-otp-29`) by digest and add
+  `_build` is not cached. Pin `Dockerfile.dev:2` (`FROM elixir:1.20.4-otp-29`) by digest and add
   `--check-locked` to its `mix deps.get`, since `Dockerfile.dev` is what `docker compose up` actually runs
   and is therefore the shipped artifact. Remove `/coveralls.json` from `.gitignore`, where it contradicts the
   tracked file.
