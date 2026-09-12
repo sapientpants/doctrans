@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G14 are implemented; G15–G19 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G15 are implemented; G16–G19 remain.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -813,17 +813,61 @@ worse than an absent one, because it is counted as evidence. Items G01–G14 are
   entry (`--today 2027-01-01`), a missing `# owner:`, a non-ISO expiry, a `{file, class}` two-tuple, a bare
   string filter, a regex filter, a filter naming a file that no longer exists, and a ninth entry over the cap.
 
-- [ ] **G15 · P2 · State the module-size limit once, and decide what it is for.**
-  Three limits exist for one rule: `scripts/check_module_size.exs` defaults to 500, pre-commit passes
-  `--max-lines 600`, and the Mix alias did not run it at all before G04. The script also miscounts by one
-  (`String.split("\n")` on a trailing-newline file) and skips `.exs` undocumented.
-  More importantly the gate fires on line count, which is uncorrelated with the property of interest, and
-  fires hardest on the worst file: `index.ex` is at 580/600 — 97% after G11 — and is the same file that
-  carried three Dialyzer suppressions and a real bug. The next feature touching it hits the wall at the moment careful
-  attention is least available.
-  Make `--max-lines` required with no default, or hoist the number into one config read by both callers.
-  Then decide deliberately whether this stays blocking under G11's honest-thresholds policy or becomes the
-  one advisory metric.
+- [x] **G15 · P2 · State the module-size limit once, and decide what it is for.**
+  Three limits existed for one rule: `scripts/check_module_size.exs` defaulted to 500, pre-commit passed
+  `--max-lines 600`, and the Mix alias did not run it at all before G04.
+  **The 600 was never a considered limit.** `git log -S` puts its arrival in `590b8d4` (#17,
+  9 December 2025), a feature PR whose own changelog line reads "Increase module size limit from 500 to
+  600 lines" between an Ollama timeout bump and a coverage exclusion. The number moved so the feature
+  could land — which is precisely the failure mode the limit exists to catch, performed on the limit
+  itself.
+  Implemented: `--max-lines` is **required with no default**, so a caller cannot disagree with a default it
+  cannot see, and the number is stated exactly once, in `.pre-commit-config.yaml`. The plan's alternative —
+  "hoist the number into one config read by both callers" — was dropped because G04 left only one caller:
+  `mix precommit` delegates to `pre-commit run --all-files`, so a config file would be a second place to
+  look for a number with a single reader.
+  The off-by-one is fixed: `String.split("\n") |> length()` counted the empty string after the terminating
+  newline, so every file measured one line longer than `wc -l` and than an editor shows, and every reported
+  overage was wrong by one with it. `index.ex` read 581 for a 580-line file. Only the single terminating
+  newline is now discarded, so trailing blank lines still count.
+  The `.ex`-only scope is documented on the script and in its `--help`, with the reason (`.exs` files are
+  read top to bottom rather than navigated, so length is not the same signal), and an explicitly named
+  non-`.ex` file now aborts instead of being dropped silently — `check_module_size.exs mix.exs` used to
+  report a pass it had not performed.
+  A fourth vacuous-pass mode was found while fixing the third and is also closed: a path matching no `.ex`
+  files printed "All modules are within the limit" and exited 0. Renaming `lib/` would have retired the
+  gate silently. It now aborts.
+
+  **Decision: it stays blocking, and the threshold returns to 500.** Advisory was rejected on this
+  repository's own governing finding. `pre-commit` renders a hook that cannot fail as "Passed", so an
+  advisory metric left in the gate list would be counted as evidence — G01's defect exactly, where
+  `entry: "true"` displayed as a passing security audit. Moved out of the gate list to escape that, it
+  would be run by nobody and rot, which is the same outcome as deletion with extra steps.
+  The plan's premise that line count is "uncorrelated with the property of interest" is half right, and the
+  half that is wrong decides the item. Credo measures complexity and coupling directly, at its own defaults
+  since G11 — and `index.ex` passed `Refactor.Nesting` 2, `CyclomaticComplexity` 9, `ABCSize` 30 and
+  `ModuleDependencies` 10 while holding a 127-line template, a five-stage upload pipeline and a
+  stream-ordering subsystem in one module. Line count is the only check that sees a module accumulating
+  several *simple* responsibilities, because every individual function in such a module is shallow, short
+  and cheap. That is now written on the script as the one property it is for.
+  So the fix for "the gate fires hardest on the worst file" is to fix the file, not to keep the number that
+  was fitted to it. 500 is the value the script documented from the day it was written, and `index.ex` is
+  split to meet it, along two seams the code already had, in the `DocumentLive.ChatSession` idiom G11
+  established: `DocumentLive.UploadIntake` (the on-disk size re-check, magic-byte validation, move-into-place
+  and record creation — no socket, which is worth the separation on its own: those checks are the only thing
+  between an arbitrary browser upload and the filesystem) and `DocumentLive.DocumentStream` (the ordered
+  `:documents` stream and its per-document subscriptions). `index.ex` goes 580 → 360, and sits at 72% of the
+  limit rather than 97%. The extractions are moves: no behaviour changed, no test was rewritten, and the
+  suite stayed at 846 passing.
+  `openai.ex` is now the largest module at 489, which is 98% of the limit. That is recorded rather than
+  pre-emptively refactored — it is one module with one responsibility, and splitting it to buy headroom
+  would be the metric damaging the code. If it crosses, it gets split; the limit does not move again
+  without an entry here saying so.
+  Acceptance: full `mix precommit` green with the limit at 500. Verified the gate is not passing vacuously
+  by padding `openai.ex` to 501 lines, which fails with a one-line overage — so the count and the boundary
+  are both exact. Verified the script aborts on each divergence mode: a missing `--max-lines`, a
+  non-positive `--max-lines`, an unrecognised option, an explicitly named `.exs`, a path that does not
+  exist, and a directory holding no `.ex` files.
 
 - [ ] **G16 · P2 · Gate compile-time cycles with `mix xref`; do not adopt Boundary.**
   Architectural enforcement was assessed and **Boundary is rejected** on evidence. The violations it would
