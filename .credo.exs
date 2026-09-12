@@ -104,8 +104,22 @@
           {Credo.Check.Refactor.RejectReject, []},
           {Credo.Check.Refactor.UnlessWithElse, []},
           {Credo.Check.Refactor.WithClauses, []},
-          # Limit module dependencies to reduce coupling
-          {Credo.Check.Refactor.ModuleDependencies, [max_deps: 20]},
+          # Credo's default max_deps, counting first-party modules only.
+          # The check counts every module name in the body, so without
+          # `dependency_namespaces` the score is dominated by Enum/Map/String
+          # and by framework macros: `DocumentConverter` scored 15 with one
+          # first-party dependency, and `Endpoint` 19 with three, all of them
+          # Plug/Phoenix entries the plug pipeline requires. Namespacing makes
+          # the number mean what the check claims to measure.
+          # `Doctrans.Application` is exempt: a supervision tree must name its
+          # children, and three of its eleven "dependencies" are registered
+          # process names rather than modules.
+          {Credo.Check.Refactor.ModuleDependencies,
+           [
+             max_deps: 10,
+             dependency_namespaces: ["Doctrans"],
+             excluded_namespaces: ["Doctrans.Application"]
+           ]},
           # Credo's default; see Refactor.Nesting for the same reasoning.
           {Credo.Check.Refactor.ABCSize, [max_size: 30]},
           # Detect inefficient list appends

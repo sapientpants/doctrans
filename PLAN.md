@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G10 are implemented; G11–G18 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G11 are implemented; G12–G18 remain.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -666,20 +666,38 @@ worse than an absent one, because it is counted as evidence. Items G01–G10 are
   on erts-17.0.6; `mix precommit` passes on the new toolchain; and reverting the `Dockerfile.dev` tag alone
   fails the new hook.
 
-- [ ] **G11 · P2 · Tighten the subjective Credo checks to honest thresholds.**
-  Four checks are labelled "strict" in `.credo.exs` while being configured **looser than Credo's own
+- [x] **G11 · P2 · Tighten the subjective Credo checks to honest thresholds.**
+  Four checks were labelled "strict" in `.credo.exs` while being configured **looser than Credo's own
   defaults**: `Refactor.Nesting` 3 (default 2), `CyclomaticComplexity` 10 (default 9), `ABCSize` 50
-  (default 30), `ModuleDependencies` 20 (default 10). They pass unconditionally and teach nothing.
-  `Design.DuplicatedCode` is the clearest case: 0 issues at `mass_threshold: 30`, **146 at 12** — a cliff
-  that shows the number was fitted to the codebase rather than chosen.
+  (default 30), `ModuleDependencies` 20 (default 10). They passed unconditionally and taught nothing.
   Decision taken 12 September 2026: keep these blocking and move them to Credo's defaults, accepting the
-  backlog rather than demoting them to advisory. Measured cost at default thresholds: **16** cyclomatic
-  complexity, **9** nesting, **31** ABC size, **17** module-dependency findings, plus whatever
-  `DuplicatedCode` surfaces below 30. Stage it — one threshold per change, each with its refactor — rather
-  than tightening all five at once; and treat the module-size cap (G15) as part of the same conversation,
-  since `index.ex` is at 96% of it and is also the file carrying the most real defects.
-  Acceptance: every threshold is at or below Credo's default, no threshold is loosened to make a change pass,
-  and `mix credo --strict` is clean at the new values.
+  backlog rather than demoting them to advisory.
+  Implemented in four staged commits, one threshold per commit with its refactor. Measured before each
+  stage and cleared within it: **9** nesting sites, **1** cyclomatic-complexity site, **17** ABC-size
+  sites, **2** module-dependency sites. Every fix is an extraction along an existing seam — the anonymous
+  function inside a pipeline becomes a named private one, the branch of a `case` becomes the function it
+  was already describing. No behaviour changed and no test was rewritten; the suite stayed at 846 passing.
+  The largest change is structural rather than cosmetic: `DocumentLive.Show` reached ten first-party
+  dependencies only by moving the chat panel's remaining state transitions into
+  `DocumentLive.ChatSession`, which already owned the rest of them. `Show` no longer calls `Doctrans.Chat`,
+  `Chat.Agent` or `Chat.Conversations` at all.
+  Two corrections to the entry as originally written. `Design.DuplicatedCode` is **not** a case of a
+  fitted threshold: Credo's default `mass_threshold` is 40, so the configured 30 was already stricter than
+  the default and stays as it is. And `ModuleDependencies` counts every module name appearing in a module
+  body, standard library and framework macros included, so at `max_deps: 10` it measures verbosity rather
+  than coupling — `DocumentConverter` scored 15 with a single first-party dependency, `Endpoint` 19 with
+  three, the other sixteen being the `Plug`/`Phoenix` entries its plug pipeline is made of. The check is
+  therefore configured with `dependency_namespaces: ["Doctrans"]`, which is what makes the default
+  threshold meaningful here; this narrows what is counted, it does not raise the ceiling. 23 of the 25
+  findings at `max_deps: 10` were framework and stdlib noise of exactly this kind.
+  `Doctrans.Application` carries a named `excluded_namespaces` exemption: a supervision tree has to name
+  its children, and three of its eleven entries (`Doctrans.PubSub`, `Doctrans.TaskSupervisor`,
+  `Doctrans.Supervisor`) are registered process names rather than modules. Restructuring the tree to
+  satisfy a lint count would be the metric damaging the code.
+  Acceptance met: every threshold is at or below Credo's default, none was loosened to make a change pass,
+  and `mix credo --strict` is clean at the new values. Verified: adding an eleventh first-party alias to
+  `DocumentLive.Show` fails the dependency gate, so it is not passing vacuously.
+  G15 is now more pressing, not less: `index.ex` sits at **580/600** lines after this work.
 
 - [ ] **G12 · P2 · Make Sobelow findings explicit rather than tolerated.**
   `exit: "high"` means four Low-Confidence `SQL.Query` findings in `lib/doctrans/search.ex:167,196,301,414`
@@ -729,8 +747,8 @@ worse than an absent one, because it is counted as evidence. Items G01–G10 are
   `--max-lines 600`, and the Mix alias did not run it at all before G04. The script also miscounts by one
   (`String.split("\n")` on a trailing-newline file) and skips `.exs` undocumented.
   More importantly the gate fires on line count, which is uncorrelated with the property of interest, and
-  fires hardest on the worst file: `index.ex` is at 576/600 — 96% — and is the same file that carried three
-  Dialyzer suppressions and a real bug. The next feature touching it hits the wall at the moment careful
+  fires hardest on the worst file: `index.ex` is at 580/600 — 97% after G11 — and is the same file that
+  carried three Dialyzer suppressions and a real bug. The next feature touching it hits the wall at the moment careful
   attention is least available.
   Make `--max-lines` required with no default, or hoist the number into one config read by both callers.
   Then decide deliberately whether this stays blocking under G11's honest-thresholds policy or becomes the
