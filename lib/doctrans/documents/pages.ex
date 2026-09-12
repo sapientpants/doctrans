@@ -47,6 +47,41 @@ defmodule Doctrans.Documents.Pages do
   end
 
   @doc """
+  Returns `%{page_id => {content_revision, translated_markdown}}` for the given ids.
+
+  Ids that are not UUIDs and pages that no longer exist are absent from the map,
+  so a caller can read a missing key as "no such page" without pre-validating.
+  """
+  @spec page_content_state([term()]) :: %{
+          optional(Ecto.UUID.t()) => {integer(), String.t() | nil}
+        }
+  def page_content_state(page_ids) do
+    case castable_ids(page_ids) do
+      [] ->
+        %{}
+
+      ids ->
+        from(p in Page,
+          where: p.id in ^ids,
+          select: {p.id, {p.content_revision, p.translated_markdown}}
+        )
+        |> Repo.all()
+        |> Map.new()
+    end
+  end
+
+  defp castable_ids(page_ids) do
+    page_ids
+    |> Enum.flat_map(fn id ->
+      case Ecto.UUID.cast(id) do
+        {:ok, id} -> [id]
+        :error -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  @doc """
   Creates a new page for a document.
   """
   def create_page(document, attrs) do

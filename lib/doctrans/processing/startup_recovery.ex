@@ -7,12 +7,14 @@ defmodule Doctrans.Processing.StartupRecovery do
   import Ecto.Query
 
   alias Doctrans.Documents.{Document, Page, Topics}
-  alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
+  alias Doctrans.Jobs.{DocumentExtractionJob, Keys, LlmProcessingJob}
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
   @batch_size 50
   @active_states ~w(available scheduled executing retryable suspended)
+  @document_id_match "?->>'#{Keys.document_id()}' = ?::text"
+  @page_id_match "?->>'#{Keys.page_id()}' = ?::text"
 
   @doc "Returns the next cursor, or :done when the startup pass is complete."
   def run_batch(cursor \\ {:documents, nil})
@@ -28,7 +30,7 @@ defmodule Doctrans.Processing.StartupRecovery do
           not exists(
             from(j in Oban.Job,
               where: j.worker == ^worker and j.state in ^@active_states,
-              where: fragment("?->>'document_id' = ?::text", j.args, parent_as(:document).id),
+              where: fragment(@document_id_match, j.args, parent_as(:document).id),
               select: 1
             )
           ),
@@ -59,7 +61,7 @@ defmodule Doctrans.Processing.StartupRecovery do
           not exists(
             from(j in Oban.Job,
               where: j.worker == ^worker and j.state in ^@active_states,
-              where: fragment("?->>'page_id' = ?::text", j.args, parent_as(:page).id),
+              where: fragment(@page_id_match, j.args, parent_as(:page).id),
               select: 1
             )
           ),
@@ -131,7 +133,7 @@ defmodule Doctrans.Processing.StartupRecovery do
     # candidate selection. A conflicting job owns this page's processing state.
     job =
       %{
-        "page_id" => page.id,
+        Keys.page_id() => page.id,
         "page_number" => page.page_number,
         "generation" => page.processing_generation
       }

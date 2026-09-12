@@ -8,6 +8,7 @@ defmodule Doctrans.Chat do
 
   alias Doctrans.Chat.MultiSearch
   alias Doctrans.Chat.QueryExpander
+  alias Doctrans.Documents
   alias Doctrans.Search
 
   require Logger
@@ -307,25 +308,10 @@ defmodule Doctrans.Chat do
   def current_context([]), do: []
 
   def current_context(chunks) do
-    import Ecto.Query
-
-    page_ids =
-      chunks
-      |> Enum.flat_map(fn chunk ->
-        case Ecto.UUID.cast(Map.get(chunk, :page_id)) do
-          {:ok, id} -> [id]
-          :error -> []
-        end
-      end)
-      |> Enum.uniq()
-
     pages =
-      from(p in Doctrans.Documents.Page,
-        where: p.id in ^page_ids,
-        select: {p.id, {p.content_revision, p.translated_markdown}}
-      )
-      |> Doctrans.Repo.all()
-      |> Map.new()
+      chunks
+      |> Enum.map(&Map.get(&1, :page_id))
+      |> Documents.page_content_state()
 
     kept =
       Enum.filter(chunks, fn chunk ->
@@ -369,32 +355,7 @@ defmodule Doctrans.Chat do
 
   Prefers chunks (fine-grained), falls back to page-level embeddings.
   """
-  def embeddings_ready?(document) do
-    import Ecto.Query
-
-    # Check for chunk-level embeddings first
-    chunk_count =
-      Doctrans.Documents.Chunk
-      |> join(:inner, [c], p in assoc(c, :page))
-      |> where([c, p], p.document_id == ^document.id)
-      |> where([c], c.embedding_status == "completed")
-      |> where([c], not is_nil(c.embedding))
-      |> Doctrans.Repo.aggregate(:count)
-
-    if chunk_count > 0 do
-      true
-    else
-      # Fall back to page-level embeddings
-      page_count =
-        Doctrans.Documents.Page
-        |> where([p], p.document_id == ^document.id)
-        |> where([p], p.embedding_status == "completed")
-        |> where([p], not is_nil(p.embedding))
-        |> Doctrans.Repo.aggregate(:count)
-
-      page_count > 0
-    end
-  end
+  defdelegate embeddings_ready?(document), to: Documents
 
   # Private functions
 

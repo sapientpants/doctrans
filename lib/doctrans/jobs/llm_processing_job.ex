@@ -17,12 +17,10 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.{LlmProcessor, Run}
 
-  @page_id_key "page_id"
-
-  @doc false
-  def page_id_key, do: @page_id_key
+  @page_id_key Keys.page_id()
 
   def model_args(opts) do
     opts
