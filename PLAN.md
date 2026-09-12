@@ -513,7 +513,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G08 are implemented; G09–G18 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G09 are implemented; G10–G18 remain.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -615,19 +615,32 @@ worse than an absent one, because it is counted as evidence. Items G01–G08 are
 
 - [x] **G08 · P1 · Correct the compiler flag.** See Q01.
 
-- [ ] **G09 · P1 · Require status checks before merge.**
-  Ruleset 10866831 on `main` enforces deletion, non-fast-forward, linear history, signatures, and a pull
-  request — but contains **no `required_status_checks` rule**, and `branches/main/protection` returns
-  404. A pull request with a red CI run is mergeable today, which means every other item in this phase is
-  advisory until this lands. This is the highest-value change in the phase and the only one requiring
-  repository settings rather than a code change.
-  It has a prerequisite: the check is currently named `Run Pre-commit Checks (1.20.3, 29.0.5)` because the
-  single-entry `strategy.matrix` interpolates versions into the job name. Requiring that name means the gate
-  silently stops matching — and therefore stops applying — the day the toolchain is bumped. Drop the matrix
-  (it has one entry and serves no purpose) or add a small `gate` job that `needs:` the others and require
-  only its stable name.
+- [x] **G09 · P1 · Require status checks before merge.**
+  Ruleset 10866831 on `main` enforced deletion, non-fast-forward, linear history, signatures, and a pull
+  request — but contained **no `required_status_checks` rule**, and `branches/main/protection` returned
+  404. A pull request with a red CI run was mergeable, which made every other item in this phase advisory
+  until this landed. This is the highest-value change in the phase and the only one requiring repository
+  settings rather than a code change.
+  Its prerequisite was the check name: `Run Pre-commit Checks (1.20.3, 29.0.5)`, because the single-entry
+  `strategy.matrix` interpolated versions into the job name. Requiring that name would mean the gate
+  silently stops matching — and therefore stops applying — the day the toolchain is bumped.
+  Implemented: both halves of the prerequisite, because either alone leaves a way to detach the
+  requirement. The single-entry matrix is gone, its two versions moved to job-level `env` (`ELIXIR_VERSION`,
+  `OTP_VERSION`), which the cache keys and `setup-beam` read — so a toolchain bump no longer touches the
+  job name, and G10 has one fewer copy to reconcile. A `gate` job named **`Quality Gate`** was added; it
+  `needs: [verify, docker]` and is the only required check, so adding or renaming a job changes nothing in
+  repository settings. It carries `if: always()` — without it the job would be *skipped* when a dependency
+  fails, and a skipped required check is treated as pending, not failed, which would block merges forever
+  instead of reporting the failure. The step reads `toJSON(needs)` and fails unless every dependency
+  reports `success`, so `failure`, `cancelled`, and `skipped` all fail the gate.
+  The `required_status_checks` rule was then added to ruleset 10866831 with `Quality Gate` bound to the
+  GitHub Actions app (integration 15368), so a status of that name cannot be forged by another source.
+  `strict_required_status_checks_policy` is left `false`: the ruleset already requires linear history and
+  squash merges, and forcing every branch to re-sync before merge costs a full CI run per intervening
+  commit for no additional signal on a single-maintainer repository.
   Acceptance: a pull request whose CI fails cannot be merged, and a toolchain bump does not detach the
-  requirement.
+  requirement. Verified: `gh api repos/sapientpants/doctrans/rulesets/10866831` lists the rule, and the
+  pull request implementing this item reports `Quality Gate` as a required check.
 
 - [ ] **G10 · P1 · Bump the toolchain and pin it in one place.**
   The pins are Elixir 1.20.3 and OTP 29.0.5. **Elixir 1.20.4 is a security release (CVE-2026-75758,
