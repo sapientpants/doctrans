@@ -37,8 +37,20 @@ jobs:
       MIX_ENV: test
 
     steps:
+      # Actions are pinned to a full commit SHA: a mutable tag like `@v4` can be
+      # repointed at any commit by anyone who can push to that repository, and this
+      # job downloads and executes hook code from five external repositories on top
+      # of that. The trailing comment records the human-readable version, which is
+      # what Dependabot's `github-actions` ecosystem reads and bumps.
+      #
+      # `persist-credentials: false` stops checkout writing the job's GITHUB_TOKEN
+      # into `.git/config`, where every later step — including third-party action
+      # and hook code — could read it. Nothing here pushes or calls the API; the
+      # remaining git commands are local (`git status`, `git diff`).
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # `mise.toml` is the single source of truth for the toolchain. Reading it
       # here rather than restating the versions keeps CI, Docker, and local
@@ -47,13 +59,13 @@ jobs:
       # ruleset from the required check on every bump.
       - name: Set up Elixir
         id: beam
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: mise.toml
           version-type: strict
 
       - name: Set up Python for pre-commit
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
 
@@ -61,7 +73,7 @@ jobs:
         run: pip install pre-commit
 
       - name: Restore pre-commit cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -69,7 +81,7 @@ jobs:
             pre-commit-
 
       - name: Restore dependencies cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             deps
@@ -79,7 +91,7 @@ jobs:
             ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
 
       - name: Restore Dialyzer PLT cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: priv/plts
           key: ${{ runner.os }}-plt-v2-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
@@ -115,7 +127,7 @@ jobs:
           fi
 
       - name: Save dependencies cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: always()
         with:
           path: |
@@ -124,7 +136,7 @@ jobs:
           key: ${{ runner.os }}-mix-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
 
       - name: Save Dialyzer PLT cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: always()
         with:
           path: priv/plts
@@ -137,13 +149,15 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: ./Dockerfile.dev

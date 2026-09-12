@@ -137,6 +137,18 @@ repos:
         pass_filenames: false
         files: ^(mise\.toml|Dockerfile\.dev|scripts/check_toolchain_pins\.exs)$
 
+      # 3.57. GitHub Actions pin register. Every `uses:` must name an immutable
+      # commit SHA with a version comment, and every checkout must set
+      # `persist-credentials: false`. Every action README shows a floating tag, so
+      # the regression is a copy-paste away; Dependabot's github-actions ecosystem
+      # is what keeps the pins from going stale.
+      - id: check-action-pins
+        name: Check GitHub Actions are SHA-pinned
+        entry: elixir scripts/check_action_pins.exs
+        language: system
+        pass_filenames: false
+        files: ^(\.github/workflows/.*\.ya?ml|scripts/check_action_pins\.exs)$
+
       # 3.6. Module size check (600 lines max)
       - id: check-module-size
         name: Check module size limits
