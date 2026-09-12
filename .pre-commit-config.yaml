@@ -186,6 +186,17 @@ repos:
         pass_filenames: false
         files: ^(lib/.*\.(ex|exs|heex)|scripts/check_raw_call_sites\.exs)$
 
+      # 5.45. Dialyzer suppression register. Narrow `{file, class, line}` keys, an
+      # owner, an expiry, an upstream link, and a rationale per entry, capped at 8.
+      # `always_run` because the expiry is a date, not a file change: a register nobody
+      # touches is exactly the one that goes stale.
+      - id: check-dialyzer-filters
+        name: Check Dialyzer suppression register
+        entry: elixir scripts/check_dialyzer_filters.exs
+        language: system
+        pass_filenames: false
+        always_run: true
+
       # 5.5. Static type analysis. --list-unused-filters makes a stale entry in
       # .dialyzer_ignore.exs fail the gate instead of lingering unnoticed.
       - id: dialyzer

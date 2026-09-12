@@ -66,9 +66,20 @@ and warms the PLT before analysis, caching it by OS, OTP, Elixir, and dependency
 lockfile. Generated `priv/plts/*.plt` and `*.plt.hash` files are ignored by Git.
 
 Add specs to public APIs and use concrete result types. Fix new warnings at their
-source before considering a suppression. Existing exceptions live in
-`.dialyzer_ignore.exs`; audit stale entries with
-`MIX_ENV=test mix dialyzer --list-unused-filters` when changing that file.
+source before considering a suppression.
+
+Suppressions live in `.dialyzer_ignore.exs`, which is a register rather than a
+dumping ground. Every entry is a narrow `{file, warning_class, line}` key — note
+that a warning carrying a column reports its location as `{line, column}`, and an
+integer-line filter silently matches nothing in that case — preceded by four
+comment annotations: `owner`, `expires` (an ISO date), `upstream` (an issue URL,
+or `none` for a first-party cause), and `rationale`. The register is capped at
+eight entries.
+
+`scripts/check_dialyzer_filters.exs` enforces all of that on every commit,
+including the expiry: once a date passes, the entry fails the gate until someone
+re-decides it. It complements `--list-unused-filters`, which retires a filter
+whose code moved but cannot judge whether the justification is still true.
 
 ## Chat persistence
 

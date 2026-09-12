@@ -38,7 +38,6 @@ defmodule Doctrans.MixProject do
         # Stricter dialyzer flags
         flags: [
           :error_handling,
-          :underspecs,
           :unmatched_returns,
           :no_improper_lists
         ]
