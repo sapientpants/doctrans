@@ -67,8 +67,10 @@ defmodule DoctransWeb.SearchLiveTest do
     test "shows no results message when search returns empty", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search?q=nonexistent")
 
-      assert has_element?(view, "#search-loading")
-
+      # No assertion on the loading state here: nothing holds the search open,
+      # so an empty library can answer before the first render is inspected.
+      # The async suite parks the embedding stub on a barrier and pins that
+      # state deterministically; what this test is for is the empty *outcome*.
       render_async(view, @async_timeout)
       assert has_element?(view, "#search-empty")
       refute has_element?(view, "#search-loading")
