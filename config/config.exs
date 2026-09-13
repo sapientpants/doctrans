@@ -43,9 +43,11 @@ config :doctrans, :retry,
   max_delay_ms: 30_000
 
 # File upload configuration
-config :doctrans, :uploads,
-  upload_dir: Path.expand("../priv/static/uploads", __DIR__),
-  max_file_size: 100_000_000
+#
+# The storage root is deliberately absent: `Doctrans.Config.Uploads.upload_dir/0`
+# resolves it at runtime, so a release is not pinned to the directory layout of
+# the machine that built it.
+config :doctrans, :uploads, max_file_size: 100_000_000
 
 # PDF extraction configuration
 # Higher DPI = better text recognition but larger files

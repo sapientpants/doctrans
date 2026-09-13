@@ -319,14 +319,52 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   exhausted budget starts no renderer at all; 280 KB of error output arrives as 64 KiB and stays valid
   to encode; and the page, pixel, and image limits report their numbers in every locale.
 
-- [ ] **R05 · P2 · Use one runtime storage root for writing and serving images.**
+- [x] **R05 · P2 · Use one runtime storage root for writing and serving images.**
   Writers use `Config.Uploads.upload_dir/0`, but the endpoint always serves `priv/static/uploads`.
   Custom storage can successfully process documents while returning broken page-image URLs.
   The default root is also expanded during build configuration, which complicates portable releases.
   Resolve the runtime data directory consistently and retain the generated-image-only serving restrictions.
   Acceptance: upload, view, reprocess, restart, and delete work with a nondefault data root;
   originals and converted PDFs remain inaccessible through HTTP; image responses retain no-store headers.
-  Evidence: `lib/doctrans_web/endpoint.ex:46`, `config/config.exs:47`.
+  Implemented: the page-image plug now takes `from: {Doctrans.Config.Uploads, :upload_dir, []}`, the MFA
+  form `Plug.Static` resolves per request, so serving reads the one setting every writer already used.
+  The build-time `Path.expand/2` in `config/config.exs` is gone: the key is simply absent, and
+  `Config.Uploads.upload_dir/0` falls back to `priv/static/uploads` of the running application — the
+  same absent-means-default idiom the sibling accessors use. A configured root is expanded there, so
+  every caller can rely on an absolute path; page paths are persisted relative to the root, and a
+  relative root would resolve them against the working directory. A nondefault root normally points at
+  an empty volume, so the application creates the root at startup: uploads make their own
+  subdirectories, but the filesystem health check probes the root itself and would otherwise report a
+  missing directory until the first document arrived. Failure to create it names `DOCTRANS_DATA_DIR`
+  rather than surfacing a bare filesystem error from inside `start/2`. The serving restrictions are
+  untouched — the allow-list plug still admits only `page-<digits>.png` under a document's `pages` or
+  `runs/<uuid>/pages` directory, and the no-store headers stay on both ordinary and versioned requests.
+
+  `DOCTRANS_DATA_DIR` is validated rather than trusted. An empty value is rejected instead of silently
+  meaning the working directory (`""` is truthy, and `Path.expand("")` is the cwd, so a blanked `.env`
+  line would have scattered private documents into the repository, which `.gitignore` does not cover).
+  A relative value is rejected instead of resolving against whatever directory the release started in.
+  A root inside the statically served `priv/static` is rejected at startup by
+  `Config.Uploads.validate_root!/0`: the endpoint serves `DoctransWeb.static_paths/0` at `/` ahead of
+  the allow-list, so a root under, say, `priv/static/images` would have handed out retained sources as
+  ordinary static assets with `cache-control: public`. Both names of the development `priv` symlink are
+  checked, and the default root under `priv/static/uploads` stays allowed.
+
+  The variable is deliberately ignored in `:test`. `config/runtime.exs` is evaluated after
+  `config/test.exs` in every environment, so an operator who set it in `.env` would have had `mix test`
+  repoint the suite at their real storage root — where the sweeper tests delete every directory they
+  find. `test/test_helper.exs` refuses to start against any root other than the configured
+  `tmp/uploads_test`, as a tripwire for any future path that repoints it, and the sweeper tests now take
+  a temporary root of their own instead of emptying the shared one.
+  Evidence: `lib/doctrans_web/endpoint.ex` (`UploadImages` plug), `lib/doctrans/config/uploads.ex`,
+  `config/runtime.exs`, `lib/doctrans/application.ex`, `test/test_helper.exs`. The test environment
+  stores outside the application directory (`tmp/uploads_test`), so the whole suite runs against a
+  nondefault root; the endpoint tests build their paths from it. A dedicated test repoints the root
+  after boot and shows the fresh directory being created and reported healthy, its images served with
+  `private, no-store`, its retained sources 404, and images under a root the application has moved on
+  from no longer served. Reverting the plug alone fails five of them. `Doctrans.RuntimeConfigTest` reads
+  `config/runtime.exs` through `Config.Reader` to cover the variable itself, which `mix test` never
+  evaluates otherwise, including that `:test` ignores it.
 
 - [x] **R06 · P2 · Give retries and circuit breakers clear ownership.**
   Indexing melted the breaker around a client that already classifies and melts failures.
