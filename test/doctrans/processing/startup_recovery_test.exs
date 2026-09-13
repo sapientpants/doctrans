@@ -146,7 +146,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
 
       pending = page_fixture(document, %{page_number: 5, extraction_status: "processing"})
 
-      assert :done = StartupRecovery.run_batch({:embeddings, nil})
+      assert {:completion, nil} = StartupRecovery.run_batch({:embeddings, nil})
       jobs = Repo.all(Oban.Job)
       assert Enum.all?(jobs, &(&1.worker == Oban.Worker.to_string(EmbeddingJob)))
       assert Enum.all?(jobs, &(&1.meta["recovered"] == true))
@@ -169,7 +169,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
       page = completed_page_fixture(document)
       page |> EmbeddingJob.page_args() |> EmbeddingJob.new() |> Oban.insert!()
 
-      assert :done = StartupRecovery.run_batch({:embeddings, nil})
+      assert {:completion, nil} = StartupRecovery.run_batch({:embeddings, nil})
       assert Repo.aggregate(Oban.Job, :count) == 1
       assert [job] = Repo.all(Oban.Job)
       refute job.meta["recovered"]
@@ -196,7 +196,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
 
       assert rewritten.content_revision > page.content_revision
 
-      assert :done = StartupRecovery.run_batch({:embeddings, nil})
+      assert {:completion, nil} = StartupRecovery.run_batch({:embeddings, nil})
 
       assert Repo.aggregate(Oban.Job, :count) == 2
       assert [recovered] = Repo.all(from j in Oban.Job, where: j.id != ^stale_job.id)
@@ -220,7 +220,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
       |> Ecto.Changeset.change(state: "cancelled")
       |> Repo.update!()
 
-      assert :done = StartupRecovery.run_batch({:embeddings, nil})
+      assert {:completion, nil} = StartupRecovery.run_batch({:embeddings, nil})
       assert Repo.aggregate(Oban.Job, :count) == 1
     end)
   end
@@ -240,7 +240,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
       |> Ecto.Changeset.change(state: "discarded")
       |> Repo.update!()
 
-      assert :done = StartupRecovery.run_batch({:embeddings, nil})
+      assert {:completion, nil} = StartupRecovery.run_batch({:embeddings, nil})
 
       assert Repo.aggregate(Oban.Job, :count) == 2
       assert [recovered] = Repo.all(from j in Oban.Job, where: j.state == "available")
@@ -255,9 +255,9 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
 
       assert {:embeddings, cursor} = StartupRecovery.run_batch({:embeddings, nil})
       assert Repo.aggregate(Oban.Job, :count) == 50
-      assert :done = StartupRecovery.run_batch({:embeddings, cursor})
+      assert {:completion, nil} = StartupRecovery.run_batch({:embeddings, cursor})
       assert Repo.aggregate(Oban.Job, :count) == 51
-      assert :done = StartupRecovery.run_batch({:embeddings, cursor})
+      assert {:completion, nil} = StartupRecovery.run_batch({:embeddings, cursor})
       assert Repo.aggregate(Oban.Job, :count) == 51
     end)
   end
@@ -274,7 +274,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
         })
       end)
 
-      assert :done = StartupRecovery.run_batch({:embeddings, nil})
+      assert {:completion, nil} = StartupRecovery.run_batch({:embeddings, nil})
       assert [job] = Repo.all(Oban.Job)
       current = Repo.get!(Page, page.id)
       assert current.content_revision > page.content_revision
