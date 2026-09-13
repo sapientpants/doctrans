@@ -514,14 +514,78 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   floor fails both. `ErrorMessagesTest` walks the outage msgids through every known locale, since a missing
   clause would otherwise fall through to the generic message unnoticed.
 
-- [ ] **S03 · P2 · Filter semantic relevance before rank fusion.**
+- [x] **S03 · P2 · Filter semantic relevance before rank fusion.**
   Global semantic retrieval has no similarity floor. With reciprocal-rank constant 60 and score floor .01,
   the top 40 semantic-only pages qualify regardless of actual similarity.
   Calibrate a similarity threshold before combining ranks, using known-answer and unrelated-query examples.
   Acceptance: unrelated queries can return no results; known keyword and semantic matches retain recall;
   pagination/count use the same filtering. Measure query plans on a representative larger library before
   deciding whether bounded candidate retrieval or index changes are needed.
-  Evidence: `lib/doctrans/search.ex:57,313`.
+  Implemented: the semantic half now has to earn its rows. `HybridQuery.run/3`'s `semantic_ranked` CTE gained
+  `(1 - (p.embedding <=> $1::vector)) >= $4`, and it sits inside the CTE rather than after the fusion for two
+  reasons: `ROW_NUMBER()` is then computed over the surviving rows, so RRF denominators stay dense and start
+  at 1, and `COUNT(*) OVER ()` already totals the same filtered set the page is drawn from -- pagination and
+  count use the same filtering without a second predicate that could drift from the first. Filtering after
+  the `FULL OUTER JOIN` would also have dropped keyword-only rows, whose `semantic_score` COALESCEs to 0.
+  The threshold is 0.55, calibrated against the real embedder rather than chosen. Twelve known-answer and
+  twelve unrelated queries were embedded with the configured model and ranked against the 912-page reference
+  library: the best match a known-answer query finds scores 0.603 to 0.772, and the best match an unrelated
+  query can find scores 0.446 to 0.591. The two bands do not overlap, and 0.55 sits between them. The chat
+  path's 0.30 is far below this corpus's noise floor -- at 0.30 an unrelated query still admits 18 to 186
+  pages -- which is why global search takes its own constant rather than sharing that one.
+  What an unrelated query surfaces above 0.50 is content-free boilerplate: a bare `© Campus Verlag GmbH`
+  line, an empty image page, a dot-leader contents page. Fourteen of the 912 pages carry under 120 characters
+  of text, and their embeddings sit near the corpus centroid, so they are mildly similar to every query ever
+  asked. Raising the floor to 0.60 empties all twelve unrelated queries completely, but it also cuts the
+  single most relevant page for a known-answer query -- a section headed "Liquiditätssicherung", at 0.597 --
+  and dropping a true match to silence boilerplate is the wrong trade for a personal library. Embedding
+  pages that hold no retrievable content is the actual defect behind that residue, and it is not this item's.
+  The floor on the *fused* score is gone rather than retuned. A fused score is a function of rank, not of
+  relevance: `1/(rrf_k + rank)` tells a row that is the library's only match apart from a row 500 matches
+  deep and nothing else, so any floor there is a cap on how many matches a library is permitted to have.
+  S02 had already found that edge for keyword-only ranking, where the score crossed 0.01 at rank 41 and took
+  the `COUNT(*) OVER ()` total down with it, and set `min_score(:keyword_only)` to 0; adding a similarity
+  floor without removing the rest of it would have reproduced exactly that truncation on the semantic half.
+  So `@min_score_threshold` and `min_score/1` are deleted and the mode split with them -- one threshold now
+  serves both retrieval modes, because in keyword-only mode the semantic half is empty and a NULL vector
+  clears no floor at all. Relevance is decided where it is still measurable instead of after it has been
+  flattened into a rank.
+  Query plans were measured on replicated-but-distinct corpora of 50,160 and 200,640 pages, since the
+  reference library is too small to say anything: at 912 pages the statement takes 2.1 ms and Postgres does
+  not touch `pages_embedding_idx` for any variant. The floor does not change that: a similarity threshold is
+  a range predicate, and HNSW only accelerates `ORDER BY <=>` under a `LIMIT`, so the CTE stays a sequential
+  scan and every embedded page is still compared. It costs nothing -- 512 ms drops to 465 ms at
+  200k pages, because the smaller surviving set no longer spills its sort to disk -- but it buys relevance,
+  not speed, and must not be argued for as a performance fix.
+  Bounded candidate retrieval is therefore deferred rather than adopted. Cost is linear and predictable at
+  2.3 ms per thousand pages, which puts a 200 ms statement at roughly 86,000 pages against a reference
+  library of 912. A `LIMIT 500` candidate CTE does use the index and runs in 2.0 ms at 200,640 pages, around
+  250 times faster, and the existing join does not block it -- but it caps the semantic half at K rows where the
+  current statement ranks every page above the floor, and it silently under-delivers unless `hnsw.ef_search`
+  is raised to at least K in the same transaction. With `hnsw.iterative_scan` off, which is the default and
+  is set nowhere in this project, an HNSW scan returns at most `ef_search` rows: a `LIMIT 500` written today
+  would return 40. Both of those are changes to make deliberately, when a library approaches the size that
+  needs them, not ahead of one.
+  Tradeoff accepted: an absolute cosine floor is a property of the embedding model and the corpus, not a
+  universal constant. Swapping the embedding model, or changing the Matryoshka truncation width, moves the
+  bands it separates and invalidates the number. It is a single documented module attribute for that reason,
+  and the calibration it came from is reproducible against any library the app holds.
+  Tradeoff accepted: recall is now genuinely narrower for a paraphrase. A query whose wording shares no
+  lexeme with the page it wants gets only the pages the embedder scores above 0.55, and the full-text half
+  cannot cover for it because `plainto_tsquery` ANDs every term of a sentence-length query. That is the
+  intended shape of the fix -- the alternative is the top 40 pages of the corpus regardless of the question --
+  but it is a real loss on the long tail, and it lands on exactly the abstract queries the chat threshold's
+  0.30 was chosen to protect.
+  Evidence: `lib/doctrans/search/hybrid_query.ex` (`semantic_ranked`), `lib/doctrans/search.ex`
+  (`@semantic_similarity_threshold`, `search_with_count/2`). `SemanticRelevanceTest` builds page vectors at
+  exact cosine similarities against the stub's query vector -- `k` components of `+0.1` against the rest at
+  `-0.1` gives `(2k - 1024)/1024` -- so a page can be placed a chosen distance either side of the floor
+  rather than inheriting whatever an opaque fixture produced. It pins an unrelated query returning nothing,
+  a semantic match above the floor surviving without any keyword match, a keyword match below the floor
+  being returned anyway, and a total that counts the filtered set across two pages of results; zeroing the
+  threshold fails those three and correctly leaves the two recall tests passing. The deleted fused-score
+  floor is pinned by a 45-page semantic match set asserting the full count and the tail past offset 40 --
+  restoring the floor fails it, alongside the two keyword-only tests S02 left behind for the same edge.
 
 - [ ] **S04 · P2 · Split oversized paragraphs consistently.**
   A long paragraph is split only when no preceding text is accumulated; after an introduction it becomes

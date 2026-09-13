@@ -63,6 +63,10 @@ defmodule Doctrans.Search do
   - `:limit` - Maximum number of results (default: 20)
   - `:offset` - Matches to skip before the first result (default: 0)
   - `:rrf_k` - RRF smoothing constant (default: 60, higher = smoother ranking)
+
+  The semantic similarity floor is not an option: it is calibrated against the
+  embedding model rather than chosen per call, and a caller that could lower it
+  would be asking for a ranking of the corpus rather than a set of matches.
   """
   @spec search(String.t() | nil, keyword()) ::
           {:ok, [hybrid_result()]} | {:error, Doctrans.Errors.reason()}
@@ -73,9 +77,22 @@ defmodule Doctrans.Search do
   # RRF constant k - higher values give smoother ranking
   @default_rrf_k 60
 
-  # Minimum RRF score threshold to filter out irrelevant results
-  # With k=60, a single match at rank 1 gives score ~0.0164 (1/61)
-  @min_score_threshold 0.01
+  # Minimum cosine similarity a page must reach before the semantic half will
+  # rank it at all. Calibrated on the reference library (912 embedded pages,
+  # qwen3-embedding truncated to 1024 dimensions) against 12 known-answer and
+  # 12 unrelated queries: the best match for a known-answer query scored
+  # 0.603-0.772, while the best match an unrelated query could find scored
+  # 0.446-0.591. Everything an unrelated query surfaces above 0.50 is
+  # content-free boilerplate -- copyright lines, an empty image page -- whose
+  # embeddings sit near the corpus centroid and are therefore mildly similar to
+  # any query at all.
+  #
+  # 0.55 is the value that leaves those two bands apart. Raising it to 0.60
+  # would empty every unrelated query completely, but it also cuts the single
+  # most relevant page for a known-answer query (a section titled
+  # "Liquiditatssicherung", 0.597), and dropping a true match to silence
+  # boilerplate is the wrong trade for a personal library.
+  @semantic_similarity_threshold 0.55
 
   @default_limit 20
 
@@ -105,6 +122,11 @@ defmodule Doctrans.Search do
   half answered alone. A caller has to be able to tell a degraded search apart
   from a search that found nothing, so this reports the mode rather than
   failing.
+
+  A `:hybrid` search can still be empty. The semantic half only ranks pages that
+  clear a cosine similarity floor, so a query about something the library does
+  not cover has nothing to fuse and nothing to return -- which is the honest
+  answer, and the one an unfiltered ranking of the whole corpus cannot give.
   """
   @spec search_with_count(String.t() | nil, keyword()) ::
           {:ok, search_page()} | {:error, Doctrans.Errors.reason()}
@@ -118,7 +140,7 @@ defmodule Doctrans.Search do
 
       execute_hybrid_search(query, embedding, retrieval,
         rrf_k: rrf_k,
-        min_score: min_score(retrieval),
+        min_similarity: @semantic_similarity_threshold,
         limit: limit,
         offset: offset
       )
@@ -129,16 +151,14 @@ defmodule Doctrans.Search do
   # which is why the mode is the healthy one rather than a degraded one.
   defp empty_page, do: %{results: [], total_count: 0, retrieval: :hybrid}
 
-  # The floor is there to cut the semantic half's noise: that half has no
-  # similarity threshold, so it ranks the whole corpus and its deep ranks are
-  # not matches in any meaningful sense (PLAN.md S03). Keyword-only retrieval
-  # has no such half -- every row it ranks cleared a tsquery match -- and the
-  # fused score collapses to `1/(rrf_k + fts_rank)`, which falls under 0.01 at
-  # rank 41 for the default k=60. Keeping the floor there would silently drop
-  # every match past the 40th *and* shrink the `COUNT(*) OVER ()` total to
-  # match, reporting "40 results" for a term that matched five hundred pages.
-  defp min_score(:hybrid), do: @min_score_threshold
-  defp min_score(:keyword_only), do: 0.0
+  # The threshold does not vary by retrieval mode. It governs which pages the
+  # semantic half is allowed to rank, and in keyword-only mode that half is
+  # already empty -- a NULL vector clears no floor at all. Its predecessor, a
+  # floor on the *fused* score, did have to vary: a fused score is a function of
+  # rank, so a single-ranking keyword-only search crossed it at rank 41 and lost
+  # every deeper match along with the count that agreed with them. Filtering
+  # where relevance is actually measurable rather than where it has already been
+  # flattened into a rank is what lets one number serve both modes.
 
   # An embedding server outage must not read as "nothing matched": rank on the
   # full-text half alone rather than failing a search the keyword index can

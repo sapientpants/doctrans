@@ -176,6 +176,11 @@ Use the search input on the dashboard to find content across all documents. Sear
 semantic similarity (AI embeddings) with keyword matching. Press Enter to see results, then
 click a result to jump directly to that page.
 
+A page is only offered as a semantic match when it is actually close to the query, so a search for
+something your library does not cover comes back empty instead of returning the nearest few hundred
+pages in rank order. Keyword matches are never filtered this way: a page that contains your search
+term is always a result, however far its meaning sits from the query.
+
 When the embedding server is unavailable, search keeps working on keyword matches alone and the
 results page says so, so an outage reads as reduced recall rather than as an empty library.
 Semantic matches return once inference is reachable again.
