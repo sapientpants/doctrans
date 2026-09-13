@@ -8,6 +8,8 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpers do
 
   require Logger
 
+  alias DoctransWeb.DocumentLive.MarkdownScrubber
+
   @doc """
   Renders Markdown text to sanitized HTML.
 
@@ -45,21 +47,27 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpers do
     end
   end
 
+  # GFM tables are the one extension enabled: OCR prompts ask the model to keep
+  # tables, and without it comrak renders a table as one pipe-delimited paragraph.
+  @extensions [table: true]
+
   defp mdex_options(opts) do
     if Keyword.get(opts, :hardbreaks, false) do
-      [render: [hardbreaks: true]]
+      [extension: @extensions, render: [hardbreaks: true]]
     else
-      []
+      [extension: @extensions]
     end
   end
 
   @doc """
   Sanitizes HTML to prevent XSS attacks from user-uploaded content.
 
-  Uses HtmlSanitizeEx.basic_html/1 which allows basic formatting tags
-  but strips potentially dangerous elements like scripts.
+  Uses `DoctransWeb.DocumentLive.MarkdownScrubber`, which allows exactly the tags
+  and attributes `HtmlSanitizeEx.basic_html/1` allows — stripping scripts, event
+  handlers, and `javascript:` URLs — plus `align` on table cells so that Markdown
+  column alignment survives.
   """
   def sanitize_html(html) do
-    HtmlSanitizeEx.basic_html(html)
+    MarkdownScrubber.sanitize(html)
   end
 end

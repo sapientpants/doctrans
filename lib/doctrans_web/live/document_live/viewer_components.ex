@@ -100,7 +100,9 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
   def markdown_content(assigns) do
     html = render_markdown(assigns.content || "")
     assigns = assign(assigns, :html, html)
-    ~H"<div>{raw(@html)}</div>"
+    # No wrapper element: the rendered blocks must be direct children of the
+    # `.prose` container so its edge-margin rules (`.prose > :first-child`) match.
+    ~H"{raw(@html)}"
   end
 
   defp show_content?(page, show_original) do

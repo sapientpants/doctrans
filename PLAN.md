@@ -694,7 +694,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
 
 ## Phase 4 — Viewer, uploads, and local-use experience
 
-- [ ] **U01 · P2 · Render Markdown tables and document typography correctly.**
+- [x] **U01 · P2 · Render Markdown tables and document typography correctly.**
   MDEx's table extension is not enabled. A valid Markdown table rendered as a pipe-delimited paragraph,
   despite OCR prompts requesting preserved tables.
   Enable tables and verify sanitized table cells, headings, lists, and overflow styles.
@@ -702,6 +702,81 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   long tables remain readable; existing sanitization checks pass.
   Evidence: `lib/doctrans_web/live/document_live/markdown_helpers.ex:40`, `assets/css/app.css`.
   Runtime reproduction confirmed the missing table.
+  Implemented: `extension: [table: true]` on both render paths, so the viewer and chat render GFM tables
+  as table elements. The plan names one cause; probing found three, all required for a table to reach the
+  page intact. The second is the sanitizer: `HtmlSanitizeEx.basic_html/1` allows the six table tags with
+  an empty attribute list each, so all 16 `align` attributes comrak emitted for the probe table were
+  stripped and every numeric column lost its alignment. `DoctransWeb.DocumentLive.MarkdownScrubber`
+  extends `:basic_html` -- rather than restating it, so the allowed set cannot drift -- and adds `align`
+  on `th`/`td` restricted to the three literal values a delimiter row can produce. Extending alone is not
+  enough: without re-declaring both tags locally the generated fallback resolves their attributes against
+  `BasicHTML`'s rules and drops `align` silently. The third is CSS. The Tailwind typography plugin is not
+  installed, so `.prose` is only the rules in `assets/css/app.css`, and headings, lists, blockquotes,
+  code, rules and images had no styling at all under Preflight -- the document-typography half of this
+  item. `.prose` is now a self-contained sheet in `em` units with colours mixed from
+  `--color-base-content`, so it reads on `base-100` panes and `base-200` chat bubbles in both themes, and
+  `prose-sm` -- asked for by all three call sites and previously matching nothing -- tightens the heading
+  scale without changing body size.
+  This is a regression, not an omission. `f70f1ee` added the `.prose table` rules for Earmark, which
+  renders GFM tables by default; `18b5ecc` swapped Earmark for MDEx as an unrelated dependency change,
+  and comrak's extensions are all off by default. Those table rules had been dead since 10 July 2026, and
+  were written blind: the header tint equalled the odd-row tint and both even and odd rows were striped,
+  so neither the stripe nor the head/body split existed. Fixed along with the alignment selectors, which
+  are needed because an author `text-align` beats the browser's presentational hint for `align`.
+  The viewer degraded worse than this entry stated. Its newlines are CommonMark soft breaks inside one
+  paragraph, so the browser collapsed the probe's five rows into a single 276-character line with no
+  recoverable row or column boundary; chat's `hardbreaks: true` emitted `<br>` between rows, which kept
+  them legible as pipe-delimited text and is likely why only the viewer was reported.
+  Tradeoff accepted: a wide table is its own scroll container (`display: block; width: max-content;
+  max-width: 100%; overflow-x: auto`), which keeps a wide table from widening the pane -- the viewer's
+  only horizontal affordance was the whole content pane, and the chat column has none at all -- at the
+  cost of a table being shrink-to-fit rather than full-width, with its scrollbar reachable only over
+  itself. Cells are `white-space: nowrap`, because capping the table at 100% otherwise lets auto layout
+  crush every column to min-content and break short values like "INV-2024-1001" across three lines; the
+  cost is that a cell holding a sentence makes the table wide and scrolled rather than tall.
+  Scope note: tables are the only GFM construct that is both necessary here and survivable through the
+  existing sanitizer, so no other extension was enabled. Probed: strikethrough and autolinks would
+  survive, but task lists lose their `<input>` and render checked and unchecked identically, footnote
+  anchors lose the `id` they point at, and superscript is unwrapped so `x^2^` becomes `x2` -- each a net
+  regression without sanitizer work of its own.
+  Found in review: the new edge-margin rules use the child combinator
+  (`.prose > :first-child`), but `markdown_content/1` wrapped the rendered HTML in a bare `<div>`, so
+  they matched the wrapper and the first and last block kept their margins -- measured at 12px of dead
+  space at the top and bottom of every viewer page and chat bubble, 28.8px when the page opens on a
+  heading, and worse than the rules they replaced, which were descendant selectors. The wrapper is gone
+  from both components; a LiveView test in each path asserts the rendered blocks are direct children of
+  `.prose`, so the contract the CSS depends on is pinned rather than assumed.
+  Found in review and recorded rather than fixed: a GFM table runs to the next blank line, so a sentence
+  written on the line straight after the last row becomes another row. It is what every GFM renderer
+  does, and chat is where it shows, since an answer may close its table without a blank line. A test
+  pins it.
+  Tradeoff accepted: rendering is synchronous in the LiveView process and the extension makes a wide
+  table much more expensive to render. Measured: a realistic 100KB table page goes 25ms to 82ms, but an
+  adversarial 1,000-column by 200-row page goes 23ms to 3.6s, and 1MB of table to 3.1s, with output
+  growing 3.6x across the LiveView diff. Cost is linear in cell count, not super-linear, and no model
+  produces such a page in practice, so no size cap was added here; U03 is where viewer work moves off
+  the LiveView process.
+  Evidence: `lib/doctrans_web/live/document_live/markdown_helpers.ex` (`mdex_options/1`,
+  `sanitize_html/1`), `lib/doctrans_web/live/document_live/markdown_scrubber.ex`,
+  `lib/doctrans_web/live/document_live/viewer_components.ex` and `chat_components.ex`
+  (`markdown_content/1`), `assets/css/app.css` (`.prose`). 22 unit tests in `MarkdownHelpersTest` and 9
+  LiveView tests across `document_live_show_test.exs` and `show_chat_test.exs`, every claim pinned by a
+  mutation that fails a test, measured rather than asserted: of the 85 tests, dropping the extension from
+  the viewer branch fails 11, from the chat branch 8, from both 19, reverting the scrubber to
+  `basic_html/1` fails 9, removing the `th`/`td` re-registration fails 9, widening the `align` whitelist
+  to any value fails 2, and restoring the wrapper element fails 2. No existing assertion changed: HEAD's
+  four Markdown-touching test files were run against the fix unmodified.
+  Nothing in the repo depended on the broken rendering -- the only pipe tables under `test/`, `priv/` and
+  `README.md` are developer documentation that never reaches `render_markdown/2`.
+  The scrubber was reviewed adversarially: 246 curated hostile inputs and 30,000 generated malformed
+  documents were diffed against `HtmlSanitizeEx.basic_html/1`, and every divergence in every case was
+  `align` on a `th` or `td` carrying one of the three permitted values. The value is what is matched, not
+  the spelling -- the parser lowercases attribute names and decodes entities first, so `ALIGN="right"`
+  survives as `align="right"`, which carries no payload and is also pinned by a test.
+  CSS was verified by rendering the real sanitized pipeline output against the compiled `app.css` in
+  headless Chromium at viewer and chat-panel widths, light and dark, including an 8-column 34-row table,
+  and by measuring that neither pane nor page scrolls horizontally; the running app was not driven in a
+  browser.
 
 - [ ] **U02 · P2 · Preserve the resolved browser locale through LiveView.**
   The HTTP plug detects Accept-Language but deletes the session locale; LiveView then defaults to English.

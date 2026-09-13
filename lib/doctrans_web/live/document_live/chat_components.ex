@@ -169,6 +169,8 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
     # so the layout is preserved instead of collapsing into run-on text.
     html = render_markdown(assigns.content || "", hardbreaks: true)
     assigns = assign(assigns, :html, html)
-    ~H"<div>{raw(@html)}</div>"
+    # No wrapper element: the rendered blocks must be direct children of the
+    # `.prose` container so its edge-margin rules (`.prose > :first-child`) match.
+    ~H"{raw(@html)}"
   end
 end
