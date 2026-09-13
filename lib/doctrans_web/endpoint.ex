@@ -43,9 +43,11 @@ defmodule DoctransWeb.Endpoint do
   # share the upload root but must never be exposed by static serving.
   # These contain private document content: prevent browser/proxy storage,
   # including requests with Plug.Static's versioned query strings.
+  # The root is resolved per request from the same setting the writers use, so a
+  # nondefault storage root serves the images it stored.
   plug DoctransWeb.Plugs.UploadImages,
     at: "/uploads",
-    from: {:doctrans, "priv/static/uploads"},
+    from: {Doctrans.Config.Uploads, :upload_dir, []},
     gzip: false,
     cache_control_for_etags: "private, no-store",
     cache_control_for_vsn_requests: "private, no-store"

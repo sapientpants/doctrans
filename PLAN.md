@@ -278,14 +278,30 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Evidence: `lib/doctrans/processing/pdf_extractor.ex:94,117`, `config/config.exs:104`.
   Code-based finding; no deliberate renderer hang was run during review.
 
-- [ ] **R05 · P2 · Use one runtime storage root for writing and serving images.**
+- [x] **R05 · P2 · Use one runtime storage root for writing and serving images.**
   Writers use `Config.Uploads.upload_dir/0`, but the endpoint always serves `priv/static/uploads`.
   Custom storage can successfully process documents while returning broken page-image URLs.
   The default root is also expanded during build configuration, which complicates portable releases.
   Resolve the runtime data directory consistently and retain the generated-image-only serving restrictions.
   Acceptance: upload, view, reprocess, restart, and delete work with a nondefault data root;
   originals and converted PDFs remain inaccessible through HTTP; image responses retain no-store headers.
-  Evidence: `lib/doctrans_web/endpoint.ex:46`, `config/config.exs:47`.
+  Implemented: the page-image plug now takes `from: {Doctrans.Config.Uploads, :upload_dir, []}`, the MFA
+  form `Plug.Static` resolves per request, so serving reads the one setting every writer already used.
+  The configured default became `:default` rather than a `Path.expand/2` performed while the build
+  machine's `config/config.exs` was evaluated; `Config.Uploads.upload_dir/0` resolves it against the
+  running application, and `DOCTRANS_DATA_DIR` replaces it in `config/runtime.exs`. A nondefault root
+  normally points at an empty volume, so the application creates the root at startup: uploads make their
+  own subdirectories, but the filesystem health check probes the root itself and would otherwise report a
+  missing directory until the first document arrived. The serving restrictions are untouched — the
+  allow-list plug still admits only `page-<digits>.png` under a document's `pages` or `runs/<uuid>/pages`
+  directory, and the no-store headers stay on both ordinary and versioned requests.
+  Evidence: `lib/doctrans_web/endpoint.ex` (`UploadImages` plug), `lib/doctrans/config/uploads.ex`,
+  `config/runtime.exs`, `lib/doctrans/application.ex`. The test environment now stores outside the
+  application directory (`tmp/uploads_test`), so the whole suite runs against a nondefault root; the
+  endpoint tests build their paths from it. A dedicated test repoints the root after boot and shows the
+  fresh directory being created and reported healthy, its images served with `private, no-store`, its
+  retained sources 404, and images left behind in the default root no longer served. Reverting the plug
+  alone fails five of them.
 
 - [x] **R06 · P2 · Give retries and circuit breakers clear ownership.**
   Indexing melted the breaker around a client that already classifies and melts failures.

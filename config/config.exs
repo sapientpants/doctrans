@@ -43,8 +43,14 @@ config :doctrans, :retry,
   max_delay_ms: 30_000
 
 # File upload configuration
+#
+# `:default` resolves at runtime to `priv/static/uploads` inside the running
+# application, so a release is not pinned to the directory layout of the machine
+# that built it. `DOCTRANS_DATA_DIR` selects another storage root; see
+# `Doctrans.Config.Uploads.upload_dir/0`, which every writer and the page-image
+# endpoint read.
 config :doctrans, :uploads,
-  upload_dir: Path.expand("../priv/static/uploads", __DIR__),
+  upload_dir: :default,
   max_file_size: 100_000_000
 
 # PDF extraction configuration

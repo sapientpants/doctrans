@@ -350,6 +350,23 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
+  Ensures the configured storage root exists.
+
+  A nondefault `DOCTRANS_DATA_DIR` normally points at an empty volume, so the
+  root is created at startup: uploads create their own subdirectories, but the
+  filesystem health check probes the root itself and would otherwise report a
+  missing directory until the first document arrived.
+  """
+  # The path is the configured storage root; no request value contributes to it.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec ensure_uploads_dir!() :: String.t()
+  def ensure_uploads_dir! do
+    dir = uploads_dir()
+    File.mkdir_p!(dir)
+    dir
+  end
+
+  @doc """
   Ensures the document's upload directories exist.
   """
   # Callers supply generated or persisted document UUIDs; the only suffix is pages.
