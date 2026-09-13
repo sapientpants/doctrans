@@ -27,7 +27,7 @@ defmodule Doctrans.Search.HybridQuery do
   identically typed, and silently transposable positionally:
 
   - `:rrf_k` - smooths the fusion
-  - `:min_score` - drops rows whose fused score is noise
+  - `:min_similarity` - the cosine floor the semantic half must clear
   - `:limit` / `:offset` - the page to draw
 
   All four are the caller's values rather than this module's defaults, so every
@@ -42,7 +42,10 @@ defmodule Doctrans.Search.HybridQuery do
     # Use CTE-based query for efficient RRF calculation
     # - semantic_ranked: pages ranked by embedding similarity (IDs and ranks only),
     #   empty when $1 is NULL so an unembeddable query still gets the fts half
-    #   rather than an error -- one statement, both retrieval modes
+    #   rather than an error -- one statement, both retrieval modes. $4 is the
+    #   similarity floor: without it this CTE ranks every embedded page in the
+    #   library, so the deepest ranks are whatever the corpus happens to hold
+    #   rather than anything the query asked for.
     # - fts_ranked: pages ranked by full-text search score (IDs and ranks only)
     # - combined: FULL OUTER JOIN with RRF score calculation
     # - Final SELECT joins back to pages for snippets using ts_headline(), and
@@ -61,6 +64,7 @@ defmodule Doctrans.Search.HybridQuery do
         AND d.status = 'completed'
         AND p.extraction_status = 'completed'
         AND p.embedding IS NOT NULL
+        AND (1 - (p.embedding <=> $1::vector)) >= $4
     ),
     fts_ranked AS (
       SELECT
@@ -143,7 +147,14 @@ defmodule Doctrans.Search.HybridQuery do
     FROM combined c
     JOIN pages p ON c.page_id = p.id
     JOIN documents d ON c.document_id = d.id
-    WHERE c.rrf_score >= $4
+    -- No floor on the fused score. A fused score is a function of rank, not of
+    -- relevance: a row that is the only match in the library and a row 500
+    -- matches deep are told apart by 1/(k + rank) alone, so any floor here is a
+    -- cap on how many matches the library is allowed to have. The 0.01 floor
+    -- this replaces cut off at rank 41 for the default k=60 and shrank the
+    -- COUNT(*) OVER () total to agree with itself. Relevance is now decided
+    -- where it can be: the semantic half clears $4, the full-text half clears
+    -- its tsquery, and every row reaching here earned its place.
     -- page_id breaks RRF ties deterministically. Without it Postgres may order
     -- tied rows differently per statement, which paginates one row onto two
     -- pages and drops another entirely.
@@ -156,7 +167,7 @@ defmodule Doctrans.Search.HybridQuery do
       query_embedding,
       query,
       Keyword.fetch!(opts, :rrf_k),
-      Keyword.fetch!(opts, :min_score),
+      Keyword.fetch!(opts, :min_similarity),
       Keyword.fetch!(opts, :limit),
       Keyword.fetch!(opts, :offset)
     ]
