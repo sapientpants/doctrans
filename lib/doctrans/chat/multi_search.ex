@@ -22,11 +22,14 @@ defmodule Doctrans.Chat.MultiSearch do
   and merges results using Reciprocal Rank Fusion.
 
   A query that fails is logged and skipped, so a partially available retrieval
-  still answers with what it found. Returns `{:error, {:retrieval_unavailable,
-  [reason: reason]}}` only when *every* query failed, which is an outage rather
-  than an absence of matches: `{:ok, []}` means the document was searched and
-  nothing matched. An empty query list is `{:ok, []}` too — nothing was asked,
-  so nothing failed.
+  still answers with what it found. Returns `{:error, reason}` only when *every*
+  query failed, which is an outage rather than an absence of matches: `{:ok, []}`
+  means the document was searched and nothing matched. An empty query list is
+  `{:ok, []}` too — nothing was asked, so nothing failed.
+
+  `Doctrans.Chat.retrieve/4` is what turns that error into the
+  `:retrieval_unavailable` an outage reads as, because it has to tag the
+  single-query branch the same way and the tag belongs in one place.
 
   ## Options
 
@@ -48,12 +51,12 @@ defmodule Doctrans.Chat.MultiSearch do
     |> resolve(queries, limit)
   end
 
-  # Task.async_stream preserves input order, so the head of the failures is the
-  # first query's failure.
+  # The stream is ordered, so the head of the failures is the first query's
+  # failure.
   defp resolve({[], [{:error, reason} | _rest] = failures}, queries, _limit) do
     log_summary(queries, [], failures, 0)
 
-    {:error, {:retrieval_unavailable, [reason: reason]}}
+    {:error, reason}
   end
 
   defp resolve({successes, failures}, queries, limit) do
@@ -81,37 +84,56 @@ defmodule Doctrans.Chat.MultiSearch do
     |> Keyword.delete(:context_limit)
   end
 
+  # Supervised and *nolink*: `Task.async_stream/3` links each task to this
+  # process, so one crashed query would take the whole chat request down with
+  # it rather than being skipped -- the outcome below could never observe an
+  # exit. Partial availability is the point of this module, and a crash is just
+  # another way for one query to be unavailable.
   defp query_outcomes(document_id, queries, search_opts) do
-    queries
-    |> Task.async_stream(&search_one(document_id, &1, search_opts),
+    Doctrans.TaskSupervisor
+    |> Task.Supervisor.async_stream_nolink(
+      queries,
+      &search_one(document_id, &1, search_opts),
       timeout: :infinity,
       max_concurrency: length(queries)
     )
     |> Enum.map(&outcome/1)
   end
 
+  # `{:ok, nil}` is a legal embedding result -- see `Search.EmbeddingBehaviour`.
+  # Searching on it yields `{:ok, []}`, an absence of matches, which is the one
+  # thing this module exists to keep apart from a query that never ran.
   defp search_one(document_id, query, search_opts) do
-    with {:ok, embedding} <- embedding_module().generate(query, []) do
-      Search.search_by_embedding(document_id, embedding, search_opts)
+    case embedding_module().generate(query, []) do
+      {:ok, nil} -> {:error, :embedding_unavailable}
+      {:ok, embedding} -> Search.search_by_embedding(document_id, embedding, search_opts)
+      {:error, reason} -> {:error, reason}
     end
   end
 
   defp outcome({:ok, {:ok, results}}), do: {:ok, results}
 
   defp outcome({:ok, {:error, reason}}) do
-    Logger.warning("Multi-search query failed: #{inspect(reason)}")
+    Logger.warning(
+      "Multi-search query failed: #{inspect(reason, limit: 5, printable_limit: 256)}"
+    )
 
-    {:error, Errors.normalize(reason)}
+    {:error, tag_only(Errors.normalize(reason))}
   end
 
   defp outcome({:exit, reason}) do
-    # An exit reason can carry a stacktrace holding the query text and its
-    # 1024-float embedding, so it stays in the log and never in the returned
-    # reason, which the caller renders and stores.
-    Logger.warning("Multi-search task exited: #{inspect(reason)}")
+    Logger.warning("Multi-search task exited: #{inspect(reason, limit: 5, printable_limit: 256)}")
 
     {:error, :task_exited}
   end
+
+  # Both failure paths hand back the tag alone. An exit reason can carry a
+  # stacktrace holding the query text and its 1024-float embedding, and a
+  # `{:database_error, [reason: %Postgrex.Error{}]}` binding carries the whole
+  # SQL statement -- detail that belongs in the log, not in a reason the caller
+  # renders. A bare atom is still a `Doctrans.Errors.reason()`.
+  defp tag_only({code, _bindings}), do: code
+  defp tag_only(code) when is_atom(code), do: code
 
   # For each ranked list, assign RRF scores based on position
   # Then sum scores per unique chunk (or fallback page) across all lists

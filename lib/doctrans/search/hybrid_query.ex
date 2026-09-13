@@ -23,16 +23,22 @@ defmodule Doctrans.Search.HybridQuery do
   @doc """
   Runs the statement, returning Postgrex's result or a tagged database error.
 
-  `min_score` drops rows whose fused score is noise; `rrf_k` smooths the
-  fusion. Both are the caller's defaults rather than this module's, so every
+  The knobs arrive as options because `:limit` and `:offset` are adjacent,
+  identically typed, and silently transposable positionally:
+
+  - `:rrf_k` - smooths the fusion
+  - `:min_score` - drops rows whose fused score is noise
+  - `:limit` / `:offset` - the page to draw
+
+  All four are the caller's values rather than this module's defaults, so every
   search knob stays documented in one place.
   """
-  @spec run(String.t(), Pgvector.t() | nil, integer(), float(), integer(), integer()) ::
+  @spec run(String.t(), Pgvector.t() | nil, keyword()) ::
           {:ok, Postgrex.Result.t()} | {:error, Doctrans.Errors.reason()}
   # Static heredoc; $1..$6 are bound parameters, including the user's search text ($2)
   # and the pagination values ($5, $6). No interpolation anywhere in the statement.
   # sobelow_skip ["SQL.Query"]
-  def run(query, query_embedding, rrf_k, min_score, limit, offset) do
+  def run(query, query_embedding, opts) do
     # Use CTE-based query for efficient RRF calculation
     # - semantic_ranked: pages ranked by embedding similarity (IDs and ranks only),
     #   empty when $1 is NULL so an unembeddable query still gets the fts half
@@ -146,12 +152,26 @@ defmodule Doctrans.Search.HybridQuery do
     OFFSET $6
     """
 
-    case Repo.query(sql, [query_embedding, query, rrf_k, min_score, limit, offset]) do
+    params = [
+      query_embedding,
+      query,
+      Keyword.fetch!(opts, :rrf_k),
+      Keyword.fetch!(opts, :min_score),
+      Keyword.fetch!(opts, :limit),
+      Keyword.fetch!(opts, :offset)
+    ]
+
+    case Repo.query(sql, params) do
       {:ok, result} ->
         {:ok, result}
 
       {:error, error} ->
-        Logger.error("Hybrid search query failed: #{inspect(error)}")
+        # A %Postgrex.Error{} carries the statement that failed -- this whole
+        # heredoc -- so the log gets it bounded rather than several KB at a time.
+        Logger.error(
+          "Hybrid search query failed: #{inspect(error, limit: 5, printable_limit: 256)}"
+        )
+
         {:error, {:database_error, [reason: error]}}
     end
   end

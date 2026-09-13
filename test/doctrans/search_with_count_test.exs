@@ -13,7 +13,14 @@ defmodule Doctrans.SearchWithCountTest do
   alias Doctrans.Documents.Pages
   alias Doctrans.Repo
   alias Doctrans.Search
-  alias Doctrans.Search.{EmbeddingDimensionStub, EmbeddingErrorStub, EmbeddingProbe}
+
+  alias Doctrans.Search.{
+    EmbeddingDimensionStub,
+    EmbeddingErrorStub,
+    EmbeddingNilStub,
+    EmbeddingProbe
+  }
+
   alias Doctrans.TestEnv
 
   import Doctrans.Fixtures
@@ -135,6 +142,56 @@ defmodule Doctrans.SearchWithCountTest do
                  Search.search_with_count("degradedcountterm", limit: 5)
 
         assert length(results) == 5
+      end)
+    end
+
+    test "counts and returns degraded matches past the fused-score floor" do
+      # 45 > the 40 the floor admits: keyword-only fuses one rank, so the score
+      # is 1/(60 + fts_rank), which crosses under 0.01 at rank 41. Applying the
+      # hybrid floor here would cap both the page and its total at 40 and call
+      # that the whole match set.
+      for index <- 1..45 do
+        searchable_page("Page #{index} about floorcapterm", "Floor Cap Doc #{index}")
+      end
+
+      fail_embeddings_for("floorcapterm")
+
+      capture_log(fn ->
+        assert {:ok, %{results: results, total_count: 45, retrieval: :keyword_only}} =
+                 Search.search_with_count("floorcapterm", limit: 50)
+
+        assert length(results) == 45
+      end)
+    end
+
+    test "pages through degraded matches past the floor rather than ending at it" do
+      for index <- 1..45 do
+        searchable_page("Page #{index} about floorpageterm", "Floor Page Doc #{index}")
+      end
+
+      fail_embeddings_for("floorpageterm")
+
+      capture_log(fn ->
+        assert {:ok, %{results: results, total_count: 45, retrieval: :keyword_only}} =
+                 Search.search_with_count("floorpageterm", limit: 20, offset: 40)
+
+        # The tail the floor used to swallow whole.
+        assert length(results) == 5
+      end)
+    end
+
+    test "reports a vectorless embedding success as keyword-only, not as hybrid" do
+      page = searchable_page("A page about nilvectorterm and nothing else")
+
+      # `{:ok, nil}` is a legal embedding result; ranking never ran, so calling
+      # it hybrid would claim a semantic half that sat out.
+      use_embedding_module(EmbeddingNilStub)
+
+      capture_log(fn ->
+        assert {:ok, %{results: [result], total_count: 1, retrieval: :keyword_only}} =
+                 Search.search_with_count("nilvectorterm")
+
+        assert result.page_id == page.id
       end)
     end
 

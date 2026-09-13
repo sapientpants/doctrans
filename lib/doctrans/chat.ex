@@ -9,6 +9,7 @@ defmodule Doctrans.Chat do
   alias Doctrans.Chat.MultiSearch
   alias Doctrans.Chat.QueryExpander
   alias Doctrans.Documents
+  alias Doctrans.Errors
   alias Doctrans.Search
 
   require Logger
@@ -85,7 +86,10 @@ defmodule Doctrans.Chat do
         request_answer(document, pages, standalone_question, chat_history, opts)
 
       {:error, reason} = error ->
-        Logger.error("Chat search failed for document #{document.id}: #{inspect(reason)}")
+        Logger.error(
+          "Chat search failed for document #{document.id}: #{inspect(reason, limit: 5, printable_limit: 256)}"
+        )
+
         error
     end
   end
@@ -386,18 +390,44 @@ defmodule Doctrans.Chat do
   Runs multi-query search with RRF when there are multiple query variants,
   otherwise a single semantic search using the supplied query, falling back to
   the standalone question only when no queries are supplied.
-  Returns `{:ok, pages}` or `{:error, reason}`.
+  Returns `{:ok, pages}`, or `{:error, {:retrieval_unavailable, [reason: tag]}}`
+  when retrieval could not run at all -- on any of the three branches, so an
+  outage never reaches the reader as "the document holds nothing relevant".
+  `{:ok, []}` keeps its own meaning: searched, nothing matched.
+
   Shared by `send_message/4` and `Doctrans.Chat.Agent`.
   """
   @spec retrieve(Ecto.UUID.t(), String.t(), [String.t()], keyword()) ::
           {:ok, [Search.document_result()]} | {:error, Doctrans.Errors.reason()}
   def retrieve(document_id, standalone_question, queries, search_opts) do
-    case queries do
-      [] -> Search.search_in_document(document_id, standalone_question, search_opts)
-      [query] -> Search.search_in_document(document_id, query, search_opts)
-      queries -> MultiSearch.search_with_queries(document_id, queries, search_opts)
-    end
+    result =
+      case queries do
+        [] -> Search.search_in_document(document_id, standalone_question, search_opts)
+        [query] -> Search.search_in_document(document_id, query, search_opts)
+        queries -> MultiSearch.search_with_queries(document_id, queries, search_opts)
+      end
+
+    tag_outage(result)
   end
+
+  # Retrieval that returned nothing because it is down is a different answer
+  # than retrieval that returned nothing because the document holds nothing, so
+  # every branch has to say which -- the single-query one most of all. The
+  # planner and the embedder are the same server, so a planner outage collapses
+  # the query list to one (`QueryExpander.expand/3` falls back to `[question]`)
+  # and lands on the branch that would otherwise report a bare `:circuit_open`
+  # as the generic "I encountered an error".
+  #
+  # The tag carries the reason's tag alone: the detail is already logged where
+  # it arose, and what reaches the reader is a rendered message, not a payload.
+  defp tag_outage({:error, reason}) do
+    {:error, {:retrieval_unavailable, [reason: tag_only(Errors.normalize(reason))]}}
+  end
+
+  defp tag_outage(result), do: result
+
+  defp tag_only({code, _bindings}), do: code
+  defp tag_only(code) when is_atom(code), do: code
 
   @doc false
   @spec build_system_prompt(String.t(), String.t()) :: String.t()

@@ -39,6 +39,8 @@ defmodule Doctrans.Search do
   alias Doctrans.Repo
   alias Doctrans.Search.HybridQuery
 
+  require Logger
+
   # Allow embedding module to be configured for testing
   defp embedding_module do
     Application.get_env(:doctrans, :embedding_module, Doctrans.Search.Embedding)
@@ -53,7 +55,8 @@ defmodule Doctrans.Search do
   Use `search_with_count/2` when the total number of matches is wanted too --
   it is the same statement, the total comes back for free, and it reports
   whether the ranking was hybrid or degraded to keyword-only. This function
-  degrades the same way; it just does not say so.
+  degrades the same way; it just does not say so, which is why nothing in
+  `lib/` calls it.
 
   ## Options
 
@@ -112,7 +115,13 @@ defmodule Doctrans.Search do
   def search_with_count(query, opts) when is_binary(query) do
     with {:ok, {limit, offset, rrf_k}} <- query_bounds(opts) do
       {embedding, retrieval} = query_embedding(query)
-      execute_hybrid_search(query, embedding, rrf_k, limit, offset, retrieval)
+
+      execute_hybrid_search(query, embedding, retrieval,
+        rrf_k: rrf_k,
+        min_score: min_score(retrieval),
+        limit: limit,
+        offset: offset
+      )
     end
   end
 
@@ -120,20 +129,38 @@ defmodule Doctrans.Search do
   # which is why the mode is the healthy one rather than a degraded one.
   defp empty_page, do: %{results: [], total_count: 0, retrieval: :hybrid}
 
+  # The floor is there to cut the semantic half's noise: that half has no
+  # similarity threshold, so it ranks the whole corpus and its deep ranks are
+  # not matches in any meaningful sense (PLAN.md S03). Keyword-only retrieval
+  # has no such half -- every row it ranks cleared a tsquery match -- and the
+  # fused score collapses to `1/(rrf_k + fts_rank)`, which falls under 0.01 at
+  # rank 41 for the default k=60. Keeping the floor there would silently drop
+  # every match past the 40th *and* shrink the `COUNT(*) OVER ()` total to
+  # match, reporting "40 results" for a term that matched five hundred pages.
+  defp min_score(:hybrid), do: @min_score_threshold
+  defp min_score(:keyword_only), do: 0.0
+
   # An embedding server outage must not read as "nothing matched": rank on the
   # full-text half alone rather than failing a search the keyword index can
   # still answer, and hand back the mode so the caller can say which it got.
-  # `nil` reaches the statement as a NULL vector, which the semantic CTE's
-  # `$1::vector IS NOT NULL` guard turns into an empty semantic ranking.
+  # `{:ok, nil}` is a legal embedding result (`EmbeddingBehaviour`) and is the
+  # same situation -- reporting `:hybrid` for it would claim a ranking that did
+  # not run. Either way `nil` reaches the statement as a NULL vector, which
+  # `HybridQuery.run/3` turns into an empty semantic ranking.
   defp query_embedding(query) do
     case embedding_module().generate(query, []) do
+      {:ok, nil} ->
+        Logger.warning("Search embedding returned no vector, keyword-only")
+        {nil, :keyword_only}
+
       {:ok, embedding} ->
         {embedding, :hybrid}
 
       {:error, reason} ->
-        require Logger
+        Logger.warning(
+          "Search embedding failed, keyword-only: #{inspect(reason, limit: 5, printable_limit: 256)}"
+        )
 
-        Logger.warning("Search embedding failed, keyword-only: #{inspect(reason, limit: 5)}")
         {nil, :keyword_only}
     end
   end
@@ -265,8 +292,10 @@ defmodule Doctrans.Search do
         {:ok, Enum.map(rows, &format_chunk_search_row(&1, columns))}
 
       {:error, error} ->
-        require Logger
-        Logger.error("Chunk search query failed: #{inspect(error)}")
+        Logger.error(
+          "Chunk search query failed: #{inspect(error, limit: 5, printable_limit: 256)}"
+        )
+
         {:error, {:database_error, [reason: error]}}
     end
   end
@@ -296,8 +325,10 @@ defmodule Doctrans.Search do
         {:ok, Enum.map(rows, &format_page_search_row(&1, columns))}
 
       {:error, error} ->
-        require Logger
-        Logger.error("Page search query failed: #{inspect(error)}")
+        Logger.error(
+          "Page search query failed: #{inspect(error, limit: 5, printable_limit: 256)}"
+        )
+
         {:error, {:database_error, [reason: error]}}
     end
   end
@@ -330,9 +361,9 @@ defmodule Doctrans.Search do
     }
   end
 
-  defp execute_hybrid_search(query, query_embedding, rrf_k, limit, offset, retrieval) do
+  defp execute_hybrid_search(query, query_embedding, retrieval, query_opts) do
     with {:ok, %{rows: rows, columns: columns}} <-
-           HybridQuery.run(query, query_embedding, rrf_k, @min_score_threshold, limit, offset) do
+           HybridQuery.run(query, query_embedding, query_opts) do
       {:ok,
        %{
          results: Enum.map(rows, &format_row(&1, columns)),

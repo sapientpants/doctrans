@@ -118,6 +118,18 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
       refute socket.assigns.searched
     end
 
+    test "a superseded degraded result cannot raise the notice over a newer query" do
+      socket = search_socket("new query", 1)
+      payload = {:ok, {"old query", 1, search_page([result_stub()], 5, :keyword_only)}}
+
+      assert {:noreply, socket} = SearchLive.handle_async(:search, payload, socket)
+
+      # The banner reads `:retrieval`, so a stale degraded payload setting it
+      # would report an outage for a query that never ran into one.
+      assert socket.assigns.retrieval == :hybrid
+      assert socket.assigns.results == []
+    end
+
     test "ignores a result reported for a page the view has moved off" do
       socket = search_socket("same query", 2)
       payload = {:ok, {"same query", 1, search_page([result_stub()], 5)}}
@@ -303,7 +315,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
 
     test "the notice does not outlive the query that produced it", %{conn: conn} do
       searchable_page("Contains degradedterm in the text", "Degraded Doc")
-      searchable_page("Contains healthyterm in the text", "Healthy Doc")
+      healthy = searchable_page("Contains healthyterm in the text", "Healthy Doc")
 
       # Only the first query fails to embed, so the second one searches normally.
       inference_down_for("degradedterm")
@@ -313,8 +325,9 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
       assert has_element?(view, "#search-degraded")
 
       view |> element("#search-form") |> render_submit(%{q: "healthyterm"})
-      assert render_async(view, @async_timeout) =~ "Healthy Doc"
+      render_async(view, @async_timeout)
 
+      assert has_element?(view, "#search-result-#{healthy.id}")
       refute has_element?(view, "#search-degraded")
     end
   end

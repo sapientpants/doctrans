@@ -164,6 +164,12 @@ defmodule DoctransWeb.SearchLive do
     |> assign(:page, 1)
     |> assign(:results, [])
     |> assign(:total_count, 0)
+    # `:retrieval` describes a result, so it is reset wherever results are --
+    # here, on a new search, and on a failure. Two of those three are currently
+    # invisible behind `:searching` / `:search_error`, but the invariant is what
+    # keeps the notice from outliving what it describes: `reject_query/3` clears
+    # and then re-asserts `searched`, which would otherwise leave a degraded
+    # notice standing over results that are gone.
     |> assign(:retrieval, :hybrid)
     |> assign(:searching, false)
     |> assign(:searched, false)
@@ -230,10 +236,8 @@ defmodule DoctransWeb.SearchLive do
           <span>{gettext("Searching...")}</span>
         </div>
 
-        <%!-- One bar above both outcomes: a keyword-only search that matched
-        nothing is exactly the case a reader would otherwise read as "nothing in
-        my library matches", so it needs the notice as much as a page of hits
-        does. Rendering it once keeps the id unique whichever outcome shows. --%>
+        <%!-- Above both outcomes: a keyword-only search that matched nothing
+        needs this notice as much as a page of hits does. --%>
         <div
           :if={!@searching && @searched && !@search_error && @retrieval == :keyword_only}
           id="search-degraded"

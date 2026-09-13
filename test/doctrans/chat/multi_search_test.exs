@@ -6,6 +6,8 @@ defmodule Doctrans.Chat.MultiSearchTest do
   alias Doctrans.Chat.MultiSearch
   alias Doctrans.Documents
   alias Doctrans.Search.EmbeddingErrorStub
+  alias Doctrans.Search.EmbeddingExitStub
+  alias Doctrans.Search.EmbeddingNilStub
   alias Doctrans.TestEnv
 
   describe "search_with_queries/3" do
@@ -120,17 +122,56 @@ defmodule Doctrans.Chat.MultiSearchTest do
       document = create_document(status: "completed")
       insert_page_with_embedding(document, 1)
 
+      # Distinct reasons per query, so the assertion below pins *which* failure
+      # is reported rather than passing for any of them.
       TestEnv.put_env(:embedding_module, EmbeddingErrorStub)
-      TestEnv.put_env(:embedding_error_reason, :circuit_open)
+      TestEnv.put_env(:embedding_error_plan, [{"firstq", :circuit_open}, {"secondq", :timeout}])
 
       log =
         capture_info_log(fn ->
-          assert {:error, {:retrieval_unavailable, [reason: :circuit_open]}} =
-                   MultiSearch.search_with_queries(document.id, ["q1", "q2"])
+          # `Doctrans.Chat.retrieve/4` is what tags this as an outage; here the
+          # bare reason is the contract, and it is the first query's.
+          assert {:error, :circuit_open} =
+                   MultiSearch.search_with_queries(document.id, ["firstq", "secondq"])
         end)
 
       # The summary line has to show the outage, not a quiet empty result.
       assert log =~ "0 succeeded, 2 failed"
+    end
+
+    test "reports a crashed query as an outage without carrying its payload out" do
+      document = create_document(status: "completed")
+      insert_page_with_embedding(document, 1)
+
+      TestEnv.put_env(:embedding_module, EmbeddingExitStub)
+
+      log =
+        capture_info_log(fn ->
+          assert {:error, reason} =
+                   MultiSearch.search_with_queries(document.id, ["crashq1", "crashq2"])
+
+          # The tag alone. An exit reason carries the query text and its vector,
+          # and this reason is rendered -- so it keeps neither.
+          assert reason == :task_exited
+          refute inspect(reason) =~ "crashq1"
+        end)
+
+      assert log =~ "0 succeeded, 2 failed"
+    end
+
+    test "treats an embedding that returns no vector as an outage, not as no matches" do
+      document = create_document(status: "completed")
+      insert_page_with_embedding(document, 1)
+
+      # `{:ok, nil}` is a legal success, but nothing can be ranked against a
+      # NULL vector: searching on it would report "nothing matched" for a query
+      # that never ran.
+      TestEnv.put_env(:embedding_module, EmbeddingNilStub)
+
+      capture_info_log(fn ->
+        assert {:error, :embedding_unavailable} =
+                 MultiSearch.search_with_queries(document.id, ["nilq1", "nilq2"])
+      end)
     end
 
     test "keeps the results of the queries that succeeded when only some fail" do
