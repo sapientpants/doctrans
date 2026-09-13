@@ -8,6 +8,7 @@ defmodule Doctrans.Chat.MultiSearch do
   across multiple query phrasings.
   """
 
+  alias Doctrans.Errors
   alias Doctrans.Search
 
   require Logger
@@ -20,27 +21,57 @@ defmodule Doctrans.Chat.MultiSearch do
   Generates embeddings for all queries in parallel, runs pgvector searches,
   and merges results using Reciprocal Rank Fusion.
 
+  A query that fails is logged and skipped, so a partially available retrieval
+  still answers with what it found. Returns `{:error, {:retrieval_unavailable,
+  [reason: reason]}}` only when *every* query failed, which is an outage rather
+  than an absence of matches: `{:ok, []}` means the document was searched and
+  nothing matched. An empty query list is `{:ok, []}` too — nothing was asked,
+  so nothing failed.
+
   ## Options
 
   - `:limit` - Maximum number of results to return (default: 3)
   - `:min_similarity` - Minimum cosine similarity threshold (default: Search default)
   """
   @spec search_with_queries(Ecto.UUID.t(), [String.t()], keyword()) ::
-          {:ok, [Search.document_result()]}
+          {:ok, [Search.document_result()]} | {:error, Errors.reason()}
   def search_with_queries(document_id, queries, opts \\ [])
 
   def search_with_queries(_document_id, [], _opts), do: {:ok, []}
 
   def search_with_queries(document_id, queries, opts) when is_list(queries) do
     limit = Keyword.get(opts, :limit, 3)
-    ranked_lists = ranked_lists(document_id, queries, per_query_opts(opts, limit))
-    merged = merge_with_rrf(ranked_lists, limit)
 
-    Logger.info(
-      "Multi-search: #{length(queries)} queries, #{length(ranked_lists)} successful, #{length(merged)} results returned"
-    )
+    document_id
+    |> query_outcomes(queries, per_query_opts(opts, limit))
+    |> Enum.split_with(&match?({:ok, _results}, &1))
+    |> resolve(queries, limit)
+  end
+
+  # Task.async_stream preserves input order, so the head of the failures is the
+  # first query's failure.
+  defp resolve({[], [{:error, reason} | _rest] = failures}, queries, _limit) do
+    log_summary(queries, [], failures, 0)
+
+    {:error, {:retrieval_unavailable, [reason: reason]}}
+  end
+
+  defp resolve({successes, failures}, queries, limit) do
+    merged =
+      successes
+      |> Enum.map(fn {:ok, results} -> results end)
+      |> merge_with_rrf(limit)
+
+    log_summary(queries, successes, failures, length(merged))
 
     {:ok, merged}
+  end
+
+  defp log_summary(queries, successes, failures, returned) do
+    Logger.info(
+      "Multi-search: #{length(queries)} queries, #{length(successes)} succeeded, " <>
+        "#{length(failures)} failed, #{returned} results returned"
+    )
   end
 
   defp per_query_opts(opts, limit) do
@@ -50,13 +81,13 @@ defmodule Doctrans.Chat.MultiSearch do
     |> Keyword.delete(:context_limit)
   end
 
-  defp ranked_lists(document_id, queries, search_opts) do
+  defp query_outcomes(document_id, queries, search_opts) do
     queries
     |> Task.async_stream(&search_one(document_id, &1, search_opts),
       timeout: :infinity,
       max_concurrency: length(queries)
     )
-    |> Enum.flat_map(&collect_results/1)
+    |> Enum.map(&outcome/1)
   end
 
   defp search_one(document_id, query, search_opts) do
@@ -65,16 +96,21 @@ defmodule Doctrans.Chat.MultiSearch do
     end
   end
 
-  defp collect_results({:ok, {:ok, results}}), do: [results]
+  defp outcome({:ok, {:ok, results}}), do: {:ok, results}
 
-  defp collect_results({:ok, {:error, reason}}) do
+  defp outcome({:ok, {:error, reason}}) do
     Logger.warning("Multi-search query failed: #{inspect(reason)}")
-    []
+
+    {:error, Errors.normalize(reason)}
   end
 
-  defp collect_results({:exit, reason}) do
+  defp outcome({:exit, reason}) do
+    # An exit reason can carry a stacktrace holding the query text and its
+    # 1024-float embedding, so it stays in the log and never in the returned
+    # reason, which the caller renders and stores.
     Logger.warning("Multi-search task exited: #{inspect(reason)}")
-    []
+
+    {:error, :task_exited}
   end
 
   # For each ranked list, assign RRF scores based on position

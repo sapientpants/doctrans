@@ -296,13 +296,18 @@ defmodule Doctrans.SearchTest do
 
   describe "search_with_count/2" do
     test "returns empty results and a zero count for an empty query" do
-      assert {:ok, %{results: [], total_count: 0}} = Search.search_with_count("")
+      assert {:ok, %{results: [], total_count: 0, retrieval: :hybrid}} =
+               Search.search_with_count("")
     end
 
     test "returns empty results and a zero count for a nil query" do
-      assert {:ok, %{results: [], total_count: 0}} = Search.search_with_count(nil)
+      assert {:ok, %{results: [], total_count: 0, retrieval: :hybrid}} =
+               Search.search_with_count(nil)
     end
 
+    # An unasked query skipped no ranking, so it reports the healthy mode: only
+    # a search that could not be embedded is `:keyword_only`.
+    #
     # The cases that swap `:embedding_module` globally live in
     # `Doctrans.SearchWithCountTest`, which is `async: false`; this module is not.
   end
@@ -338,7 +343,7 @@ defmodule Doctrans.SearchTest do
     end
 
     test "accepts the largest offset Postgres can encode" do
-      assert {:ok, %{results: [], total_count: 0}} =
+      assert {:ok, %{results: [], total_count: 0, retrieval: :hybrid}} =
                Search.search_with_count("test", offset: 9_223_372_036_854_775_807)
     end
   end

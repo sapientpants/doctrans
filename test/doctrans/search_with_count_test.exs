@@ -1,7 +1,9 @@
 defmodule Doctrans.SearchWithCountTest do
   @moduledoc """
-  Covers `Doctrans.Search.search_with_count/2`: one embedding per query, and a
-  total that describes every match rather than the page it ships with.
+  Covers `Doctrans.Search.search_with_count/2`: one embedding per query, a
+  total that describes every match rather than the page it ships with, and the
+  retrieval mode it reports -- which is how a caller tells an embedding outage
+  apart from a query that simply matched nothing.
 
   Not async: each test swaps `:embedding_module` in the global `Application`
   environment, as every other module in this suite that does so.
@@ -24,7 +26,7 @@ defmodule Doctrans.SearchWithCountTest do
       TestEnv.put_env(:embedding_probe_pid, self())
       use_embedding_module(EmbeddingProbe)
 
-      assert {:ok, %{results: results, total_count: total_count}} =
+      assert {:ok, %{results: results, total_count: total_count, retrieval: :hybrid}} =
                Search.search_with_count("sharedembeddingterm")
 
       assert Enum.any?(results, &(&1.page_id == page.id))
@@ -63,21 +65,6 @@ defmodule Doctrans.SearchWithCountTest do
       assert total_count == 7
     end
 
-    test "propagates an embedding failure" do
-      # The plan fails this query alone, so the swapped-in module stays
-      # behaviourally identical for anything else embedding concurrently.
-      use_embedding_module(EmbeddingErrorStub)
-      TestEnv.put_env(:embedding_error_plan, [{"failingembeddingterm", :timeout}])
-      TestEnv.put_env(:embedding_call_observer, self())
-
-      assert {:error, :timeout} = Search.search_with_count("failingembeddingterm")
-
-      # The embedding is the first step for a reason: a query that cannot be
-      # embedded must not reach the database at all.
-      assert_received {:embedding_call, "failingembeddingterm"}
-      refute_received {:embedding_call, _}
-    end
-
     test "returns a tagged error when the search statement fails" do
       "A page about dbfailureterm"
       |> searchable_page()
@@ -91,6 +78,75 @@ defmodule Doctrans.SearchWithCountTest do
         end)
 
       assert log =~ "Hybrid search query failed"
+    end
+  end
+
+  describe "retrieval without an embedding server" do
+    test "still returns the keyword matches, flagged as keyword-only" do
+      page = searchable_page("A page about failingembeddingterm and nothing else")
+
+      # An indexed page the query does not mention. It is what proves the
+      # semantic half really sat out: ranked against a NULL vector it would
+      # otherwise place first and count as a match nobody searched for.
+      "An indexed page about something unrelated"
+      |> searchable_page("Indexed Doc")
+      |> embed()
+
+      fail_embeddings_for("failingembeddingterm")
+
+      log =
+        capture_log(fn ->
+          assert {:ok, %{results: [result], total_count: 1, retrieval: :keyword_only}} =
+                   Search.search_with_count("failingembeddingterm")
+
+          # The whole point of degrading: the full-text index already knows this
+          # page, and an unreachable embedding server cannot make it forget.
+          assert result.page_id == page.id
+          assert result.snippet =~ "failingembeddingterm"
+        end)
+
+      # An outage only stays diagnosable if the reason reaches the log; nothing
+      # else in the response says why the ranking was half of one.
+      assert log =~ "keyword-only"
+      assert log =~ ":timeout"
+      assert_received {:embedding_call, "failingembeddingterm"}
+    end
+
+    test "reports no matches as no matches, not as an outage" do
+      searchable_page("A page about somethingelseentirely")
+
+      fail_embeddings_for("unmatchedkeywordterm")
+
+      capture_log(fn ->
+        assert {:ok, %{results: [], total_count: 0, retrieval: :keyword_only}} =
+                 Search.search_with_count("unmatchedkeywordterm")
+      end)
+    end
+
+    test "counts every degraded match, not just the page returned" do
+      for index <- 1..7 do
+        searchable_page("Page #{index} about degradedcountterm", "Degraded Doc #{index}")
+      end
+
+      fail_embeddings_for("degradedcountterm")
+
+      capture_log(fn ->
+        assert {:ok, %{results: results, total_count: 7, retrieval: :keyword_only}} =
+                 Search.search_with_count("degradedcountterm", limit: 5)
+
+        assert length(results) == 5
+      end)
+    end
+
+    test "still rejects bounds Postgres cannot encode" do
+      fail_embeddings_for("boundedegradeterm")
+
+      # Degrading is about the ranking, not about what reaches Postgres: an
+      # unencodable offset must still be refused rather than raised.
+      assert {:error, {:invalid_search_bounds, [offset: _]}} =
+               Search.search_with_count("boundedegradeterm", offset: 99_999_999_999_999_999_999)
+
+      refute_received {:embedding_call, _}
     end
   end
 
@@ -129,4 +185,12 @@ defmodule Doctrans.SearchWithCountTest do
   end
 
   defp use_embedding_module(module), do: TestEnv.put_env(:embedding_module, module)
+
+  # The plan fails this query alone, so the swapped-in module stays
+  # behaviourally identical for anything else embedding concurrently.
+  defp fail_embeddings_for(query) do
+    use_embedding_module(EmbeddingErrorStub)
+    TestEnv.put_env(:embedding_error_plan, [{query, :timeout}])
+    TestEnv.put_env(:embedding_call_observer, self())
+  end
 end

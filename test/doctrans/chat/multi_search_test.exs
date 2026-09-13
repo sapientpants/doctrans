@@ -1,8 +1,12 @@
 defmodule Doctrans.Chat.MultiSearchTest do
   use Doctrans.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Doctrans.Chat.MultiSearch
   alias Doctrans.Documents
+  alias Doctrans.Search.EmbeddingErrorStub
+  alias Doctrans.TestEnv
 
   describe "search_with_queries/3" do
     test "returns empty results when no pages exist" do
@@ -111,6 +115,66 @@ defmodule Doctrans.Chat.MultiSearchTest do
       assert page_ids == [page.id]
       assert_in_delta hd(pages).rrf_score, 2 / 61, 1.0e-12
     end
+
+    test "reports an outage when every query fails" do
+      document = create_document(status: "completed")
+      insert_page_with_embedding(document, 1)
+
+      TestEnv.put_env(:embedding_module, EmbeddingErrorStub)
+      TestEnv.put_env(:embedding_error_reason, :circuit_open)
+
+      log =
+        capture_info_log(fn ->
+          assert {:error, {:retrieval_unavailable, [reason: :circuit_open]}} =
+                   MultiSearch.search_with_queries(document.id, ["q1", "q2"])
+        end)
+
+      # The summary line has to show the outage, not a quiet empty result.
+      assert log =~ "0 succeeded, 2 failed"
+    end
+
+    test "keeps the results of the queries that succeeded when only some fail" do
+      document = create_document(status: "completed")
+      page = insert_page_with_embedding(document, 1)
+
+      # Only the first query fails; the second embeds through the ordinary stub.
+      TestEnv.put_env(:embedding_module, EmbeddingErrorStub)
+      TestEnv.put_env(:embedding_error_plan, [{"failingquery", :circuit_open}])
+
+      log =
+        capture_info_log(fn ->
+          assert {:ok, results} =
+                   MultiSearch.search_with_queries(document.id, ["failingquery", "good query"])
+
+          assert Enum.map(results, & &1.page_id) == [page.id]
+          # Fused from one ranked list only, so a single RRF term.
+          assert_in_delta hd(results).rrf_score, 1 / 61, 1.0e-12
+        end)
+
+      assert log =~ "1 succeeded, 1 failed"
+    end
+
+    test "returns no matches, not an outage, when every query searches and finds nothing" do
+      document = create_document(status: "completed")
+      # Opposite direction to the stub's query vector, so the page is searched
+      # but never clears the similarity threshold.
+      insert_page_with_embedding(document, 1, List.duplicate(-0.1, 1024))
+
+      assert {:ok, []} = MultiSearch.search_with_queries(document.id, ["q1", "q2"])
+    end
+  end
+
+  # The suite runs at :warning, so the summary line an outage has to be visible
+  # in is only readable with the level raised for the duration of the capture.
+  defp capture_info_log(fun) do
+    previous = Logger.level()
+    Logger.configure(level: :info)
+
+    try do
+      capture_log(fun)
+    after
+      Logger.configure(level: previous)
+    end
   end
 
   defp create_document(opts) do
@@ -125,8 +189,8 @@ defmodule Doctrans.Chat.MultiSearchTest do
     document
   end
 
-  defp insert_page_with_embedding(document, page_number) do
-    embedding = Pgvector.new(List.duplicate(0.1, 1024))
+  defp insert_page_with_embedding(document, page_number, values \\ List.duplicate(0.1, 1024)) do
+    embedding = Pgvector.new(values)
 
     Doctrans.Repo.insert!(%Doctrans.Documents.Page{
       id: Ecto.UUID.generate(),
