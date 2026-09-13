@@ -24,6 +24,18 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   alias Doctrans.Repo
 
   @document_id_key Keys.document_id()
+  @default_job_timeout 3_600_000
+
+  # Oban waits forever by default. Extraction bounds each poppler run separately,
+  # but a document is many runs, so the job carries its own ceiling. Pages already
+  # rendered stay on disk and their records stay in the database, so the retry this
+  # produces resumes the document instead of restarting it.
+  @impl true
+  def timeout(_job) do
+    :doctrans
+    |> Application.get_env(:pdf_extraction, [])
+    |> Keyword.get(:job_timeout, @default_job_timeout)
+  end
 
   @spec enqueue_document(Ecto.UUID.t(), String.t()) ::
           {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}

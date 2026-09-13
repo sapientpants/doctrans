@@ -90,6 +90,35 @@ defmodule DoctransWeb.ErrorMessagesTest do
     end
   end
 
+  describe "extraction limit errors" do
+    test "state the value, the limit, and what to do about it" do
+      Gettext.with_locale(DoctransWeb.Gettext, "de", fn ->
+        assert ErrorMessages.message({:pdf_too_many_pages, [pages: 4200, limit: 1000]}) =~
+                 "4200"
+
+        assert ErrorMessages.message({:pdf_too_many_pages, [pages: 4200, limit: 1000]}) =~ "1000"
+
+        assert ErrorMessages.message(
+                 {:page_image_too_large, [page_number: 3, size: 40_000_000, limit: 20_000_000]}
+               ) =~ "40000000"
+
+        assert ErrorMessages.message({:poppler_not_found, [command: "pdftoppm"]}) =~ "pdftoppm"
+      end)
+    end
+
+    test "a renderer timeout reads as a timeout, not as an unknown failure" do
+      generic = ErrorMessages.message(:unknown)
+
+      for locale <- ~w(en de fr) do
+        Gettext.with_locale(DoctransWeb.Gettext, locale, fn ->
+          message = ErrorMessages.message(:pdf_command_timeout)
+          assert message != generic
+          assert message != ""
+        end)
+      end
+    end
+  end
+
   describe "file errors" do
     @tag :tmp_dir
     test "translates file validation failures", %{tmp_dir: dir} do

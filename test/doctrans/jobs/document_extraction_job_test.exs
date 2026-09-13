@@ -6,6 +6,24 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
 
   import Doctrans.Fixtures
 
+  describe "timeout/1" do
+    test "bounds the job, and follows configuration" do
+      job = %Oban.Job{args: %{}}
+
+      assert DocumentExtractionJob.timeout(job) ==
+               Keyword.fetch!(Application.get_env(:doctrans, :pdf_extraction), :job_timeout)
+
+      original = Application.get_env(:doctrans, :pdf_extraction, [])
+      on_exit(fn -> Application.put_env(:doctrans, :pdf_extraction, original) end)
+
+      Application.put_env(:doctrans, :pdf_extraction, Keyword.delete(original, :job_timeout))
+      assert is_integer(DocumentExtractionJob.timeout(job))
+
+      Application.put_env(:doctrans, :pdf_extraction, Keyword.put(original, :job_timeout, 5_000))
+      assert DocumentExtractionJob.timeout(job) == 5_000
+    end
+  end
+
   describe "perform/1 with file_path" do
     test "attempts to extract document with document_id and file_path" do
       document = document_fixture()

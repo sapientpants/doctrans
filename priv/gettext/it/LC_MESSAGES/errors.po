@@ -129,22 +129,22 @@ msgstr "Traduzione pagina %{page_number} fallita: %{reason}"
 msgid "pdfinfo failed: %{error}"
 msgstr "pdfinfo fallito: %{error}"
 
-#: lib/doctrans_web/error_messages.ex:100
+#: lib/doctrans_web/error_messages.ex:132
 #, elixir-autogen, elixir-format
 msgid "Conversion completed but PDF file not found"
 msgstr "Conversione completata ma file PDF non trovato"
 
-#: lib/doctrans_web/error_messages.ex:104
+#: lib/doctrans_web/error_messages.ex:136
 #, elixir-autogen, elixir-format
 msgid "Document conversion failed: %{error}"
 msgstr "Conversione del documento non riuscita: %{error}"
 
-#: lib/doctrans_web/error_messages.ex:114
+#: lib/doctrans_web/error_messages.ex:146
 #, elixir-autogen, elixir-format
 msgid "Document conversion timed out"
 msgstr "Timeout della conversione del documento"
 
-#: lib/doctrans_web/error_messages.ex:94
+#: lib/doctrans_web/error_messages.ex:126
 #, elixir-autogen, elixir-format
 msgid "LibreOffice is not installed"
 msgstr "LibreOffice non è installato"
@@ -159,7 +159,7 @@ msgstr "Page image not found after extraction"
 msgid "Page not found"
 msgstr "Page not found"
 
-#: lib/doctrans_web/error_messages.ex:97
+#: lib/doctrans_web/error_messages.ex:129
 #, elixir-autogen, elixir-format
 msgid "Source file not found: %{path}"
 msgstr "File di origine non trovato: %{path}"
@@ -169,7 +169,7 @@ msgstr "File di origine non trovato: %{path}"
 msgid "Unsupported file format: %{format}"
 msgstr "Formato file non supportato: %{format}"
 
-#: lib/doctrans_web/error_messages.ex:108
+#: lib/doctrans_web/error_messages.ex:140
 #, elixir-autogen, elixir-format
 msgid "Failed to start LibreOffice: %{error}"
 msgstr "Impossibile avviare LibreOffice: %{error}"
@@ -239,17 +239,17 @@ msgstr "Il titolo è obbligatorio e deve essere una stringa"
 msgid "Unsupported language: %{language}"
 msgstr "Lingua non supportata: %{language}"
 
-#: lib/doctrans_web/error_messages.ex:125
+#: lib/doctrans_web/error_messages.ex:157
 #, elixir-autogen, elixir-format
 msgid "Could not read uploaded file"
 msgstr "Impossibile leggere il file caricato"
 
-#: lib/doctrans_web/error_messages.ex:129
+#: lib/doctrans_web/error_messages.ex:161
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
 msgstr "File troppo grande (%{size}MB, massimo %{max}MB)"
 
-#: lib/doctrans_web/error_messages.ex:112
+#: lib/doctrans_web/error_messages.ex:144
 #, elixir-autogen, elixir-format
 msgid "LibreOffice process terminated unexpectedly"
 msgstr "Il processo LibreOffice è terminato inaspettatamente"
@@ -263,3 +263,23 @@ msgstr "Il modello non ha restituito un testo finale completo. Usa un modello co
 #, elixir-autogen, elixir-format
 msgid "Processing failed on page(s) %{page_numbers}. Reprocess those pages to finish this document."
 msgstr "L'elaborazione non è riuscita alle pagine %{page_numbers}. Rielabora quelle pagine per completare questo documento."
+
+#: lib/doctrans_web/error_messages.ex:96
+#, elixir-autogen, elixir-format
+msgid "PDF rendering timed out. Lower the extraction resolution or split the document, then try again."
+msgstr "Il rendering del PDF è scaduto. Riduci la risoluzione di estrazione o dividi il documento, quindi riprova."
+
+#: lib/doctrans_web/error_messages.ex:112
+#, elixir-autogen, elixir-format
+msgid "Page %{page_number} rendered too large (%{size} bytes, limit %{limit}). Lower the extraction resolution, then reprocess this page."
+msgstr "La pagina %{page_number} è stata generata troppo grande (%{size} byte, limite %{limit}). Riduci la risoluzione di estrazione, quindi rielabora questa pagina."
+
+#: lib/doctrans_web/error_messages.ex:122
+#, elixir-autogen, elixir-format
+msgid "Required PDF tool %{command} is not installed"
+msgstr "Lo strumento PDF richiesto %{command} non è installato"
+
+#: lib/doctrans_web/error_messages.ex:103
+#, elixir-autogen, elixir-format
+msgid "This PDF has %{pages} pages, above the limit of %{limit}. Split it into smaller documents before uploading."
+msgstr "Questo PDF ha %{pages} pagine, oltre il limite di %{limit}. Dividilo in documenti più piccoli prima di caricarlo."

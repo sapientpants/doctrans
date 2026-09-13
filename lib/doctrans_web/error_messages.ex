@@ -91,6 +91,38 @@ defmodule DoctransWeb.ErrorMessages do
   def message({:pdfinfo_failed, bindings}),
     do: dgettext("errors", "pdfinfo failed: %{error}", error: binding(bindings, :error))
 
+  def message(:pdf_command_timeout),
+    do:
+      dgettext(
+        "errors",
+        "PDF rendering timed out. Lower the extraction resolution or split the document, then try again."
+      )
+
+  def message({:pdf_too_many_pages, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "This PDF has %{pages} pages, above the limit of %{limit}. Split it into smaller documents before uploading.",
+        pages: binding(bindings, :pages),
+        limit: binding(bindings, :limit)
+      )
+
+  def message({:page_image_too_large, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "Page %{page_number} rendered too large (%{size} bytes, limit %{limit}). Lower the extraction resolution, then reprocess this page.",
+        page_number: binding(bindings, :page_number),
+        size: binding(bindings, :size),
+        limit: binding(bindings, :limit)
+      )
+
+  def message({:poppler_not_found, bindings}),
+    do:
+      dgettext("errors", "Required PDF tool %{command} is not installed",
+        command: binding(bindings, :command)
+      )
+
   def message(:soffice_not_found), do: dgettext("errors", "LibreOffice is not installed")
 
   def message({:source_file_not_found, bindings}),

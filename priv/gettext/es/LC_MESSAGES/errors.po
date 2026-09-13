@@ -129,22 +129,22 @@ msgstr "Error en traducción de página %{page_number}: %{reason}"
 msgid "pdfinfo failed: %{error}"
 msgstr "Error en pdfinfo: %{error}"
 
-#: lib/doctrans_web/error_messages.ex:100
+#: lib/doctrans_web/error_messages.ex:132
 #, elixir-autogen, elixir-format
 msgid "Conversion completed but PDF file not found"
 msgstr "Conversión completada pero archivo PDF no encontrado"
 
-#: lib/doctrans_web/error_messages.ex:104
+#: lib/doctrans_web/error_messages.ex:136
 #, elixir-autogen, elixir-format
 msgid "Document conversion failed: %{error}"
 msgstr "Error en la conversión del documento: %{error}"
 
-#: lib/doctrans_web/error_messages.ex:114
+#: lib/doctrans_web/error_messages.ex:146
 #, elixir-autogen, elixir-format
 msgid "Document conversion timed out"
 msgstr "Tiempo de espera de conversión del documento agotado"
 
-#: lib/doctrans_web/error_messages.ex:94
+#: lib/doctrans_web/error_messages.ex:126
 #, elixir-autogen, elixir-format
 msgid "LibreOffice is not installed"
 msgstr "LibreOffice no está instalado"
@@ -159,7 +159,7 @@ msgstr "Page image not found after extraction"
 msgid "Page not found"
 msgstr "Page not found"
 
-#: lib/doctrans_web/error_messages.ex:97
+#: lib/doctrans_web/error_messages.ex:129
 #, elixir-autogen, elixir-format
 msgid "Source file not found: %{path}"
 msgstr "Archivo de origen no encontrado: %{path}"
@@ -169,7 +169,7 @@ msgstr "Archivo de origen no encontrado: %{path}"
 msgid "Unsupported file format: %{format}"
 msgstr "Formato de archivo no compatible: %{format}"
 
-#: lib/doctrans_web/error_messages.ex:108
+#: lib/doctrans_web/error_messages.ex:140
 #, elixir-autogen, elixir-format
 msgid "Failed to start LibreOffice: %{error}"
 msgstr "No se pudo iniciar LibreOffice: %{error}"
@@ -239,17 +239,17 @@ msgstr "El título es obligatorio y debe ser una cadena de texto"
 msgid "Unsupported language: %{language}"
 msgstr "Idioma no compatible: %{language}"
 
-#: lib/doctrans_web/error_messages.ex:125
+#: lib/doctrans_web/error_messages.ex:157
 #, elixir-autogen, elixir-format
 msgid "Could not read uploaded file"
 msgstr "No se pudo leer el archivo subido"
 
-#: lib/doctrans_web/error_messages.ex:129
+#: lib/doctrans_web/error_messages.ex:161
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
 msgstr "Archivo demasiado grande (%{size}MB, máximo %{max}MB)"
 
-#: lib/doctrans_web/error_messages.ex:112
+#: lib/doctrans_web/error_messages.ex:144
 #, elixir-autogen, elixir-format
 msgid "LibreOffice process terminated unexpectedly"
 msgstr "El proceso de LibreOffice terminó inesperadamente"
@@ -263,3 +263,23 @@ msgstr "El modelo no devolvió un texto final completo. Use un modelo con un lí
 #, elixir-autogen, elixir-format
 msgid "Processing failed on page(s) %{page_numbers}. Reprocess those pages to finish this document."
 msgstr "El procesamiento falló en la(s) página(s) %{page_numbers}. Vuelva a procesar esas páginas para terminar este documento."
+
+#: lib/doctrans_web/error_messages.ex:96
+#, elixir-autogen, elixir-format
+msgid "PDF rendering timed out. Lower the extraction resolution or split the document, then try again."
+msgstr "El renderizado del PDF ha superado el tiempo límite. Reduzca la resolución de extracción o divida el documento e inténtelo de nuevo."
+
+#: lib/doctrans_web/error_messages.ex:112
+#, elixir-autogen, elixir-format
+msgid "Page %{page_number} rendered too large (%{size} bytes, limit %{limit}). Lower the extraction resolution, then reprocess this page."
+msgstr "La página %{page_number} se generó demasiado grande (%{size} bytes, límite %{limit}). Reduzca la resolución de extracción y vuelva a procesar esta página."
+
+#: lib/doctrans_web/error_messages.ex:122
+#, elixir-autogen, elixir-format
+msgid "Required PDF tool %{command} is not installed"
+msgstr "La herramienta PDF requerida %{command} no está instalada"
+
+#: lib/doctrans_web/error_messages.ex:103
+#, elixir-autogen, elixir-format
+msgid "This PDF has %{pages} pages, above the limit of %{limit}. Split it into smaller documents before uploading."
+msgstr "Este PDF tiene %{pages} páginas, por encima del límite de %{limit}. Divídalo en documentos más pequeños antes de subirlo."
