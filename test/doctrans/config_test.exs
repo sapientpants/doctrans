@@ -78,11 +78,24 @@ defmodule Doctrans.ConfigTest do
              "/tmp/custom-uploads/document.pdf"
   end
 
-  test "the default storage root resolves inside the running application" do
-    Application.put_env(:doctrans, :uploads, upload_dir: :default, max_file_size: 1)
+  test "an unset storage root resolves inside the running application" do
+    Application.put_env(:doctrans, :uploads, max_file_size: 1)
 
     assert Uploads.upload_dir() == Application.app_dir(:doctrans, "priv/static/uploads")
     assert Path.type(Uploads.upload_dir()) == :absolute
+  end
+
+  test "a relative storage root is expanded, so persisted page paths stay resolvable" do
+    Application.put_env(:doctrans, :uploads, upload_dir: "relative/uploads", max_file_size: 1)
+
+    assert Uploads.upload_dir() == Path.expand("relative/uploads")
+    assert Path.type(Uploads.upload_dir()) == :absolute
+  end
+
+  test "a storage root that is neither a path nor absent fails explicitly" do
+    Application.put_env(:doctrans, :uploads, upload_dir: :default, max_file_size: 1)
+
+    assert_raise ArgumentError, ~r/invalid :upload_dir/, &Uploads.upload_dir/0
   end
 
   test "missing required settings fail explicitly" do
@@ -90,7 +103,10 @@ defmodule Doctrans.ConfigTest do
     Application.put_env(:doctrans, :uploads, [])
     assert_raise KeyError, fn -> OpenAI.chat_model() end
     assert_raise KeyError, fn -> OpenAI.base_url() end
-    assert_raise KeyError, fn -> Uploads.upload_dir() end
     assert_raise KeyError, fn -> Uploads.max_file_size() end
+
+    # The storage root is the exception: it has a safe default to fall back on,
+    # so absence selects the application directory instead of failing.
+    assert Uploads.upload_dir() == Application.app_dir(:doctrans, "priv/static/uploads")
   end
 end

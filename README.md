@@ -225,10 +225,10 @@ config :doctrans, :retry,
   base_delay_ms: 2_000,
   max_delay_ms: 30_000
 
-# Upload settings (DOCTRANS_DATA_DIR overrides the storage root at runtime)
-config :doctrans, :uploads,
-  upload_dir: :default,           # priv/static/uploads of the running application
-  max_file_size: 100_000_000      # 100MB
+# Upload settings. The storage root is deliberately absent: it resolves at
+# runtime to priv/static/uploads of the running application, and
+# DOCTRANS_DATA_DIR replaces it.
+config :doctrans, :uploads, max_file_size: 100_000_000  # 100MB
 
 # PDF extraction configuration
 config :doctrans, :pdf_extraction, dpi: 150
@@ -253,7 +253,7 @@ for documents in another source language.
 | `OPENAI_HOST` | `http://localhost:8000` | Shared API base URL, without `/v1` or a trailing slash |
 | `OPENAI_API_KEY` | unset | Bearer API key for both AI and embedding requests |
 | `DOCTRANS_ENV_FILE` | `.env` | Environment file path, relative to the working directory or absolute |
-| `DOCTRANS_DATA_DIR` | `priv/static/uploads` of the running application | Storage root for originals, converted PDFs, and generated page images. Page images are served from the same root, so moving it moves both writing and serving |
+| `DOCTRANS_DATA_DIR` | `priv/static/uploads` of the running application | Storage root for originals, converted PDFs, and generated page images. Must be an absolute path; created at startup and must be writable. See [Storage root](#storage-root) |
 | `DATABASE_HOST` | `localhost` | PostgreSQL hostname (dev/test) |
 | `DATABASE_URL` | - | Full database URL (required in production) |
 | `PORT` | `4000` | Phoenix server port (dev/prod; tests use 4002) |
@@ -264,6 +264,41 @@ for documents in another source language.
 | `POOL_SIZE` | `10` | Production database connection pool size |
 | `ECTO_IPV6` | unset | Enable IPv6 database sockets in production with `true` or `1` |
 | `DNS_CLUSTER_QUERY` | unset | Optional DNS cluster discovery query in production |
+
+### Storage root
+
+Originals, converted PDFs, and generated page images all live under one root,
+and page images are served from that same root — moving it moves both writing
+and serving.
+
+Unset, the root is `priv/static/uploads` inside the running application. That is
+fine for development, but it is *inside the build output*: a release stores data
+under `lib/doctrans-<version>/priv`, which a version bump, `mix release
+--overwrite`, or a rebuilt container image discards. **Set `DOCTRANS_DATA_DIR`
+to a path outside the release for any deployment you intend to keep.**
+
+```bash
+DOCTRANS_DATA_DIR=/var/lib/doctrans
+```
+
+The path must be absolute — a relative value is rejected at startup rather than
+resolved against whatever directory the release happened to start in. The
+directory is created at startup if missing, and the application refuses to boot
+if it cannot be created or written. It must also sit outside the application's
+`priv/static`, since directories served as static assets would hand out your
+original documents over HTTP.
+
+**Moving an existing root.** Nothing is migrated for you: the database keeps
+rows for documents whose files are no longer where the application looks, so
+page images 404 and originals become unreachable. Page paths are stored relative
+to the root, so copying the files across is sufficient:
+
+```bash
+# stop the application first
+mkdir -p /var/lib/doctrans
+cp -a priv/static/uploads/. /var/lib/doctrans/
+DOCTRANS_DATA_DIR=/var/lib/doctrans mix phx.server
+```
 
 ## Development
 

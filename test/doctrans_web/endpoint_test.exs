@@ -1,8 +1,6 @@
 defmodule DoctransWeb.EndpointTest do
   use DoctransWeb.ConnCase, async: true
 
-  @endpoint DoctransWeb.Endpoint
-
   alias Doctrans.Documents
 
   # Every path below is built from the configured storage root, which the test

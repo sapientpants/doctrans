@@ -5,6 +5,8 @@ defmodule Doctrans.Application do
 
   use Application
 
+  alias Doctrans.Config.Uploads
+  alias Doctrans.Documents
   alias Doctrans.Resilience.CircuitBreaker
 
   @impl true
@@ -12,9 +14,12 @@ defmodule Doctrans.Application do
     # Install circuit breakers before starting workers
     CircuitBreaker.install_fuses()
 
-    # Writers and the page-image endpoint share one storage root; create it up
-    # front so a fresh data directory is usable and reported healthy.
-    _ = Doctrans.Documents.ensure_uploads_dir!()
+    # Writers and the page-image endpoint share one storage root. Reject a root
+    # that static serving would expose, then create it so a fresh data directory
+    # is usable and reported healthy before the first document arrives.
+    # Both return the root; discarded to satisfy the unmatched_return check.
+    _ = Uploads.validate_root!()
+    _ = Documents.ensure_uploads_dir!()
 
     children = [
       DoctransWeb.Telemetry,

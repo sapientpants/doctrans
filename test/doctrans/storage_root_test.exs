@@ -2,10 +2,9 @@ defmodule Doctrans.StorageRootTest do
   # Repoints the shared storage root, so it must not run alongside async tests.
   use DoctransWeb.ConnCase, async: false
 
+  alias Doctrans.Config.Uploads
   alias Doctrans.Documents
   alias Doctrans.Resilience.HealthCheck
-
-  @endpoint DoctransWeb.Endpoint
 
   setup do
     previous = Application.fetch_env!(:doctrans, :uploads)
@@ -53,15 +52,58 @@ defmodule Doctrans.StorageRootTest do
     end
   end
 
-  test "images left in the default root are not served once it moves", %{root: root} do
+  test "images left under the previous root stop being served once it moves", %{root: root} do
     directory = "documents/#{Uniq.UUID.uuid7()}"
-    stale = Path.join([Application.app_dir(:doctrans, "priv/static/uploads"), directory, "pages"])
-    File.mkdir_p!(stale)
-    on_exit(fn -> File.rm_rf!(Path.dirname(stale)) end)
-    File.write!(Path.join(stale, "page-01.png"), "stale image")
+    File.mkdir_p!(Path.join([root, directory, "pages"]))
+    File.write!(Path.join([root, directory, "pages", "page-01.png"]), "stale image")
 
-    refute File.exists?(Path.join([root, directory, "pages", "page-01.png"]))
+    # Served while this root is the configured one...
+    assert get(build_conn(), "/uploads/#{directory}/pages/page-01.png").status == 200
 
+    # ...and no longer once the root moves on, rather than being served from
+    # whichever directory was baked in. A second temporary root stands in for the
+    # new location: pointing at the real default would write into live storage.
+    moved = Path.join(System.tmp_dir!(), "doctrans-moved-#{Uniq.UUID.uuid7()}")
+    on_exit(fn -> File.rm_rf!(moved) end)
+    Application.put_env(:doctrans, :uploads, upload_dir: moved, max_file_size: 1)
+
+    refute File.exists?(Path.join([moved, directory, "pages", "page-01.png"]))
     assert get(build_conn(), "/uploads/#{directory}/pages/page-01.png").status == 404
+  end
+
+  test "a storage root inside the served static directory is rejected at startup" do
+    for segment <- ["images", "assets"] do
+      root = Path.join([Application.app_dir(:doctrans, "priv/static"), segment, "data"])
+      Application.put_env(:doctrans, :uploads, upload_dir: root, max_file_size: 1)
+
+      assert_raise ArgumentError, ~r/statically served directory/, &Uploads.validate_root!/0
+    end
+  end
+
+  test "the default root is accepted even though it sits under priv/static" do
+    Application.put_env(:doctrans, :uploads, max_file_size: 1)
+
+    assert Uploads.validate_root!() == Application.app_dir(:doctrans, "priv/static/uploads")
+  end
+
+  test "an unwritable storage root names the setting to correct", %{root: root} do
+    File.mkdir_p!(root)
+    File.chmod!(root, 0o500)
+    on_exit(fn -> File.chmod(root, 0o700) end)
+
+    Application.put_env(:doctrans, :uploads,
+      upload_dir: Path.join(root, "nested"),
+      max_file_size: 1
+    )
+
+    assert_raise RuntimeError, ~r/DOCTRANS_DATA_DIR/, &Documents.ensure_uploads_dir!/0
+  end
+
+  test "an unwritable storage root is reported unhealthy", %{root: root} do
+    File.mkdir_p!(root)
+    File.chmod!(root, 0o500)
+    on_exit(fn -> File.chmod(root, 0o700) end)
+
+    assert {:error, {:uploads_directory_unwritable, _}} = HealthCheck.check_filesystem()
   end
 end
