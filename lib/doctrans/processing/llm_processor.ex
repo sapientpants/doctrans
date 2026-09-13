@@ -76,7 +76,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     with :ok <- maybe_extract(page, opts),
          extracted <- Documents.get_page!(page.id),
          :ok <- maybe_translate(extracted, opts) do
-      reconcile_document(page.id)
+      reconcile_document(extracted)
     end
   end
 
@@ -85,9 +85,16 @@ defmodule Doctrans.Processing.LlmProcessor do
   # pages are all saved. A replay skips both stages and would return `:ok`
   # without ever revisiting the document, which is why the check belongs to
   # every successful run of this job rather than to the run that happened to
-  # save the last translation. Resolving it costs one query and no model call.
-  defp reconcile_document(page_id) do
-    _ = DocumentOrchestrator.check_document_completion(Documents.get_page!(page_id))
+  # save the last translation. Resolving it costs no model call.
+  #
+  # Hand over the page this run already read rather than a fresh copy. The
+  # orchestrator fences the check against that page's revision and generation,
+  # and a row re-read here would only ever be compared against itself. The
+  # translation writes in between cannot invalidate it: `content_revision`
+  # advances on an `original_markdown` change or an extraction leaving
+  # "completed", and `processing_generation` only on a reprocess.
+  defp reconcile_document(page) do
+    _ = DocumentOrchestrator.check_document_completion(page)
     :ok
   end
 

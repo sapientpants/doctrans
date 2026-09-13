@@ -66,14 +66,15 @@ defmodule Doctrans.Documents.Page do
   @doc """
   Query-land predicate for a page whose content has reached a terminal state.
 
-  The union of success and `failed?/1`: a settled page has either finished
-  translation or errored in a required stage, so nothing but reprocessing will
-  change its contribution to its document's outcome.
+  The union of success and `failed?/1`, expressed by delegating to it rather
+  than restating it: a settled page has either finished translation or errored
+  in a required stage, so nothing but reprocessing will change its contribution
+  to its document's outcome.
   """
   defmacro settled?(page) do
     quote do
-      unquote(page).translation_status in ["completed", "error"] or
-        unquote(page).extraction_status == "error"
+      unquote(page).translation_status == "completed" or
+        unquote(__MODULE__).failed?(unquote(page))
     end
   end
 

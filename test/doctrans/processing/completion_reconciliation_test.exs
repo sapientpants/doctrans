@@ -1,7 +1,10 @@
 defmodule Doctrans.Processing.CompletionReconciliationTest do
-  # The replay cases swap the global :openai_module for a stub that raises on
-  # every call, which is how they prove no model request is made.
+  # Every case here swaps the global :openai_module for a stub that raises on
+  # any call, which is how they prove no model request is made. Reconciliation
+  # decides from rows that are already saved, so that holds for the startup
+  # phase as much as for a replay.
   use Doctrans.DataCase, async: false
+  use Oban.Testing, repo: Doctrans.Repo
 
   import Doctrans.Fixtures
 
@@ -25,20 +28,35 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
     {document, pages}
   end
 
-  describe "job replay" do
-    setup do
-      previous_module = Application.fetch_env!(:doctrans, :openai_module)
-      Application.put_env(:doctrans, :openai_module, OpenAICrashStub)
-      on_exit(fn -> Application.put_env(:doctrans, :openai_module, previous_module) end)
-      :ok
-    end
+  setup do
+    previous_module = Application.fetch_env!(:doctrans, :openai_module)
+    Application.put_env(:doctrans, :openai_module, OpenAICrashStub)
+    on_exit(fn -> Application.put_env(:doctrans, :openai_module, previous_module) end)
+    :ok
+  end
 
+  describe "job replay" do
     test "a replay whose stages are all saved completes the document" do
       {document, [_first, last]} = interrupted_document([{1, :completed}, {2, :completed}])
 
       assert LlmProcessor.process_page(last.id, MapSet.new(),
                generation: last.processing_generation
              ) == :ok
+
+      assert Documents.get_document!(document.id).status == "completed"
+    end
+
+    # The other replay cases call the processor directly. This one goes through
+    # Oban so the job wrapper — arg decoding, the generation option, and the
+    # exhausted-job settlement around the result — is covered too.
+    test "a replayed Oban job completes the document" do
+      {document, [_first, last]} = interrupted_document([{1, :completed}, {2, :completed}])
+
+      assert perform_job(
+               LlmProcessingJob,
+               LlmProcessingJob.page_args(last, last.processing_generation, %{})
+             ) ==
+               :ok
 
       assert Documents.get_document!(document.id).status == "completed"
     end
@@ -139,6 +157,23 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
                    where: fragment("?->>'page_id' = ?", j.args, ^failed.id)
                  )
                )
+      end)
+    end
+
+    # Only a "processing" document is mid-run. Reconciling an "error" document
+    # would resurrect one an operator or a document-level failure deliberately
+    # stopped, and would overwrite the diagnostic that stopped it.
+    test "leaves a document that already failed alone" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        {document, _pages} = interrupted_document([{1, :completed}])
+
+        {:ok, failed} = Documents.update_document_status(document, "error", "stopped")
+
+        assert :done = StartupRecovery.run_batch({:completion, nil})
+
+        unchanged = Documents.get_document!(failed.id)
+        assert unchanged.status == "error"
+        assert unchanged.error_message == "stopped"
       end)
     end
 

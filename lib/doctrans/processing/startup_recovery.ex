@@ -157,9 +157,27 @@ defmodule Doctrans.Processing.StartupRecovery do
   # when every expected page succeeded, records the failed page numbers when
   # they all settled with a failure, and leaves a document alone while a retry
   # of a failed page is still pending.
+  #
+  # One document per row, contained like the phases above: this phase commits
+  # per document rather than per batch, so an escaping error would abandon the
+  # cursor mid-batch and take the worker down with it. The worker restarts the
+  # whole pass from the first phase, and the inconsistency this phase exists to
+  # heal is durable, so an uncontained row would be replayed on every restart.
+  #
+  # Only the database errors are caught, matching `Worker.queue_status/0`. The
+  # orchestrator's `{:ok, _} =` matches are self-consistent under the document
+  # lock it holds, so a MatchError from there would be a logic bug worth
+  # surfacing rather than a row worth skipping.
   defp reconcile_completion(row) do
     _ = DocumentOrchestrator.check_document_completion(row.id)
     :ok
+  rescue
+    error in [Ecto.NoResultsError, Postgrex.Error, DBConnection.ConnectionError] ->
+      Logger.warning(
+        "Startup recovery could not reconcile document #{row.id}: #{Exception.message(error)}"
+      )
+
+      :ok
   end
 
   # One page per transaction: these rows are independent, so a row that cannot be
