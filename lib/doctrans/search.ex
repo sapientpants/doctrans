@@ -71,6 +71,33 @@ defmodule Doctrans.Search do
     end
   end
 
+  @doc """
+  Performs hybrid search and counts every match from one query embedding.
+
+  Both are ranked from one vector under one score threshold, so a query costs a
+  single inference call and the two agree on what matched. They are still two
+  statements outside a transaction: indexing landing between them moves the
+  total. Takes `search/2`'s options, plus `:offset` (default: 0).
+  """
+  @spec search_with_count(String.t() | nil, keyword()) ::
+          {:ok, %{results: [hybrid_result()], total_count: non_neg_integer()}}
+          | {:error, Doctrans.Errors.reason()}
+  def search_with_count(query, opts \\ [])
+  def search_with_count("", _opts), do: {:ok, %{results: [], total_count: 0}}
+  def search_with_count(nil, _opts), do: {:ok, %{results: [], total_count: 0}}
+
+  def search_with_count(query, opts) when is_binary(query) do
+    limit = Keyword.get(opts, :limit, 20)
+    offset = Keyword.get(opts, :offset, 0)
+    rrf_k = Keyword.get(opts, :rrf_k, @default_rrf_k)
+
+    with {:ok, embedding} <- embedding_module().generate(query, []),
+         {:ok, total_count} <- execute_count_query(query, embedding, rrf_k),
+         {:ok, results} <- execute_hybrid_search(query, embedding, rrf_k, limit, offset) do
+      {:ok, %{results: results, total_count: total_count}}
+    end
+  end
+
   # Minimum cosine similarity threshold for chat context
   # Pages below this threshold are considered irrelevant
   # Cosine similarity: 0 = unrelated, 1 = identical
@@ -242,11 +269,8 @@ defmodule Doctrans.Search do
   @doc """
   Counts total matching results for a query.
 
-  Used for pagination to determine total pages.
-
-  ## Options
-
-  - `:rrf_k` - RRF smoothing constant (default: 60)
+  Prefer `search_with_count/2` when the results are wanted too: it counts and
+  lists them from one embedding. Takes the same `:rrf_k` option as `search/2`.
   """
   @spec count_results(String.t() | nil, keyword()) ::
           {:ok, non_neg_integer()} | {:error, Doctrans.Errors.reason()}

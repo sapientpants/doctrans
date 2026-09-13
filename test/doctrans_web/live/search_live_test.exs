@@ -6,6 +6,9 @@ defmodule DoctransWeb.SearchLiveTest do
 
   alias Doctrans.Documents
 
+  # Search runs off the LiveView process now, so assertions on results await it.
+  @async_timeout 2_000
+
   describe "Search LiveView" do
     test "shows validation errors in the selected locale", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search?lang=de")
@@ -54,13 +57,17 @@ defmodule DoctransWeb.SearchLiveTest do
       # Submit search, it will push_patch to /search?q=test
       view |> element("#search-form") |> render_submit(%{q: "test"})
 
-      # Should show results count (even if empty)
-      assert render(view) =~ "0 results" or render(view) =~ "No results found"
+      # The search runs asynchronously, so await it before asserting on results
+      html = render_async(view, @async_timeout)
+      assert html =~ "0 results" or html =~ "No results found"
     end
 
     test "shows no results message when search returns empty", %{conn: conn} do
-      {:ok, _view, html} = live(conn, ~p"/search?q=nonexistent")
+      {:ok, view, html} = live(conn, ~p"/search?q=nonexistent")
 
+      assert html =~ "Searching..."
+
+      html = render_async(view, @async_timeout)
       assert html =~ "No results found" or html =~ "0 results"
     end
 
@@ -80,6 +87,9 @@ defmodule DoctransWeb.SearchLiveTest do
 
       # Should patch with trimmed query (Phoenix uses + for spaces in URLs)
       assert_patch(view, ~p"/search?q=test+query")
+
+      # Let the search the patch started finish before the test tears down
+      render_async(view, @async_timeout)
     end
 
     test "shows results when matching documents exist", %{conn: conn} do
@@ -101,8 +111,8 @@ defmodule DoctransWeb.SearchLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/search?q=searchterm")
 
-      # Wait for search to complete
-      html = render(view)
+      # Wait for the asynchronous search to complete
+      html = render_async(view, @async_timeout)
 
       # Should show results or no results (depends on embedding service availability)
       assert html =~ "Searchable Doc" or html =~ "No results found" or html =~ "results"
@@ -112,7 +122,7 @@ defmodule DoctransWeb.SearchLiveTest do
       {:ok, view, _html} = live(conn, ~p"/search?q=myquery")
 
       # Should display query somewhere
-      assert render(view) =~ "myquery"
+      assert render_async(view, @async_timeout) =~ "myquery"
     end
 
     test "search results link to document pages", %{conn: conn} do
@@ -134,7 +144,7 @@ defmodule DoctransWeb.SearchLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/search?q=LinkableContent")
 
-      html = render(view)
+      html = render_async(view, @async_timeout)
 
       # If results are found, links should contain document ID and from=search param
       if html =~ "Link Test Doc" do
@@ -164,7 +174,7 @@ defmodule DoctransWeb.SearchLiveTest do
     test "handles search with special characters", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search?q=test%2Bquery")
 
-      html = render(view)
+      html = render_async(view, @async_timeout)
       # Should handle gracefully
       assert html =~ "Search" or html =~ "No results found"
     end
@@ -188,7 +198,7 @@ defmodule DoctransWeb.SearchLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/search?q=Content")
 
-      html = render(view)
+      html = render_async(view, @async_timeout)
       # May or may not show pagination depending on search results
       assert html =~ "Search" or html =~ "Page"
     end
@@ -197,7 +207,7 @@ defmodule DoctransWeb.SearchLiveTest do
       {:ok, view, _html} = live(conn, ~p"/search?q=test&page=2")
 
       # Should handle page parameter gracefully
-      html = render(view)
+      html = render_async(view, @async_timeout)
       assert html =~ "test" or html =~ "Search"
     end
 
@@ -205,7 +215,7 @@ defmodule DoctransWeb.SearchLiveTest do
       {:ok, view, _html} = live(conn, ~p"/search?q=test&page=invalid")
 
       # Should default to page 1
-      html = render(view)
+      html = render_async(view, @async_timeout)
       assert html =~ "test" or html =~ "Search"
     end
   end

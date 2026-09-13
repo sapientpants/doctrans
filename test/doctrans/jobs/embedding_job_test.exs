@@ -7,6 +7,7 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
   alias Doctrans.Documents.{Chunk, Page, Pages}
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Search.{EmbeddingErrorStub, EmbeddingMock}
+  alias Doctrans.TestEnv
 
   # Three paragraphs of 200 words chunk into three chunks, each carrying exactly
   # one marker: the 50-word overlap between neighbours is filler. That makes a
@@ -345,15 +346,5 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
     on_exit(fn -> :telemetry.detach(handler) end)
   end
 
-  defp put_test_env(key, value) do
-    previous = Application.fetch_env(:doctrans, key)
-    Application.put_env(:doctrans, key, value)
-
-    on_exit(fn ->
-      case previous do
-        {:ok, value} -> Application.put_env(:doctrans, key, value)
-        :error -> Application.delete_env(:doctrans, key)
-      end
-    end)
-  end
+  defp put_test_env(key, value), do: TestEnv.put_env(key, value)
 end

@@ -383,14 +383,38 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
 
 ## Phase 3 — Search relevance and responsiveness
 
-- [ ] **S01 · P2 · Share query embeddings and run search asynchronously.**
+- [x] **S01 · P2 · Share query embeddings and run search asynchronously.**
   Search synchronously generates separate embeddings for count and results. Direct disconnected/connected
   mounts repeat the work, producing four inference calls on the successful initial-load path.
   The loading state cannot render while the callback blocks.
   Use one combined asynchronous operation on the connected mount, reuse its vector, and discard stale results.
   Acceptance: one query embedding per submitted query; loading is visible while inference waits;
   navigation remains responsive; older responses cannot replace newer results; count and results agree.
-  Evidence: `lib/doctrans_web/live/search_live.ex:32`, `lib/doctrans/search.ex:66,247`.
+  Implemented: `Search.search_with_count/2` embeds the query once and ranks both the total and the page
+  of results from that vector, replacing the `count_results/2` + `search/2` pair at the LiveView's call
+  site. `SearchLive` runs it through `start_async/3`, so the callback no longer blocks: the spinner
+  renders while inference waits, and the disconnected mount renders that spinner and does no work at
+  all. A successful initial load went from four inference calls to one.
+  A superseding query cancels the search it replaces rather than letting it finish, and LiveView drops
+  the result of a task a later `start_async` has re-keyed, so a newer response always wins. The payload
+  also names the query and page it was started for, because cancellation alone is not enough: a
+  rejected query cancels without starting a replacement, and `cancel_async/2` neither clears the stored
+  ref nor kills synchronously, so a task reporting in the moment before its exit signal landed would
+  otherwise have rendered the previous query's results under the rejected one. Cancelling a search that
+  already reached SQL discards its pooled connection — the accepted price of abandoning a superseded
+  inference call rather than paying for an answer nobody will see.
+  Evidence: `lib/doctrans/search.ex` (`search_with_count/2`), `lib/doctrans_web/live/search_live.ex`
+  (`run_search/3`, `handle_async/3`). `SearchLiveAsyncTest` parks the embedding stub mid-inference to
+  show the spinner rendering, the view staying navigable, and the superseded task exiting with
+  `{:shutdown, :cancel}` — an assertion that goes red when the cancellation is removed, where the
+  outcome assertions around it do not. The stale-payload guard is driven through `handle_async/3`
+  directly, since no timing-based test can reliably open that window. A probe counts one embedding per
+  submitted query where the old path made four. `SearchWithCountTest` takes seven matches against a
+  limit of five, on both the full and the tail page, so a total that merely described the page it
+  shipped with would fail. `lib/doctrans/search.ex` now sits exactly at the 500-line module cap; the
+  seam for the next change to it is the document-scoped chat retrieval path (`search_in_document/3`,
+  `search_by_embedding/3` and their helpers), which shares no RRF or full-text machinery with the
+  global hybrid search this task changed.
 
 - [ ] **S02 · P2 · Distinguish retrieval outages from no matches.**
   MultiSearch discards failed requests and returns success with no results even when every query fails.

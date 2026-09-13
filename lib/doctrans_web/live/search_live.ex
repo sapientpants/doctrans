@@ -32,7 +32,7 @@ defmodule DoctransWeb.SearchLive do
   def handle_params(%{"q" => query} = params, _uri, socket) when query != "" do
     case Validation.validate_search_query(query) do
       {:ok, validated_query} ->
-        run_search(socket, validated_query, parse_page(params["page"]))
+        {:noreply, run_search(socket, validated_query, parse_page(params["page"]))}
 
       {:error, reason} ->
         {:noreply, reject_query(socket, query, reason)}
@@ -40,8 +40,51 @@ defmodule DoctransWeb.SearchLive do
   end
 
   def handle_params(_params, _uri, socket) do
+    # A query-less URL -- browser Back, say -- has no result to wait for, so
+    # stop spinning for a search the view has moved off.
+    {:noreply, socket |> cancel_async(:search) |> assign(:searching, false)}
+  end
+
+  # The payload names the query and page the search was started for. LiveView
+  # drops the result of a task a later `start_async` superseded, but a search
+  # cancelled without a replacement -- `reject_query/3` -- can still report in
+  # the moment before its exit signal lands, and that result must not be
+  # rendered under a query the view has already moved off.
+  @impl true
+  def handle_async(:search, {:ok, {query, page, result}}, socket) do
+    if current_search?(socket, query, page) do
+      {:noreply, apply_search_result(socket, result)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # A search we cancelled ourselves is not a failure. Only `reject_query/3`
+  # reaches here: it cancels without starting a replacement, whereas a
+  # superseded search is pruned by LiveView before this callback runs.
+  def handle_async(:search, {:exit, {:shutdown, :cancel}}, socket) do
     {:noreply, socket}
   end
+
+  def handle_async(:search, {:exit, reason}, socket) do
+    {:noreply, search_failed(socket, reason)}
+  end
+
+  defp current_search?(socket, query, page) do
+    socket.assigns.query == query and socket.assigns.page == page
+  end
+
+  defp apply_search_result(socket, {:ok, %{results: results, total_count: total_count}}) do
+    assign(socket,
+      results: results,
+      total_count: total_count,
+      searching: false,
+      searched: true,
+      search_error: false
+    )
+  end
+
+  defp apply_search_result(socket, {:error, reason}), do: search_failed(socket, reason)
 
   defp run_search(socket, query, page) do
     socket =
@@ -51,20 +94,22 @@ defmodule DoctransWeb.SearchLive do
       |> assign(:searching, true)
       |> assign(:search_error, false)
 
-    offset = max(0, (page - 1) * @per_page)
+    if connected?(socket) do
+      offset = max(0, (page - 1) * @per_page)
 
-    # Get total count and search results
-    with {:ok, total_count} <- Search.count_results(query),
-         {:ok, results} <- Search.search(query, limit: @per_page, offset: offset) do
-      {:noreply,
-       assign(socket,
-         results: results,
-         total_count: total_count,
-         searching: false,
-         searched: true
-       )}
+      # Cancelling first stops a superseded query from burning an inference call,
+      # and LiveView ignores the result of an earlier task once a later
+      # `start_async` reuses the name, so an older response can never replace a
+      # newer one (see `Phoenix.LiveView.start_async/3`).
+      socket
+      |> cancel_async(:search)
+      |> start_async(:search, fn ->
+        {query, page, Search.search_with_count(query, limit: @per_page, offset: offset)}
+      end)
     else
-      {:error, reason} -> {:noreply, search_failed(socket, reason)}
+      # The disconnected mount only renders the loading state; the query is
+      # embedded once, by the connected mount.
+      socket
     end
   end
 
@@ -78,8 +123,11 @@ defmodule DoctransWeb.SearchLive do
 
   defp reject_query(socket, query, reason) do
     socket
+    |> cancel_async(:search)
     |> assign(:query, query)
+    |> assign(:searching, false)
     |> assign(:searched, true)
+    |> assign(:search_error, false)
     |> assign(:results, [])
     |> assign(:total_count, 0)
     |> put_flash(:error, ErrorMessages.message(reason))
@@ -130,7 +178,11 @@ defmodule DoctransWeb.SearchLive do
           </div>
         </form>
 
-        <div :if={@searching} class="flex items-center gap-2 py-8 text-base-content/60">
+        <div
+          :if={@searching}
+          id="search-loading"
+          class="flex items-center gap-2 py-8 text-base-content/60"
+        >
           <span class="loading loading-spinner loading-md"></span>
           <span>{gettext("Searching...")}</span>
         </div>
