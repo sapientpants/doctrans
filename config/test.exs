@@ -64,3 +64,16 @@ config :doctrans, Oban,
   ],
   queues: false,
   testing: :inline
+
+# Extraction bounds are deliberately small in tests: the suite drives the bounds
+# with fake poppler executables, and the production ceilings would make a test
+# that exercises a timeout take two minutes to do it. Tests that need a specific
+# bound still override it locally.
+config :doctrans, :pdf_extraction,
+  dpi: 150,
+  timeout: 5_000,
+  info_timeout: 2_000,
+  job_timeout: 30_000,
+  max_pages: 1_000,
+  max_page_pixels: 40_000_000,
+  max_image_bytes: 20_000_000

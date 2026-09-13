@@ -49,7 +49,39 @@ config :doctrans, :uploads,
 
 # PDF extraction configuration
 # Higher DPI = better text recognition but larger files
-config :doctrans, :pdf_extraction, dpi: 150
+#
+# Extraction runs in a single-slot queue against external poppler commands, so
+# every bound here exists to keep one document from holding that slot:
+# - timeout: milliseconds one `pdftoppm` render may take before its process
+#   group is killed
+# - info_timeout: the same deadline for the much cheaper `pdfinfo` call
+# - job_timeout: milliseconds the whole extraction job may take. It is also the
+#   budget the extractor clamps each page render against, so per-page deadlines
+#   cannot add up past it. Pages already rendered are kept, so a retry resumes
+#   rather than restarting. `RunCleanupJob` shares this single-slot queue, so
+#   this is also how long cleanup can be kept waiting.
+# - max_pages: documents above this are rejected before any page is rendered
+# - max_page_pixels: a page whose geometry would rasterize to more pixels than
+#   this at the configured :dpi is rejected before it is rendered. A maximal PDF
+#   media box renders to gigabytes well inside the deadline, so this is the bound
+#   that has to come first. The default admits an E-size (36x48in) drawing at
+#   150 dpi.
+# - max_image_bytes: a rendered page above this is deleted and reported, since
+#   the image is about to be sent to a model; lower :dpi is the usual answer
+#
+# Optional keys:
+# - pdftoppm_path / pdfinfo_path: explicit paths to the poppler executables,
+#   for installations that are not on $PATH
+# - search_dirs: directories to fall back to when $PATH has no match, for a
+#   daemon started with a slim environment. Set to [] to require $PATH.
+config :doctrans, :pdf_extraction,
+  dpi: 150,
+  timeout: 120_000,
+  info_timeout: 15_000,
+  job_timeout: 3_600_000,
+  max_pages: 1_000,
+  max_page_pixels: 40_000_000,
+  max_image_bytes: 20_000_000
 
 # Document conversion configuration (for Word, OpenDocument, etc.)
 # Requires LibreOffice to be installed:

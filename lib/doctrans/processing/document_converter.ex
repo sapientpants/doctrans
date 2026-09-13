@@ -2,10 +2,9 @@ defmodule Doctrans.Processing.DocumentConverter do
   @moduledoc """
   Converts documents to PDF using LibreOffice with a separate profile per run.
 
-  A monitored port owner enforces a fixed deadline and cleans up if the caller
-  exits. On Unix, OTP starts port executables in their own process group; cleanup
-  kills that group so launcher children cannot outlive a failed conversion.
-  Captured diagnostic output is limited to 64 KiB.
+  `Doctrans.Processing.Subprocess` enforces the deadline, bounds captured
+  diagnostics, and kills the conversion's process group — including anything the
+  launcher left behind — whether it exits, times out, or the caller dies.
 
   Profiles are created privately and exclusively using `/usr/bin/mktemp`,
   available on the supported macOS and Linux installations.
@@ -15,8 +14,11 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   require Logger
 
+  alias Doctrans.Processing.Executable
+  alias Doctrans.Processing.Subprocess
+
   @default_timeout 120_000
-  @max_output_bytes 64 * 1024
+  @profile_timeout 10_000
   @search_paths [
     "/Applications/LibreOffice.app/Contents/MacOS/soffice",
     "/usr/bin/soffice",
@@ -58,62 +60,22 @@ defmodule Doctrans.Processing.DocumentConverter do
   @spec resolve_soffice_path() :: {:ok, String.t()} | {:error, :soffice_not_found}
   def resolve_soffice_path do
     config = Application.get_env(:doctrans, :document_conversion, [])
-    configured = Keyword.get(config, :soffice_path)
-    search_paths = Keyword.get(config, :search_paths, @search_paths)
 
-    found =
-      if executable_file?(configured) do
-        configured
-      else
-        find_on_path("soffice") || Enum.find(search_paths, &absolute_executable?/1)
-      end
-
-    case found do
-      nil -> {:error, :soffice_not_found}
-      path -> {:ok, Path.expand(path)}
+    case Executable.resolve("soffice",
+           configured: Keyword.get(config, :soffice_path),
+           candidates: Keyword.get(config, :search_paths, @search_paths)
+         ) do
+      {:ok, path} -> {:ok, path}
+      :error -> {:error, :soffice_not_found}
     end
   end
 
-  defp absolute_executable?(path),
-    do: is_binary(path) and Path.type(path) == :absolute and executable_file?(path)
-
-  # Locates `name` by searching the directories in the current `PATH`,
-  # honouring whatever PATH the process environment holds at call time.
-  # Returns the absolute path or `nil`.
-  defp find_on_path(name) do
-    path_var = System.get_env("PATH", "")
-
-    separator =
-      case :os.type() do
-        {:win32, _} -> ";"
-        _other -> ":"
-      end
-
-    path_var
-    |> String.split(separator, trim: false)
-    |> Enum.map(fn dir -> Path.join(dir, name) end)
-    |> Enum.find(&executable_file?/1)
-  end
-
   defp supervise_conversion(path, source_path, output_dir) do
-    caller = self()
-    result_ref = make_ref()
-
-    {pid, monitor} =
-      spawn_monitor(fn ->
-        Process.flag(:trap_exit, true)
-        Process.monitor(caller)
-        result = run_conversion(path, source_path, output_dir)
-        send(caller, {result_ref, result})
-      end)
-
-    receive do
-      {^result_ref, result} ->
-        Process.demonitor(monitor, [:flush])
-        result
-
-      {:DOWN, ^monitor, :process, ^pid, reason} ->
-        finalize({:error, reason}, nil, nil)
+    # The profile is created inside the supervised process so a caller killed
+    # mid-conversion still has it removed.
+    case Subprocess.supervised(fn -> run_conversion(path, source_path, output_dir) end) do
+      {:subprocess_owner_down, reason} -> finalize({:error, reason}, nil, nil)
+      result -> result
     end
   end
 
@@ -123,7 +85,6 @@ defmodule Doctrans.Processing.DocumentConverter do
     File.mkdir_p!(output_dir)
 
     timeout = get_timeout()
-    deadline = System.monotonic_time(:millisecond) + timeout
     profile_dir = create_profile_dir!()
 
     args = [
@@ -143,25 +104,9 @@ defmodule Doctrans.Processing.DocumentConverter do
 
     result =
       try do
-        port =
-          Port.open(
-            {:spawn_executable, soffice_path},
-            # Retain port metadata even if the launcher exits before PID lookup.
-            [:binary, :exit_status, :eof, :stderr_to_stdout, args: args]
-          )
-
-        os_pid = port_os_pid(port)
-
-        try do
-          run_port(port, deadline, <<>>)
-        after
-          reap_soffice(port, os_pid)
-        end
-      rescue
-        error ->
-          Logger.error("Failed to start LibreOffice: #{Exception.message(error)}")
-
-          {:start_error, Exception.message(error)}
+        # soffice's launcher can return while its children are still working,
+        # so the process group is killed even when the launcher exits cleanly.
+        Subprocess.run(soffice_path, args, timeout: timeout, kill_on_exit: true)
       after
         # Remove the throwaway profile whether the conversion succeeded,
         # failed, or was killed.
@@ -169,43 +114,6 @@ defmodule Doctrans.Processing.DocumentConverter do
       end
 
     finalize(result, pdf_path, timeout)
-  end
-
-  # Output must never reset the deadline.
-  defp run_port(port, deadline, buffer) do
-    now = System.monotonic_time(:millisecond)
-
-    if now >= deadline do
-      {:timeout, buffer}
-    else
-      receive do
-        {^port, {:data, data}} ->
-          run_port(port, deadline, append_output(buffer, data))
-
-        {^port, {:exit_status, status}} ->
-          {:ok, {buffer, status}}
-
-        {^port, :eof} ->
-          # EOF and exit_status can arrive in either order. EOF alone does not
-          # mean the process has exited, so continue enforcing the same deadline.
-          run_port(port, deadline, buffer)
-
-        {:DOWN, _monitor, :process, _caller, reason} ->
-          {:error, {:caller_exited, reason}}
-
-        {:EXIT, ^port, reason} ->
-          {:error, reason}
-
-        {^port, {:error, reason}} ->
-          {:error, reason}
-
-        {^port, _other} ->
-          {:error, :port_died}
-      after
-        deadline - now ->
-          {:timeout, buffer}
-      end
-    end
   end
 
   defp finalize({:ok, {_output, 0}}, pdf_path, _timeout) do
@@ -218,16 +126,18 @@ defmodule Doctrans.Processing.DocumentConverter do
   end
 
   defp finalize({:ok, {output, exit_code}}, _pdf_path, _timeout) do
+    diagnostic = Subprocess.diagnostic(output)
+
     Logger.error(
       "LibreOffice conversion failed with exit code #{exit_code}: " <>
-        String.slice(output, 0, 500)
+        String.slice(diagnostic, 0, 500)
     )
 
-    {:error, {:conversion_failed, [error: String.trim(output)]}}
+    {:error, {:conversion_failed, [error: diagnostic]}}
   end
 
   defp finalize({:start_error, reason}, _pdf_path, _timeout) do
-    {:error, {:conversion_start_failed, [error: String.trim(reason)]}}
+    {:error, {:conversion_start_failed, [error: Subprocess.diagnostic(reason)]}}
   end
 
   defp finalize({:error, reason}, _pdf_path, _timeout) do
@@ -236,71 +146,11 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   defp finalize({:timeout, output}, _pdf_path, timeout) do
     Logger.error(
-      "LibreOffice conversion timed out after #{timeout}ms: " <> String.slice(output, 0, 500)
+      "LibreOffice conversion timed out after #{timeout}ms: " <>
+        String.slice(Subprocess.diagnostic(output), 0, 500)
     )
 
     {:error, :conversion_timeout}
-  end
-
-  # Keep the port open until SIGKILL is sent, then wait for OTP to reap its
-  # child before closing. Negative PIDs address the isolated Unix process group.
-  # OTP establishes the group before exec (erl_child_setup.c).
-  defp reap_soffice(port, os_pid) do
-    if is_integer(os_pid) and os_pid > 0 do
-      case System.cmd("/bin/kill", ["-KILL", "--", "-#{os_pid}"], stderr_to_stdout: true, env: []) do
-        {_output, 0} -> await_exit(port)
-        {_output, _status} -> :ok
-      end
-    end
-
-    close_port(port)
-    drain_port(port)
-  end
-
-  defp await_exit(port) do
-    receive do
-      {^port, {:exit_status, _status}} -> :ok
-    after
-      1_000 -> :ok
-    end
-  end
-
-  defp close_port(port) do
-    Port.close(port)
-  rescue
-    ArgumentError -> :ok
-  end
-
-  defp drain_port(port) do
-    receive do
-      {^port, _message} -> drain_port(port)
-      {:EXIT, ^port, _reason} -> drain_port(port)
-    after
-      0 -> :ok
-    end
-  end
-
-  # Appends new output, keeping only the most recent @max_output_bytes.
-  defp append_output(buffer, data) do
-    combined = buffer <> data
-
-    if byte_size(combined) > @max_output_bytes do
-      binary_part(combined, byte_size(combined) - @max_output_bytes, @max_output_bytes)
-    else
-      combined
-    end
-  end
-
-  # The operating-system pid of the port's child process, used to kill a
-  # hung conversion. Returns nil if the VM cannot report one.
-  #
-  # `:erlang.port_info/2` returns `:undefined` once the port has been
-  # torn down, which is handled by the catch-all.
-  defp port_os_pid(port) do
-    case :erlang.port_info(port, :os_pid) do
-      {:os_pid, pid} when is_integer(pid) and pid > 0 -> pid
-      _other -> nil
-    end
   end
 
   # Creates a throwaway LibreOffice profile for a single conversion.
@@ -314,11 +164,21 @@ defmodule Doctrans.Processing.DocumentConverter do
     # mktemp atomically creates a fresh mode-0700 directory on macOS and Linux.
     # mkdir_p would accept an existing directory; mkdir followed by chmod would
     # leave a permissions window when the application's umask is permissive.
-    case System.cmd("/usr/bin/mktemp", ["-d", template], stderr_to_stdout: true, env: []) do
-      {path, 0} -> String.trim_trailing(path, "\n")
-      {error, _status} -> raise "Failed to create LibreOffice profile: #{String.trim(error)}"
+    # Bounded like every other external call: an unbounded one here would be the
+    # single place a hung command could still hold the extraction slot.
+    case Subprocess.run("/usr/bin/mktemp", ["-d", template], timeout: @profile_timeout) do
+      {:ok, {path, 0}} ->
+        String.trim_trailing(path, "\n")
+
+      other ->
+        raise "Failed to create LibreOffice profile: #{Subprocess.diagnostic(profile_error(other))}"
     end
   end
+
+  defp profile_error({:ok, {output, _status}}), do: output
+  defp profile_error({:timeout, _output}), do: "mktemp timed out"
+  defp profile_error({:start_error, message}), do: message
+  defp profile_error({:error, reason}), do: inspect(reason)
 
   # Encodes the profile path as a file:// URI, escaping each path segment so
   # spaces or non-ASCII characters in the temp directory do not break it.
@@ -335,17 +195,5 @@ defmodule Doctrans.Processing.DocumentConverter do
   defp get_timeout do
     config = Application.get_env(:doctrans, :document_conversion, [])
     Keyword.get(config, :timeout, @default_timeout)
-  end
-
-  # Returns true when `path` points at an existing, executable regular file.
-  defp executable_file?(path) do
-    is_binary(path) and executable_stats?(path)
-  end
-
-  defp executable_stats?(path) do
-    case File.stat(path) do
-      {:ok, %File.Stat{type: :regular, mode: mode}} -> :erlang.band(mode, 0o111) != 0
-      _other -> false
-    end
   end
 end

@@ -268,15 +268,56 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   states — including leaving an already-failed document untouched.
   Dependency: C03.
 
-- [ ] **R04 · P2 · Bound PDF subprocess execution and resources.**
+- [x] **R04 · P2 · Bound PDF subprocess execution and resources.**
   `pdfinfo` and `pdftoppm` run through unbounded `System.cmd`; the extraction job has no deadline,
   and extraction concurrency is one. A hung renderer can occupy the only slot indefinitely.
   Reuse the monitored LibreOffice subprocess approach with deadlines, bounded diagnostics, child cleanup,
   and configurable page/image resource limits.
   Acceptance: a fake hung renderer times out and is reaped; subsequent extraction can run;
   excessive diagnostic output is bounded; legitimate larger documents have actionable limit errors.
-  Evidence: `lib/doctrans/processing/pdf_extractor.ex:94,117`, `config/config.exs:104`.
-  Code-based finding; no deliberate renderer hang was run during review.
+  Implemented: the converter's port machinery moved into `Processing.Subprocess` — a deadline that output
+  cannot reset, a 64 KiB tail of diagnostics, a SIGKILL of the child's process group on every exit path,
+  and a monitored owner that reaps the child when the caller dies mid-run. Extracting it rather than
+  copying it is the point: the renderer and the converter now fail the same way, and a fix to one is a
+  fix to both. `DocumentConverter` kept only what is LibreOffice's — profile creation, argument
+  assembly, and its own error vocabulary — and its existing tests, including the launcher-child and
+  caller-kill cases, pass against the shared module unchanged.
+  Both poppler commands now run through it with separate deadlines, because the two calls are not
+  comparable: `pdfinfo` reads a header (15 s) while `pdftoppm` rasterizes a page (120 s). A hung
+  `pdfinfo` reports as its own reason rather than as a rendering timeout, since advice to lower the
+  resolution is unusable when nothing was rendered. Executables resolve through
+  `Processing.Executable`, shared with the converter — a configured path, then `$PATH`, then the known
+  install directories for a daemon started with a slim environment — which is what let the hang, the
+  flood, and the limits be tested against fake renderers instead of a real one.
+  The child environment is an allowlist, not a denylist: `System.cmd`'s `env:` option merges into the
+  inherited environment rather than replacing it, so the previous `env: [{"PATH", ...}]` passed every
+  credential the VM held straight to poppler. Naming the variables a converter may keep means a secret
+  added later is excluded by default instead of needing to be remembered.
+  Four limits bound one document's demand, all under `:pdf_extraction` and read through
+  `Config.PdfExtraction`. `:max_pages` and `:max_page_pixels` are checked in `get_page_count/1`, the
+  single call that decides how much extraction follows, so an oversized document is rejected before a
+  page is rendered. The pixel bound is the one that has to come first: a maximal PDF media box
+  rasterizes to gigabytes of memory and disk well inside any sane deadline, so a byte check afterwards
+  is too late to prevent it. `:max_image_bytes` still rejects a rendered page and deletes it — every
+  oversized render, not just the first, because leaving one behind would make a lower `:dpi` take no
+  effect, as extraction treats a stored image as a finished page. Each error reports the value and the
+  limit, so the answer is a smaller document or a lower resolution.
+  The job's own deadline is `DocumentExtractionJob.timeout/1`, and `PdfProcessor` turns it into a
+  document budget that each page render is clamped against. Without that clamp the per-page ceiling
+  times the page limit is 33 hours against a one-hour job, so past roughly thirty slow pages the
+  subprocess deadline never binds and Oban's `TimeoutError` is what ends the job. A timeout costs
+  little either way: rendered pages stay on disk and in the database, and `ensure_page/4` makes the
+  retry resume rather than restart. Failures that cannot come out differently — a page count over the
+  limit, a missing poppler — are cancelled rather than retried, so they neither burn the document's
+  remaining attempts nor re-occupy the single slot to reach the same answer.
+  Evidence: `lib/doctrans/processing/subprocess.ex`, `lib/doctrans/processing/executable.ex`,
+  `lib/doctrans/processing/pdf_extractor.ex`, `lib/doctrans/config/pdf_extraction.ex`,
+  `lib/doctrans/jobs/document_extraction_job.ex` (`timeout/1`), `config/config.exs` (`:pdf_extraction`).
+  Reproduced against fake poppler executables: a hung renderer times out, its process group is reaped
+  along with its grandchildren, and the next extraction in the same slot succeeds; a renderer printing
+  continuously still dies at its deadline; a render is clamped to the caller's remaining budget and an
+  exhausted budget starts no renderer at all; 280 KB of error output arrives as 64 KiB and stays valid
+  to encode; and the page, pixel, and image limits report their numbers in every locale.
 
 - [ ] **R05 · P2 · Use one runtime storage root for writing and serving images.**
   Writers use `Config.Uploads.upload_dir/0`, but the endpoint always serves `priv/static/uploads`.
@@ -570,8 +611,8 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   There is also no response size bound — `grep max_response_size lib/` returns nothing, so a body is read
   fully into memory. Add a total deadline and a size cap, each with a Bypass test.
   SSRF needs no test: `base_url` resolves only from `Config.fetch!(:openai, :base_url)` and no request path
-  can set it. Command injection is not possible in the PDF path either, since `System.cmd/3` takes an
-  argument list — the gap there is the missing timeout, which is R04.
+  can set it. Command injection is not possible in the PDF path either, since the extractor passes an
+  argument list — the gap there was the missing timeout, closed by R04.
   Model output reaching `raw/1` is correct by construction and well tested at the unit level
   (`markdown_helpers_test.exs:7-31` uses LazyHTML and covers `<script>`, nested `<iframe srcdoc>`,
   `onerror`, `onclick`, and `javascript:` hrefs). Add one end-to-end test driving a document whose
