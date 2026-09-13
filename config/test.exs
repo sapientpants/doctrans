@@ -42,9 +42,11 @@ config :doctrans, :embedding_module, Doctrans.Search.EmbeddingMock
 config :doctrans, :openai_module, Doctrans.Processing.OpenAIStub
 config :doctrans, :pdf_extractor_module, Doctrans.Processing.PdfExtractorMock
 
-# Use isolated upload directory for tests to avoid conflicts with development
+# Use an isolated storage root for tests, outside the application directory, so
+# the suite exercises the same nondefault root an operator gets from
+# DOCTRANS_DATA_DIR rather than the default under priv/static.
 config :doctrans, :uploads,
-  upload_dir: Path.expand("../priv/static/uploads_test", __DIR__),
+  upload_dir: Path.expand("../tmp/uploads_test", __DIR__),
   max_file_size: 100_000_000
 
 # Use shorter retry delays for faster tests

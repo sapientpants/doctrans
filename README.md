@@ -225,10 +225,10 @@ config :doctrans, :retry,
   base_delay_ms: 2_000,
   max_delay_ms: 30_000
 
-# Upload settings
+# Upload settings (DOCTRANS_DATA_DIR overrides the storage root at runtime)
 config :doctrans, :uploads,
-  upload_dir: Path.expand("../priv/static/uploads", __DIR__),
-  max_file_size: 100_000_000  # 100MB
+  upload_dir: :default,           # priv/static/uploads of the running application
+  max_file_size: 100_000_000      # 100MB
 
 # PDF extraction configuration
 config :doctrans, :pdf_extraction, dpi: 150
@@ -253,6 +253,7 @@ for documents in another source language.
 | `OPENAI_HOST` | `http://localhost:8000` | Shared API base URL, without `/v1` or a trailing slash |
 | `OPENAI_API_KEY` | unset | Bearer API key for both AI and embedding requests |
 | `DOCTRANS_ENV_FILE` | `.env` | Environment file path, relative to the working directory or absolute |
+| `DOCTRANS_DATA_DIR` | `priv/static/uploads` of the running application | Storage root for originals, converted PDFs, and generated page images. Page images are served from the same root, so moving it moves both writing and serving |
 | `DATABASE_HOST` | `localhost` | PostgreSQL hostname (dev/test) |
 | `DATABASE_URL` | - | Full database URL (required in production) |
 | `PORT` | `4000` | Phoenix server port (dev/prod; tests use 4002) |
