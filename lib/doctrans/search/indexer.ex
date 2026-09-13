@@ -73,7 +73,29 @@ defmodule Doctrans.Search.Indexer do
     end
   end
 
+  # Everything below runs with the page already marked "processing". An
+  # unexpected raise -- malformed text reaching a Unicode regex in `Chunker`, a
+  # database blip mid-run -- would otherwise leave that status behind for good:
+  # none of the paths below mark the page errored, Oban retries the job, a
+  # deterministic failure raises again on every attempt, and the page is
+  # discarded still reading "processing". `StartupRecovery` keys on the status,
+  # so it re-enqueues that page on every boot thereafter. Recording the failure
+  # keeps the status truthful; re-raising leaves Oban's retry schedule to decide
+  # whether the raise was transient.
   defp embed_page_chunks(page) do
+    chunk_and_embed(page)
+  rescue
+    error ->
+      Logger.error(
+        "Indexing crashed for page #{page.id}: " <>
+          Exception.format(:error, error, __STACKTRACE__)
+      )
+
+      mark_page_errored(page)
+      reraise error, __STACKTRACE__
+  end
+
+  defp chunk_and_embed(page) do
     case with_current_revision(page, &ensure_chunks/1) do
       {:error, :stale_entry} ->
         stale(page)
