@@ -1,44 +1,33 @@
 defmodule Doctrans.Search.Chunker do
   @moduledoc """
-  Splits markdown text into overlapping chunks for fine-grained embedding.
+  Splits markdown text into chunks for fine-grained embedding.
 
-  Respects paragraph boundaries (double newlines). Targets ~300 words per
-  chunk with ~50-word overlap between consecutive chunks. A paragraph over the
-  target is split at sentence boundaries, and a sentence still over it is split
-  at word and then grapheme boundaries, so no chunk can exceed the hard limits
-  below whatever the source looks like.
+  Respects paragraph boundaries (double newlines) and fills a chunk to ~300
+  words before starting the next. A paragraph over the target is split at
+  sentence boundaries, a sentence still over it at word boundaries, and a word
+  still over it at grapheme boundaries, so no chunk exceeds 400 words, 3,200
+  graphemes or 12,800 bytes whatever the source looks like.
+
+  Stored chunk content carries no overlap. `content_for_embedding/2` prepends a
+  bounded tail of the previous chunk so an embedding still sees its context.
+
+  Grouping paragraphs is this module's job; `Doctrans.Search.Chunker.Segments`
+  owns the budgets themselves and the splitting of a paragraph too large to be
+  one chunk.
   """
 
-  # Target ~300 words per chunk for fine-grained retrieval while
-  # preserving enough context for meaningful embeddings.
-  @target_words 300
+  # Embedding overlap, bounded in every unit for the reason the chunk itself is:
+  # the word tail alone returns the whole of a Japanese chunk, because it sees
+  # one word -- a 2,394-grapheme chunk went to the embedding server as 4,794.
   @overlap_words 50
+  @overlap_graphemes 400
+  @overlap_bytes 1600
 
-  # The ceiling a chunk may not pass. A chunk fills to @target_words and then
-  # takes whatever the current segment is, so it can overshoot by one segment;
-  # the hard limit is what splits that segment rather than letting it through.
-  @max_words 400
+  # Paragraphs are rejoined on "\n\n" by `finalize_paras/1`, which those two
+  # graphemes account for when measuring what a chunk would become.
+  @paragraph_join {0, 2, 2}
 
-  # Chinese, Japanese and Thai do not separate words with spaces, so
-  # `word_count/1` reports 1 for a paragraph of any length and every
-  # word-based budget above is blind to it -- a 5,000-character page became one
-  # chunk. A grapheme budget is the limit that still means something there.
-  #
-  # It is deliberately loose enough never to bind on space-separated prose:
-  # 300 words of Latin text runs about 1,800 graphemes and 400 words about
-  # 2,400, so these thresholds are reached first only when word counting has
-  # stopped working.
-  @target_graphemes 2400
-  @max_graphemes 3200
-
-  # Sentence boundaries across scripts. Latin terminators must be followed by
-  # whitespace, so "3.14" and "example.com" stay intact; the full-width and
-  # Indic terminators may not be, because those scripts do not put a space
-  # after one. The previous pattern required an ASCII capital next, so it split
-  # English and nothing else -- not German after "Über", not Russian, not any
-  # sentence beginning lowercase, and not CJK, which has no ASCII capitals at
-  # all.
-  @sentence_boundary ~r/(?<=[.!?\x{2026}])\s+|(?<=[\x{3002}\x{FF01}\x{FF1F}\x{0964}\x{0965}\x{06D4}\x{061F}])\s*/u
+  alias Doctrans.Search.Chunker.Segments
 
   @typedoc "One chunk of a page's markdown, as stored in `Doctrans.Documents.Chunk`."
   @type chunk :: %{
@@ -48,6 +37,9 @@ defmodule Doctrans.Search.Chunker do
           end_offset: non_neg_integer(),
           word_count: non_neg_integer()
         }
+
+  # A chunk before it is indexed: {content, start_offset, end_offset}.
+  @typep raw_chunk :: {String.t(), non_neg_integer(), non_neg_integer()}
 
   @doc """
   Splits text into chunks without overlap.
@@ -67,14 +59,28 @@ defmodule Doctrans.Search.Chunker do
   def chunk(""), do: []
 
   def chunk(text) do
-    text = String.trim(text)
+    # `Regex.scan/3` on a Unicode pattern raises `ArgumentError` on invalid
+    # UTF-8, and `Segments` splits with one. An oversized paragraph holding a
+    # stray byte would otherwise take the raise
+    # through `Indexer`, whose Oban job retries it deterministically and leaves
+    # the page's `embedding_status` at "processing" for good. Postgres rejects
+    # these bytes in a text column, so this is a guard rather than a path with a
+    # known caller; offsets are into the sanitized text when it fires.
+    text = if String.valid?(text), do: text, else: String.replace_invalid(text)
+    trimmed = String.trim(text)
 
-    if text == "" do
+    if trimmed == "" do
       []
     else
-      paragraphs = split_paragraphs(text)
-      raw_chunks = build_raw_chunks(paragraphs)
-      index_chunks(raw_chunks)
+      # Offsets are built against the trimmed text, so the whitespace trimmed
+      # off the front is added back to every one of them -- otherwise they are
+      # offsets into a string the caller never passed in.
+      base = byte_size(text) - byte_size(String.trim_leading(text))
+
+      trimmed
+      |> split_paragraphs()
+      |> build_raw_chunks()
+      |> index_chunks(base)
     end
   end
 
@@ -98,7 +104,7 @@ defmodule Doctrans.Search.Chunker do
     prev = Enum.at(chunks, chunk_index - 1)
 
     if chunk && prev do
-      overlap = tail_words(prev.content, @overlap_words)
+      overlap = overlap_tail(prev.content)
 
       if overlap != "" do
         overlap <> "\n\n" <> chunk.content
@@ -144,83 +150,61 @@ defmodule Doctrans.Search.Chunker do
     end
   end
 
-  # Pass 1: greedily group paragraphs into chunks targeting @target_words.
-  # Returns [{content, start_offset, end_offset}]
+  # Pass 1: greedily group paragraphs into chunks, up to the fill target
+  # `Segments` defines. Returns [raw_chunk()]
   defp build_raw_chunks([]), do: []
 
   defp build_raw_chunks(paragraphs) do
-    # current_rev accumulates paragraphs in reverse order for efficiency
-    {chunks, current_rev} =
-      Enum.reduce(paragraphs, {[], []}, &accumulate_paragraph/2)
+    # current_rev accumulates paragraphs in reverse order for efficiency, and
+    # `measure` is what those paragraphs come to once joined.
+    {chunks, current_rev, _measure} =
+      Enum.reduce(paragraphs, {[], [], Segments.zero()}, &accumulate_paragraph/2)
 
-    # Emit any remaining paragraphs
-    all_chunks =
-      if current_rev != [] do
-        [finalize_paras(Enum.reverse(current_rev)) | chunks]
-      else
-        chunks
-      end
-
-    Enum.reverse(all_chunks)
+    chunks
+    |> flush_paragraphs(current_rev)
+    |> Enum.reverse()
   end
 
-  defp accumulate_paragraph({para_text, para_start, _para_end} = para, {chunks, current}) do
+  defp accumulate_paragraph({para_text, _start, _end} = para, {_chunks, current_rev, acc} = state) do
+    para_measure = Segments.measure(para_text)
+    extended = extend(acc, para_measure, current_rev)
+
     cond do
-      # A paragraph over the target is split on its own, whether or not
-      # anything precedes it. The old clause also required `current == []`, so
-      # an introduction ahead of a long paragraph sent it down the branch
-      # below, which emits a paragraph whole however large it is -- one short
-      # intro turned the rest of a page into a single chunk (PLAN.md S04).
-      # Whatever is accumulated is flushed first so the long paragraph starts a
-      # chunk rather than joining one.
-      oversized?(para_text) ->
-        {Enum.reverse(split_oversized(para_text, para_start)) ++ flush(current, chunks), []}
-
-      # Adding this paragraph would exceed target and we have content: emit current, start new
-      exceeds_target?(current, para) ->
-        {[finalize_paras(Enum.reverse(current)) | chunks], [para]}
-
-      # Accumulate (prepend, reverse later)
-      true ->
-        {chunks, [para | current]}
+      not Segments.within?(para_measure, :target) -> split_paragraph(para, state)
+      Segments.within?(extended, :target) -> keep_paragraph(para, extended, state)
+      true -> start_chunk(para, para_measure, state)
     end
   end
 
-  defp flush([], chunks), do: chunks
-  defp flush(current, chunks), do: [finalize_paras(Enum.reverse(current)) | chunks]
-
-  defp oversized?(text) do
-    word_count(text) > @target_words or grapheme_count(text) > @target_graphemes
+  # A paragraph over the target is split on its own, whether or not anything
+  # precedes it (PLAN.md S04). Whatever is accumulated is flushed first, so the
+  # long paragraph starts a chunk rather than joining one.
+  defp split_paragraph({para_text, para_start, _end}, {chunks, current_rev, _acc}) do
+    split = Enum.reverse(Segments.split(para_text, para_start))
+    {split ++ flush_paragraphs(chunks, current_rev), [], Segments.zero()}
   end
 
-  defp exceeds_target?([], _para), do: false
-
-  defp exceeds_target?(current, {para_text, _start, _end}) do
-    current_word_count(current) + word_count(para_text) > @target_words or
-      current_grapheme_count(current) + grapheme_count(para_text) > @target_graphemes
+  # Adding this paragraph would pass the target and we have content: emit what
+  # is accumulated, start the next chunk with this paragraph.
+  defp start_chunk(para, para_measure, {chunks, current_rev, _acc}) do
+    {flush_paragraphs(chunks, current_rev), [para], para_measure}
   end
 
-  # Assign indexes to raw chunks
-  defp index_chunks(raw_chunks) do
-    raw_chunks
-    |> Enum.with_index()
-    |> Enum.map(fn {raw, index} -> to_chunk_map(raw, index) end)
+  # Accumulate (prepend, reverse later).
+  defp keep_paragraph(para, extended, {chunks, current_rev, _acc}) do
+    {chunks, [para | current_rev], extended}
   end
 
-  defp to_chunk_map({content, start_offset, end_offset}, index) do
-    %{
-      chunk_index: index,
-      content: content,
-      start_offset: start_offset,
-      end_offset: end_offset,
-      word_count: word_count(content)
-    }
-  end
+  defp flush_paragraphs(chunks, []), do: chunks
 
-  # Get the last N words of a text (returns up to n words)
-  defp tail_words(text, n) do
-    words = String.split(text, ~r/\s+/, trim: true)
-    words |> Enum.take(-n) |> Enum.join(" ")
+  defp flush_paragraphs(chunks, current_rev),
+    do: [finalize_paras(Enum.reverse(current_rev)) | chunks]
+
+  # What the accumulated paragraphs would measure with this one appended.
+  defp extend(_measure, para_measure, []), do: para_measure
+
+  defp extend(measure, para_measure, _current_rev) do
+    measure |> Segments.add(@paragraph_join) |> Segments.add(para_measure)
   end
 
   defp finalize_paras(paras) do
@@ -230,158 +214,42 @@ defmodule Doctrans.Search.Chunker do
     {content, start_offset, end_offset}
   end
 
-  defp current_word_count(paras) do
-    Enum.reduce(paras, 0, fn {text, _, _}, acc -> acc + word_count(text) end)
+  # Assign indexes to raw chunks, shifting offsets back onto the original text.
+  @spec index_chunks([raw_chunk()], non_neg_integer()) :: [chunk()]
+  defp index_chunks(raw_chunks, base) do
+    raw_chunks
+    |> Enum.with_index()
+    |> Enum.map(fn {{content, start_offset, end_offset}, index} ->
+      %{
+        chunk_index: index,
+        content: content,
+        start_offset: base + start_offset,
+        end_offset: base + end_offset,
+        word_count: Segments.word_count(content)
+      }
+    end)
   end
 
-  defp current_grapheme_count(paras) do
-    Enum.reduce(paras, 0, fn {text, _, _}, acc -> acc + grapheme_count(text) end)
-  end
-
-  # Split an oversized paragraph into chunks that respect the limits.
-  #
-  # Everything here works in byte spans into `text` rather than by joining
-  # strings back together, and a chunk is always one contiguous span. That is
-  # what makes `binary_part(text, start_offset, end_offset - start_offset)`
-  # return the chunk's content exactly: the separators between segments are
-  # inside the span, so nothing has to be reconstructed and nothing can drift.
-  # The previous implementation rejoined sentences with a single space and
-  # advanced the offset by the length of that join, so every chunk after the
-  # first pointed at the wrong bytes (PLAN.md Q04).
-  defp split_oversized(text, base_offset) do
+  # The tail of the previous chunk, prepended to this one for embedding. Bounded
+  # in graphemes and bytes as well as words, because the word tail is the whole
+  # chunk for any script that does not space-separate.
+  defp overlap_tail(text) do
     text
-    |> segment_spans()
-    |> group_spans(text, base_offset)
-  end
-
-  # The units a chunk is assembled from: sentences, and -- where one sentence
-  # is itself over the hard limit -- the words or graphemes it breaks into.
-  defp segment_spans(text) do
-    text
-    |> sentence_spans()
-    |> Enum.flat_map(&bound_segment(text, &1))
-  end
-
-  # Sentences as {start, length} spans, taken as the gaps between boundary
-  # matches so that the terminator stays with the sentence it ends.
-  defp sentence_spans(text) do
-    size = byte_size(text)
-
-    {spans, tail_start} =
-      @sentence_boundary
-      |> Regex.scan(text, return: :index)
-      |> Enum.map(&hd/1)
-      |> Enum.reduce({[], 0}, &take_sentence/2)
-
-    spans
-    |> prepend_tail(tail_start, size)
-    |> Enum.reverse()
-  end
-
-  defp take_sentence({pos, len}, {spans, from}) do
-    if pos > from do
-      {[{from, pos - from} | spans], pos + len}
-    else
-      # A zero-width or leading boundary match: advance past it without
-      # emitting an empty sentence.
-      {spans, max(from, pos + len)}
-    end
-  end
-
-  defp prepend_tail(spans, tail_start, size) when tail_start < size do
-    [{tail_start, size - tail_start} | spans]
-  end
-
-  defp prepend_tail(spans, _tail_start, _size), do: spans
-
-  # A sentence within the hard limits is one segment. One over them is broken
-  # at word boundaries, and a "word" still over them -- a run of CJK with no
-  # spaces in it at all -- at grapheme boundaries. This is the hard fallback:
-  # after it, no segment can exceed the limits, so no chunk can either.
-  defp bound_segment(text, span) do
-    if within_limits?(slice(text, span)) do
-      [span]
-    else
-      text
-      |> word_spans(span)
-      |> Enum.flat_map(&bound_word(text, &1))
-    end
-  end
-
-  defp bound_word(text, span) do
-    if within_limits?(slice(text, span)), do: [span], else: grapheme_spans(text, span)
-  end
-
-  defp within_limits?(text) do
-    word_count(text) <= @max_words and grapheme_count(text) <= @max_graphemes
-  end
-
-  # Non-whitespace runs within a span, as absolute {start, length} pairs.
-  defp word_spans(text, {start, len}) do
-    ~r/\S+/
-    |> Regex.scan(slice(text, {start, len}), return: :index)
-    |> Enum.map(fn [{pos, size}] -> {start + pos, size} end)
-  end
-
-  # A run with no whitespace to break on is cut into fixed grapheme runs. The
-  # cut is by grapheme rather than by byte so it can never land inside a
-  # multi-byte character and produce invalid UTF-8.
-  defp grapheme_spans(text, {start, len}) do
-    text
-    |> slice({start, len})
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.take(-@overlap_words)
+    |> Enum.join(" ")
     |> String.graphemes()
-    |> Enum.chunk_every(@target_graphemes)
-    |> Enum.map_reduce(start, fn graphemes, offset ->
-      size = graphemes |> Enum.join() |> byte_size()
-      {{offset, size}, offset + size}
+    |> Enum.reverse()
+    |> Enum.reduce_while({[], 0, 0}, fn grapheme, {acc, count, size} ->
+      size = size + byte_size(grapheme)
+
+      if count + 1 > @overlap_graphemes or size > @overlap_bytes do
+        {:halt, {acc, count, size}}
+      else
+        {:cont, {[grapheme | acc], count + 1, size}}
+      end
     end)
     |> elem(0)
+    |> Enum.join()
   end
-
-  # Fill a chunk with segments until a budget is reached, then start the next.
-  defp group_spans(spans, text, base_offset) do
-    {chunks, open} = Enum.reduce(spans, {[], nil}, &take_segment(&1, &2, text))
-
-    chunks
-    |> close_open(open, text, base_offset)
-    |> Enum.reverse()
-  end
-
-  defp take_segment(span, {chunks, nil}, _text), do: {chunks, span}
-
-  defp take_segment({start, len}, {chunks, {open_start, _open_len} = open}, text) do
-    combined = {open_start, start + len - open_start}
-
-    if fits?(slice(text, combined)) do
-      {chunks, combined}
-    else
-      {[open | chunks], {start, len}}
-    end
-  end
-
-  defp fits?(text) do
-    word_count(text) <= @target_words and grapheme_count(text) <= @target_graphemes
-  end
-
-  defp close_open(chunks, nil, _text, _base_offset), do: chunks
-
-  defp close_open(chunks, open, text, base_offset) do
-    [open | chunks]
-    |> Enum.reverse()
-    |> Enum.map(&to_span_chunk(&1, text, base_offset))
-    |> Enum.reverse()
-  end
-
-  defp to_span_chunk({start, len}, text, base_offset) do
-    content = slice(text, {start, len})
-    {content, base_offset + start, base_offset + start + byte_size(content)}
-  end
-
-  defp slice(text, {start, len}), do: binary_part(text, start, len)
-
-  defp word_count(text) do
-    text |> String.split(~r/\s+/, trim: true) |> length()
-  end
-
-  defp grapheme_count(text), do: String.length(text)
 end

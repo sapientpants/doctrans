@@ -613,18 +613,57 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   at `。`.
   Word counts stop measuring anything for scripts that do not separate words with spaces: `word_count/1`
   returns 1 for a Japanese page of any length, so every word budget was blind to it and the page was never
-  chunked at all. A grapheme budget is the limit that still means something there, and it is set loose
-  enough never to bind on space-separated prose -- 300 words of Latin text runs about 1,800 graphemes and
-  400 about 2,400, against a 2,400 target and a 3,200 ceiling. The explicit limits are therefore 300 words
-  or 2,400 graphemes to fill a chunk, 400 words or 3,200 graphemes that no chunk may pass.
+  chunked at all. A grapheme budget is the limit that still means something there. It rarely binds on
+  space-separated prose, though the first draft of this entry claimed it never does, which is wrong: 300
+  words of Latin text runs about 1,900 graphemes and 400 about 2,500, so against a 2,400 target the
+  grapheme budget is what binds first at roughly 380 words of ordinary English, and it binds in this
+  change's own fixtures at 266 to 277 words.
+  A grapheme is bounded in characters but not in bytes, and bytes are what the embedding server is handed:
+  3,200 family emoji, each one grapheme built from four joined codepoints, are 80,000 bytes and passed
+  every limit above. A byte budget of 9,600 to fill and 12,800 to bound closes that at four bytes per
+  grapheme -- the most a single codepoint takes in UTF-8 -- so it binds on no ordinary text in any script.
+  The explicit limits are therefore 300 words, 2,400 graphemes or 9,600 bytes to fill a chunk, and 400
+  words, 3,200 graphemes or 12,800 bytes that no chunk may pass. A single grapheme cluster larger than the
+  ceiling is the one thing that can still pass it, because there is no rung below a character that does not
+  produce mojibake. The three ceilings are checked against their targets at compile time rather than
+  asserted in a comment.
   Offsets in the rewritten path now locate their chunk. Splitting works in byte spans into the source and a
   chunk is always one contiguous span, so `binary_part(text, start_offset, end_offset - start_offset)`
   returns its content exactly; the separators between segments sit inside the span and nothing is
   reconstructed. The previous code rejoined sentences with a single space and advanced the offset by the
-  length of that join, so every chunk after the first pointed at the wrong bytes -- a probe over a split
-  paragraph went from 0/11 and 1/11 faithful, depending on the separator, to 11/11. This is the first of the
-  two causes Q04 names; the second, `finalize_paras/1` joining paragraphs on a literal `"\n\n"` when the
-  source has more, is untouched and Q04 keeps it along with the property test.
+  length of that join, so every chunk after the first pointed at the wrong bytes -- a probe over this
+  change's own split-paragraph fixture went from 0/6 and 1/6 faithful, depending on the separator, to 6/6.
+  (An earlier draft of this entry reported 0/11 and 1/11 to 11/11; that ratio came from a probe twice the
+  size of the fixture actually committed.) Offsets are also relative to the original text again rather than
+  to `String.trim/1`'s result: leading whitespace shifted every offset in the page, and the test that was
+  meant to pin the round-trip asserted against the trimmed string, which concealed it.
+  This is the first of the two causes Q04 names; the second, `finalize_paras/1` joining paragraphs on a
+  literal `"\n\n"` when the source has more, is untouched. Q04 keeps it along with the property test, and
+  `ChunkerTest` now carries a skipped test that fails the day it is fixed.
+  Found in review, after the first implementation: `content_for_embedding/2` bounded its overlap with
+  `tail_words/2` alone, which is the same word count the rest of this change exists to stop trusting. It
+  was unreachable for CJK before -- a Japanese page was a single chunk with no previous chunk to overlap --
+  and splitting made it reachable, so every chunk after the first was embedded with the whole of its
+  predecessor prepended: a 2,394-grapheme chunk went to the embedding server as 4,794, twice the ceiling
+  this change advertises. The overlap is now bounded in graphemes and bytes as well as words.
+  Also found in review: measuring the growing span once per segment made chunking up to 96x slower per
+  byte than before the change, and the cost landed on ordinary documents rather than adversarial ones --
+  1MB of short English sentences went from 638ms to 19.2s, ordinary Japanese prose to 4.2s, and Devanagari
+  worst of all at 69s, against an embedding queue that runs two workers. The packer now carries running
+  counts instead, which needs one correction: graphemes and bytes are additive across a join but words are
+  not, because a zero-width sentence boundary leaves two segments meeting inside one word. The same
+  document is now 1.5s, ordinary paragraphs are faster than before the change at 0.6x, and the worst
+  remaining case is 2.5x.
+  Also found in review: `Regex.scan/3` on a Unicode pattern raises on invalid UTF-8, and the widened
+  splitting path made that reachable for any oversized paragraph rather than only a leading one. No caller
+  can currently supply such bytes -- Postgres rejects them in a text column -- but the raise was taken by
+  an Oban job that retries deterministically, so the page would have been left reading "processing"
+  permanently and re-enqueued by `StartupRecovery` on every boot. `Chunker` sanitizes the input, and
+  `Indexer` now marks a page errored before re-raising anything unexpected, which closes the same leak for
+  every other raise below the status write.
+  `Chunker` passed the repo's 500-line module limit once the above landed, and was split along the seam it
+  already had: `Doctrans.Search.Chunker.Segments` owns the budgets and the splitting of one oversized
+  paragraph, `Chunker` keeps paragraph grouping, offsets and the embedding overlap.
   Tradeoff accepted: chunk content changes for any page holding an oversized paragraph, so
   `chunks_match_page_content?/2` will recreate those rows and re-embed them the next time the page is
   indexed. Nothing rewrites them before that -- a library chunked under the old rules keeps its oversized
@@ -635,18 +674,23 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Tradeoff accepted: a grapheme budget is a crude stand-in for word segmentation in Chinese, Japanese and
   Thai. It bounds a chunk, which is what was missing, but it does not make the boundaries linguistic; only
   the sentence terminators do that, and a passage without them is cut at a character count.
-  Evidence: `lib/doctrans/search/chunker.ex` (`accumulate_paragraph/2`, `split_oversized/2`,
-  `bound_segment/2`, `@sentence_boundary`). `ChunkerTest` gained an "oversized paragraphs" block of nine
-  tests, one per way the old code failed to split: the plan's own probe, sentence-free text, a single
-  over-long sentence, a run with no whitespace at all, a multi-byte run asserted to stay valid UTF-8,
-  German, Japanese, the offset round-trip, and index/offset ordering across a split. Restoring the
-  `current == []` guard fails three of them, deleting the fallback ladder fails five, removing the grapheme
-  budget fails three, and reintroducing the offset arithmetic fails the round-trip plus the pre-existing
-  "splits very long single paragraph" test. Restoring the ASCII-only sentence pattern fails the German and
-  Japanese tests only because both assert chunks end *on a terminator* -- against size assertions alone it
-  passed, since the word-level fallback bounds those passages either way and merely cuts them mid-sentence.
-  The two existing tests that named this defect asserted `length(chunks) >= 2`, which the buggy output of
-  an intro plus one oversized chunk satisfies; both now bound the largest chunk instead.
+  Evidence: `lib/doctrans/search/chunker.ex` (`accumulate_paragraph/2`, `chunk/1`, `overlap_tail/1`) and
+  `lib/doctrans/search/chunker/segments.ex` (`split/2`, `bound/3`, `pack_segment/3`, `@sentence_boundary`).
+  `ChunkerTest` runs 38 tests and one skipped. Every claim above is pinned by a mutation that fails a test,
+  measured rather than asserted: restoring the `current == []` guard fails 5, deleting the fallback ladder
+  fails 9, removing the grapheme budget fails 6, removing the byte budget fails 1, restoring the ASCII-only
+  sentence pattern fails 4, dropping the leading-whitespace offset base fails 2, unbounding the embedding
+  overlap fails 1, dropping the joined-word correction fails 1, and dropping the invalid-UTF-8 guard fails
+  1. Setting a ceiling at or below its target does not compile.
+  Two tests from the first implementation pinned less than this entry claimed, and both are fixed. The
+  fixture for "emits current chunk when long paragraph follows accumulated content" was a 350-word
+  paragraph, which the packer is entitled to emit whole because it sits under the 400-word ceiling, so the
+  test passed unchanged against the defect it was written for; it is now 800 words. "Chunk indexes stay
+  contiguous and offsets non-decreasing across a split" passed against the pre-fix chunker outright, since
+  it never asserted a split had happened. The counts this entry states -- nine chunks for the probe, 11 for
+  German, three for Japanese -- are now asserted exactly rather than as `length(chunks) > 1`, and the
+  ceilings, the seven sentence terminators that no test exercised, the byte bound, invalid UTF-8, and the
+  offset round-trip across eight sources and scripts have tests of their own.
 
 ## Phase 4 — Viewer, uploads, and local-use experience
 
