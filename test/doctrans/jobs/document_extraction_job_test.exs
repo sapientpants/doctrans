@@ -3,6 +3,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
   use Oban.Testing, repo: Doctrans.Repo
 
   alias Doctrans.Jobs.DocumentExtractionJob
+  alias Doctrans.Processing.MissingConverterStub
   alias Doctrans.Processing.PdfExtractorFailingStub
 
   import Doctrans.Fixtures
@@ -44,11 +45,11 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       path = Path.join(dir, "original.pdf")
       File.write!(path, "%PDF-1.4\n" <> String.duplicate("0", 1_024))
 
-      original_module = Application.get_env(:doctrans, :pdf_extractor_module)
+      original_module = Application.fetch_env(:doctrans, :pdf_extractor_module)
       Application.put_env(:doctrans, :pdf_extractor_module, PdfExtractorFailingStub)
 
       on_exit(fn ->
-        Application.put_env(:doctrans, :pdf_extractor_module, original_module)
+        restore_env(:pdf_extractor_module, original_module)
         Application.delete_env(:doctrans, :test_extraction_failure)
       end)
 
@@ -110,7 +111,33 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       name == tag or names_failure?(Keyword.get(bindings, :reason, :none), tag)
     end
 
+    test "a missing LibreOffice is cancelled rather than retried" do
+      document = document_fixture(%{original_filename: "report.docx"})
+
+      upload_dir = Doctrans.Documents.document_upload_dir(document.id)
+      File.mkdir_p!(upload_dir)
+      File.write!(Path.join(upload_dir, "original.docx"), "fake docx content")
+      on_exit(fn -> File.rm_rf!(upload_dir) end)
+
+      original_converter = Application.fetch_env(:doctrans, :document_converter_module)
+      Application.put_env(:doctrans, :document_converter_module, MissingConverterStub)
+
+      on_exit(fn -> restore_env(:document_converter_module, original_converter) end)
+
+      # No number of retries installs LibreOffice, and each one re-occupies the
+      # single extraction slot to reach the same answer.
+      assert {:cancel, reason} =
+               perform_job(DocumentExtractionJob, %{"document_id" => document.id})
+
+      assert names_failure?(reason, :soffice_not_found)
+    end
+
     defp names_failure?(_reason, _tag), do: false
+
+    # Putting `nil` back is not the same as the key never having been set: the
+    # callers read these with a module default, which an explicit nil defeats.
+    defp restore_env(key, {:ok, value}), do: Application.put_env(:doctrans, key, value)
+    defp restore_env(key, :error), do: Application.delete_env(:doctrans, key)
   end
 
   describe "perform/1 with file_path" do
@@ -178,8 +205,9 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       # Cleanup
       File.rm_rf!(upload_dir)
 
-      # Result depends on LibreOffice availability
-      assert result == :ok or match?({:error, _}, result)
+      # Result depends on LibreOffice availability. Where it is missing the job
+      # cancels rather than erroring: no number of retries installs it.
+      assert result == :ok or match?({:error, _}, result) or match?({:cancel, _}, result)
     end
   end
 end
