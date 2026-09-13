@@ -146,22 +146,22 @@ msgstr "Page %{page_number} translation failed: %{reason}"
 msgid "pdfinfo failed: %{error}"
 msgstr "pdfinfo failed: %{error}"
 
-#: lib/doctrans_web/error_messages.ex:132
+#: lib/doctrans_web/error_messages.ex:157
 #, elixir-autogen, elixir-format
 msgid "Conversion completed but PDF file not found"
 msgstr "Conversion completed but PDF file not found"
 
-#: lib/doctrans_web/error_messages.ex:136
+#: lib/doctrans_web/error_messages.ex:161
 #, elixir-autogen, elixir-format
 msgid "Document conversion failed: %{error}"
 msgstr "Document conversion failed: %{error}"
 
-#: lib/doctrans_web/error_messages.ex:146
+#: lib/doctrans_web/error_messages.ex:171
 #, elixir-autogen, elixir-format
 msgid "Document conversion timed out"
 msgstr "Document conversion timed out"
 
-#: lib/doctrans_web/error_messages.ex:126
+#: lib/doctrans_web/error_messages.ex:151
 #, elixir-autogen, elixir-format
 msgid "LibreOffice is not installed"
 msgstr "LibreOffice is not installed"
@@ -176,7 +176,7 @@ msgstr "Page image not found after extraction"
 msgid "Page not found"
 msgstr "Page not found"
 
-#: lib/doctrans_web/error_messages.ex:129
+#: lib/doctrans_web/error_messages.ex:154
 #, elixir-autogen, elixir-format
 msgid "Source file not found: %{path}"
 msgstr "Source file not found: %{path}"
@@ -186,10 +186,10 @@ msgstr "Source file not found: %{path}"
 msgid "Unsupported file format: %{format}"
 msgstr "Unsupported file format: %{format}"
 
-#: lib/doctrans_web/error_messages.ex:140
+#: lib/doctrans_web/error_messages.ex:165
 #, elixir-autogen, elixir-format
 msgid "Failed to start LibreOffice: %{error}"
-msgstr ""
+msgstr "Failed to start LibreOffice: %{error}"
 
 #: lib/doctrans_web/error_messages.ex:26
 #, elixir-autogen, elixir-format
@@ -256,20 +256,20 @@ msgstr "Title is required and must be a string"
 msgid "Unsupported language: %{language}"
 msgstr "Unsupported language: %{language}"
 
-#: lib/doctrans_web/error_messages.ex:157
+#: lib/doctrans_web/error_messages.ex:182
 #, elixir-autogen, elixir-format
 msgid "Could not read uploaded file"
-msgstr ""
+msgstr "Could not read uploaded file"
 
-#: lib/doctrans_web/error_messages.ex:161
+#: lib/doctrans_web/error_messages.ex:186
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
-msgstr ""
+msgstr "File too large (%{size}MB, max %{max}MB)"
 
-#: lib/doctrans_web/error_messages.ex:144
+#: lib/doctrans_web/error_messages.ex:169
 #, elixir-autogen, elixir-format
 msgid "LibreOffice process terminated unexpectedly"
-msgstr ""
+msgstr "LibreOffice process terminated unexpectedly"
 
 #: lib/doctrans_web/error_messages.ex:46
 #, elixir-autogen, elixir-format
@@ -284,19 +284,34 @@ msgstr "Processing failed on page(s) %{page_numbers}. Reprocess those pages to f
 #: lib/doctrans_web/error_messages.ex:96
 #, elixir-autogen, elixir-format
 msgid "PDF rendering timed out. Lower the extraction resolution or split the document, then try again."
-msgstr ""
+msgstr "PDF rendering timed out. Lower the extraction resolution or split the document, then try again."
 
-#: lib/doctrans_web/error_messages.ex:112
+#: lib/doctrans_web/error_messages.ex:137
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} rendered too large (%{size} bytes, limit %{limit}). Lower the extraction resolution, then reprocess this page."
-msgstr ""
+msgstr "Page %{page_number} rendered too large (%{size} bytes, limit %{limit}). Lower the extraction resolution, then reprocess this page."
 
-#: lib/doctrans_web/error_messages.ex:122
+#: lib/doctrans_web/error_messages.ex:147
 #, elixir-autogen, elixir-format
 msgid "Required PDF tool %{command} is not installed"
-msgstr ""
+msgstr "Required PDF tool %{command} is not installed"
+
+#: lib/doctrans_web/error_messages.ex:117
+#, elixir-autogen, elixir-format
+msgid "This PDF has %{pages} pages, above the limit of %{limit}. Split it into smaller documents before uploading."
+msgstr "This PDF has %{pages} pages, above the limit of %{limit}. Split it into smaller documents before uploading."
+
+#: lib/doctrans_web/error_messages.ex:110
+#, elixir-autogen, elixir-format
+msgid "Extraction ran out of time for this document. Finished pages were kept; reprocess it to continue."
+msgstr "Extraction ran out of time for this document. Finished pages were kept; reprocess it to continue."
 
 #: lib/doctrans_web/error_messages.ex:103
 #, elixir-autogen, elixir-format
-msgid "This PDF has %{pages} pages, above the limit of %{limit}. Split it into smaller documents before uploading."
-msgstr ""
+msgid "Reading the PDF timed out before extraction started. The file may be damaged."
+msgstr "Reading the PDF timed out before extraction started. The file may be damaged."
+
+#: lib/doctrans_web/error_messages.ex:126
+#, elixir-autogen, elixir-format
+msgid "This PDF's pages are %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."
+msgstr "This PDF's pages are %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."

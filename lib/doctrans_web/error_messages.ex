@@ -98,12 +98,37 @@ defmodule DoctransWeb.ErrorMessages do
         "PDF rendering timed out. Lower the extraction resolution or split the document, then try again."
       )
 
+  def message(:pdfinfo_timeout),
+    do:
+      dgettext(
+        "errors",
+        "Reading the PDF timed out before extraction started. The file may be damaged."
+      )
+
+  def message(:pdf_extraction_deadline_exceeded),
+    do:
+      dgettext(
+        "errors",
+        "Extraction ran out of time for this document. Finished pages were kept; reprocess it to continue."
+      )
+
   def message({:pdf_too_many_pages, bindings}),
     do:
       dgettext(
         "errors",
         "This PDF has %{pages} pages, above the limit of %{limit}. Split it into smaller documents before uploading.",
         pages: binding(bindings, :pages),
+        limit: binding(bindings, :limit)
+      )
+
+  def message({:pdf_page_too_large, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "This PDF's pages are %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again.",
+        width: binding(bindings, :width),
+        height: binding(bindings, :height),
+        dpi: binding(bindings, :dpi),
         limit: binding(bindings, :limit)
       )
 

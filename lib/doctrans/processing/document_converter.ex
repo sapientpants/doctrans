@@ -14,9 +14,11 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   require Logger
 
+  alias Doctrans.Processing.Executable
   alias Doctrans.Processing.Subprocess
 
   @default_timeout 120_000
+  @profile_timeout 10_000
   @search_paths [
     "/Applications/LibreOffice.app/Contents/MacOS/soffice",
     "/usr/bin/soffice",
@@ -58,41 +60,14 @@ defmodule Doctrans.Processing.DocumentConverter do
   @spec resolve_soffice_path() :: {:ok, String.t()} | {:error, :soffice_not_found}
   def resolve_soffice_path do
     config = Application.get_env(:doctrans, :document_conversion, [])
-    configured = Keyword.get(config, :soffice_path)
-    search_paths = Keyword.get(config, :search_paths, @search_paths)
 
-    found =
-      if executable_file?(configured) do
-        configured
-      else
-        find_on_path("soffice") || Enum.find(search_paths, &absolute_executable?/1)
-      end
-
-    case found do
-      nil -> {:error, :soffice_not_found}
-      path -> {:ok, Path.expand(path)}
+    case Executable.resolve("soffice",
+           configured: Keyword.get(config, :soffice_path),
+           candidates: Keyword.get(config, :search_paths, @search_paths)
+         ) do
+      {:ok, path} -> {:ok, path}
+      :error -> {:error, :soffice_not_found}
     end
-  end
-
-  defp absolute_executable?(path),
-    do: is_binary(path) and Path.type(path) == :absolute and executable_file?(path)
-
-  # Locates `name` by searching the directories in the current `PATH`,
-  # honouring whatever PATH the process environment holds at call time.
-  # Returns the absolute path or `nil`.
-  defp find_on_path(name) do
-    path_var = System.get_env("PATH", "")
-
-    separator =
-      case :os.type() do
-        {:win32, _} -> ";"
-        _other -> ":"
-      end
-
-    path_var
-    |> String.split(separator, trim: false)
-    |> Enum.map(fn dir -> Path.join(dir, name) end)
-    |> Enum.find(&executable_file?/1)
   end
 
   defp supervise_conversion(path, source_path, output_dir) do
@@ -129,7 +104,9 @@ defmodule Doctrans.Processing.DocumentConverter do
 
     result =
       try do
-        Subprocess.run(soffice_path, args, timeout: timeout)
+        # soffice's launcher can return while its children are still working,
+        # so the process group is killed even when the launcher exits cleanly.
+        Subprocess.run(soffice_path, args, timeout: timeout, kill_on_exit: true)
       after
         # Remove the throwaway profile whether the conversion succeeded,
         # failed, or was killed.
@@ -149,16 +126,18 @@ defmodule Doctrans.Processing.DocumentConverter do
   end
 
   defp finalize({:ok, {output, exit_code}}, _pdf_path, _timeout) do
+    diagnostic = Subprocess.diagnostic(output)
+
     Logger.error(
       "LibreOffice conversion failed with exit code #{exit_code}: " <>
-        String.slice(output, 0, 500)
+        String.slice(diagnostic, 0, 500)
     )
 
-    {:error, {:conversion_failed, [error: String.trim(output)]}}
+    {:error, {:conversion_failed, [error: diagnostic]}}
   end
 
   defp finalize({:start_error, reason}, _pdf_path, _timeout) do
-    {:error, {:conversion_start_failed, [error: String.trim(reason)]}}
+    {:error, {:conversion_start_failed, [error: Subprocess.diagnostic(reason)]}}
   end
 
   defp finalize({:error, reason}, _pdf_path, _timeout) do
@@ -167,7 +146,8 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   defp finalize({:timeout, output}, _pdf_path, timeout) do
     Logger.error(
-      "LibreOffice conversion timed out after #{timeout}ms: " <> String.slice(output, 0, 500)
+      "LibreOffice conversion timed out after #{timeout}ms: " <>
+        String.slice(Subprocess.diagnostic(output), 0, 500)
     )
 
     {:error, :conversion_timeout}
@@ -184,11 +164,21 @@ defmodule Doctrans.Processing.DocumentConverter do
     # mktemp atomically creates a fresh mode-0700 directory on macOS and Linux.
     # mkdir_p would accept an existing directory; mkdir followed by chmod would
     # leave a permissions window when the application's umask is permissive.
-    case System.cmd("/usr/bin/mktemp", ["-d", template], stderr_to_stdout: true, env: []) do
-      {path, 0} -> String.trim_trailing(path, "\n")
-      {error, _status} -> raise "Failed to create LibreOffice profile: #{String.trim(error)}"
+    # Bounded like every other external call: an unbounded one here would be the
+    # single place a hung command could still hold the extraction slot.
+    case Subprocess.run("/usr/bin/mktemp", ["-d", template], timeout: @profile_timeout) do
+      {:ok, {path, 0}} ->
+        String.trim_trailing(path, "\n")
+
+      other ->
+        raise "Failed to create LibreOffice profile: #{Subprocess.diagnostic(profile_error(other))}"
     end
   end
+
+  defp profile_error({:ok, {output, _status}}), do: output
+  defp profile_error({:timeout, _output}), do: "mktemp timed out"
+  defp profile_error({:start_error, message}), do: message
+  defp profile_error({:error, reason}), do: inspect(reason)
 
   # Encodes the profile path as a file:// URI, escaping each path segment so
   # spaces or non-ASCII characters in the temp directory do not break it.
@@ -205,17 +195,5 @@ defmodule Doctrans.Processing.DocumentConverter do
   defp get_timeout do
     config = Application.get_env(:doctrans, :document_conversion, [])
     Keyword.get(config, :timeout, @default_timeout)
-  end
-
-  # Returns true when `path` points at an existing, executable regular file.
-  defp executable_file?(path) do
-    is_binary(path) and executable_stats?(path)
-  end
-
-  defp executable_stats?(path) do
-    case File.stat(path) do
-      {:ok, %File.Stat{type: :regular, mode: mode}} -> :erlang.band(mode, 0o111) != 0
-      _other -> false
-    end
   end
 end

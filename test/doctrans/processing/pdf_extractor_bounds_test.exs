@@ -11,6 +11,10 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
   """
   use ExUnit.Case, async: false
 
+  # The fakes below deliberately fail, and the extractor logs each failure with
+  # its diagnostic tail. Capturing keeps that out of the suite's output.
+  @moduletag :capture_log
+
   alias Doctrans.Processing.PdfExtractor
 
   setup do
@@ -100,6 +104,10 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
       assert {:error, :pdf_command_timeout} = result
       assert elapsed >= 500
 
+      # The fake writes these from a forked shell; on a loaded runner the write
+      # can land after the deadline that killed it.
+      eventually(fn -> File.exists?(pid_file) and File.exists?(pid_file <> ".child") end)
+
       renderer = pid_file |> File.read!() |> String.trim()
       child = (pid_file <> ".child") |> File.read!() |> String.trim()
       eventually(fn -> process_gone?(renderer) end)
@@ -116,7 +124,9 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
       hung = fake(dir, "pdfinfo", "#!/bin/sh\nexec /bin/sleep 98765\n")
       put_config(config, pdfinfo_path: hung, info_timeout: 300)
 
-      assert {:error, :pdf_command_timeout} = PdfExtractor.get_page_count(source_pdf(dir))
+      # A hung pdfinfo is not a rendering problem, so it does not advise lowering
+      # the resolution: nothing was rendered.
+      assert {:error, :pdfinfo_timeout} = PdfExtractor.get_page_count(source_pdf(dir))
     end
 
     test "output does not extend the deadline", %{dir: dir, config: config} do
@@ -219,7 +229,9 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
 
   describe "executable resolution" do
     test "a missing renderer is named in the error", %{dir: dir, config: config} do
-      put_config(config, pdftoppm_path: Path.join(dir, "nope"))
+      # The fallback directories are pinned off, so this really is "nothing to
+      # find" rather than "found the machine's own poppler".
+      put_config(config, pdftoppm_path: Path.join(dir, "nope"), search_dirs: [])
       System.put_env("PATH", "")
 
       assert {:error, {:poppler_not_found, [command: "pdftoppm"]}} =
@@ -241,13 +253,143 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
       on_path = Path.join(dir, "bin")
       File.mkdir_p!(on_path)
       fake(on_path, "pdftoppm", fake_pdftoppm_body())
+      # available?/0 needs both commands: every extraction calls pdfinfo first.
+      fake(on_path, "pdfinfo", "#!/bin/sh\necho \"Pages:          1\"\n")
 
-      put_config(config, pdftoppm_path: not_executable, timeout: 30_000)
+      put_config(config, pdftoppm_path: not_executable, timeout: 30_000, search_dirs: [])
       System.put_env("PATH", on_path)
 
       assert PdfExtractor.available?()
 
       assert {:ok, _path} =
+               PdfExtractor.extract_page(source_pdf(dir), Path.join(dir, "pages"), 1)
+    end
+  end
+
+  describe "page geometry" do
+    test "a page too large to rasterize is rejected before any render", %{
+      dir: dir,
+      config: config
+    } do
+      # A 20000x20000pt media box is ~278in square; at 150 dpi that is over a
+      # billion pixels, which would be gigabytes of RAM and PNG before the
+      # post-render byte check could ever see it.
+      huge =
+        fake(dir, "pdfinfo", """
+        #!/bin/sh
+        echo "Pages:          1"
+        echo "Page size:      20000 x 20000 pts"
+        """)
+
+      put_config(config, pdfinfo_path: huge, dpi: 150, max_page_pixels: 40_000_000)
+
+      assert {:error, {:pdf_page_too_large, bindings}} =
+               PdfExtractor.get_page_count(source_pdf(dir))
+
+      assert bindings[:limit] == 40_000_000
+      assert bindings[:dpi] == 150
+      assert bindings[:pixels] > 40_000_000
+    end
+
+    test "an ordinary page size passes", %{dir: dir, config: config} do
+      letter =
+        fake(dir, "pdfinfo", """
+        #!/bin/sh
+        echo "Pages:          3"
+        echo "Page size:      612 x 792 pts (letter)"
+        """)
+
+      put_config(config, pdfinfo_path: letter, dpi: 150, max_page_pixels: 40_000_000)
+
+      assert {:ok, 3} = PdfExtractor.get_page_count(source_pdf(dir))
+    end
+
+    test "output without a page size is accepted rather than guessed at", %{
+      dir: dir,
+      config: config
+    } do
+      terse = fake(dir, "pdfinfo", "#!/bin/sh\necho \"Pages:          2\"\n")
+      put_config(config, pdfinfo_path: terse, max_page_pixels: 1)
+
+      assert {:ok, 2} = PdfExtractor.get_page_count(source_pdf(dir))
+    end
+  end
+
+  describe "document budget" do
+    test "a render is clamped to the caller's remaining budget", %{dir: dir, config: config} do
+      hung = fake(dir, "pdftoppm", "#!/bin/sh\nexec /bin/sleep 98765\n")
+
+      # The per-page ceiling is far larger than the budget, so only the budget
+      # can be what ends this.
+      put_config(config, pdftoppm_path: hung, timeout: 60_000)
+      deadline = System.monotonic_time(:millisecond) + 400
+
+      started = System.monotonic_time(:millisecond)
+
+      assert {:error, :pdf_command_timeout} =
+               PdfExtractor.extract_page(source_pdf(dir), Path.join(dir, "pages"), 1,
+                 deadline: deadline
+               )
+
+      assert System.monotonic_time(:millisecond) - started < 10_000
+    end
+
+    test "an exhausted budget fails without starting a render", %{dir: dir, config: config} do
+      marker = Path.join(dir, "ran")
+
+      put_config(config,
+        pdftoppm_path: fake(dir, "pdftoppm", "#!/bin/sh\ntouch \"#{marker}\"\n"),
+        timeout: 30_000
+      )
+
+      past = System.monotonic_time(:millisecond) - 1
+
+      assert {:error, :pdf_extraction_deadline_exceeded} =
+               PdfExtractor.extract_page(source_pdf(dir), Path.join(dir, "pages"), 1,
+                 deadline: past
+               )
+
+      refute File.exists?(marker)
+    end
+  end
+
+  describe "pdfinfo output handling" do
+    test "output without a page count is reported as unparseable", %{dir: dir, config: config} do
+      # What an encrypted PDF produces.
+      encrypted =
+        fake(dir, "pdfinfo", "#!/bin/sh\necho \"Encrypted:      yes\"\n")
+
+      put_config(config, pdfinfo_path: encrypted)
+
+      assert {:error, :invalid_page_count} = PdfExtractor.get_page_count(source_pdf(dir))
+    end
+
+    test "a non-zero pdfinfo exit is reported as a pdfinfo failure", %{dir: dir, config: config} do
+      broken =
+        fake(
+          dir,
+          "pdfinfo",
+          "#!/bin/sh\necho \"Command Line Error: wrong password\" >&2\nexit 1\n"
+        )
+
+      put_config(config, pdfinfo_path: broken)
+
+      assert {:error, {:pdfinfo_failed, [error: error]}} =
+               PdfExtractor.get_page_count(source_pdf(dir))
+
+      assert error =~ "wrong password"
+    end
+  end
+
+  describe "render output handling" do
+    test "a renderer that exits cleanly but writes nothing is reported", %{
+      dir: dir,
+      config: config
+    } do
+      silent = fake(dir, "pdftoppm", "#!/bin/sh\nexit 0\n")
+      put_config(config, pdftoppm_path: silent, timeout: 30_000)
+
+      assert {:error, :page_image_not_found} =
                PdfExtractor.extract_page(source_pdf(dir), Path.join(dir, "pages"), 1)
     end
   end
@@ -272,6 +414,74 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
       )
 
       assert {:ok, 1} = PdfExtractor.extract_pages(source_pdf(dir), Path.join(dir, "pages"))
+    end
+
+    test "a malformed page count does not become a zero-millisecond deadline", %{
+      dir: dir,
+      config: config
+    } do
+      slow =
+        fake(dir, "pdftoppm", """
+        #{fake_pdftoppm_body()}
+        /bin/sleep 0.2
+        """)
+
+      put_config(config,
+        pdfinfo_path: fake(dir, "pdfinfo", "#!/bin/sh\necho \"Pages:          0\"\n"),
+        pdftoppm_path: slow,
+        timeout: 10_000
+      )
+
+      assert {:ok, 1} = PdfExtractor.extract_pages(source_pdf(dir), Path.join(dir, "pages"))
+    end
+
+    test "the whole-document deadline never exceeds the job budget", %{dir: dir, config: config} do
+      hung = fake(dir, "pdftoppm", "#!/bin/sh\nexec /bin/sleep 98765\n")
+
+      # 500 pages at the per-page ceiling would be far longer than the job can
+      # run; the job budget is what has to bind.
+      put_config(config,
+        pdfinfo_path: fake(dir, "pdfinfo", "#!/bin/sh\necho \"Pages:          500\"\n"),
+        pdftoppm_path: hung,
+        max_pages: 1_000,
+        timeout: 60_000,
+        job_timeout: 400
+      )
+
+      started = System.monotonic_time(:millisecond)
+
+      assert {:error, :pdf_command_timeout} =
+               PdfExtractor.extract_pages(source_pdf(dir), Path.join(dir, "pages"))
+
+      assert System.monotonic_time(:millisecond) - started < 10_000
+    end
+
+    test "every oversized render is removed, not just the first", %{dir: dir, config: config} do
+      fat =
+        fake(dir, "pdftoppm", """
+        #!/bin/sh
+        prefix=""
+        for a in "$@"; do prefix="$a"; done
+        /usr/bin/head -c 4096 /dev/zero > "${prefix}-01.png"
+        /usr/bin/head -c 4096 /dev/zero > "${prefix}-02.png"
+        """)
+
+      put_config(config,
+        pdfinfo_path: fake(dir, "pdfinfo", "#!/bin/sh\necho \"Pages:          2\"\n"),
+        pdftoppm_path: fat,
+        max_pages: 10,
+        timeout: 30_000,
+        max_image_bytes: 1_024
+      )
+
+      pages_dir = Path.join(dir, "pages")
+
+      assert {:error, {:page_image_too_large, _bindings}} =
+               PdfExtractor.extract_pages(source_pdf(dir), pages_dir)
+
+      # A leftover image is what a retry reads as "this page is already done", so
+      # stopping at the first offender would strand the rest.
+      assert PdfExtractor.list_page_images(pages_dir) == []
     end
   end
 end

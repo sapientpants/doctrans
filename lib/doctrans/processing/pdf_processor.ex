@@ -13,6 +13,7 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   require Logger
 
+  alias Doctrans.Config.PdfExtraction
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
@@ -105,9 +106,15 @@ defmodule Doctrans.Processing.PdfProcessor do
     File.mkdir_p!(pages_dir)
 
     # Get page count early so UI can show progress
+    # One budget for the whole document, so the per-page deadlines cannot add up
+    # past the job that contains them: without it a long document reaches Oban's
+    # timeout instead of failing cleanly with its finished pages preserved.
+    deadline = System.monotonic_time(:millisecond) + PdfExtraction.job_timeout()
+
     with {:ok, page_count} <- pdf_extractor_module().get_page_count(pdf_path),
          {:ok, document} <- set_total_pages(document, page_count),
-         :ok <- extract_pages_progressively(document, pdf_path, pages_dir, page_count) do
+         :ok <-
+           extract_pages_progressively(document, pdf_path, pages_dir, page_count, deadline) do
       Logger.info("Extracted #{page_count} pages for document #{document.id}")
 
       :ok
@@ -128,10 +135,10 @@ defmodule Doctrans.Processing.PdfProcessor do
     end
   end
 
-  defp extract_pages_progressively(document, pdf_path, pages_dir, page_count) do
+  defp extract_pages_progressively(document, pdf_path, pages_dir, page_count, deadline) do
     result =
       Enum.reduce_while(1..page_count, :ok, fn page_number, :ok ->
-        case extract_and_queue_page(document, pdf_path, pages_dir, page_number) do
+        case extract_and_queue_page(document, pdf_path, pages_dir, page_number, deadline) do
           :ok -> {:cont, :ok}
           {:error, reason} -> {:halt, {:error, reason}}
         end
@@ -140,8 +147,8 @@ defmodule Doctrans.Processing.PdfProcessor do
     if result == :ok, do: finish_extraction(document), else: result
   end
 
-  defp extract_and_queue_page(document, pdf_path, pages_dir, page_number) do
-    case ensure_page(document, pdf_path, pages_dir, page_number) do
+  defp extract_and_queue_page(document, pdf_path, pages_dir, page_number, deadline) do
+    case ensure_page(document, pdf_path, pages_dir, page_number, deadline) do
       {:ok, page} ->
         Run.with_current(document, fn current -> queue_page_for_processing(page, current) end)
 
@@ -189,19 +196,19 @@ defmodule Doctrans.Processing.PdfProcessor do
     end
   end
 
-  defp ensure_page(document, pdf_path, pages_dir, page_number) do
+  defp ensure_page(document, pdf_path, pages_dir, page_number, deadline) do
     page = Documents.get_page_by_number(document.id, page_number)
 
     if page && is_binary(page.image_path) &&
          File.regular?(Path.join(Documents.uploads_dir(), page.image_path)) do
       {:ok, page}
     else
-      extract_and_save_page(document, page, pdf_path, pages_dir, page_number)
+      extract_and_save_page(document, page, pdf_path, pages_dir, page_number, deadline)
     end
   end
 
-  defp extract_and_save_page(document, page, pdf_path, pages_dir, page_number) do
-    case pdf_extractor_module().extract_page(pdf_path, pages_dir, page_number, []) do
+  defp extract_and_save_page(document, page, pdf_path, pages_dir, page_number, deadline) do
+    case pdf_extractor_module().extract_page(pdf_path, pages_dir, page_number, deadline: deadline) do
       {:ok, image_path} ->
         relative_path = Path.relative_to(image_path, Documents.uploads_dir())
         save_current_page(document, page, %{page_number: page_number, image_path: relative_path})

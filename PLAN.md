@@ -283,25 +283,41 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   assembly, and its own error vocabulary — and its existing tests, including the launcher-child and
   caller-kill cases, pass against the shared module unchanged.
   Both poppler commands now run through it with separate deadlines, because the two calls are not
-  comparable: `pdfinfo` reads a header (15 s) while `pdftoppm` rasterizes a page (120 s). Executables
-  resolve like `soffice` does — a configured path when it is executable, otherwise `$PATH` — which is
-  what let the hang, the flood, and the limits be tested against fake renderers instead of a real one.
-  Credentials are removed from every child environment, replacing the `env: [{"PATH", ...}]` that ports
-  cannot express.
-  Two limits bound one document's demand, both under `:pdf_extraction`. `:max_pages` is checked in
-  `get_page_count/1`, the single call that decides how much extraction follows, so an oversized document
-  is rejected before a page is rendered rather than after several hundred are. `:max_image_bytes`
-  rejects a rendered page and deletes it — leaving the file would make a lower `:dpi` take no effect,
-  because extraction treats a stored image as a finished page. Both errors report the value and the
+  comparable: `pdfinfo` reads a header (15 s) while `pdftoppm` rasterizes a page (120 s). A hung
+  `pdfinfo` reports as its own reason rather than as a rendering timeout, since advice to lower the
+  resolution is unusable when nothing was rendered. Executables resolve through
+  `Processing.Executable`, shared with the converter — a configured path, then `$PATH`, then the known
+  install directories for a daemon started with a slim environment — which is what let the hang, the
+  flood, and the limits be tested against fake renderers instead of a real one.
+  The child environment is an allowlist, not a denylist: `System.cmd`'s `env:` option merges into the
+  inherited environment rather than replacing it, so the previous `env: [{"PATH", ...}]` passed every
+  credential the VM held straight to poppler. Naming the variables a converter may keep means a secret
+  added later is excluded by default instead of needing to be remembered.
+  Four limits bound one document's demand, all under `:pdf_extraction` and read through
+  `Config.PdfExtraction`. `:max_pages` and `:max_page_pixels` are checked in `get_page_count/1`, the
+  single call that decides how much extraction follows, so an oversized document is rejected before a
+  page is rendered. The pixel bound is the one that has to come first: a maximal PDF media box
+  rasterizes to gigabytes of memory and disk well inside any sane deadline, so a byte check afterwards
+  is too late to prevent it. `:max_image_bytes` still rejects a rendered page and deletes it — every
+  oversized render, not just the first, because leaving one behind would make a lower `:dpi` take no
+  effect, as extraction treats a stored image as a finished page. Each error reports the value and the
   limit, so the answer is a smaller document or a lower resolution.
-  The job's own deadline is `DocumentExtractionJob.timeout/1`, since a document is many bounded runs and
-  the product of the two bounds is not a useful ceiling. A timeout there costs nothing: rendered pages
-  stay on disk and in the database, and `ensure_page/4` makes the retry resume rather than restart.
-  Evidence: `lib/doctrans/processing/subprocess.ex`, `lib/doctrans/processing/pdf_extractor.ex`,
+  The job's own deadline is `DocumentExtractionJob.timeout/1`, and `PdfProcessor` turns it into a
+  document budget that each page render is clamped against. Without that clamp the per-page ceiling
+  times the page limit is 33 hours against a one-hour job, so past roughly thirty slow pages the
+  subprocess deadline never binds and Oban's `TimeoutError` is what ends the job. A timeout costs
+  little either way: rendered pages stay on disk and in the database, and `ensure_page/4` makes the
+  retry resume rather than restart. Failures that cannot come out differently — a page count over the
+  limit, a missing poppler — are cancelled rather than retried, so they neither burn the document's
+  remaining attempts nor re-occupy the single slot to reach the same answer.
+  Evidence: `lib/doctrans/processing/subprocess.ex`, `lib/doctrans/processing/executable.ex`,
+  `lib/doctrans/processing/pdf_extractor.ex`, `lib/doctrans/config/pdf_extraction.ex`,
   `lib/doctrans/jobs/document_extraction_job.ex` (`timeout/1`), `config/config.exs` (`:pdf_extraction`).
-  Reproduced against fake poppler executables: a hung renderer times out, its process group is reaped,
-  and the next extraction in the same slot succeeds; a renderer printing continuously still dies at its
-  deadline; 280 KB of error output arrives as 64 KiB; and the page and image limits report their numbers.
+  Reproduced against fake poppler executables: a hung renderer times out, its process group is reaped
+  along with its grandchildren, and the next extraction in the same slot succeeds; a renderer printing
+  continuously still dies at its deadline; a render is clamped to the caller's remaining budget and an
+  exhausted budget starts no renderer at all; 280 KB of error output arrives as 64 KiB and stays valid
+  to encode; and the page, pixel, and image limits report their numbers in every locale.
 
 - [ ] **R05 · P2 · Use one runtime storage root for writing and serving images.**
   Writers use `Config.Uploads.upload_dir/0`, but the endpoint always serves `priv/static/uploads`.

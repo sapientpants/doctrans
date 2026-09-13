@@ -4,24 +4,43 @@ defmodule Doctrans.Processing.Subprocess do
 
   `System.cmd/3` waits forever, so one hung executable holds its caller — and the
   single-slot queue that caller runs in — indefinitely. `run/3` enforces a fixed
-  deadline that output cannot reset, keeps only the most recent
-  `#{64 * 1024} bytes` of diagnostics, and kills the child's process group on every
-  exit path. On Unix, OTP starts port executables in their own process group
+  deadline that output cannot reset, keeps only the most recent 64 KiB of
+  diagnostics, and kills the child's process group when the child may still be
+  running. On Unix, OTP starts port executables in their own process group
   (`erl_child_setup.c`), so the group kill also reaps grandchildren a launcher
   left behind.
 
   `supervised/1` runs the work in a monitored process that watches the caller, so
   a caller killed mid-run still has its child reaped and its scratch files removed.
+  `run/3` recognises that caller's death only when it is called underneath
+  `supervised/1`, which is where it registers the monitor it waits on.
 
-  Credentials are removed from the child environment: neither LibreOffice nor
-  poppler needs them, and a process that never sees a key cannot leak one.
+  The child environment is an allowlist: only the variables an external converter
+  legitimately needs are passed through, so a credential added to the VM's
+  environment later does not silently reach LibreOffice or poppler.
   """
 
   require Logger
 
+  alias Doctrans.Processing.Executable
+
   @default_max_output_bytes 64 * 1024
   @reap_timeout 1_000
-  @secret_env_vars ~w(OPENAI_API_KEY DATABASE_URL SECRET_KEY_BASE)
+  @caller_monitor_key {__MODULE__, :caller_monitor}
+
+  # Only what an external document converter legitimately needs. Everything else
+  # in the VM's environment — release cookies, database and mail credentials,
+  # operator-set keys — is removed, so a new secret is excluded by default rather
+  # than needing to be remembered.
+  @inherited_env_vars ~w(
+    PATH HOME TMPDIR TMP TEMP
+    LANG LANGUAGE LC_ALL LC_CTYPE LC_NUMERIC TZ
+    USER LOGNAME SHELL TERM
+    DISPLAY XDG_RUNTIME_DIR XDG_DATA_DIRS XDG_CONFIG_HOME XDG_CACHE_HOME
+    FONTCONFIG_PATH FONTCONFIG_FILE
+  )
+
+  @kill_candidates ["/bin/kill", "/usr/bin/kill"]
 
   @typedoc """
   The result of one bounded run.
@@ -55,7 +74,9 @@ defmodule Doctrans.Processing.Subprocess do
     {pid, monitor} =
       spawn_monitor(fn ->
         Process.flag(:trap_exit, true)
-        Process.monitor(caller)
+        # Recorded so `run/3` waits on this monitor specifically rather than on
+        # any `:DOWN` that happens to be in the mailbox.
+        Process.put(@caller_monitor_key, Process.monitor(caller))
         send(caller, {result_ref, fun.()})
       end)
 
@@ -72,6 +93,9 @@ defmodule Doctrans.Processing.Subprocess do
   @doc """
   Runs `executable` with `args` until it exits or the deadline passes.
 
+  Call this underneath `supervised/1`. Outside it the run still works, but a
+  caller that dies mid-run is not noticed until the deadline.
+
   ## Options
 
   - `:timeout` - milliseconds the command may run before its process group is
@@ -79,6 +103,10 @@ defmodule Doctrans.Processing.Subprocess do
   - `:max_output_bytes` - how much combined stdout/stderr to retain
     (default: #{@default_max_output_bytes}); the most recent bytes are kept, since
     the tail of a failure is what explains it
+  - `:kill_on_exit` - also kill the process group after a clean exit
+    (default: `false`). Needed for a launcher like `soffice` that returns while
+    its children keep working; skipped otherwise, because a child that has
+    already been reaped leaves its process-group id free for reuse.
   - `:env` - extra `{name, value}` pairs for the child environment, as binaries;
     a `false` value removes the variable
   """
@@ -86,34 +114,68 @@ defmodule Doctrans.Processing.Subprocess do
   def run(executable, args, opts) do
     timeout = Keyword.fetch!(opts, :timeout)
     max_output_bytes = Keyword.get(opts, :max_output_bytes, @default_max_output_bytes)
+    kill_on_exit = Keyword.get(opts, :kill_on_exit, false)
     deadline = System.monotonic_time(:millisecond) + timeout
     env = child_env(Keyword.get(opts, :env, []))
+    caller_monitor = Process.get(@caller_monitor_key) || make_ref()
 
-    try do
-      port =
-        Port.open(
-          {:spawn_executable, executable},
-          # Retain port metadata even if the launcher exits before PID lookup.
-          [:binary, :exit_status, :eof, :stderr_to_stdout, args: args, env: env]
-        )
-
-      os_pid = port_os_pid(port)
-
-      try do
-        collect(port, deadline, <<>>, max_output_bytes)
-      after
-        reap(port, os_pid)
-      end
-    rescue
-      error ->
-        Logger.error("Failed to start #{executable}: #{Exception.message(error)}")
-
-        {:start_error, Exception.message(error)}
+    case open_port(executable, args, env) do
+      {:ok, port} -> execute(port, deadline, max_output_bytes, kill_on_exit, caller_monitor)
+      {:start_error, _message} = error -> error
     end
   end
 
+  # Only the spawn itself is rescued. Wrapping the run as well would report a
+  # failure in cleanup as a failure to start, hiding the real outcome.
+  defp open_port(executable, args, env) do
+    port =
+      Port.open(
+        {:spawn_executable, executable},
+        # Retain port metadata even if the launcher exits before PID lookup.
+        [:binary, :exit_status, :eof, :stderr_to_stdout, args: args, env: env]
+      )
+
+    {:ok, port}
+  rescue
+    error ->
+      Logger.error("Failed to start #{executable}: #{Exception.message(error)}")
+
+      {:start_error, Exception.message(error)}
+  end
+
+  defp execute(port, deadline, max_output_bytes, kill_on_exit, caller_monitor) do
+    os_pid = port_os_pid(port)
+
+    outcome =
+      try do
+        collect(port, deadline, <<>>, max_output_bytes, caller_monitor)
+      catch
+        kind, value ->
+          reap(port, os_pid, :aborted, kill_on_exit)
+          :erlang.raise(kind, value, __STACKTRACE__)
+      end
+
+    reap(port, os_pid, outcome, kill_on_exit)
+    outcome
+  end
+
+  @doc """
+  Turns retained command output into text safe to show and to encode.
+
+  A byte-limited tail can begin mid-codepoint, and a tool is free to write bytes
+  that are not UTF-8 at all. Either would raise when a LiveView diff carrying the
+  message is encoded, so invalid bytes become replacement characters here rather
+  than at the boundary that cannot recover.
+  """
+  @spec diagnostic(binary()) :: String.t()
+  def diagnostic(output) when is_binary(output) do
+    output
+    |> scrub()
+    |> String.trim()
+  end
+
   # Output must never reset the deadline.
-  defp collect(port, deadline, buffer, max_output_bytes) do
+  defp collect(port, deadline, buffer, max_output_bytes, caller_monitor) do
     now = System.monotonic_time(:millisecond)
 
     if now >= deadline do
@@ -121,7 +183,13 @@ defmodule Doctrans.Processing.Subprocess do
     else
       receive do
         {^port, {:data, data}} ->
-          collect(port, deadline, append_output(buffer, data, max_output_bytes), max_output_bytes)
+          collect(
+            port,
+            deadline,
+            append_output(buffer, data, max_output_bytes),
+            max_output_bytes,
+            caller_monitor
+          )
 
         {^port, {:exit_status, status}} ->
           {:ok, {buffer, status}}
@@ -129,9 +197,9 @@ defmodule Doctrans.Processing.Subprocess do
         {^port, :eof} ->
           # EOF and exit_status can arrive in either order. EOF alone does not
           # mean the process has exited, so continue enforcing the same deadline.
-          collect(port, deadline, buffer, max_output_bytes)
+          collect(port, deadline, buffer, max_output_bytes, caller_monitor)
 
-        {:DOWN, _monitor, :process, _caller, reason} ->
+        {:DOWN, ^caller_monitor, :process, _caller, reason} ->
           {:error, {:caller_exited, reason}}
 
         {:EXIT, ^port, reason} ->
@@ -149,19 +217,72 @@ defmodule Doctrans.Processing.Subprocess do
     end
   end
 
-  # Keep the port open until SIGKILL is sent, then wait for OTP to reap its
-  # child before closing. Negative PIDs address the isolated Unix process group.
-  # OTP establishes the group before exec (erl_child_setup.c).
-  defp reap(port, os_pid) do
-    if is_integer(os_pid) and os_pid > 0 do
-      case System.cmd("/bin/kill", ["-KILL", "--", "-#{os_pid}"], stderr_to_stdout: true, env: []) do
-        {_output, 0} -> await_exit(port)
-        {_output, _status} -> :ok
-      end
+  # Closing and draining the port always runs; the SIGKILL only runs when the
+  # child may still be alive. After a clean exit `erl_child_setup` has already
+  # reaped the group leader, so its process-group id is free for reuse and a kill
+  # could land on an unrelated group — `:kill_on_exit` opts back in for launchers
+  # whose children outlive them.
+  defp reap(port, os_pid, outcome, kill_on_exit) do
+    if kill_child?(outcome, kill_on_exit) and is_integer(os_pid) and os_pid > 0 do
+      if kill_group(os_pid), do: await_exit(port)
     end
 
     close_port(port)
     drain_port(port)
+  end
+
+  defp kill_child?({:ok, {_output, _status}}, kill_on_exit), do: kill_on_exit
+  defp kill_child?(_outcome, _kill_on_exit), do: true
+
+  # Negative PIDs address the isolated Unix process group; OTP establishes the
+  # group before exec (erl_child_setup.c). A kill that cannot run at all must not
+  # escape: this is called from the cleanup path, where raising would both lose
+  # the real outcome and skip closing the port.
+  defp kill_group(os_pid) do
+    case kill(["-KILL", "--", "-#{os_pid}"]) do
+      {:ok, 0} ->
+        true
+
+      {:ok, _status} ->
+        # The group may already be gone, or may never have been a group. Fall
+        # back to the process itself before giving up on it.
+        killed_directly?(os_pid)
+
+      {:error, reason} ->
+        Logger.error("Could not kill process group #{os_pid}: #{inspect(reason)}")
+        false
+    end
+  end
+
+  defp killed_directly?(os_pid) do
+    case kill(["-KILL", "--", to_string(os_pid)]) do
+      {:ok, 0} ->
+        true
+
+      {:ok, _status} ->
+        false
+
+      {:error, reason} ->
+        Logger.error("Could not kill process #{os_pid}: #{inspect(reason)}")
+        false
+    end
+  end
+
+  # The kill binary is taken only from the fixed absolute paths above, never from
+  # `PATH`: nothing about which `kill` runs should be decided by the environment
+  # the VM happened to inherit.
+  # sobelow_skip ["CI.System"]
+  defp kill(args) do
+    case Enum.find(@kill_candidates, &Executable.executable_file?/1) do
+      nil ->
+        {:error, :kill_not_found}
+
+      path ->
+        {_output, status} = System.cmd(path, args, stderr_to_stdout: true, env: [])
+        {:ok, status}
+    end
+  rescue
+    error -> {:error, Exception.message(error)}
   end
 
   defp await_exit(port) do
@@ -192,15 +313,49 @@ defmodule Doctrans.Processing.Subprocess do
     combined = buffer <> data
 
     if byte_size(combined) > max_output_bytes do
-      binary_part(combined, byte_size(combined) - max_output_bytes, max_output_bytes)
+      combined
+      |> binary_part(byte_size(combined) - max_output_bytes, max_output_bytes)
+      |> drop_partial_codepoint()
     else
       combined
     end
   end
 
+  # A byte-boundary slice can land inside a multi-byte codepoint. UTF-8
+  # continuation bytes are `0b10xxxxxx`, and no codepoint carries more than
+  # three of them, so dropping them bounds the work at three bytes.
+  defp drop_partial_codepoint(binary, dropped \\ 0)
+  defp drop_partial_codepoint(binary, 3), do: binary
+  defp drop_partial_codepoint(<<>>, _dropped), do: <<>>
+
+  defp drop_partial_codepoint(<<byte, rest::binary>> = binary, dropped) do
+    if :erlang.band(byte, 0xC0) == 0x80 do
+      drop_partial_codepoint(rest, dropped + 1)
+    else
+      binary
+    end
+  end
+
+  defp scrub(binary), do: binary |> scrub_io() |> IO.iodata_to_binary()
+
+  defp scrub_io(<<>>), do: []
+  defp scrub_io(<<char::utf8, rest::binary>>), do: [<<char::utf8>> | scrub_io(rest)]
+  defp scrub_io(<<_invalid, rest::binary>>), do: ["�" | scrub_io(rest)]
+
   # Port environments are charlist pairs; `false` removes a variable outright.
+  # `Port.open` has no way to say "start from nothing", so everything outside the
+  # allowlist is removed by name.
   defp child_env(extra) do
-    Enum.map(@secret_env_vars, &{String.to_charlist(&1), false}) ++
+    extra_names = MapSet.new(extra, fn {name, _value} -> name end)
+    allowed = MapSet.union(MapSet.new(@inherited_env_vars), extra_names)
+
+    removals =
+      System.get_env()
+      |> Map.keys()
+      |> Enum.reject(&MapSet.member?(allowed, &1))
+      |> Enum.map(&{String.to_charlist(&1), false})
+
+    removals ++
       Enum.map(extra, fn
         {name, false} -> {String.to_charlist(name), false}
         {name, value} -> {String.to_charlist(name), String.to_charlist(value)}
