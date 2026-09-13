@@ -11,10 +11,11 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
   use DoctransWeb.ConnCase, async: false
 
   import Doctrans.Fixtures
+  import ExUnit.CaptureLog
   import Phoenix.LiveViewTest
 
   alias Doctrans.Documents.Pages
-  alias Doctrans.Search.EmbeddingProbe
+  alias Doctrans.Search.{EmbeddingErrorStub, EmbeddingProbe}
   alias Doctrans.TestEnv
   alias DoctransWeb.SearchLive
 
@@ -135,6 +136,123 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
     end
   end
 
+  # The three failure clauses below have no timing-driven route either: a
+  # cancellation the view asked for is indistinguishable, from the outside, from
+  # one that never happened. Drive them directly, because deleting any of them
+  # is otherwise invisible to the suite.
+  describe "handle_async/3 cancellation" do
+    test "a cancellation the view asked for is not reported as a failure" do
+      socket = search_socket("abandoned query", 1)
+
+      assert {:noreply, socket} =
+               SearchLive.handle_async(:search, {:exit, {:shutdown, :cancel}}, socket)
+
+      # The caller that cancelled has already settled the view. Treating this as
+      # a failure would raise the error panel over a query the user replaced or
+      # navigated away from.
+      refute socket.assigns.search_error
+      assert socket.assigns.results == []
+    end
+  end
+
+  describe "handle_async/3 failures" do
+    test "a task that died reports the search as unavailable" do
+      socket = search_socket("crashing query", 1)
+
+      {{:noreply, socket}, log} =
+        with_log(fn ->
+          SearchLive.handle_async(:search, {:exit, {%RuntimeError{message: "boom"}, []}}, socket)
+        end)
+
+      assert socket.assigns.search_error
+      refute socket.assigns.searching
+      assert socket.assigns.searched
+      assert socket.assigns.results == []
+      assert log =~ "Search failed"
+    end
+
+    test "a search that returned an error reports the search as unavailable" do
+      socket = search_socket("failing query", 1)
+      payload = {:ok, {"failing query", 1, {:error, :timeout}}}
+
+      {{:noreply, socket}, log} =
+        with_log(fn -> SearchLive.handle_async(:search, payload, socket) end)
+
+      assert socket.assigns.search_error
+      refute socket.assigns.searching
+      assert socket.assigns.searched
+      assert log =~ "Search failed"
+    end
+
+    test "the failure log does not spell out the query embedding" do
+      socket = search_socket("noisy query", 1)
+      embedding = List.duplicate(0.123_456, 1024)
+      reason = {%RuntimeError{message: "boom"}, [{Doctrans.Search, :search, [embedding], []}]}
+
+      {_result, log} =
+        with_log(fn -> SearchLive.handle_async(:search, {:exit, reason}, socket) end)
+
+      # A stacktrace frame can carry the 1024-float query vector. Bounded
+      # inspection keeps a failed search from writing a screenful of noise.
+      assert log =~ "Search failed"
+      refute log =~ String.duplicate("0.123456, ", 20)
+    end
+  end
+
+  describe "search failures end to end" do
+    test "renders the error panel when the query cannot be embedded", %{conn: conn} do
+      TestEnv.put_env(:embedding_module, EmbeddingErrorStub)
+      TestEnv.put_env(:embedding_error_plan, [{"unembeddableterm", :timeout}])
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=unembeddableterm")
+
+      capture_log(fn -> render_async(view, @async_timeout) end)
+
+      assert has_element?(view, "#search-error")
+      assert has_element?(view, "#flash-error")
+      refute has_element?(view, "#search-loading")
+      refute has_element?(view, "#search-empty")
+    end
+  end
+
+  describe "navigating away from a search" do
+    test "patching to a query-less URL clears the results behind it", %{conn: conn} do
+      page = searchable_page("Contains clearedterm in the text", "Cleared Doc")
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=clearedterm")
+      render_async(view, @async_timeout)
+      assert has_element?(view, "#search-result-#{page.id}")
+
+      # Browser Back onto a URL with no `q`, on the same mounted view -- which is
+      # what makes this the `handle_params/3` catch-all rather than a fresh mount.
+      render_patch(view, ~p"/search")
+
+      assert has_element?(view, "#search-prompt")
+      refute has_element?(view, "#search-results")
+      refute has_element?(view, "#search-loading")
+      refute has_element?(view, "#search-result-#{page.id}")
+    end
+
+    test "a query the view moved off cannot report under a query-less URL", %{conn: conn} do
+      searchable_page("Contains abandonedterm in the text", "Abandoned Doc")
+      barrier = install_barrier("abandonedterm")
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=abandonedterm")
+      assert_receive {:embedding_started, ^barrier, task_pid}, @async_timeout
+      assert has_element?(view, "#search-loading")
+
+      # Patch away while the search is parked, then let it finish. `cancel_async`
+      # cannot un-send a result already in flight, so clearing `:query` is the
+      # only thing standing between that result and the rendered page.
+      render_patch(view, ~p"/search")
+      send(task_pid, {:continue_embedding, barrier})
+
+      refute has_element?(view, "#search-loading")
+      assert has_element?(view, "#search-prompt")
+      refute render(view) =~ "Abandoned Doc"
+    end
+  end
+
   defp search_socket(query, page) do
     %Phoenix.LiveView.Socket{
       assigns: %{
@@ -145,7 +263,8 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
         total_count: 0,
         searching: true,
         searched: false,
-        search_error: false
+        search_error: false,
+        flash: %{}
       }
     }
   end

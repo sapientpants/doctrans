@@ -294,21 +294,6 @@ defmodule Doctrans.SearchTest do
     end
   end
 
-  describe "count_results/2" do
-    test "returns 0 for empty query" do
-      assert {:ok, 0} = Search.count_results("")
-    end
-
-    test "returns 0 for nil query" do
-      assert {:ok, 0} = Search.count_results(nil)
-    end
-
-    test "accepts rrf_k option" do
-      result = Search.count_results("test", rrf_k: 80)
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
-    end
-  end
-
   describe "search_with_count/2" do
     test "returns empty results and a zero count for an empty query" do
       assert {:ok, %{results: [], total_count: 0}} = Search.search_with_count("")
@@ -320,5 +305,41 @@ defmodule Doctrans.SearchTest do
 
     # The cases that swap `:embedding_module` globally live in
     # `Doctrans.SearchWithCountTest`, which is `async: false`; this module is not.
+  end
+
+  # Postgrex raises on a value it cannot encode, which would escape the
+  # `{:ok, _} | {:error, _}` contract and kill the caller rather than fail the
+  # search. Every entry point has to reject those bounds before Postgres sees
+  # them -- including `search/2`, which shares the statement.
+  describe "query bounds" do
+    test "rejects an offset too large for Postgres to encode" do
+      assert {:error, {:invalid_search_bounds, [offset: _]}} =
+               Search.search_with_count("test", offset: 99_999_999_999_999_999_999)
+    end
+
+    test "rejects a limit too large for Postgres to encode" do
+      assert {:error, {:invalid_search_bounds, [limit: _]}} =
+               Search.search_with_count("test", limit: 99_999_999_999_999_999_999)
+    end
+
+    test "rejects a non-integer rrf_k" do
+      assert {:error, {:invalid_search_bounds, [rrf_k: _]}} =
+               Search.search_with_count("test", rrf_k: 60.0)
+    end
+
+    test "rejects a negative offset" do
+      assert {:error, {:invalid_search_bounds, [offset: -1]}} =
+               Search.search_with_count("test", offset: -1)
+    end
+
+    test "rejects out-of-range bounds through search/2 as well" do
+      assert {:error, {:invalid_search_bounds, [offset: _]}} =
+               Search.search("test", offset: 99_999_999_999_999_999_999)
+    end
+
+    test "accepts the largest offset Postgres can encode" do
+      assert {:ok, %{results: [], total_count: 0}} =
+               Search.search_with_count("test", offset: 9_223_372_036_854_775_807)
+    end
   end
 end

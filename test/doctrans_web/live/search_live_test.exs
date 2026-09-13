@@ -58,17 +58,20 @@ defmodule DoctransWeb.SearchLiveTest do
       view |> element("#search-form") |> render_submit(%{q: "test"})
 
       # The search runs asynchronously, so await it before asserting on results
-      html = render_async(view, @async_timeout)
-      assert html =~ "0 results" or html =~ "No results found"
+      render_async(view, @async_timeout)
+      assert has_element?(view, "#search-empty")
+      refute has_element?(view, "#search-loading")
+      refute has_element?(view, "#search-error")
     end
 
     test "shows no results message when search returns empty", %{conn: conn} do
-      {:ok, view, html} = live(conn, ~p"/search?q=nonexistent")
+      {:ok, view, _html} = live(conn, ~p"/search?q=nonexistent")
 
-      assert html =~ "Searching..."
+      assert has_element?(view, "#search-loading")
 
-      html = render_async(view, @async_timeout)
-      assert html =~ "No results found" or html =~ "0 results"
+      render_async(view, @async_timeout)
+      assert has_element?(view, "#search-empty")
+      refute has_element?(view, "#search-loading")
     end
 
     test "ignores empty search submission", %{conn: conn} do
@@ -112,17 +115,19 @@ defmodule DoctransWeb.SearchLiveTest do
       {:ok, view, _html} = live(conn, ~p"/search?q=searchterm")
 
       # Wait for the asynchronous search to complete
-      html = render_async(view, @async_timeout)
+      render_async(view, @async_timeout)
 
-      # Should show results or no results (depends on embedding service availability)
-      assert html =~ "Searchable Doc" or html =~ "No results found" or html =~ "results"
+      assert has_element?(view, "#search-results")
+      assert has_element?(view, "#search-result-#{page.id}")
+      assert has_element?(view, "#search-summary")
+      refute has_element?(view, "#search-empty")
     end
 
-    test "displays query in results header", %{conn: conn} do
+    test "keeps the submitted query in the search box", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search?q=myquery")
+      render_async(view, @async_timeout)
 
-      # Should display query somewhere
-      assert render_async(view, @async_timeout) =~ "myquery"
+      assert has_element?(view, "#search-input[value='myquery']")
     end
 
     test "search results link to document pages", %{conn: conn} do
@@ -144,13 +149,20 @@ defmodule DoctransWeb.SearchLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/search?q=LinkableContent")
 
-      html = render_async(view, @async_timeout)
+      render_async(view, @async_timeout)
 
-      # If results are found, links should contain document ID and from=search param
-      if html =~ "Link Test Doc" do
-        assert html =~ "from=search"
-        assert html =~ doc.id
-      end
+      # The card links back into the document, carrying the search it came from
+      # so the reader can return to these results.
+      assert has_element?(view, "#search-result-#{page.id}")
+
+      href =
+        view
+        |> element("#search-result-#{page.id}")
+        |> render()
+
+      assert href =~ doc.id
+      assert href =~ "from=search"
+      assert href =~ "q=LinkableContent"
     end
 
     test "back link navigates to home", %{conn: conn} do
@@ -174,9 +186,11 @@ defmodule DoctransWeb.SearchLiveTest do
     test "handles search with special characters", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search?q=test%2Bquery")
 
-      html = render_async(view, @async_timeout)
-      # Should handle gracefully
-      assert html =~ "Search" or html =~ "No results found"
+      render_async(view, @async_timeout)
+
+      # Nothing matches, but the query must not fail the search either.
+      assert has_element?(view, "#search-empty")
+      refute has_element?(view, "#search-error")
     end
 
     test "shows pagination controls when there are results", %{conn: conn} do
@@ -198,25 +212,40 @@ defmodule DoctransWeb.SearchLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/search?q=Content")
 
-      html = render_async(view, @async_timeout)
-      # May or may not show pagination depending on search results
-      assert html =~ "Search" or html =~ "Page"
+      render_async(view, @async_timeout)
+
+      # 25 matches against 20 per page: the total has to describe the whole match
+      # set, not the page, or the second page never becomes reachable.
+      assert has_element?(view, "#search-results")
+      assert has_element?(view, "#search-pagination")
+      assert has_element?(view, "#search-summary", "of 25 results")
     end
 
     test "handles page parameter correctly", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search?q=test&page=2")
 
-      # Should handle page parameter gracefully
-      html = render_async(view, @async_timeout)
-      assert html =~ "test" or html =~ "Search"
+      render_async(view, @async_timeout)
+      assert has_element?(view, "#search-empty")
+      refute has_element?(view, "#search-error")
     end
 
     test "handles invalid page parameter", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search?q=test&page=invalid")
 
-      # Should default to page 1
-      html = render_async(view, @async_timeout)
-      assert html =~ "test" or html =~ "Search"
+      render_async(view, @async_timeout)
+      assert has_element?(view, "#search-empty")
+      refute has_element?(view, "#search-error")
+    end
+
+    test "clamps a page parameter too large to be an offset", %{conn: conn} do
+      # Unclamped, this overflows bigint, Postgrex raises rather than returning
+      # an error, and the user gets "Search unavailable" for what is really just
+      # a page past the end of the results.
+      {:ok, view, _html} = live(conn, ~p"/search?q=test&page=99999999999999999999")
+
+      render_async(view, @async_timeout)
+      refute has_element?(view, "#search-error")
+      assert has_element?(view, "#search-empty")
     end
   end
 end

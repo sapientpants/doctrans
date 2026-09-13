@@ -4,6 +4,7 @@ defmodule Doctrans.Search.IndexerRaceTest do
 
   alias Doctrans.Documents.{Chunk, Page, Pages}
   alias Doctrans.Search.Indexer
+  alias Doctrans.TestEnv
 
   import Doctrans.Fixtures
 
@@ -134,17 +135,7 @@ defmodule Doctrans.Search.IndexerRaceTest do
 
   defp install_barrier(text) do
     barrier = make_ref()
-    previous = Application.get_env(:doctrans, :embedding_stub_barrier)
-    Application.put_env(:doctrans, :embedding_stub_barrier, {text, self(), barrier})
-
-    on_exit(fn ->
-      if previous do
-        Application.put_env(:doctrans, :embedding_stub_barrier, previous)
-      else
-        Application.delete_env(:doctrans, :embedding_stub_barrier)
-      end
-    end)
-
+    TestEnv.put_env(:embedding_stub_barrier, {text, self(), barrier})
     barrier
   end
 

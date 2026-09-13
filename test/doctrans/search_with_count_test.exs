@@ -9,11 +9,13 @@ defmodule Doctrans.SearchWithCountTest do
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Documents.Pages
+  alias Doctrans.Repo
   alias Doctrans.Search
-  alias Doctrans.Search.{EmbeddingErrorStub, EmbeddingProbe}
+  alias Doctrans.Search.{EmbeddingDimensionStub, EmbeddingErrorStub, EmbeddingProbe}
   alias Doctrans.TestEnv
 
   import Doctrans.Fixtures
+  import ExUnit.CaptureLog
 
   describe "search_with_count/2" do
     test "counts and lists matches from a single query embedding" do
@@ -66,8 +68,42 @@ defmodule Doctrans.SearchWithCountTest do
       # behaviourally identical for anything else embedding concurrently.
       use_embedding_module(EmbeddingErrorStub)
       TestEnv.put_env(:embedding_error_plan, [{"failingembeddingterm", :timeout}])
+      TestEnv.put_env(:embedding_call_observer, self())
 
       assert {:error, :timeout} = Search.search_with_count("failingembeddingterm")
+
+      # The embedding is the first step for a reason: a query that cannot be
+      # embedded must not reach the database at all.
+      assert_received {:embedding_call, "failingembeddingterm"}
+      refute_received {:embedding_call, _}
+    end
+
+    test "returns a tagged error when the search statement fails" do
+      "A page about dbfailureterm"
+      |> searchable_page()
+      |> embed()
+
+      use_embedding_module(EmbeddingDimensionStub)
+
+      log =
+        capture_log(fn ->
+          assert {:error, {:database_error, _}} = Search.search_with_count("dbfailureterm")
+        end)
+
+      assert log =~ "Hybrid search query failed"
+    end
+  end
+
+  describe "pagination past the end" do
+    test "reports no matches rather than a total it cannot see" do
+      for index <- 1..3 do
+        searchable_page("Page #{index} about pastendterm", "Past End Doc #{index}")
+      end
+
+      # Documented behaviour: the total is a window over the returned rows, so
+      # an offset beyond the last match has nothing to count.
+      assert {:ok, %{results: [], total_count: 0}} =
+               Search.search_with_count("pastendterm", limit: 5, offset: 50)
     end
   end
 
@@ -82,6 +118,14 @@ defmodule Doctrans.SearchWithCountTest do
       })
 
     page
+  end
+
+  # The statement only compares vectors for pages that have one, so a page must
+  # be indexed before a width mismatch can reach Postgres at all.
+  defp embed(page) do
+    page
+    |> Ecto.Changeset.change(embedding: Pgvector.new(List.duplicate(0.1, 1024)))
+    |> Repo.update!()
   end
 
   defp use_embedding_module(module), do: TestEnv.put_env(:embedding_module, module)

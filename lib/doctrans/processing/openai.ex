@@ -466,7 +466,13 @@ defmodule Doctrans.Processing.OpenAI do
       )
     end
 
-    Logger.error("API call failed (#{classification}): #{inspect(reason)}")
+    # `reason` can be `{:http_status, status, %Req.Response{}}`, and an
+    # OpenAI-compatible server commonly echoes the offending request in a 4xx
+    # body -- which for an embedding call is the user's search text. The
+    # normalized shape carries the status without the payload, so only that goes
+    # out at the production log level; the raw reason stays behind :debug.
+    Logger.error("API call failed (#{classification}): #{inspect(normalized)}")
+    Logger.debug("API call failure detail: #{inspect(reason)}")
     {:error, Doctrans.Errors.normalize(normalized)}
   end
 
