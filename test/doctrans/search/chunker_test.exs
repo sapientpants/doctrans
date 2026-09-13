@@ -3,6 +3,12 @@ defmodule Doctrans.Search.ChunkerTest do
 
   alias Doctrans.Search.Chunker
 
+  # The limits `Chunker` documents. They are stated here rather than imported
+  # because a test that read the module's own attributes would agree with it by
+  # construction and could not catch a limit being raised to fit a defect.
+  @max_words 400
+  @max_graphemes 3200
+
   describe "chunk/1" do
     test "returns empty list for nil" do
       assert Chunker.chunk(nil) == []
@@ -146,6 +152,12 @@ defmodule Doctrans.Search.ChunkerTest do
       # Should produce at least 2 chunks: the short one and the long one(s)
       assert length(chunks) >= 2
       assert String.contains?(hd(chunks).content, "short")
+
+      # `length(chunks) >= 2` alone passed on the defect this test was written
+      # for: the intro and the whole 350-word paragraph are two chunks. What
+      # distinguishes a split paragraph from an unsplit one is the size of the
+      # largest chunk.
+      assert Enum.all?(chunks, &(&1.word_count <= @max_words))
     end
 
     test "word_count is accurate" do
@@ -205,6 +217,11 @@ defmodule Doctrans.Search.ChunkerTest do
       # First chunk should contain the short paragraphs
       first = hd(chunks)
       assert String.contains?(first.content, "aaa")
+
+      # The long paragraph really is split, rather than emitted whole after the
+      # short ones are flushed -- which is what the assertions above allowed.
+      assert Enum.all?(chunks, &(&1.word_count <= @max_words))
+      assert length(chunks) >= 3
     end
   end
 
@@ -268,5 +285,141 @@ defmodule Doctrans.Search.ChunkerTest do
         assert String.length(embed_content) > 0
       end
     end
+  end
+
+  describe "oversized paragraphs" do
+    test "a long paragraph after an introduction is split rather than emitted whole" do
+      # The probe PLAN.md S04 recorded: a two-word intro then a 2,000-word
+      # paragraph, which produced [2, 2000] against a 300-word target because a
+      # paragraph was only ever split when nothing preceded it.
+      text = "Short intro.\n\n" <> words(2000)
+
+      chunks = Chunker.chunk(text)
+
+      assert length(chunks) > 2
+      assert_within_limits(chunks)
+      assert_preserves(text, chunks)
+    end
+
+    test "sentence-free text is split" do
+      # Not one terminator anywhere, so there is no sentence boundary to split
+      # on and the word-level fallback is the only thing that can bound this.
+      chunks = Chunker.chunk(words(2000))
+
+      assert length(chunks) > 1
+      assert_within_limits(chunks)
+    end
+
+    test "a single sentence longer than the limit is split" do
+      chunks = Chunker.chunk(words(2000) <> ".")
+
+      assert length(chunks) > 1
+      assert_within_limits(chunks)
+    end
+
+    test "a run with no whitespace at all is split at grapheme boundaries" do
+      # No paragraph break, no sentence break, and no word break either: the
+      # last fallback is the only one that applies.
+      chunks = Chunker.chunk(String.duplicate("a", 5000))
+
+      assert length(chunks) > 1
+      assert_within_limits(chunks)
+    end
+
+    test "splitting a multi-byte run never produces invalid UTF-8" do
+      # Cutting a 2-byte character down the middle would yield content that is
+      # not a valid string, which is why the fallback counts graphemes.
+      chunks = Chunker.chunk(String.duplicate("é", 5000))
+
+      assert length(chunks) > 1
+      assert Enum.all?(chunks, &String.valid?(&1.content))
+      assert_within_limits(chunks)
+      assert_preserves(String.duplicate("é", 5000), chunks)
+    end
+
+    test "sentences are found in scripts the English pattern could not match" do
+      # The old boundary required an ASCII capital after the terminator, so a
+      # German sentence opening on an umlaut never started one and the whole
+      # passage stayed a single chunk.
+      german = Enum.map_join(1..400, " ", &"Über den Hügel lief der Hund Nummer #{&1}.")
+
+      chunks = Chunker.chunk(german)
+
+      assert length(chunks) > 1
+      assert_within_limits(chunks)
+      assert_preserves(german, chunks)
+
+      # Size alone does not prove the sentences were found: the word-level
+      # fallback bounds this passage either way, just by cutting mid-sentence.
+      # Every chunk ending on a terminator is what says the boundary matched.
+      assert Enum.all?(chunks, &String.ends_with?(&1.content, "."))
+    end
+
+    test "text that does not separate words with spaces stays within the grapheme limit" do
+      # Japanese writes no spaces, so every word-based budget sees one word
+      # however long the passage is. Only a grapheme budget bounds this.
+      japanese = Enum.map_join(1..400, "", &"これは第#{&1}番目の文です。")
+
+      chunks = Chunker.chunk(japanese)
+
+      assert length(chunks) > 1
+      assert Enum.all?(chunks, &(&1.word_count == 1))
+      assert_within_limits(chunks)
+      assert_preserves(japanese, chunks)
+
+      # And the ideographic full stop is a sentence boundary, so the split
+      # lands between sentences rather than inside one.
+      assert Enum.all?(chunks, &String.ends_with?(&1.content, "。"))
+    end
+
+    test "offsets locate a split chunk in the source text" do
+      # Chunks from a split paragraph are contiguous byte spans, so each one
+      # slices back out of the source exactly. The previous implementation
+      # rejoined sentences with a single space and advanced the offset by the
+      # length of that join, so every chunk after the first pointed at the
+      # wrong bytes.
+      text = "Intro paragraph.\n\n" <> Enum.map_join(1..400, "  ", &"This is sentence #{&1}.")
+      trimmed = String.trim(text)
+
+      chunks = Chunker.chunk(text)
+
+      assert length(chunks) > 2
+
+      for chunk <- chunks do
+        assert binary_part(
+                 trimmed,
+                 chunk.start_offset,
+                 chunk.end_offset - chunk.start_offset
+               ) == chunk.content
+      end
+    end
+
+    test "chunk indexes stay contiguous and offsets non-decreasing across a split" do
+      chunks = Chunker.chunk("Intro.\n\n" <> words(2000))
+
+      assert Enum.map(chunks, & &1.chunk_index) == Enum.to_list(0..(length(chunks) - 1))
+      starts = Enum.map(chunks, & &1.start_offset)
+      assert starts == Enum.sort(starts)
+    end
+  end
+
+  defp words(n), do: Enum.map_join(1..n, " ", &"word#{&1}")
+
+  defp assert_within_limits(chunks) do
+    assert chunks != []
+
+    for chunk <- chunks do
+      assert chunk.word_count <= @max_words
+      assert String.length(chunk.content) <= @max_graphemes
+    end
+  end
+
+  # Content survives a split: every non-whitespace character of the source is
+  # still present, in order, across the chunks. Whitespace is excluded because
+  # a split consumes the separator it breaks on, and words are not a usable
+  # unit for scripts that do not space-separate them.
+  defp assert_preserves(source, chunks) do
+    strip = &String.replace(&1, ~r/\s+/u, "")
+    assert chunks |> Enum.map_join("", & &1.content) |> then(strip) == strip.(String.trim(source))
   end
 end

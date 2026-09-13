@@ -200,6 +200,12 @@ translations, including those in saved chat context. To rebuild existing chunks 
 old translation pairings, run `mix rechunk_documents` with the embedding server available.
 Previously generated chat answers are retained.
 
+Chunks are bounded in size whatever the source looks like. A paragraph longer than the target is
+split at sentence boundaries, a sentence longer than the limit at word boundaries, and text that
+writes no spaces at all -- Chinese, Japanese, Thai -- at character boundaries. Documents chunked
+before this was true keep their existing oversized chunks until the page is reprocessed or
+`mix rechunk_documents` is run.
+
 If every retrieval query fails -- an unreachable embedding server, say -- chat reports that
 document search is unavailable instead of answering as though the document held nothing relevant.
 

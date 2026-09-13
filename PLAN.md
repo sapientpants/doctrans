@@ -587,13 +587,66 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   floor is pinned by a 45-page semantic match set asserting the full count and the tail past offset 40 --
   restoring the floor fails it, alongside the two keyword-only tests S02 left behind for the same edge.
 
-- [ ] **S04 · P2 · Split oversized paragraphs consistently.**
+- [x] **S04 · P2 · Split oversized paragraphs consistently.**
   A long paragraph is split only when no preceding text is accumulated; after an introduction it becomes
   an oversized chunk. A probe yielded `[2, 2000]` words despite the 300-word target.
   Flush prior text, split the oversized paragraph, and provide a hard fallback for very long sentences.
   Acceptance: long paragraphs after introductions, sentence-free text, and multilingual fixtures stay
   within explicit limits without losing content or breaking source offsets.
-  Evidence: `lib/doctrans/search/chunker.ex:132`. Reproduced. Coordinate with C01 before rebuilding indexes.
+  Implemented: the `current == []` guard is gone from the first clause of `accumulate_paragraph/2`, so a
+  paragraph over the target is split whether or not anything precedes it, and whatever is accumulated is
+  flushed first rather than joined to it. The plan's probe -- a two-word intro then 2,000 words -- returned
+  `[2, 2000]` and now returns nine chunks whose largest is 300 words.
+  Splitting is a ladder, because each rung can fail to apply. A paragraph over the target is cut at sentence
+  boundaries; a sentence still over the hard limit is cut at word boundaries; a "word" still over it -- a run
+  of CJK with no spaces anywhere in it -- is cut at grapheme boundaries. The last rung always applies, which
+  is what makes the limits guarantees rather than targets. Before it, a 2,000-word paragraph with no
+  terminator anywhere was one chunk even with nothing preceding it, and so was a single 2,000-word sentence:
+  the old "split alone" path called a sentence splitter that found no sentences and returned the text whole.
+  Cutting by grapheme rather than by byte is what keeps a chunk from ending inside a multi-byte character.
+  The sentence pattern was `(?<=[.!?])\s+(?=[A-Z])`, which requires an ASCII capital next and therefore
+  split English and almost nothing else. A German passage of 400 sentences each opening on "Über" was one
+  3,200-word chunk; so was anything Russian, anything beginning lowercase, and all CJK, which has no ASCII
+  capitals at all. The replacement takes Latin terminators followed by whitespace -- so `3.14` and
+  `example.com` stay intact -- and full-width and Indic terminators with or without it, since those scripts
+  do not put a space after one. German now splits into 11 chunks at its sentence ends, Japanese into three
+  at `。`.
+  Word counts stop measuring anything for scripts that do not separate words with spaces: `word_count/1`
+  returns 1 for a Japanese page of any length, so every word budget was blind to it and the page was never
+  chunked at all. A grapheme budget is the limit that still means something there, and it is set loose
+  enough never to bind on space-separated prose -- 300 words of Latin text runs about 1,800 graphemes and
+  400 about 2,400, against a 2,400 target and a 3,200 ceiling. The explicit limits are therefore 300 words
+  or 2,400 graphemes to fill a chunk, 400 words or 3,200 graphemes that no chunk may pass.
+  Offsets in the rewritten path now locate their chunk. Splitting works in byte spans into the source and a
+  chunk is always one contiguous span, so `binary_part(text, start_offset, end_offset - start_offset)`
+  returns its content exactly; the separators between segments sit inside the span and nothing is
+  reconstructed. The previous code rejoined sentences with a single space and advanced the offset by the
+  length of that join, so every chunk after the first pointed at the wrong bytes -- a probe over a split
+  paragraph went from 0/11 and 1/11 faithful, depending on the separator, to 11/11. This is the first of the
+  two causes Q04 names; the second, `finalize_paras/1` joining paragraphs on a literal `"\n\n"` when the
+  source has more, is untouched and Q04 keeps it along with the property test.
+  Tradeoff accepted: chunk content changes for any page holding an oversized paragraph, so
+  `chunks_match_page_content?/2` will recreate those rows and re-embed them the next time the page is
+  indexed. Nothing rewrites them before that -- a library chunked under the old rules keeps its oversized
+  chunks until a page is reprocessed or `mix rechunk_documents` is run, which the README now says.
+  Tradeoff accepted: sentence detection has no abbreviation list, so "Dr. Smith" is two sentences. It was
+  two before as well, and the consequence is only where a chunk boundary falls, never whether content
+  survives -- but it does mean a chunk can open mid-sentence in prose full of abbreviations.
+  Tradeoff accepted: a grapheme budget is a crude stand-in for word segmentation in Chinese, Japanese and
+  Thai. It bounds a chunk, which is what was missing, but it does not make the boundaries linguistic; only
+  the sentence terminators do that, and a passage without them is cut at a character count.
+  Evidence: `lib/doctrans/search/chunker.ex` (`accumulate_paragraph/2`, `split_oversized/2`,
+  `bound_segment/2`, `@sentence_boundary`). `ChunkerTest` gained an "oversized paragraphs" block of nine
+  tests, one per way the old code failed to split: the plan's own probe, sentence-free text, a single
+  over-long sentence, a run with no whitespace at all, a multi-byte run asserted to stay valid UTF-8,
+  German, Japanese, the offset round-trip, and index/offset ordering across a split. Restoring the
+  `current == []` guard fails three of them, deleting the fallback ladder fails five, removing the grapheme
+  budget fails three, and reintroducing the offset arithmetic fails the round-trip plus the pre-existing
+  "splits very long single paragraph" test. Restoring the ASCII-only sentence pattern fails the German and
+  Japanese tests only because both assert chunks end *on a terminator* -- against size assertions alone it
+  passed, since the word-level fallback bounds those passages either way and merely cuts them mid-sentence.
+  The two existing tests that named this defect asserted `length(chunks) >= 2`, which the buggy output of
+  an intro plus one oversized chunk satisfies; both now bound the largest chunk instead.
 
 ## Phase 4 — Viewer, uploads, and local-use experience
 
