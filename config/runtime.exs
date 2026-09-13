@@ -32,6 +32,14 @@ for config_key <- [:openai, :embedding] do
   end
 end
 
+# One storage root for writing and serving: `DOCTRANS_DATA_DIR` moves documents,
+# generated page images, and converted PDFs off the application directory, and the
+# endpoint serves page images from the same place. Left unset, the configured
+# default resolves at runtime (see `Doctrans.Config.Uploads.upload_dir/0`).
+if data_dir = System.get_env("DOCTRANS_DATA_DIR") do
+  config :doctrans, :uploads, upload_dir: Path.expand(data_dir)
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

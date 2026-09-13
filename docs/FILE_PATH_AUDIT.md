@@ -35,6 +35,8 @@ the filename sanitizer also replaces backslashes.
 | Operations | Path source and constraint |
 | --- | --- |
 | Document deletion and directory creation | Generated or database UUID under the configured upload root; fixed `pages` suffix. |
+| Storage root creation at startup | The configured upload root itself (`DOCTRANS_DATA_DIR` or the application default); no request value contributes. |
+| Page image serving | The same configured upload root, resolved per request, plus the segments the allow-list above already constrains. |
 | Orphan sweeper deletion | Direct children returned by `File.ls` on the documents directory; `File.rm_rf` removes symlinks without traversing their targets. |
 | Environment loading | Operator-specified `.env` path or `DOCTRANS_ENV_FILE`; intentionally outside upload storage. |
 | Converter directory creation and profile cleanup | Output directory is the stored upload's parent. Profile directory is created by `mktemp`; PDF name uses `Path.basename` of the source. Executable lookup uses operator PATH directories. |

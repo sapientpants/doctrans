@@ -78,6 +78,13 @@ defmodule Doctrans.ConfigTest do
              "/tmp/custom-uploads/document.pdf"
   end
 
+  test "the default storage root resolves inside the running application" do
+    Application.put_env(:doctrans, :uploads, upload_dir: :default, max_file_size: 1)
+
+    assert Uploads.upload_dir() == Application.app_dir(:doctrans, "priv/static/uploads")
+    assert Path.type(Uploads.upload_dir()) == :absolute
+  end
+
   test "missing required settings fail explicitly" do
     Application.put_env(:doctrans, :openai, [])
     Application.put_env(:doctrans, :uploads, [])

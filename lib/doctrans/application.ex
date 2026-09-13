@@ -12,6 +12,10 @@ defmodule Doctrans.Application do
     # Install circuit breakers before starting workers
     CircuitBreaker.install_fuses()
 
+    # Writers and the page-image endpoint share one storage root; create it up
+    # front so a fresh data directory is usable and reported healthy.
+    _ = Doctrans.Documents.ensure_uploads_dir!()
+
     children = [
       DoctransWeb.Telemetry,
       Doctrans.Repo,
