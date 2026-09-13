@@ -44,6 +44,10 @@ defmodule Doctrans.DataCase do
   Sets up the sandbox based on the test tags.
   """
   def setup_sandbox(tags) do
+    # Lets `Doctrans.TestEnv` refuse a global application-env override from a
+    # test that runs concurrently with others.
+    Doctrans.TestEnv.record_async(tags)
+
     pid = Sandbox.start_owner!(Doctrans.Repo, shared: not tags[:async])
     on_exit(fn -> Sandbox.stop_owner(pid) end)
   end

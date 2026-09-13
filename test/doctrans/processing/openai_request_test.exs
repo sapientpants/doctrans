@@ -777,6 +777,23 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
       assert {:error, :invalid_embedding_response} = OpenAI.embed("text")
     end
+
+    test "keeps an echoed request body out of the error log", %{bypass: bypass} do
+      # A 4xx from an OpenAI-compatible server commonly quotes the input it
+      # rejected. For an embedding call that input is the user's search text, so
+      # it must not reach the log level production actually runs at.
+      Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
+        json(conn, 400, %{"error" => %{"message" => "invalid input: my-secret-query"}})
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log([level: :info], fn ->
+          assert {:error, _reason} = OpenAI.embed("my-secret-query")
+        end)
+
+      refute log =~ "my-secret-query"
+      assert log =~ "API call failed"
+    end
   end
 
   describe "list_models/0" do

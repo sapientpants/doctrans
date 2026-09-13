@@ -15,6 +15,7 @@ defmodule Doctrans.Search.IndexerFenceTest do
 
   alias Doctrans.Documents.{Chunk, Page}
   alias Doctrans.Search.{Chunker, Indexer}
+  alias Doctrans.TestEnv
 
   test "cancels when the revision moves between reading the page and claiming it" do
     page = extracted_page("Superseded before the status write")
@@ -175,8 +176,7 @@ defmodule Doctrans.Search.IndexerFenceTest do
 
   defp install_barrier(text) do
     barrier = make_ref()
-    Application.put_env(:doctrans, :embedding_stub_barrier, {text, self(), barrier})
-    on_exit(fn -> Application.delete_env(:doctrans, :embedding_stub_barrier) end)
+    TestEnv.put_env(:embedding_stub_barrier, {text, self(), barrier})
     barrier
   end
 end
