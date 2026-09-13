@@ -176,6 +176,10 @@ Use the search input on the dashboard to find content across all documents. Sear
 semantic similarity (AI embeddings) with keyword matching. Press Enter to see results, then
 click a result to jump directly to that page.
 
+When the embedding server is unavailable, search keeps working on keyword matches alone and the
+results page says so, so an outage reads as reduced recall rather than as an empty library.
+Semantic matches return once inference is reachable again.
+
 ### Document Chat
 
 Open the chat panel on any document to ask questions about its content. The chat uses
@@ -190,6 +194,9 @@ Existing source embeddings remain usable without rebuilding: retrieval ignores l
 translations, including those in saved chat context. To rebuild existing chunks and remove their
 old translation pairings, run `mix rechunk_documents` with the embedding server available.
 Previously generated chat answers are retained.
+
+If every retrieval query fails -- an unreachable embedding server, say -- chat reports that
+document search is unavailable instead of answering as though the document held nothing relevant.
 
 Conversations are saved per document and can be resumed after reopening it.
 

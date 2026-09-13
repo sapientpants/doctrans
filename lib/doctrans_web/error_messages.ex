@@ -192,6 +192,11 @@ defmodule DoctransWeb.ErrorMessages do
   def message({:database_error, _}), do: message(:database_error)
   def message(:database_error), do: gettext("Failed to search the document. Please try again.")
   def message(:search_failed), do: gettext("Search is temporarily unavailable. Please try again.")
+  def message({:retrieval_unavailable, _}), do: message(:retrieval_unavailable)
+
+  def message(:retrieval_unavailable),
+    do: gettext("Document search is temporarily unavailable. Please try again.")
+
   def message(:delete_failed), do: gettext("Failed to delete document")
   def message(:reprocess_failed), do: gettext("Failed to reset page for reprocessing")
   def message(:models_unavailable), do: gettext("Failed to fetch models from OpenAI")

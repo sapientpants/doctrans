@@ -8,6 +8,7 @@ defmodule Doctrans.Chat.MultiSearch do
   across multiple query phrasings.
   """
 
+  alias Doctrans.Errors
   alias Doctrans.Search
 
   require Logger
@@ -20,27 +21,60 @@ defmodule Doctrans.Chat.MultiSearch do
   Generates embeddings for all queries in parallel, runs pgvector searches,
   and merges results using Reciprocal Rank Fusion.
 
+  A query that fails is logged and skipped, so a partially available retrieval
+  still answers with what it found. Returns `{:error, reason}` only when *every*
+  query failed, which is an outage rather than an absence of matches: `{:ok, []}`
+  means the document was searched and nothing matched. An empty query list is
+  `{:ok, []}` too — nothing was asked, so nothing failed.
+
+  `Doctrans.Chat.retrieve/4` is what turns that error into the
+  `:retrieval_unavailable` an outage reads as, because it has to tag the
+  single-query branch the same way and the tag belongs in one place.
+
   ## Options
 
   - `:limit` - Maximum number of results to return (default: 3)
   - `:min_similarity` - Minimum cosine similarity threshold (default: Search default)
   """
   @spec search_with_queries(Ecto.UUID.t(), [String.t()], keyword()) ::
-          {:ok, [Search.document_result()]}
+          {:ok, [Search.document_result()]} | {:error, Errors.reason()}
   def search_with_queries(document_id, queries, opts \\ [])
 
   def search_with_queries(_document_id, [], _opts), do: {:ok, []}
 
   def search_with_queries(document_id, queries, opts) when is_list(queries) do
     limit = Keyword.get(opts, :limit, 3)
-    ranked_lists = ranked_lists(document_id, queries, per_query_opts(opts, limit))
-    merged = merge_with_rrf(ranked_lists, limit)
 
-    Logger.info(
-      "Multi-search: #{length(queries)} queries, #{length(ranked_lists)} successful, #{length(merged)} results returned"
-    )
+    document_id
+    |> query_outcomes(queries, per_query_opts(opts, limit))
+    |> Enum.split_with(&match?({:ok, _results}, &1))
+    |> resolve(queries, limit)
+  end
+
+  # The stream is ordered, so the head of the failures is the first query's
+  # failure.
+  defp resolve({[], [{:error, reason} | _rest] = failures}, queries, _limit) do
+    log_summary(queries, [], failures, 0)
+
+    {:error, reason}
+  end
+
+  defp resolve({successes, failures}, queries, limit) do
+    merged =
+      successes
+      |> Enum.map(fn {:ok, results} -> results end)
+      |> merge_with_rrf(limit)
+
+    log_summary(queries, successes, failures, length(merged))
 
     {:ok, merged}
+  end
+
+  defp log_summary(queries, successes, failures, returned) do
+    Logger.info(
+      "Multi-search: #{length(queries)} queries, #{length(successes)} succeeded, " <>
+        "#{length(failures)} failed, #{returned} results returned"
+    )
   end
 
   defp per_query_opts(opts, limit) do
@@ -50,32 +84,56 @@ defmodule Doctrans.Chat.MultiSearch do
     |> Keyword.delete(:context_limit)
   end
 
-  defp ranked_lists(document_id, queries, search_opts) do
-    queries
-    |> Task.async_stream(&search_one(document_id, &1, search_opts),
+  # Supervised and *nolink*: `Task.async_stream/3` links each task to this
+  # process, so one crashed query would take the whole chat request down with
+  # it rather than being skipped -- the outcome below could never observe an
+  # exit. Partial availability is the point of this module, and a crash is just
+  # another way for one query to be unavailable.
+  defp query_outcomes(document_id, queries, search_opts) do
+    Doctrans.TaskSupervisor
+    |> Task.Supervisor.async_stream_nolink(
+      queries,
+      &search_one(document_id, &1, search_opts),
       timeout: :infinity,
       max_concurrency: length(queries)
     )
-    |> Enum.flat_map(&collect_results/1)
+    |> Enum.map(&outcome/1)
   end
 
+  # `{:ok, nil}` is a legal embedding result -- see `Search.EmbeddingBehaviour`.
+  # Searching on it yields `{:ok, []}`, an absence of matches, which is the one
+  # thing this module exists to keep apart from a query that never ran.
   defp search_one(document_id, query, search_opts) do
-    with {:ok, embedding} <- embedding_module().generate(query, []) do
-      Search.search_by_embedding(document_id, embedding, search_opts)
+    case embedding_module().generate(query, []) do
+      {:ok, nil} -> {:error, :embedding_unavailable}
+      {:ok, embedding} -> Search.search_by_embedding(document_id, embedding, search_opts)
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp collect_results({:ok, {:ok, results}}), do: [results]
+  defp outcome({:ok, {:ok, results}}), do: {:ok, results}
 
-  defp collect_results({:ok, {:error, reason}}) do
-    Logger.warning("Multi-search query failed: #{inspect(reason)}")
-    []
+  defp outcome({:ok, {:error, reason}}) do
+    Logger.warning(
+      "Multi-search query failed: #{inspect(reason, limit: 5, printable_limit: 256)}"
+    )
+
+    {:error, tag_only(Errors.normalize(reason))}
   end
 
-  defp collect_results({:exit, reason}) do
-    Logger.warning("Multi-search task exited: #{inspect(reason)}")
-    []
+  defp outcome({:exit, reason}) do
+    Logger.warning("Multi-search task exited: #{inspect(reason, limit: 5, printable_limit: 256)}")
+
+    {:error, :task_exited}
   end
+
+  # Both failure paths hand back the tag alone. An exit reason can carry a
+  # stacktrace holding the query text and its 1024-float embedding, and a
+  # `{:database_error, [reason: %Postgrex.Error{}]}` binding carries the whole
+  # SQL statement -- detail that belongs in the log, not in a reason the caller
+  # renders. A bare atom is still a `Doctrans.Errors.reason()`.
+  defp tag_only({code, _bindings}), do: code
+  defp tag_only(code) when is_atom(code), do: code
 
   # For each ranked list, assign RRF scores based on position
   # Then sum scores per unique chunk (or fallback page) across all lists

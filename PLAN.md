@@ -441,15 +441,78 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   (`search_in_document/3`, `search_by_embedding/3` and their helpers), which shares no RRF or full-text
   machinery with the global hybrid search this task changed.
 
-- [ ] **S02 · P2 · Distinguish retrieval outages from no matches.**
+- [x] **S02 · P2 · Distinguish retrieval outages from no matches.**
   MultiSearch discards failed requests and returns success with no results even when every query fails.
   Global keyword search also depends on successful embedding generation.
   Return an error when no query succeeds, retain partial successes, and support keyword-only global search
   while inference is unavailable. Present the degraded mode and errors accurately.
   Acceptance: all-query failure is an outage, successful empty retrieval is no matches, partial success
   remains useful, and known keyword results are available without an embedding server.
-  Evidence: `lib/doctrans/chat/multi_search.ex:53`, `lib/doctrans/search.ex:66`.
-  An all-`:circuit_open` probe returned `{:ok, []}`.
+  Implemented: the two retrieval paths now report *why* they returned nothing, because "no matches" and
+  "retrieval is down" are the same empty list to a reader and opposite answers to the question asked.
+  `MultiSearch.search_with_queries/3` turns each query's task result into an outcome and splits them:
+  any success still fuses with RRF exactly as before -- a partially available retrieval answers with what
+  it found -- but an all-failure run returns `{:error, first}` instead of `{:ok, []}`. The `Logger.info`
+  summary states successes against failures, so the outage is visible in logs rather than inferred from an
+  empty result.
+  `Chat.retrieve/4` is what tags an outage, wrapping *all three* of its branches as
+  `{:retrieval_unavailable, [reason: tag]}`. Tagging inside `MultiSearch` would have covered only the
+  multi-query branch, and that is the branch an outage is least likely to reach: `QueryExpander.expand/3`
+  falls back to `[question]` when the planner call fails, and the planner and the embedder are the same
+  server -- so an inference outage usually collapses the query list to one and lands on the single-query
+  branch, which reported a bare `:circuit_open` and rendered as the generic "I encountered an error".
+  `Chat.Agent` needed no change; `DocumentLive.ChatSession.put_failure/2` renders the reason through
+  `ErrorMessages.message/1`, where the refine loop still keeps the context it has.
+  Every failure path hands back the tag alone. An exit reason can carry a stacktrace holding the query text
+  and its 1024-float embedding, and a `{:database_error, [reason: %Postgrex.Error{}]}` binding carries the
+  whole SQL statement; both stay in the log, bounded, and out of a reason the web layer renders.
+  The per-query stream is supervised and *nolink* (`Task.Supervisor.async_stream_nolink/4` on
+  `Doctrans.TaskSupervisor`). `Task.async_stream/3` links each task to the caller, so one crashed query
+  took the whole chat request down with it and the `{:exit, _}` outcome could never actually be observed --
+  partial availability is the point of this module, and a crash is one more way for a query to be
+  unavailable.
+  Global search degrades instead of failing. `search_with_count/2` no longer aborts when the query cannot
+  be embedded: it passes a NULL vector into the same statement, whose `semantic_ranked` CTE gained a
+  `$1::vector IS NOT NULL` guard and so contributes no rows, leaving the full-text half to rank alone.
+  One statement serves both modes -- duplicating it is what S01 removed -- and the result map gained
+  `:retrieval` (`:hybrid` or `:keyword_only`) so the caller can say which it got. `SearchLive` carries that
+  into a `#search-degraded` notice rendered above both outcomes, including the empty one: a keyword-only
+  search that matched nothing is precisely the case a reader would otherwise read as "nothing in my
+  library matches". The notice is assigned with the result and reset by every new search, failure, and
+  query-less URL, so it cannot outlive the query that produced it.
+  Tradeoff accepted: a degraded search is a success, so an unreachable embedding server no longer raises
+  the error panel on the global search page. That is the point -- keyword results are still true results --
+  but it does mean the outage is reported as reduced recall rather than as a failure, and only the notice
+  and the log line distinguish the two.
+  The fused-score floor applies to hybrid ranking only. Keyword-only fuses one rank, so the score collapses
+  to `1/(rrf_k + fts_rank)`, which crosses under `@min_score_threshold` at rank 41 for the default k=60 --
+  the floor would have silently dropped every match past the 40th *and* shrunk the `COUNT(*) OVER ()` total
+  to agree, reporting "40 results" for a term matching five hundred pages. The floor exists to cut the
+  semantic half's noise (that half has no similarity threshold; see S03), and keyword-only has no such
+  half: every row it ranks already cleared a tsquery match. So `min_score(:keyword_only)` is 0.
+  `{:ok, nil}` is a legal embedding result and is treated as the degraded mode rather than as a ranking
+  that ran -- reporting `:hybrid` for it would claim a semantic half that sat out, and in chat it would
+  turn a query that never ran into "nothing matched".
+  Fitting the degraded path into `lib/doctrans/search.ex` put it at 515 lines, over the 500-line module cap,
+  so the hybrid statement and its execution moved to `Doctrans.Search.HybridQuery` (the module now owns how
+  a result is *found*; `Doctrans.Search` still owns what one looks like). The public API is unchanged --
+  `SearchLive` and `MultiSearch` needed no edit -- and `search.ex` came down to 395 lines. `run/3` takes its
+  knobs as options: `:limit` and `:offset` are adjacent, identically typed, and were silently transposable
+  across two differently-ordered six-argument hops.
+  Evidence: `lib/doctrans/chat/multi_search.ex` (`resolve/3`, `outcome/1`), `lib/doctrans/search.ex`
+  (`query_embedding/1`), `lib/doctrans/search/hybrid_query.ex`, `lib/doctrans_web/live/search_live.ex`.
+  `MultiSearchTest` drives the exact probe this finding recorded: an all-`:circuit_open` run, which
+  returned `{:ok, []}` against the old code and now returns the outage, with partial-success and
+  searched-but-empty tests either side of it to pin the three cases apart. `SearchWithCountTest` takes a
+  real full-text hit with the embedding client failing, alongside an embedded page the query never
+  mentions, so a semantic ranking leaking back in fails the test -- deleting the NULL guard was confirmed
+  to do exactly that. `SearchLiveAsyncTest` covers the notice with results, with zero results, absent
+  while loading, absent on the error panel, gone again after a healthy search replaces it, and not raised
+  by a superseded degraded result arriving under a newer query. `RetrieveTest` pins the outage on each of
+  the three branches and keeps a searched-but-empty retrieval as `{:ok, []}`. The floor fix is pinned by a
+  45-match degraded search asserting both the full count and the tail past offset 40; restoring the hybrid
+  floor fails both. `ErrorMessagesTest` walks the outage msgids through every known locale, since a missing
+  clause would otherwise fall through to the generic message unnoticed.
 
 - [ ] **S03 · P2 · Filter semantic relevance before rank fusion.**
   Global semantic retrieval has no similarity floor. With reciprocal-rank constant 60 and score floor .01,

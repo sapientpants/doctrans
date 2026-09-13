@@ -81,7 +81,7 @@ msgstr "Nederlands"
 msgid "English"
 msgstr "Engels"
 
-#: lib/doctrans_web/live/search_live.ex:206
+#: lib/doctrans_web/live/search_live.ex:324
 #, elixir-autogen, elixir-format
 msgid "Enter a search term to find content across all your documents."
 msgstr "Voer een zoekterm in om inhoud in al uw documenten te vinden."
@@ -101,7 +101,7 @@ msgstr "Fout: %{error}"
 msgid "Extracting text from page..."
 msgstr "Tekst uit pagina extraheren..."
 
-#: lib/doctrans_web/error_messages.ex:195
+#: lib/doctrans_web/error_messages.ex:200
 #, elixir-autogen, elixir-format
 msgid "Failed to delete document"
 msgstr "Document verwijderen mislukt"
@@ -111,7 +111,7 @@ msgstr "Document verwijderen mislukt"
 msgid "File is too large (max 100MB)"
 msgstr "Bestand is te groot (max 100 MB)"
 
-#: lib/doctrans_web/live/search_live.ex:108
+#: lib/doctrans_web/live/search_live.ex:199
 #, elixir-autogen, elixir-format
 msgid "Find content across all documents"
 msgstr "Zoek inhoud in alle documenten"
@@ -160,7 +160,7 @@ msgid "Newest First"
 msgstr "Nieuwste eerst"
 
 #: lib/doctrans_web/live/document_live/page_viewer.ex:128
-#: lib/doctrans_web/live/search_live.ex:264
+#: lib/doctrans_web/live/search_live.ex:383
 #, elixir-autogen, elixir-format
 msgid "Next"
 msgstr "Volgende"
@@ -180,7 +180,7 @@ msgstr "Geen bestanden geüpload"
 msgid "No page selected"
 msgstr "Geen pagina geselecteerd"
 
-#: lib/doctrans_web/live/search_live.ex:188
+#: lib/doctrans_web/live/search_live.ex:306
 #, elixir-autogen, elixir-format
 msgid "No results found"
 msgstr "Geen resultaten gevonden"
@@ -210,7 +210,7 @@ msgstr "Originele pagina"
 msgid "Page %{current} of %{total}"
 msgstr "Pagina %{current} van %{total}"
 
-#: lib/doctrans_web/live/search_live.ex:164
+#: lib/doctrans_web/live/search_live.ex:281
 #, elixir-autogen, elixir-format
 msgid "Page %{number}"
 msgstr "Pagina %{number}"
@@ -233,7 +233,7 @@ msgid "Portuguese"
 msgstr "Portugees"
 
 #: lib/doctrans_web/live/document_live/page_viewer.ex:111
-#: lib/doctrans_web/live/search_live.ex:253
+#: lib/doctrans_web/live/search_live.ex:372
 #, elixir-autogen, elixir-format
 msgid "Previous"
 msgstr "Vorige"
@@ -249,23 +249,23 @@ msgstr "Verwerken"
 msgid "Queued"
 msgstr "In wachtrij"
 
-#: lib/doctrans_web/live/search_live.ex:107
+#: lib/doctrans_web/live/search_live.ex:198
 #, elixir-autogen, elixir-format
 msgid "Search"
 msgstr "Zoeken"
 
-#: lib/doctrans_web/live/search_live.ex:204
+#: lib/doctrans_web/live/search_live.ex:322
 #, elixir-autogen, elixir-format
 msgid "Search documents"
 msgstr "Documenten zoeken"
 
 #: lib/doctrans_web/live/document_live/index.ex:82
-#: lib/doctrans_web/live/search_live.ex:122
+#: lib/doctrans_web/live/search_live.ex:213
 #, elixir-autogen, elixir-format
 msgid "Search..."
 msgstr "Zoeken..."
 
-#: lib/doctrans_web/live/search_live.ex:135
+#: lib/doctrans_web/live/search_live.ex:230
 #, elixir-autogen, elixir-format
 msgid "Searching..."
 msgstr "Zoeken..."
@@ -311,7 +311,7 @@ msgstr "Vertaalde inhoud"
 msgid "Translating content..."
 msgstr "Inhoud vertalen..."
 
-#: lib/doctrans_web/live/search_live.ex:189
+#: lib/doctrans_web/live/search_live.ex:307
 #, elixir-autogen, elixir-format
 msgid "Try a different search term."
 msgstr "Probeer een andere zoekterm."
@@ -402,13 +402,13 @@ msgstr "Sleep PDF-bestanden hierheen, of"
 msgid "Extraction Model"
 msgstr "Extraction Model"
 
-#: lib/doctrans_web/error_messages.ex:196
+#: lib/doctrans_web/error_messages.ex:201
 #, elixir-autogen, elixir-format
 msgid "Failed to reset page for reprocessing"
 msgstr "Failed to reset page for reprocessing"
 
-#: lib/doctrans_web/live/search_live.ex:250
-#: lib/doctrans_web/live/search_live.ex:262
+#: lib/doctrans_web/live/search_live.ex:369
+#: lib/doctrans_web/live/search_live.ex:381
 #, elixir-autogen, elixir-format
 msgid "Go to page %{page}"
 msgstr "Go to page %{page}"
@@ -423,7 +423,7 @@ msgstr "Invalid model selection"
 msgid "Loading models..."
 msgstr "Loading models..."
 
-#: lib/doctrans_web/live/search_live.ex:256
+#: lib/doctrans_web/live/search_live.ex:375
 #, elixir-autogen, elixir-format
 msgid "Page %{page} of %{total}"
 msgstr "Pagina %{page} van %{total}"
@@ -433,7 +433,7 @@ msgstr "Pagina %{page} van %{total}"
 msgid "Page queued for reprocessing"
 msgstr "Page queued for reprocessing"
 
-#: lib/doctrans_web/live/search_live.ex:198
+#: lib/doctrans_web/live/search_live.ex:316
 #, elixir-autogen, elixir-format
 msgid "Please try again in a moment."
 msgstr "Please try again in a moment."
@@ -458,12 +458,12 @@ msgstr "Reprocess this page"
 msgid "Search is temporarily unavailable. Please try again."
 msgstr "Search is temporarily unavailable. Please try again."
 
-#: lib/doctrans_web/live/search_live.ex:244
+#: lib/doctrans_web/live/search_live.ex:363
 #, elixir-autogen, elixir-format
 msgid "Search results pagination"
 msgstr "Search results pagination"
 
-#: lib/doctrans_web/live/search_live.ex:195
+#: lib/doctrans_web/live/search_live.ex:313
 #, elixir-autogen, elixir-format
 msgid "Search unavailable"
 msgstr "Search unavailable"
@@ -473,7 +473,7 @@ msgstr "Search unavailable"
 msgid "Select models to use for re-extracting and re-translating this page."
 msgstr "Select models to use for re-extracting and re-translating this page."
 
-#: lib/doctrans_web/live/search_live.ex:229
+#: lib/doctrans_web/live/search_live.ex:347
 #, elixir-autogen, elixir-format
 msgid "Showing %{start}-%{end} of %{total} results for \"%{query}\""
 msgstr "Toon %{start}-%{end} van %{total} resultaten voor \"%{query}\""
@@ -549,7 +549,7 @@ msgstr "Privé documentvertaling aangedreven door lokale AI"
 msgid "Send message"
 msgstr "Bericht verzenden"
 
-#: lib/doctrans_web/error_messages.ex:198
+#: lib/doctrans_web/error_messages.ex:203
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Sorry, er is een fout opgetreden. Probeer het opnieuw."
@@ -574,7 +574,7 @@ msgstr "Uw documenten verlaten nooit uw apparaat"
 msgid "Checking the sources..."
 msgstr "Bronnen controleren..."
 
-#: lib/doctrans_web/error_messages.ex:197
+#: lib/doctrans_web/error_messages.ex:202
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Failed to fetch models from OpenAI"
 msgstr "Failed to fetch models from Ollama"
@@ -676,3 +676,18 @@ msgstr "Er zijn nog verwerkingstaken actief voor dit document. Wacht tot deze zi
 #, elixir-autogen, elixir-format
 msgid "Select a model"
 msgstr "Selecteer een model"
+
+#: lib/doctrans_web/error_messages.ex:198
+#, elixir-autogen, elixir-format
+msgid "Document search is temporarily unavailable. Please try again."
+msgstr "Zoeken in het document is tijdelijk niet beschikbaar. Probeer het opnieuw."
+
+#: lib/doctrans_web/live/search_live.ex:246
+#, elixir-autogen, elixir-format
+msgid "Semantic search is unavailable, so only keyword matches are shown."
+msgstr "Semantisch zoeken is niet beschikbaar, dus alleen trefwoordresultaten worden getoond."
+
+#: lib/doctrans_web/live/search_live.ex:249
+#, elixir-autogen, elixir-format
+msgid "These results may be incomplete until it is back."
+msgstr "Deze resultaten kunnen onvolledig zijn totdat het weer beschikbaar is."

@@ -5,6 +5,11 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
   inference call is cancelled rather than left running, and the payload check
   that stops a cancelled search from reporting under the query that replaced it.
 
+  Also covers how a finished search reports itself -- an outage, no matches, or
+  the keyword-only mode `Doctrans.Search.search_with_count/2` falls back to when
+  the query cannot be embedded, which is a success the reader must not mistake
+  for the whole answer.
+
   Not async: each test swaps global `Application` env (the embedding module, or
   the stub's barrier) to observe or hold an embedding call.
   """
@@ -15,7 +20,8 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
   import Phoenix.LiveViewTest
 
   alias Doctrans.Documents.Pages
-  alias Doctrans.Search.{EmbeddingErrorStub, EmbeddingProbe}
+  alias Doctrans.Repo
+  alias Doctrans.Search.{EmbeddingDimensionStub, EmbeddingErrorStub, EmbeddingProbe}
   alias Doctrans.TestEnv
   alias DoctransWeb.SearchLive
 
@@ -102,7 +108,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
   describe "handle_async/3 staleness guard" do
     test "ignores a result reported for a query the view has moved off" do
       socket = search_socket("new query", 1)
-      payload = {:ok, {"old query", 1, {:ok, %{results: [result_stub()], total_count: 5}}}}
+      payload = {:ok, {"old query", 1, search_page([result_stub()], 5)}}
 
       assert {:noreply, socket} = SearchLive.handle_async(:search, payload, socket)
 
@@ -112,9 +118,21 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
       refute socket.assigns.searched
     end
 
+    test "a superseded degraded result cannot raise the notice over a newer query" do
+      socket = search_socket("new query", 1)
+      payload = {:ok, {"old query", 1, search_page([result_stub()], 5, :keyword_only)}}
+
+      assert {:noreply, socket} = SearchLive.handle_async(:search, payload, socket)
+
+      # The banner reads `:retrieval`, so a stale degraded payload setting it
+      # would report an outage for a query that never ran into one.
+      assert socket.assigns.retrieval == :hybrid
+      assert socket.assigns.results == []
+    end
+
     test "ignores a result reported for a page the view has moved off" do
       socket = search_socket("same query", 2)
-      payload = {:ok, {"same query", 1, {:ok, %{results: [result_stub()], total_count: 5}}}}
+      payload = {:ok, {"same query", 1, search_page([result_stub()], 5)}}
 
       assert {:noreply, socket} = SearchLive.handle_async(:search, payload, socket)
 
@@ -125,14 +143,24 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
     test "applies a result reported for the current query and page" do
       result = result_stub()
       socket = search_socket("current query", 2)
-      payload = {:ok, {"current query", 2, {:ok, %{results: [result], total_count: 5}}}}
+      payload = {:ok, {"current query", 2, search_page([result], 5)}}
 
       assert {:noreply, socket} = SearchLive.handle_async(:search, payload, socket)
 
       assert socket.assigns.results == [result]
       assert socket.assigns.total_count == 5
+      assert socket.assigns.retrieval == :hybrid
       refute socket.assigns.searching
       assert socket.assigns.searched
+    end
+
+    test "carries the retrieval mode the search reported" do
+      socket = search_socket("degraded query", 1)
+      payload = {:ok, {"degraded query", 1, search_page([result_stub()], 1, :keyword_only)}}
+
+      assert {:noreply, socket} = SearchLive.handle_async(:search, payload, socket)
+
+      assert socket.assigns.retrieval == :keyword_only
     end
   end
 
@@ -184,6 +212,23 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
       assert log =~ "Search failed"
     end
 
+    test "a failure clears the degraded retrieval mode behind it" do
+      socket =
+        "degraded then failing query"
+        |> search_socket(1)
+        |> Phoenix.Component.assign(:retrieval, :keyword_only)
+
+      payload = {:ok, {"degraded then failing query", 1, {:error, :timeout}}}
+
+      {{:noreply, socket}, _log} =
+        with_log(fn -> SearchLive.handle_async(:search, payload, socket) end)
+
+      # The error panel replaces the results, so the notice describing how they
+      # were retrieved has nothing left to describe.
+      assert socket.assigns.search_error
+      assert socket.assigns.retrieval == :hybrid
+    end
+
     test "the failure log does not spell out the query embedding" do
       socket = search_socket("noisy query", 1)
       embedding = List.duplicate(0.123_456, 1024)
@@ -200,11 +245,17 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
   end
 
   describe "search failures end to end" do
-    test "renders the error panel when the query cannot be embedded", %{conn: conn} do
-      TestEnv.put_env(:embedding_module, EmbeddingErrorStub)
-      TestEnv.put_env(:embedding_error_plan, [{"unembeddableterm", :timeout}])
+    test "renders the error panel when the search statement fails", %{conn: conn} do
+      "Contains failingstatementterm in the text"
+      |> searchable_page("Failing Statement Doc")
+      |> embed()
 
-      {:ok, view, _html} = live(conn, ~p"/search?q=unembeddableterm")
+      # The embedding succeeds and the query fails for a real reason, which is
+      # what separates an outage from the degraded keyword-only mode: there are
+      # no results to show, so the error panel stands alone.
+      TestEnv.put_env(:embedding_module, EmbeddingDimensionStub)
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=failingstatementterm")
 
       capture_log(fn -> render_async(view, @async_timeout) end)
 
@@ -212,6 +263,72 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
       assert has_element?(view, "#flash-error")
       refute has_element?(view, "#search-loading")
       refute has_element?(view, "#search-empty")
+      refute has_element?(view, "#search-degraded")
+    end
+  end
+
+  describe "keyword-only retrieval" do
+    test "tells the reader the results are keyword matches only", %{conn: conn} do
+      page = searchable_page("Contains degradedterm in the text", "Degraded Doc")
+      inference_down_for("degradedterm")
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=degradedterm")
+
+      capture_log(fn -> render_async(view, @async_timeout) end)
+
+      assert has_element?(view, "#search-results")
+      assert has_element?(view, "#search-result-#{page.id}")
+      assert has_element?(view, "#search-degraded")
+
+      # Degraded, not failed: the results stand, and nothing claims otherwise.
+      refute has_element?(view, "#search-error")
+      refute has_element?(view, "#flash-error")
+    end
+
+    test "tells the reader why a keyword-only search found nothing", %{conn: conn} do
+      searchable_page("Contains something else entirely", "Unrelated Doc")
+      inference_down_for("unmatchedterm")
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=unmatchedterm")
+
+      capture_log(fn -> render_async(view, @async_timeout) end)
+
+      # Without the notice this reads as "nothing in my library matches", when
+      # what it really means is that half the search never ran.
+      assert has_element?(view, "#search-empty")
+      assert has_element?(view, "#search-degraded")
+      refute has_element?(view, "#search-error")
+    end
+
+    test "says nothing about retrieval until the search reports", %{conn: conn} do
+      searchable_page("Contains degradedterm in the text", "Degraded Doc")
+      inference_down_for("degradedterm")
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=degradedterm")
+
+      assert has_element?(view, "#search-loading")
+      refute has_element?(view, "#search-degraded")
+
+      capture_log(fn -> render_async(view, @async_timeout) end)
+      assert has_element?(view, "#search-degraded")
+    end
+
+    test "the notice does not outlive the query that produced it", %{conn: conn} do
+      searchable_page("Contains degradedterm in the text", "Degraded Doc")
+      healthy = searchable_page("Contains healthyterm in the text", "Healthy Doc")
+
+      # Only the first query fails to embed, so the second one searches normally.
+      inference_down_for("degradedterm")
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=degradedterm")
+      capture_log(fn -> render_async(view, @async_timeout) end)
+      assert has_element?(view, "#search-degraded")
+
+      view |> element("#search-form") |> render_submit(%{q: "healthyterm"})
+      render_async(view, @async_timeout)
+
+      assert has_element?(view, "#search-result-#{healthy.id}")
+      refute has_element?(view, "#search-degraded")
     end
   end
 
@@ -261,12 +378,24 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
         page: page,
         results: [],
         total_count: 0,
+        retrieval: :hybrid,
         searching: true,
         searched: false,
         search_error: false,
         flash: %{}
       }
     }
+  end
+
+  # The plan fails this query alone, so every other embedding in the VM keeps
+  # behaving normally while the override stands.
+  defp inference_down_for(query) do
+    TestEnv.put_env(:embedding_module, EmbeddingErrorStub)
+    TestEnv.put_env(:embedding_error_plan, [{query, :circuit_open}])
+  end
+
+  defp search_page(results, total_count, retrieval \\ :hybrid) do
+    {:ok, %{results: results, total_count: total_count, retrieval: retrieval}}
   end
 
   defp result_stub do
@@ -292,6 +421,14 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
       })
 
     page
+  end
+
+  # The statement only compares vectors for pages that have one, so a page must
+  # be indexed before a width mismatch can reach Postgres at all.
+  defp embed(page) do
+    page
+    |> Ecto.Changeset.change(embedding: Pgvector.new(List.duplicate(0.1, 1024)))
+    |> Repo.update!()
   end
 
   # Parks the embedding stub on `text` until this test releases it, so the

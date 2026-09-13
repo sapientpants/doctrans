@@ -123,6 +123,37 @@ defmodule DoctransWeb.SearchLiveTest do
       refute has_element?(view, "#search-empty")
     end
 
+    test "does not warn about degraded retrieval on a healthy search", %{conn: conn} do
+      doc = document_fixture(%{title: "Healthy Doc", status: "completed"})
+      page = page_fixture(doc, %{page_number: 1})
+
+      {:ok, _page} =
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown: "This is healthyterm content"
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=healthyterm")
+
+      render_async(view, @async_timeout)
+
+      # Semantic search ran, so the results are the whole answer and the page
+      # must not hedge about them.
+      assert has_element?(view, "#search-results")
+      refute has_element?(view, "#search-degraded")
+    end
+
+    test "does not warn about degraded retrieval when a healthy search finds nothing", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = live(conn, ~p"/search?q=nothingmatchesthis")
+
+      render_async(view, @async_timeout)
+
+      assert has_element?(view, "#search-empty")
+      refute has_element?(view, "#search-degraded")
+    end
+
     test "keeps the submitted query in the search box", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search?q=myquery")
       render_async(view, @async_timeout)

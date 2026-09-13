@@ -1,10 +1,13 @@
 defmodule Doctrans.Chat.RetrieveTest do
   use Doctrans.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Doctrans.Chat
   alias Doctrans.Chat.Agent
   alias Doctrans.Chat.RetrievalProbe
   alias Doctrans.Documents
+  alias Doctrans.Search.EmbeddingErrorStub
 
   setup do
     original_embedding = Application.get_env(:doctrans, :embedding_module)
@@ -68,6 +71,40 @@ defmodule Doctrans.Chat.RetrieveTest do
     assert Chat.current_context([result]) == [result]
   end
 
+  test "reports an outage on the no-query branch", %{document: document} do
+    fail_embeddings()
+
+    assert {:error, {:retrieval_unavailable, [reason: :circuit_open]}} =
+             Chat.retrieve(document.id, "original question", [], limit: 1)
+  end
+
+  test "reports an outage on the single-query branch", %{document: document} do
+    # The branch that matters most: the planner and the embedder are the same
+    # server, so a planner outage collapses the query list to one and lands
+    # here. Untagged, this reads to the user as a generic error rather than as
+    # retrieval being down.
+    fail_embeddings()
+
+    assert {:error, {:retrieval_unavailable, [reason: :circuit_open]}} =
+             Chat.retrieve(document.id, "original question", ["refined query"], limit: 1)
+  end
+
+  test "reports an outage on the multi-query branch", %{document: document} do
+    fail_embeddings()
+
+    capture_log(fn ->
+      assert {:error, {:retrieval_unavailable, [reason: :circuit_open]}} =
+               Chat.retrieve(document.id, "original question", ["assets", "equity"], limit: 1)
+    end)
+  end
+
+  test "leaves a searched-but-empty retrieval as no matches", %{document: document} do
+    # Nothing failed, so nothing is an outage: an empty list keeps meaning that
+    # the document was searched and held nothing relevant.
+    assert {:ok, []} =
+             Chat.retrieve(document.id, "original question", [], limit: 1, min_similarity: 2.0)
+  end
+
   test "embeds the grader's single refined query during agent retrieval", %{document: document} do
     assert {:ok, "Answer.", [_]} =
              Agent.run(document, "assess the balance sheet", [], [], fn _ -> :ok end)
@@ -76,5 +113,15 @@ defmodule Doctrans.Chat.RetrieveTest do
     assert_receive {:embedded, "liquidity and cash reserves"}
     assert_receive {:embedded, "liquidity and cash reserves"}
     refute_receive {:embedded, _}
+  end
+
+  defp fail_embeddings do
+    Application.put_env(:doctrans, :embedding_module, EmbeddingErrorStub)
+    Application.put_env(:doctrans, :embedding_error_reason, :circuit_open)
+
+    on_exit(fn ->
+      Application.put_env(:doctrans, :embedding_module, RetrievalProbe)
+      Application.delete_env(:doctrans, :embedding_error_reason)
+    end)
   end
 end

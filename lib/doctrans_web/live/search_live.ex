@@ -21,6 +21,7 @@ defmodule DoctransWeb.SearchLive do
       |> assign(:searching, false)
       |> assign(:searched, false)
       |> assign(:search_error, false)
+      |> assign(:retrieval, :hybrid)
       |> assign(:page, 1)
       |> assign(:per_page, @per_page)
       |> assign(:total_count, 0)
@@ -79,10 +80,18 @@ defmodule DoctransWeb.SearchLive do
     socket.assigns.query == query and socket.assigns.page == page
   end
 
-  defp apply_search_result(socket, {:ok, %{results: results, total_count: total_count}}) do
+  # `:retrieval` says how this page of results was found: `:keyword_only` means
+  # the query could not be embedded, so full-text matches are all there is and
+  # the page may be missing what only semantic search would have found. It is a
+  # property of the result, so it is assigned with it and never survives it.
+  defp apply_search_result(
+         socket,
+         {:ok, %{results: results, total_count: total_count, retrieval: retrieval}}
+       ) do
     assign(socket,
       results: results,
       total_count: total_count,
+      retrieval: retrieval,
       searching: false,
       searched: true,
       search_error: false
@@ -98,6 +107,7 @@ defmodule DoctransWeb.SearchLive do
       |> assign(:page, page)
       |> assign(:searching, true)
       |> assign(:search_error, false)
+      |> assign(:retrieval, :hybrid)
 
     if connected?(socket) do
       offset = max(0, (page - 1) * @per_page)
@@ -128,7 +138,14 @@ defmodule DoctransWeb.SearchLive do
     Logger.warning("Search failed: #{inspect(reason, limit: 10, printable_limit: 256)}")
 
     socket
-    |> assign(results: [], total_count: 0, searching: false, searched: true, search_error: true)
+    |> assign(
+      results: [],
+      total_count: 0,
+      retrieval: :hybrid,
+      searching: false,
+      searched: true,
+      search_error: true
+    )
     |> put_flash(:error, ErrorMessages.message(:search_failed))
   end
 
@@ -147,6 +164,13 @@ defmodule DoctransWeb.SearchLive do
     |> assign(:page, 1)
     |> assign(:results, [])
     |> assign(:total_count, 0)
+    # `:retrieval` describes a result, so it is reset wherever results are --
+    # here, on a new search, and on a failure. Two of those three are currently
+    # invisible behind `:searching` / `:search_error`, but the invariant is what
+    # keeps the notice from outliving what it describes: `reject_query/3` clears
+    # and then re-asserts `searched`, which would otherwise leave a degraded
+    # notice standing over results that are gone.
+    |> assign(:retrieval, :hybrid)
     |> assign(:searching, false)
     |> assign(:searched, false)
     |> assign(:search_error, false)
@@ -210,6 +234,25 @@ defmodule DoctransWeb.SearchLive do
         >
           <span class="loading loading-spinner loading-md"></span>
           <span>{gettext("Searching...")}</span>
+        </div>
+
+        <%!-- Above both outcomes: a keyword-only search that matched nothing
+        needs this notice as much as a page of hits does. --%>
+        <div
+          :if={!@searching && @searched && !@search_error && @retrieval == :keyword_only}
+          id="search-degraded"
+          role="status"
+          class="flex items-start gap-3 max-w-3xl mb-6 px-4 py-3 rounded-lg border border-warning/30 bg-warning/10"
+        >
+          <.icon name="hero-exclamation-triangle" class="w-5 h-5 shrink-0 text-warning" />
+          <div class="text-sm">
+            <p class="font-medium text-base-content">
+              {gettext("Semantic search is unavailable, so only keyword matches are shown.")}
+            </p>
+            <p class="text-base-content/70">
+              {gettext("These results may be incomplete until it is back.")}
+            </p>
+          </div>
         </div>
 
         <div :if={!@searching && @searched && @results != []} id="search-results">
