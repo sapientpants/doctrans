@@ -268,9 +268,10 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
       aria-labelledby="reprocess-title"
       phx-window-keydown="hide_reprocess_modal"
       phx-key="escape"
-      phx-mounted={JS.push_focus() |> JS.focus_first(to: "#reprocess-modal")}
-      phx-remove={JS.pop_focus()}
-      phx-hook="FocusTrap"
+      phx-hook="DialogFocus"
+      data-return-focus={
+        if(@scope == :document, do: "#show-document-reprocess", else: "#show-reprocess")
+      }
     >
       <div class="relative z-10 w-full max-w-lg rounded-2xl border border-base-300 bg-base-100 p-6 shadow-2xl">
         <button

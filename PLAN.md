@@ -1050,8 +1050,21 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   gate. Gettext's fuzzy matcher auto-filled four new msgids from unrelated strings -- `Sort documents`
   shipped as "Search documents" in English until those `en` entries were blanked; verified against
   the served page.
-  Not verified: real focus movement and screen-reader output. The regression tests cover the markup
-  contract and the server-side events only; a browser pass is still outstanding.
+  Found in the browser pass and fixed: `JS.push_focus/0` pushes the element the command is attached
+  to -- the dialog -- not what was focused before it opened, so `pop_focus` focused a node being
+  removed and focus fell to the body. The reprocess dialog had shipped that since it was written.
+  The trigger is named by `data-return-focus` instead, which also survives a browser that does not
+  focus a button on click. Also found there: `button:not([disabled])` matched the backdrop, whose
+  `tabindex="-1"` keeps it out of the real tab order, so the trap mistook it for the last element
+  and Tab walked out of the dialog; the filter is `tabIndex >= 0` now. And daisyUI opens the upload
+  dialog through an `allow-discrete` `visibility` transition that computes as `hidden` for the whole
+  first frame, so the initial focus call was a no-op -- it retries across nested frames, guarded so
+  it cannot yank focus back once it has landed. Focus management is one mechanism in the hook now
+  rather than split between the hook and JS commands that did not do what they read as.
+  Verified in Chrome via Puppeteer: an upload completed with Tab/Enter alone from the top of the
+  page through to a queued document; Tab and Shift+Tab stay inside both dialogs; Escape closes both
+  and focus returns to the trigger that opened them; the accessibility tree reports no unnamed
+  button, link, combobox or textbox, and the file input is named exactly `Documents`.
   Evidence: `lib/doctrans_web/live/document_live/upload_components.ex` (`upload_modal/1`,
   `upload_entries_list/1`), `lib/doctrans_web/live/document_live/components.ex` (`document_card/1`,
   `document_thumbnail/1`), `lib/doctrans_web/live/document_live/index.ex`,

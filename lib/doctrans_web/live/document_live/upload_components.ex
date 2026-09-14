@@ -38,9 +38,8 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
       aria-labelledby="upload-modal-title"
       phx-window-keydown="hide_upload_modal"
       phx-key="escape"
-      phx-hook="FocusTrap"
-      phx-mounted={JS.push_focus() |> JS.focus_first(to: "#upload-modal")}
-      phx-remove={JS.pop_focus()}
+      phx-hook="DialogFocus"
+      data-return-focus="#upload-document-btn"
     >
       <div class="modal-box max-w-lg">
         <button

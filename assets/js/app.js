@@ -72,19 +72,71 @@ const Hooks = {
       }
     }
   },
-  // Keeps Tab inside an open dialog. LiveView owns the dialog markup and
-  // re-patches it while it is open (upload entries appear and disappear as
-  // files are picked), so a list captured at mount would go stale — the
-  // focusable set is read again on every keypress. The listener sits on the
-  // document because focus can still be outside the dialog when it opens, and
-  // a keydown out there would never reach the dialog element.
-  FocusTrap: {
+  // Owns focus for an open dialog: where it starts, where Tab may go, and where
+  // it returns to on close.
+  //
+  // `JS.push_focus/0` cannot do the last part. It pushes the element the command
+  // is attached to -- the dialog -- not the element that was focused before it
+  // opened, so popping focuses a node that is being removed and focus lands on
+  // the body. The trigger is named by `data-return-focus` instead, which also
+  // survives a browser that does not focus a button on click.
+  //
+  // The focusable set is read again on every keypress rather than cached at
+  // mount: LiveView owns this markup and repatches it while the dialog is open,
+  // as upload entries come and go. The listener sits on the document because
+  // focus can still be outside the dialog when a key lands, and a keydown out
+  // there would never reach the dialog element.
+  DialogFocus: {
     mounted() {
+      this.returnTo = this.returnTarget()
       this.onKeyDown = event => this.trapTab(event)
       document.addEventListener("keydown", this.onKeyDown, true)
+      this.focusFirst()
     },
     destroyed() {
       document.removeEventListener("keydown", this.onKeyDown, true)
+      const target = this.returnTo
+      if (target && target.isConnected) {
+        // The patch that removed the dialog is still settling, so claim focus
+        // again once it has.
+        target.focus()
+        window.requestAnimationFrame(() => target.focus())
+      }
+    },
+    returnTarget() {
+      const selector = this.el.getAttribute("data-return-focus")
+      const named = selector && document.querySelector(selector)
+      if (named) {
+        return named
+      }
+      const active = document.activeElement
+      const usable = active && active !== document.body && !this.el.contains(active)
+      return usable ? active : null
+    },
+    focusFirst() {
+      // daisyUI opens the upload dialog through a `visibility` transition marked
+      // `allow-discrete`: it computes as `hidden` when the hook mounts and for
+      // the whole first frame, turning `visible` only on the second. A node in a
+      // hidden subtree cannot take focus, and it keeps its client rects
+      // throughout, so there is nothing to test for -- only to wait for. Hence
+      // the nested frames, the same way LiveView defers its own focus commands.
+      //
+      // Each attempt is guarded: once focus is inside, the later ones must not
+      // yank it back to the top.
+      const attempt = () => {
+        if (this.el.contains(document.activeElement)) {
+          return
+        }
+        const focusable = this.focusableElements()
+        if (focusable.length > 0) {
+          focusable[0].focus()
+        }
+      }
+      attempt()
+      window.requestAnimationFrame(() => {
+        attempt()
+        window.requestAnimationFrame(attempt)
+      })
     },
     trapTab(event) {
       if (event.key !== "Tab") {
@@ -118,14 +170,19 @@ const Hooks = {
         "input:not([disabled])",
         "select:not([disabled])",
         "textarea:not([disabled])",
-        "[tabindex]:not([tabindex=\"-1\"])"
+        "[tabindex]"
       ].join(", ")
 
+      // `tabIndex >= 0` is the load-bearing filter, not the selector: a dialog's
+      // backdrop is a `<button tabindex="-1">`, which `button:not([disabled])`
+      // matches. Counting it made it the trap's "last" element, so the real last
+      // control was never recognised and Tab walked straight out of the dialog.
+      //
       // getClientRects() rather than offsetParent: the file input is `sr-only`
       // (clipped to 1px) yet must stay reachable, while `display: none`
       // elements have no rects and drop out.
       return Array.from(this.el.querySelectorAll(selector)).filter(
-        el => el.getClientRects().length > 0
+        el => el.tabIndex >= 0 && el.getClientRects().length > 0
       )
     }
   }

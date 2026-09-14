@@ -9,7 +9,7 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
   Escape key really closes a dialog through a handled event.
 
   What these cannot cover: where the focus ring actually goes. `phx-hook`,
-  `JS.push_focus/0`, `JS.focus_first/1` and the FocusTrap hook all run in the
+  the DialogFocus hook runs in the
   browser, and `Phoenix.LiveViewTest` has no DOM to move focus in. These tests
   therefore assert only that the page *declares* the focus management; that it
   works is a browser-level concern. The same goes for what a screen reader
@@ -243,25 +243,32 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
       if context[:stub_models], do: stub_model_list(context), else: :ok
     end
 
-    # Declaration only. `phx-hook="FocusTrap"` and the `JS.push_focus/0` /
-    # `JS.focus_first/1` commands run in the browser -- LiveViewTest has no DOM,
-    # so nothing here proves focus actually moved or came back. These assertions
-    # exist so the declarations cannot be dropped silently; the behaviour itself
-    # needs a real browser to verify.
-    test "the upload dialog traps focus and restores it on close", %{conn: conn} do
+    # Declaration only. The DialogFocus hook runs in the browser -- LiveViewTest
+    # has no DOM, so nothing here proves focus actually moved or came back. These
+    # assertions exist so the declarations cannot be dropped silently; the
+    # behaviour itself is verified with Puppeteer against a running server.
+    #
+    # `data-return-focus` is the load-bearing part. `JS.push_focus/0` pushes the
+    # element the command is attached to -- the dialog -- not whatever was
+    # focused before it opened, so popping focused a node that was being removed
+    # and focus fell to the body. The trigger is named explicitly instead.
+    test "the upload dialog traps focus and names where it returns", %{conn: conn} do
       view = open_upload_modal(conn)
 
-      assert has_element?(view, ~s{#upload-modal[phx-hook="FocusTrap"]})
-      assert has_element?(view, "#upload-modal[phx-mounted][phx-remove]")
+      assert has_element?(view, ~s{#upload-modal[phx-hook="DialogFocus"]})
+      assert has_element?(view, ~s{#upload-modal[data-return-focus="#upload-document-btn"]})
+      assert has_element?(view, "#upload-document-btn")
       assert has_element?(view, ~s{#upload-modal[phx-window-keydown][phx-key="escape"]})
     end
 
     @tag :stub_models
-    test "the reprocess dialog traps focus and restores it on close", %{conn: conn} do
+    test "the reprocess dialog traps focus and names the trigger of its scope", %{conn: conn} do
       view = open_reprocess_modal(conn)
 
-      assert has_element?(view, ~s{#reprocess-modal[phx-hook="FocusTrap"]})
-      assert has_element?(view, "#reprocess-modal[phx-mounted][phx-remove]")
+      assert has_element?(view, ~s{#reprocess-modal[phx-hook="DialogFocus"]})
+      # The page-scope trigger, because that is the one this dialog was opened from.
+      assert has_element?(view, ~s{#reprocess-modal[data-return-focus="#show-reprocess"]})
+      assert has_element?(view, "#show-reprocess")
       assert has_element?(view, ~s{#reprocess-modal[phx-window-keydown][phx-key="escape"]})
     end
   end
