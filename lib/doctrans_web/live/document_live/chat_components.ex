@@ -13,7 +13,10 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
 
   def chat_panel(assigns) do
     ~H"""
-    <div class="w-80 border-l border-base-300 flex flex-col bg-base-100 flex-shrink-0">
+    <div
+      id="chat-panel"
+      class="w-80 border-l border-base-300 flex flex-col bg-base-100 flex-shrink-0"
+    >
       <%!-- Header --%>
       <div class="px-4 py-3 border-b border-base-300 flex items-center justify-between bg-base-200">
         <div class="flex items-center gap-2">
@@ -24,6 +27,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
           type="button"
           phx-click="toggle_chat"
           class="btn btn-ghost btn-xs btn-circle"
+          aria-label={gettext("Close chat")}
           title={gettext("Close chat")}
         >
           <.icon name="hero-x-mark" class="w-4 h-4" />
@@ -106,6 +110,9 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
         class="p-3 border-t border-base-300"
         id="chat-form"
       >
+        <label for="chat-input" class="sr-only">
+          {gettext("Ask a question about this document")}
+        </label>
         <div class="flex gap-2">
           <input
             type="text"
@@ -121,6 +128,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
             type="submit"
             class="btn btn-primary btn-sm"
             disabled={@chat_loading}
+            aria-label={gettext("Send message")}
             title={gettext("Send message")}
           >
             <.icon name="hero-paper-airplane" class="w-4 h-4" />

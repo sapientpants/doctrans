@@ -12,6 +12,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   require Logger
 
   import DoctransWeb.DocumentLive.Components
+  import DoctransWeb.DocumentLive.UploadComponents
 
   # How long to wait after a page-level update before refreshing affected cards.
   # Page updates arrive very frequently (one per page, per document); this
@@ -74,7 +75,16 @@ defmodule DoctransWeb.DocumentLive.Index do
           </div>
           <div class="flex items-center gap-3">
             <%!-- Inline search form --%>
-            <form action="/search" method="get" class="relative" id="dashboard-search-form">
+            <form
+              action="/search"
+              method="get"
+              role="search"
+              class="relative"
+              id="dashboard-search-form"
+            >
+              <label for="dashboard-search-input" class="sr-only">
+                {gettext("Search documents")}
+              </label>
               <.icon
                 name="hero-magnifying-glass"
                 class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 z-10 text-base-content/60 pointer-events-none"
@@ -90,16 +100,36 @@ defmodule DoctransWeb.DocumentLive.Index do
 
             <%!-- Sort dropdown --%>
             <div class="dropdown dropdown-end">
-              <label tabindex="0" class="btn btn-sm btn-ghost gap-1.5 text-base-content/70">
+              <%!-- A real `<button>`, not a `<label tabindex="0">`: daisyUI opens the
+                    dropdown from CSS `:focus-within`, which a button satisfies just as
+                    well, and a bare label is announced as nothing at all.
+
+                    This is a disclosure, not a menu. `aria-haspopup="menu"` would
+                    promise arrow-key navigation between `menuitem`s that nothing here
+                    implements, so the trigger only claims what it delivers: it controls
+                    a group of buttons, and says whether that group is showing.
+                    `aria-expanded` is mirrored from focus by `DropdownExpanded`, since
+                    the open state lives entirely in CSS. --%>
+              <button
+                type="button"
+                id="sort-documents-trigger"
+                phx-hook="DropdownExpanded"
+                aria-expanded="false"
+                aria-controls="sort-documents-menu"
+                aria-label={gettext("Sort documents")}
+                class="btn btn-sm btn-ghost gap-1.5 text-base-content/70"
+              >
                 <.icon name="hero-arrows-up-down" class="w-4 h-4" />
                 <span class="text-xs font-normal">{sort_label(@sort_by, @sort_dir)}</span>
-              </label>
+              </button>
               <ul
                 tabindex="0"
+                id="sort-documents-menu"
                 class="dropdown-content z-10 menu menu-sm p-1 shadow-lg bg-base-200 rounded-lg w-40 mt-1"
               >
                 <li>
                   <button
+                    type="button"
                     phx-click="sort"
                     phx-value-field="inserted_at"
                     phx-value-dir="desc"
@@ -110,6 +140,7 @@ defmodule DoctransWeb.DocumentLive.Index do
                 </li>
                 <li>
                   <button
+                    type="button"
                     phx-click="sort"
                     phx-value-field="inserted_at"
                     phx-value-dir="asc"
@@ -120,6 +151,7 @@ defmodule DoctransWeb.DocumentLive.Index do
                 </li>
                 <li>
                   <button
+                    type="button"
                     phx-click="sort"
                     phx-value-field="title"
                     phx-value-dir="asc"
@@ -130,6 +162,7 @@ defmodule DoctransWeb.DocumentLive.Index do
                 </li>
                 <li>
                   <button
+                    type="button"
                     phx-click="sort"
                     phx-value-field="title"
                     phx-value-dir="desc"
@@ -179,6 +212,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
       <.upload_modal
         :if={@show_upload_modal}
+        return_focus="#upload-document-btn"
         uploads={@uploads}
         target_language={@target_language}
         failures={@upload_failures}

@@ -12,6 +12,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
     ~H"""
     <div class="flex items-center gap-2">
       <form phx-change="goto_page" id="page-selector-form">
+        <label for="page-selector" class="sr-only">{gettext("Page")}</label>
         <select id="page-selector" name="page" class="select select-bordered select-sm w-24">
           <option
             :for={page_num <- 1..max(@total_pages, 1)}
@@ -35,7 +36,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
     <div :if={@page && @page.image_path} class="transition-transform">
       <img
         src={"/uploads/#{@page.image_path}"}
-        alt="Page image"
+        alt={gettext("Page %{number}", number: @page.page_number)}
         class={"shadow-lg rounded transition-transform zoom-#{@zoom_level}"}
       />
     </div>

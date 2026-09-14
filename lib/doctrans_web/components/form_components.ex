@@ -59,6 +59,14 @@ defmodule DoctransWeb.FormComponents do
     include: ~w(accept autocomplete capture cols disabled form list max maxlength min minlength
                 multiple pattern placeholder readonly required rows size step)
 
+  # Without an id the label's `for` and the error's `aria-describedby` reference
+  # nothing, so the wiring silently does nothing. The documented explicit form
+  # (`<.input name="my-input" errors={["oh no!"]} />`) always carries a name;
+  # derive the id from it. Inputs given neither fall through unchanged.
+  def input(%{id: nil, name: name} = assigns) when is_binary(name) do
+    assigns |> assign(:id, name) |> input()
+  end
+
   def input(%{field: %Phoenix.HTML.FormField{} = field} = assigns) do
     errors = if Phoenix.Component.used_input?(field), do: field.errors, else: []
 
@@ -78,7 +86,7 @@ defmodule DoctransWeb.FormComponents do
 
     ~H"""
     <div class="fieldset mb-2">
-      <label>
+      <label for={@id}>
         <input type="hidden" name={@name} value="false" disabled={@rest[:disabled]} />
         <span class="label">
           <input
@@ -88,11 +96,12 @@ defmodule DoctransWeb.FormComponents do
             value="true"
             checked={@checked}
             class={@class || "checkbox checkbox-sm"}
+            {error_attrs(@id, @errors)}
             {@rest}
           />{@label}
         </span>
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.input_errors id={@id} errors={@errors} />
     </div>
     """
   end
@@ -100,20 +109,21 @@ defmodule DoctransWeb.FormComponents do
   def input(%{type: "select"} = assigns) do
     ~H"""
     <div class="fieldset mb-2">
-      <label>
+      <label for={@id}>
         <span :if={@label} class="label mb-1">{@label}</span>
         <select
           id={@id}
           name={@name}
           class={[@class || "w-full select", @errors != [] && (@error_class || "select-error")]}
           multiple={@multiple}
+          {error_attrs(@id, @errors)}
           {@rest}
         >
           <option :if={@prompt} value="">{@prompt}</option>
           {Phoenix.HTML.Form.options_for_select(@options, @value)}
         </select>
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.input_errors id={@id} errors={@errors} />
     </div>
     """
   end
@@ -121,7 +131,7 @@ defmodule DoctransWeb.FormComponents do
   def input(%{type: "textarea"} = assigns) do
     ~H"""
     <div class="fieldset mb-2">
-      <label>
+      <label for={@id}>
         <span :if={@label} class="label mb-1">{@label}</span>
         <textarea
           id={@id}
@@ -130,10 +140,11 @@ defmodule DoctransWeb.FormComponents do
             @class || "w-full textarea",
             @errors != [] && (@error_class || "textarea-error")
           ]}
+          {error_attrs(@id, @errors)}
           {@rest}
         >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
       </label>
-      <.error :for={msg <- @errors}>{msg}</.error>
+      <.input_errors id={@id} errors={@errors} />
     </div>
     """
   end
@@ -142,7 +153,7 @@ defmodule DoctransWeb.FormComponents do
   def input(assigns) do
     ~H"""
     <div class="fieldset mb-2">
-      <label>
+      <label for={@id}>
         <span :if={@label} class="label mb-1">{@label}</span>
         <input
           type={@type}
@@ -153,13 +164,41 @@ defmodule DoctransWeb.FormComponents do
             @class || "w-full input",
             @errors != [] && (@error_class || "input-error")
           ]}
+          {error_attrs(@id, @errors)}
           {@rest}
         />
       </label>
+      <.input_errors id={@id} errors={@errors} />
+    </div>
+    """
+  end
+
+  # The error container every input clause renders, and the attributes that point
+  # the control at it. Kept together so the id on one side and the reference on
+  # the other cannot drift apart.
+  attr :id, :any, required: true
+  attr :errors, :list, required: true
+
+  defp input_errors(assigns) do
+    ~H"""
+    <div :if={@errors != []} id={error_id(@id)}>
       <.error :for={msg <- @errors}>{msg}</.error>
     </div>
     """
   end
+
+  defp error_attrs(id, errors) do
+    %{"aria-invalid" => errors != [] && "true", "aria-describedby" => describedby(id, errors)}
+  end
+
+  # Deterministic id for an input's error container, so the control can point at
+  # it with aria-describedby. Call sites may render inputs without an id, in
+  # which case there is nothing to reference.
+  defp error_id(nil), do: nil
+  defp error_id(id), do: "#{id}-error"
+
+  defp describedby(_id, []), do: nil
+  defp describedby(id, _errors), do: error_id(id)
 
   # Helper used by inputs to generate form errors
   defp error(assigns) do

@@ -281,4 +281,14 @@ defmodule DoctransWeb.DocumentLive.Show do
     |> assign(:chat_retrieved_context, [])
     |> assign(:embeddings_ready, false)
   end
+
+  # Names the reprocess-document button and fills its tooltip. The two must say
+  # the same thing: `aria-label` overrides `title` for the accessible name, so a
+  # tooltip-only explanation of why the button is disabled never reaches a
+  # screen reader.
+  defp reprocess_document_hint(true), do: gettext("Reprocess document")
+
+  defp reprocess_document_hint(false) do
+    gettext("Original upload unavailable. Re-upload this document to process it again.")
+  end
 end
