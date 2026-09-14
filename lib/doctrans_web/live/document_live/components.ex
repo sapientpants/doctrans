@@ -138,6 +138,12 @@ defmodule DoctransWeb.DocumentLive.Components do
   attr :uploads, :map, required: true
   attr :target_language, :string, required: true
 
+  attr :failures, :list,
+    default: [],
+    doc: "files that did not reach the processing queue, as %{name:, message:} maps"
+
+  attr :started, :integer, default: 0, doc: "documents the same submission did queue"
+
   def upload_modal(assigns) do
     ~H"""
     <div class="modal modal-open" id="upload-modal">
@@ -166,6 +172,7 @@ defmodule DoctransWeb.DocumentLive.Components do
               <.upload_entries_list :if={@uploads.document.entries != []} upload={@uploads.document} />
               <.upload_error :for={err <- upload_errors(@uploads.document)} error={err} />
             </div>
+            <.upload_outcomes :if={@failures != []} failures={@failures} started={@started} />
           </div>
 
           <div class="form-control mb-6">
@@ -271,6 +278,46 @@ defmodule DoctransWeb.DocumentLive.Components do
       {name}
     </option>
     """
+  end
+
+  # Server-side outcomes, one line per file. The modal stays open to show them, and
+  # it covers the flash toasts (z-999 against z-50), so what the submission did start
+  # is reported in here as well rather than only in a flash nobody can see yet.
+  defp upload_outcomes(assigns) do
+    ~H"""
+    <div id="upload-outcomes" class="mt-3 space-y-2 text-left">
+      <div :if={@started > 0} id="upload-started" class="alert alert-success items-start">
+        <.icon name="hero-check-circle" class="size-5 shrink-0" />
+        <p class="text-sm flex-1">{upload_started_message(@started)}</p>
+      </div>
+
+      <div id="upload-failures" role="alert" class="alert alert-error items-start">
+        <.icon name="hero-exclamation-circle" class="size-5 shrink-0" />
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-sm">{gettext("These files were not uploaded")}</p>
+          <ul class="mt-1 space-y-1">
+            <li :for={failure <- @failures} class="text-sm" data-failed-upload={failure.name}>
+              <span class="font-medium break-all">{failure.name}</span>: {failure.message}
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  The message for documents a submission queued for processing.
+
+  Shared so the dashboard flash and the modal's own outcome list cannot drift apart.
+  """
+  @spec upload_started_message(non_neg_integer()) :: String.t()
+  def upload_started_message(count) do
+    ngettext(
+      "Document uploaded! Processing will begin shortly.",
+      "%{count} documents uploaded! Processing will begin shortly.",
+      count
+    )
   end
 
   defp upload_error(assigns) do

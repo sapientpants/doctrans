@@ -181,6 +181,17 @@ defmodule DoctransWeb.ErrorMessages do
   def message(:invalid_model), do: gettext("Invalid model selection")
   def message(:upload_unreadable), do: dgettext("errors", "Could not read uploaded file")
 
+  def message(:upload_store_failed),
+    do: dgettext("errors", "Could not store the uploaded file")
+
+  def message(:upload_start_failed),
+    do: dgettext("errors", "Could not start processing for this document")
+
+  # The changeset is dropped deliberately: a per-file upload message says the save
+  # failed, never which column the database objected to.
+  def message({:validation_failed, _bindings}),
+    do: dgettext("errors", "The document could not be saved")
+
   def message({:file_too_large, bindings}),
     do:
       dgettext("errors", "File too large (%{size}MB, max %{max}MB)",

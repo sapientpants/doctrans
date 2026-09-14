@@ -253,7 +253,7 @@ msgstr "Nieobsługiwany język: %{language}"
 msgid "Could not read uploaded file"
 msgstr "Nie można odczytać przesłanego pliku"
 
-#: lib/doctrans_web/error_messages.ex:186
+#: lib/doctrans_web/error_messages.ex:197
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
 msgstr "Plik jest zbyt duży (%{size}MB, maks. %{max}MB)"
@@ -307,3 +307,18 @@ msgstr "Odczyt pliku PDF przekroczył limit czasu, zanim rozpoczęło się wyodr
 #, elixir-autogen, elixir-format
 msgid "This PDF's pages are %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."
 msgstr "Strony tego pliku PDF mają %{width}x%{height} pikseli przy %{dpi} DPI, powyżej limitu %{limit} pikseli. Zmniejsz rozdzielczość wyodrębniania i spróbuj ponownie."
+
+#: lib/doctrans_web/error_messages.ex:185
+#, elixir-autogen, elixir-format
+msgid "Could not store the uploaded file"
+msgstr "Nie można zapisać przesłanego pliku"
+
+#: lib/doctrans_web/error_messages.ex:193
+#, elixir-autogen, elixir-format
+msgid "The document could not be saved"
+msgstr "Nie udało się zapisać dokumentu"
+
+#: lib/doctrans_web/error_messages.ex:188
+#, elixir-autogen, elixir-format
+msgid "Could not start processing for this document"
+msgstr "Nie można rozpocząć przetwarzania tego dokumentu"

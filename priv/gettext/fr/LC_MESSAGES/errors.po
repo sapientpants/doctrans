@@ -251,7 +251,7 @@ msgstr "Langue non prise en charge : %{language}"
 msgid "Could not read uploaded file"
 msgstr "Impossible de lire le fichier téléversé"
 
-#: lib/doctrans_web/error_messages.ex:186
+#: lib/doctrans_web/error_messages.ex:197
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
 msgstr "Fichier trop volumineux (%{size}Mo, maximum %{max}Mo)"
@@ -305,3 +305,18 @@ msgstr "La lecture du PDF a expiré avant le début de l’extraction. Le fichie
 #, elixir-autogen, elixir-format
 msgid "This PDF's pages are %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."
 msgstr "Les pages de ce PDF font %{width}x%{height} pixels à %{dpi} DPI, au-dessus de la limite de %{limit} pixels. Réduisez la résolution d’extraction, puis réessayez."
+
+#: lib/doctrans_web/error_messages.ex:185
+#, elixir-autogen, elixir-format
+msgid "Could not store the uploaded file"
+msgstr "Impossible d’enregistrer le fichier téléversé"
+
+#: lib/doctrans_web/error_messages.ex:193
+#, elixir-autogen, elixir-format
+msgid "The document could not be saved"
+msgstr "Le document n’a pas pu être enregistré"
+
+#: lib/doctrans_web/error_messages.ex:188
+#, elixir-autogen, elixir-format
+msgid "Could not start processing for this document"
+msgstr "Impossible de démarrer le traitement de ce document"
