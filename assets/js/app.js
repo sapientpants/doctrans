@@ -27,15 +27,67 @@ import topbar from "../vendor/topbar"
 
 // Custom hooks
 const Hooks = {
+  // Fades a transient flash out after a few seconds and then clears it on the
+  // server, so the LiveView -- not this hook -- removes its own DOM. Notices
+  // that must outlive a timer (the `phx-disconnected` connectivity banners,
+  // which are found by id when the socket drops) render without this hook.
   AutoDismiss: {
     mounted() {
-      setTimeout(() => {
-        this.el.style.transition = "opacity 300ms ease-out"
-        this.el.style.opacity = "0"
-        setTimeout(() => {
+      this.message = this.el.textContent
+      this.scheduleDismiss()
+    },
+    updated() {
+      if (this.dismissing) {
+        // A patch strips inline styles the server markup does not carry, so
+        // re-apply the fade rather than leaving a half-faded notice behind.
+        this.fadeOut()
+        return
+      }
+
+      // Restart the countdown only when the notice actually says something new.
+      // Keying off the patch itself would let a frequently-rendering LiveView
+      // hold a flash on screen indefinitely.
+      if (this.el.textContent === this.message) {
+        return
+      }
+
+      this.message = this.el.textContent
+      this.scheduleDismiss()
+    },
+    destroyed() {
+      this.cancelTimers()
+    },
+    scheduleDismiss() {
+      this.cancelTimers()
+      this.dismissing = false
+      this.el.style.opacity = ""
+      this.dismissTimer = setTimeout(() => this.dismiss(), 5000)
+    },
+    cancelTimers() {
+      clearTimeout(this.dismissTimer)
+      clearTimeout(this.clearTimer)
+    },
+    fadeOut() {
+      this.el.style.transition = "opacity 300ms ease-out"
+      this.el.style.opacity = "0"
+    },
+    dismiss() {
+      this.dismissing = true
+      this.fadeOut()
+      this.clearTimer = setTimeout(() => {
+        const key = this.el.dataset.flashKey
+        if (!key) {
+          // Nothing to clear on the server: this notice is not flash-backed.
           this.el.remove()
-        }, 300)
-      }, 5000)
+          return
+        }
+
+        // Clear the server-side flash so the message cannot come back on the
+        // next render, and let LiveView take the node out. The push rejects
+        // while the socket is down; drop the node ourselves rather than leave
+        // an invisible overlay sitting over the page.
+        this.pushEvent("lv:clear-flash", {key}).catch(() => this.el.remove())
+      }, 300)
     }
   },
   ScrollToBottom: {

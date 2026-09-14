@@ -51,6 +51,62 @@ defmodule DoctransWeb.CoreComponentsTest do
 
       refute html =~ "alert"
     end
+
+    test "transient flash carries the auto-dismiss hook, its flash key, and a clearing click" do
+      flash =
+        render_component(&CoreComponents.flash/1,
+          kind: :info,
+          flash: %{"info" => "Operation successful"}
+        )
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#flash-info")
+
+      assert LazyHTML.attribute(flash, "phx-hook") == ["AutoDismiss"]
+      assert LazyHTML.attribute(flash, "data-flash-key") == ["info"]
+
+      # The hook asks the server to clear the flash, so clicking must do the same.
+      assert [phx_click] = LazyHTML.attribute(flash, "phx-click")
+      assert phx_click =~ "lv:clear-flash"
+    end
+
+    test "non-transient flash has no auto-dismiss hook but still clears its flash on click" do
+      flash =
+        render_component(&CoreComponents.flash/1,
+          kind: :error,
+          transient: false,
+          flash: %{"error" => "Connection lost"}
+        )
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#flash-error")
+
+      # No hook and no flash key: nothing may delete this notice on a timer.
+      assert LazyHTML.attribute(flash, "phx-hook") == []
+      assert LazyHTML.attribute(flash, "data-flash-key") == []
+
+      # Transience is independent of flash backing, so a dismissal by hand must
+      # still clear the server state -- otherwise the next render brings it back.
+      assert [phx_click] = LazyHTML.attribute(flash, "phx-click")
+      assert phx_click =~ "lv:clear-flash"
+    end
+
+    test "flash rendered from its inner block never clears server flash state" do
+      assigns = %{}
+
+      flash =
+        rendered_to_string(~H"""
+        <CoreComponents.flash kind={:info}>Welcome back!</CoreComponents.flash>
+        """)
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#flash-info")
+
+      # This notice has no entry in the flash map, so there is nothing to clear
+      # and `lv:clear-flash` would discard an unrelated message of the same kind.
+      # The hook falls back to removing the node itself.
+      assert LazyHTML.attribute(flash, "phx-hook") == ["AutoDismiss"]
+      assert LazyHTML.attribute(flash, "data-flash-key") == []
+      assert [phx_click] = LazyHTML.attribute(flash, "phx-click")
+      refute phx_click =~ "lv:clear-flash"
+    end
   end
 
   describe "button component" do

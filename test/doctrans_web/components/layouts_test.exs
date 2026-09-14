@@ -59,6 +59,61 @@ defmodule DoctransWeb.LayoutsTest do
 
       assert html =~ "custom-flash"
     end
+
+    test "connectivity notices render without the auto-dismiss hook" do
+      # Regression guard for U06: the hook used to remove these notices from the
+      # DOM a few seconds after mount, leaving the `phx-disconnected` handlers
+      # with no node to target once the socket actually dropped.
+      document = render_flash_group()
+
+      for id <- ["#client-error", "#server-error"] do
+        notice = LazyHTML.query(document, id)
+
+        assert LazyHTML.to_tree(notice) != [], "expected #{id} to be rendered"
+        assert LazyHTML.attribute(notice, "phx-hook") == []
+        assert LazyHTML.attribute(notice, "data-flash-key") == []
+        assert [phx_click] = LazyHTML.attribute(notice, "phx-click")
+        refute phx_click =~ "lv:clear-flash"
+      end
+    end
+
+    test "connectivity notices keep their connection handlers and stay hidden until needed" do
+      document = render_flash_group()
+
+      for id <- ["#client-error", "#server-error"] do
+        notice = LazyHTML.query(document, id)
+
+        assert [disconnected] = LazyHTML.attribute(notice, "phx-disconnected")
+        assert disconnected =~ id
+        assert [connected] = LazyHTML.attribute(notice, "phx-connected")
+        assert connected =~ id
+        assert LazyHTML.attribute(notice, "hidden") == [""]
+      end
+    end
+
+    test "flash-backed notices still auto-dismiss" do
+      document = render_flash_group()
+
+      for {id, key} <- [{"#flash-info", "info"}, {"#flash-error", "error"}] do
+        notice = LazyHTML.query(document, id)
+
+        assert LazyHTML.attribute(notice, "phx-hook") == ["AutoDismiss"]
+        assert LazyHTML.attribute(notice, "data-flash-key") == [key]
+        assert [phx_click] = LazyHTML.attribute(notice, "phx-click")
+        assert phx_click =~ "lv:clear-flash"
+      end
+    end
+  end
+
+  # Renders the flash group with both flash kinds present, so all four notices --
+  # the two flash-backed ones and the two connectivity banners -- are in the tree.
+  defp render_flash_group do
+    assigns = %{flash: %{"info" => "Saved", "error" => "Failed"}}
+
+    rendered_to_string(~H"""
+    <Layouts.flash_group flash={@flash} />
+    """)
+    |> LazyHTML.from_fragment()
   end
 
   describe "theme_toggle/1" do

@@ -16,24 +16,50 @@ defmodule DoctransWeb.CoreComponents do
 
       <.flash kind={:info} flash={@flash} />
       <.flash kind={:info} phx-mounted={show("#flash")}>Welcome Back!</.flash>
+      <.flash kind={:error} transient={false}>Connection lost</.flash>
   """
   attr :id, :string, doc: "the optional id of flash container"
   attr :flash, :map, default: %{}, doc: "the map of flash messages to display"
   attr :title, :string, default: nil
   attr :kind, :atom, values: [:info, :error], doc: "used for styling and flash lookup"
+
+  attr :transient, :boolean,
+    default: true,
+    doc: """
+    whether the notice should dismiss itself after a few seconds. Set to `false` for notices
+    that must stay mounted until their own state resolves, such as the connectivity banners
+    driven by `phx-connected`/`phx-disconnected`: those handlers target the element by id, so
+    it has to still be in the DOM when the connection drops.
+
+    This is independent of whether the notice is backed by the flash map. Clearing server-side
+    flash state is driven by the flash map alone -- a notice rendered from the inner block has
+    no entry to clear, and pushing `lv:clear-flash` for it would discard an unrelated message
+    of the same kind.
+    """
+
   attr :rest, :global, doc: "the arbitrary HTML attributes to add to the flash container"
 
   slot :inner_block, doc: "the optional inner block that renders the flash message"
 
   def flash(assigns) do
-    assigns = assign_new(assigns, :id, fn -> "flash-#{assigns.kind}" end)
+    assigns =
+      assigns
+      |> assign_new(:id, fn -> "flash-#{assigns.kind}" end)
+      |> assign(:flash_msg, Phoenix.Flash.get(assigns.flash, assigns.kind))
 
     ~H"""
     <div
-      :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
+      :if={msg = render_slot(@inner_block) || @flash_msg}
       id={@id}
-      phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
-      phx-hook="AutoDismiss"
+      phx-click={
+        if @flash_msg do
+          JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")
+        else
+          hide("##{@id}")
+        end
+      }
+      phx-hook={@transient && "AutoDismiss"}
+      data-flash-key={@transient && @flash_msg && @kind}
       role="alert"
       class="toast toast-top toast-end z-50"
       {@rest}

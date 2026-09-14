@@ -1096,15 +1096,44 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `lib/doctrans_web/components/core_components.ex` (`dialog/1`), `assets/js/app.js` (`DialogFocus`),
   `test/doctrans_web/live/document_live/keyboard_accessibility_test.exs`.
 
-- [ ] **U06 · P2 · Keep connectivity notices mounted.**
+- [x] **U06 · P2 · Keep connectivity notices mounted.**
   AutoDismiss removes all flash nodes after about 5.3 seconds, including initially hidden client/server
   connection-error banners. Later disconnect handlers target missing nodes.
   Limit timed dismissal to transient notifications and update LiveView flash state instead of removing
   LiveView-owned DOM. Keep connectivity notices until connection state resolves.
   Acceptance: disconnecting after a minute still displays a reconnect notice, which clears on reconnect;
   manually dismissed flashes do not reappear from stale server state.
-  Evidence: `lib/doctrans_web/components/core_components.ex:36`,
-  `lib/doctrans_web/components/layouts.ex:62`, `assets/js/app.js:30`.
+  Implemented: `flash/1` gained a `:transient` attribute that decides whether a notice is a one-off
+  message or a piece of connection state. Only transient notices get `phx-hook="AutoDismiss"`, so the
+  `#client-error` and `#server-error` banners -- which render `hidden` on first paint and are found by
+  id when the socket drops -- are no longer deleted 5.3 seconds into a healthy session. Their
+  `phx-disconnected`/`phx-connected` handlers now always have a node to target, however long the page
+  has been open. The distinction is one attribute rather than an id allowlist in the hook, because the
+  hook cannot know which notices a future caller will want to keep mounted; `flash/1` documents the
+  invariant at the attribute itself. Timed dismissal also stopped tearing out DOM that LiveView owns:
+  the hook fades the notice, then pushes `lv:clear-flash` for the kind it reads from `data-flash-key`
+  and lets the LiveView remove its own node on the next render. Previously it called `el.remove()` and
+  left the message in the server-side flash map, so any later render put the dismissed message back.
+  Clearing is keyed off the flash map rather than off `:transient`, because the two are orthogonal: a
+  notice rendered from the inner block -- the connectivity banners, or the component's own documented
+  example -- has no entry to clear, and pushing `lv:clear-flash` for it would have discarded an
+  unrelated message of the same kind while leaving the node itself parked at `opacity: 0`, invisible
+  but still swallowing clicks over the top-right corner of the page. Those notices get no
+  `data-flash-key` and the hook removes them directly. Conversely a flash-backed notice clears its
+  flash when clicked whether or not it auto-dismisses, so dismissing one by hand cannot be undone by
+  the next render. The push is also caught: `pushEvent` rejects outright while the socket is down,
+  which is precisely when a dismissal can land, so the hook falls back to removing the node rather
+  than leaving that same invisible overlay behind. The countdown restarts on the notice's text rather
+  than on the patch that delivered it -- a replaced message is readable for its full five seconds,
+  while a LiveView that repatches every hundred milliseconds cannot hold one on screen forever -- and
+  a patch arriving mid-fade re-applies the fade instead of cancelling it, since patching strips inline
+  styles the server markup does not carry. Timers are cancelled in `destroyed`.
+  Verified against the served page: `#client-error` and `#server-error` render with no `phx-hook`, no
+  `data-flash-key`, no `lv:clear-flash` in their click handler, and with `hidden` and both connection
+  handlers intact. The timing behaviour itself is not covered by tests -- the repo has no JavaScript
+  test runner -- so the hook's five-second path was not exercised automatically.
+  Evidence: `lib/doctrans_web/components/core_components.ex` (`flash/1`, the `:transient` attribute),
+  `lib/doctrans_web/components/layouts.ex` (`flash_group/1`), `assets/js/app.js` (`AutoDismiss`).
 
 - [ ] **U07 · P2 · Make privacy claims match configured inference.**
   Upload text and metadata promise that documents never leave the device even when a remote endpoint is used.
