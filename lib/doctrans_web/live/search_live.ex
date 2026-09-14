@@ -201,7 +201,9 @@ defmodule DoctransWeb.SearchLive do
             <.icon name="hero-arrow-left" class="w-5 h-5" />
           </.link>
           <div>
-            <h1 class="text-2xl font-bold text-base-content">{gettext("Search")}</h1>
+            <h1 id="search-title" class="text-2xl font-bold text-base-content">
+              {gettext("Search")}
+            </h1>
             <p class="text-base-content/70 text-sm">{gettext("Find content across all documents")}</p>
           </div>
         </div>

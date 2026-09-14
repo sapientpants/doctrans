@@ -25,7 +25,7 @@
   #   caller path validates `:title` as a binary first. It is kept as a defensive
   #   fallback for a private pipeline; the alternative is a FunctionClauseError if the
   #   validation order ever changes. Re-decide at expiry: delete the clause or keep it.
-  {"lib/doctrans/validation.ex", :pattern_match_cov, {224, 8}},
+  {"lib/doctrans/validation.ex", :pattern_match_cov, {223, 8}},
 
   # owner: @sapientpants
   # expires: 2026-12-12

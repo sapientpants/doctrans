@@ -9,7 +9,12 @@ defmodule DoctransWeb.Endpoint do
     signing_salt: "Qr5ZNHs0",
     encryption_salt: "Zm5XkR8p",
     same_site: "Lax",
-    secure: Application.compile_env(:doctrans, :env) == :prod,
+    # Not `Secure`: the app is served over plain HTTP on loopback or a LAN
+    # address, and a `Secure` cookie would simply not be stored, breaking the
+    # session. Confidentiality comes from the deployment binding, not the flag.
+    # (This previously read `compile_env(:doctrans, :env) == :prod`, but `:env`
+    # is configured nowhere, so it always evaluated to `false` regardless.)
+    secure: false,
     http_only: true
   ]
 
