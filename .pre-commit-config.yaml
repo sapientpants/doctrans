@@ -103,13 +103,15 @@ repos:
         types: [elixir]
         pass_filenames: false
 
-      # 3. Translation completeness check (fast)
+      # 3. Translation completeness, and no fuzzy entries (fast). Gettext renders
+      # fuzzy translations, so one is not a placeholder -- it is wrong text already
+      # shipping, auto-filled from a different msgid the merge found similar.
       - id: check-translations
-        name: Check translation completeness
-        entry: elixir scripts/check_translations.exs
+        name: Check translations (complete, none fuzzy)
+        entry: mix run --no-start scripts/check_translations.exs
         language: system
         pass_filenames: false
-        files: ^priv/gettext/.*\.po[t]?$
+        files: ^(priv/gettext/.*\.pot?|scripts/check_translations\.exs)$
 
       # 4. Compilation with warnings as errors (medium speed)
       - id: mix-compile
