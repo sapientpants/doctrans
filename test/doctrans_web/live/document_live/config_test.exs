@@ -30,6 +30,7 @@ defmodule DoctransWeb.DocumentLive.ConfigTest do
     document = document_with_pages_fixture(%{}, 1)
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
     render_click(view, "show_reprocess_modal")
+    render_async(view)
 
     assert has_element?(view, "#extraction-model-select option[value='custom-vision'][selected]")
 

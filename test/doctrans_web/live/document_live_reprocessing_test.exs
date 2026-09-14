@@ -46,6 +46,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
 
       refute has_element?(view, "#document-processing-progress")
       view |> element("#show-document-reprocess") |> render_click()
+      render_async(view)
       assert has_element?(view, "#document-reprocess-form")
       model = "vision"
 
@@ -69,6 +70,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
   } do
     {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
     view |> element("#show-document-reprocess") |> render_click()
+    render_async(view)
     view |> element("#reprocess-cancel") |> render_click()
     assert length(Documents.list_pages(document.id)) == 1
     File.rm!(Run.source_path(document))

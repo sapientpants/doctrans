@@ -824,6 +824,45 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
       assert {:error, :invalid_api_response} = OpenAI.list_models()
     end
+
+    # `:openai_api` is shared with extraction, translation, chat and background
+    # jobs, and the reprocess modal puts this call behind a Retry button. If it
+    # melted, a reader holding down Retry against a failing server would disable
+    # processing for everything else.
+    test "a failing model list never melts the shared fuse", %{bypass: bypass} do
+      Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
+        json(conn, 500, %{"error" => "boom"})
+      end)
+
+      handler_id = {__MODULE__, make_ref()}
+      test_pid = self()
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:doctrans, :circuit_breaker, :failure],
+          fn _event, _measurements, metadata, pid ->
+            send(pid, {:circuit_failure, metadata.fuse_name})
+          end,
+          test_pid
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      for _ <- 1..6, do: assert({:error, _} = OpenAI.list_models())
+
+      refute_received {:circuit_failure, :openai_api}
+      assert CircuitBreaker.status(:openai_api) == :ok
+
+      # The same failure through a call that is meant to melt still does, so the
+      # assertion above is about `melt: false` and not about a dead fuse.
+      Bypass.stub(bypass, "POST", "/v1/chat/completions", fn conn ->
+        json(conn, 500, %{"error" => %{"message" => "boom"}})
+      end)
+
+      assert {:error, _} = OpenAI.chat([%{role: "user", content: "x"}])
+      assert_received {:circuit_failure, :openai_api}
+    end
   end
 
   describe "available?/0" do

@@ -7,9 +7,9 @@ defmodule Doctrans.Processing.OpenAI do
   """
 
   alias Doctrans.Config.{Embedding, OpenAI}
+  alias Doctrans.Processing.ApiFailure
   alias Doctrans.Processing.SSECollector
   alias Doctrans.Resilience.CircuitBreaker
-  alias Doctrans.Resilience.ErrorClassifier
 
   require Logger
 
@@ -45,16 +45,16 @@ defmodule Doctrans.Processing.OpenAI do
   defp resolve_extract_response({:ok, %Req.Response{status: 200, body: body}}, fuse) do
     case parse_chat_response(body) do
       {:ok, _} = result -> result
-      {:error, _} = error -> handle_api_error(fuse, error)
+      {:error, _} = error -> ApiFailure.handle(fuse, error)
     end
   end
 
   defp resolve_extract_response({:ok, %Req.Response{status: status} = resp}, fuse) do
-    handle_api_error(fuse, {:http_status, status, resp})
+    ApiFailure.handle(fuse, {:http_status, status, resp})
   end
 
   defp resolve_extract_response({:error, reason}, fuse) do
-    handle_api_error(fuse, reason)
+    ApiFailure.handle(fuse, reason)
   end
 
   defp build_multimodal_content(image_path, image_data, opts) do
@@ -105,11 +105,11 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp resolve_chat_response({:ok, %Req.Response{status: status} = resp}, fuse) do
-    handle_api_error(fuse, {:http_status, status, resp})
+    ApiFailure.handle(fuse, {:http_status, status, resp})
   end
 
   defp resolve_chat_response({:error, reason}, fuse) do
-    handle_api_error(fuse, reason)
+    ApiFailure.handle(fuse, reason)
   end
 
   defp post_chat_completion(request_body, opts) do
@@ -177,10 +177,10 @@ defmodule Doctrans.Processing.OpenAI do
         collected_content(resp.body, collector)
 
       {:ok, %Req.Response{} = resp} ->
-        handle_api_error(fuse, {:http_status, resp.status, resp})
+        ApiFailure.handle(fuse, {:http_status, resp.status, resp})
 
       {:error, reason} ->
-        handle_api_error(fuse, reason)
+        ApiFailure.handle(fuse, reason)
     end
   end
 
@@ -281,21 +281,30 @@ defmodule Doctrans.Processing.OpenAI do
     _ -> false
   end
 
+  # The model list only ever backs a modal a user is waiting in front of, so it
+  # gets a tighter budget than the processing calls: with `retry: :safe_transient`
+  # a transport failure costs this much per attempt, not the default 15s.
+  @list_models_timeout 5_000
+
   @impl true
   @spec list_models() :: {:ok, [String.t()]} | {:error, Doctrans.Errors.reason()}
   def list_models do
     fuse = :openai_api
 
     case build_base_req()
-         |> Req.get(url: api_url("/v1/models"), retry: :safe_transient) do
+         |> Req.get(
+           url: api_url("/v1/models"),
+           retry: :safe_transient,
+           receive_timeout: @list_models_timeout
+         ) do
       {:ok, %Req.Response{status: 200, body: body}} ->
         parse_list_models_response(body)
 
       {:ok, %Req.Response{status: status} = resp} ->
-        handle_api_error(fuse, {:http_status, status, resp})
+        ApiFailure.handle(fuse, {:http_status, status, resp}, melt: false)
 
       {:error, reason} ->
-        handle_api_error(fuse, reason)
+        ApiFailure.handle(fuse, reason, melt: false)
     end
   end
 
@@ -343,10 +352,10 @@ defmodule Doctrans.Processing.OpenAI do
         parse_embed_response(body)
 
       {:ok, %Req.Response{status: status} = resp} ->
-        handle_api_error(fuse, {:http_status, status, resp})
+        ApiFailure.handle(fuse, {:http_status, status, resp})
 
       {:error, reason} ->
-        handle_api_error(fuse, reason)
+        ApiFailure.handle(fuse, reason)
     end
   end
 
@@ -451,38 +460,6 @@ defmodule Doctrans.Processing.OpenAI do
     # Larger context for chat, smaller for extraction/translation
     4096
   end
-
-  defp handle_api_error(fuse, reason) do
-    normalized = normalize_reason(reason)
-    classification = ErrorClassifier.classify(normalized)
-
-    if classification == :retryable do
-      # Only transient/5xx/transport failures count against the circuit
-      # breaker; a single 401 or bad request must not push it toward blown.
-      CircuitBreaker.melt(fuse, reason)
-    else
-      Logger.debug(
-        "Not melting fuse #{to_string(fuse)} for #{classification} error: #{inspect(reason)}"
-      )
-    end
-
-    # `reason` can be `{:http_status, status, %Req.Response{}}`, and an
-    # OpenAI-compatible server commonly echoes the offending request in a 4xx
-    # body -- which for an embedding call is the user's search text. The
-    # normalized shape carries the status without the payload, so only that goes
-    # out at the production log level; the raw reason stays behind :debug.
-    Logger.error("API call failed (#{classification}): #{inspect(normalized)}")
-    Logger.debug("API call failure detail: #{inspect(reason)}")
-    {:error, Doctrans.Errors.normalize(normalized)}
-  end
-
-  # ErrorClassifier keys HTTP failures as {:http_error, status}, so map our
-  # internal {:http_status, status, resp} tuple onto that shape.
-  defp normalize_reason({:http_status, status, _resp}), do: {:http_error, status}
-
-  defp normalize_reason({:error, reason}), do: normalize_reason(reason)
-
-  defp normalize_reason(reason), do: reason
 
   # Strip markdown code fences that LLMs sometimes wrap their output in
   @spec strip_code_fences(String.t()) :: String.t()
