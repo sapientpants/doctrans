@@ -251,6 +251,10 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   attr :models_loading, :boolean, default: false
   attr :model_fetch_error, :string, default: nil
 
+  attr :return_focus, :string,
+    required: true,
+    doc: "selector for the control that opened the dialog, owned by the caller"
+
   def reprocess_modal(assigns) do
     options =
       if assigns.models_loading,
@@ -260,126 +264,103 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     assigns = assign(assigns, :model_options, options)
 
     ~H"""
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    <.dialog
       id="reprocess-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="reprocess-title"
-      phx-window-keydown="hide_reprocess_modal"
-      phx-key="escape"
-      phx-hook="DialogFocus"
-      data-return-focus={
-        if(@scope == :document, do: "#show-document-reprocess", else: "#show-reprocess")
-      }
+      title_id="reprocess-title"
+      on_close="hide_reprocess_modal"
+      return_focus={@return_focus}
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      box_class="relative z-10 w-full max-w-lg rounded-2xl border border-base-300 bg-base-100 p-6 shadow-2xl"
+      close_class="absolute right-3 top-3 rounded-lg p-2 transition-colors hover:bg-base-200"
+      backdrop_class="absolute inset-0"
     >
-      <div class="relative z-10 w-full max-w-lg rounded-2xl border border-base-300 bg-base-100 p-6 shadow-2xl">
+      <h3 id="reprocess-title" class="font-bold text-lg mb-4">
+        {if @scope == :document, do: gettext("Reprocess document"), else: gettext("Reprocess Page")}
+      </h3>
+      <p :if={@scope == :document} class="mb-3 font-medium">{@document.title}</p>
+      <p class="text-sm text-base-content/70 mb-4">
+        {if @scope == :document,
+          do:
+            gettext(
+              "Run every processing step again from the original upload. Existing pages and search results will be replaced. This may take some time."
+            ),
+          else: gettext("Select models to use for re-extracting and re-translating this page.")}
+      </p>
+
+      <div
+        :if={@model_fetch_error}
+        id="reprocess-model-error"
+        role="alert"
+        class="alert alert-error mb-4"
+      >
+        <.icon name="hero-exclamation-triangle" class="w-5 h-5 shrink-0" />
+        <span class="flex-1">{@model_fetch_error}</span>
         <button
           type="button"
-          id="reprocess-close"
-          phx-click="hide_reprocess_modal"
-          aria-label={gettext("Close")}
-          class="absolute right-3 top-3 rounded-lg p-2 transition-colors hover:bg-base-200"
+          id="reprocess-model-retry"
+          phx-click="retry_reprocess_models"
+          disabled={@models_loading}
+          class={[
+            "shrink-0 rounded-lg border border-current/40 px-3 py-1 text-sm font-medium",
+            "transition-colors hover:bg-current/10",
+            "disabled:cursor-not-allowed disabled:opacity-60"
+          ]}
         >
-          <.icon name="hero-x-mark" class="w-5 h-5" />
+          {if @models_loading, do: gettext("Retrying..."), else: gettext("Retry")}
         </button>
+      </div>
 
-        <h3 id="reprocess-title" class="font-bold text-lg mb-4">
-          {if @scope == :document, do: gettext("Reprocess document"), else: gettext("Reprocess Page")}
-        </h3>
-        <p :if={@scope == :document} class="mb-3 font-medium">{@document.title}</p>
-        <p class="text-sm text-base-content/70 mb-4">
-          {if @scope == :document,
-            do:
-              gettext(
-                "Run every processing step again from the original upload. Existing pages and search results will be replaced. This may take some time."
-              ),
-            else: gettext("Select models to use for re-extracting and re-translating this page.")}
-        </p>
+      <.form
+        for={@form}
+        phx-submit={if @scope == :document, do: "reprocess_document", else: "reprocess_page"}
+        phx-change="update_reprocess_models"
+        id={if @scope == :document, do: "document-reprocess-form", else: "reprocess-form"}
+      >
+        <.input
+          field={@form[:extraction_model]}
+          type="select"
+          label={gettext("Extraction Model")}
+          options={@model_options}
+          class="w-full rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-base-content focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+          id="extraction-model-select"
+          disabled={@models_loading}
+          phx-hook="EscapeStaysInSelect"
+        />
+        <.input
+          field={@form[:translation_model]}
+          type="select"
+          label={gettext("Translation Model")}
+          options={@model_options}
+          class="w-full rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-base-content focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+          id="translation-model-select"
+          disabled={@models_loading}
+          phx-hook="EscapeStaysInSelect"
+        />
 
-        <div
-          :if={@model_fetch_error}
-          id="reprocess-model-error"
-          role="alert"
-          class="alert alert-error mb-4"
-        >
-          <.icon name="hero-exclamation-triangle" class="w-5 h-5 shrink-0" />
-          <span class="flex-1">{@model_fetch_error}</span>
+        <div class="mt-6 flex justify-end gap-3">
           <button
             type="button"
-            id="reprocess-model-retry"
-            phx-click="retry_reprocess_models"
-            disabled={@models_loading}
-            class={[
-              "shrink-0 rounded-lg border border-current/40 px-3 py-1 text-sm font-medium",
-              "transition-colors hover:bg-current/10",
-              "disabled:cursor-not-allowed disabled:opacity-60"
-            ]}
+            id="reprocess-cancel"
+            phx-click="hide_reprocess_modal"
+            class="btn-ghost rounded-lg px-4 py-2 transition-colors hover:bg-base-200"
           >
-            {if @models_loading, do: gettext("Retrying..."), else: gettext("Retry")}
+            {gettext("Cancel")}
+          </button>
+          <button
+            type="submit"
+            class="rounded-lg bg-primary px-4 py-2 font-medium text-primary-content transition-opacity hover:opacity-90 disabled:opacity-50"
+            disabled={
+              @models_loading || @form[:extraction_model].value not in @available_models ||
+                @form[:translation_model].value not in @available_models
+            }
+            id={if @scope == :document, do: "document-reprocess-submit", else: "reprocess-submit-btn"}
+            phx-disable-with={gettext("Queuing…")}
+          >
+            {gettext("Reprocess")}
           </button>
         </div>
-
-        <.form
-          for={@form}
-          phx-submit={if @scope == :document, do: "reprocess_document", else: "reprocess_page"}
-          phx-change="update_reprocess_models"
-          id={if @scope == :document, do: "document-reprocess-form", else: "reprocess-form"}
-        >
-          <.input
-            field={@form[:extraction_model]}
-            type="select"
-            label={gettext("Extraction Model")}
-            options={@model_options}
-            class="w-full rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-base-content focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
-            id="extraction-model-select"
-            disabled={@models_loading}
-          />
-          <.input
-            field={@form[:translation_model]}
-            type="select"
-            label={gettext("Translation Model")}
-            options={@model_options}
-            class="w-full rounded-lg border border-base-300 bg-base-100 px-3 py-2 text-base-content focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
-            id="translation-model-select"
-            disabled={@models_loading}
-          />
-
-          <div class="mt-6 flex justify-end gap-3">
-            <button
-              type="button"
-              id="reprocess-cancel"
-              phx-click="hide_reprocess_modal"
-              class="btn-ghost rounded-lg px-4 py-2 transition-colors hover:bg-base-200"
-            >
-              {gettext("Cancel")}
-            </button>
-            <button
-              type="submit"
-              class="rounded-lg bg-primary px-4 py-2 font-medium text-primary-content transition-opacity hover:opacity-90 disabled:opacity-50"
-              disabled={
-                @models_loading || @form[:extraction_model].value not in @available_models ||
-                  @form[:translation_model].value not in @available_models
-              }
-              id={
-                if @scope == :document, do: "document-reprocess-submit", else: "reprocess-submit-btn"
-              }
-              phx-disable-with={gettext("Queuing…")}
-            >
-              {gettext("Reprocess")}
-            </button>
-          </div>
-        </.form>
-      </div>
-      <button
-        type="button"
-        tabindex="-1"
-        aria-label={gettext("Cancel")}
-        class="absolute inset-0"
-        phx-click="hide_reprocess_modal"
-      >
-      </button>
-    </div>
+      </.form>
+    </.dialog>
     """
   end
 end

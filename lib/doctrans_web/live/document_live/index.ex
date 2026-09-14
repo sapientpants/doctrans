@@ -100,22 +100,31 @@ defmodule DoctransWeb.DocumentLive.Index do
 
             <%!-- Sort dropdown --%>
             <div class="dropdown dropdown-end">
-              <%!-- daisyUI opens this dropdown from `:focus`, so tabbing to the trigger
-                    is enough to open it -- but a bare `<label>` carrying `tabindex` is
-                    announced as nothing at all. `role="button"` is what daisyUI documents
-                    for a non-`<button>` trigger, and it keeps the CSS behaviour intact. --%>
-              <div
-                tabindex="0"
-                role="button"
-                aria-haspopup="true"
+              <%!-- A real `<button>`, not a `<label tabindex="0">`: daisyUI opens the
+                    dropdown from CSS `:focus-within`, which a button satisfies just as
+                    well, and a bare label is announced as nothing at all.
+
+                    This is a disclosure, not a menu. `aria-haspopup="menu"` would
+                    promise arrow-key navigation between `menuitem`s that nothing here
+                    implements, so the trigger only claims what it delivers: it controls
+                    a group of buttons, and says whether that group is showing.
+                    `aria-expanded` is mirrored from focus by `DropdownExpanded`, since
+                    the open state lives entirely in CSS. --%>
+              <button
+                type="button"
+                id="sort-documents-trigger"
+                phx-hook="DropdownExpanded"
+                aria-expanded="false"
+                aria-controls="sort-documents-menu"
                 aria-label={gettext("Sort documents")}
                 class="btn btn-sm btn-ghost gap-1.5 text-base-content/70"
               >
                 <.icon name="hero-arrows-up-down" class="w-4 h-4" />
                 <span class="text-xs font-normal">{sort_label(@sort_by, @sort_dir)}</span>
-              </div>
+              </button>
               <ul
                 tabindex="0"
+                id="sort-documents-menu"
                 class="dropdown-content z-10 menu menu-sm p-1 shadow-lg bg-base-200 rounded-lg w-40 mt-1"
               >
                 <li>
@@ -203,6 +212,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
       <.upload_modal
         :if={@show_upload_modal}
+        return_focus="#upload-document-btn"
         uploads={@uploads}
         target_language={@target_language}
         failures={@upload_failures}

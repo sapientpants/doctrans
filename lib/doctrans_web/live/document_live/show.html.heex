@@ -29,15 +29,8 @@
             type="button"
             phx-click="show_document_reprocess_modal"
             disabled={!@source_available || @document.status not in ~w(completed error)}
-            aria-label={gettext("Reprocess document")}
-            title={
-              if @source_available,
-                do: gettext("Reprocess document"),
-                else:
-                  gettext(
-                    "Original upload unavailable. Re-upload this document to process it again."
-                  )
-            }
+            aria-label={reprocess_document_hint(@source_available)}
+            title={reprocess_document_hint(@source_available)}
             class="inline-flex items-center gap-2 rounded-lg border border-base-300 px-3 py-2 text-sm transition-colors hover:bg-base-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <.icon name="hero-arrow-path" class="size-4" />
@@ -56,9 +49,9 @@
               @chat_open && "btn-primary",
               !@chat_open && "btn-ghost"
             ]}
-            aria-label={gettext("Chat")}
+            aria-label={gettext("Chat with document")}
             aria-expanded={to_string(@chat_open)}
-            aria-controls="chat-panel"
+            aria-controls={@chat_open && "chat-panel"}
             title={gettext("Chat with document")}
           >
             <.icon name="hero-chat-bubble-left-right" class="w-5 h-5" />
@@ -129,7 +122,7 @@
                 phx-click="show_reprocess_modal"
                 class="btn btn-ghost btn-xs"
                 aria-label={gettext("Reprocess page")}
-                title={gettext("Reprocess this page")}
+                title={gettext("Reprocess page")}
               >
                 <.icon name="hero-arrow-path" class="w-4 h-4" />
               </button>
@@ -171,6 +164,9 @@
       page={@current_page}
       document={@document}
       scope={@reprocess_scope}
+      return_focus={
+        if(@reprocess_scope == :document, do: "#show-document-reprocess", else: "#show-reprocess")
+      }
       form={@reprocess_form}
       available_models={@available_models}
       models_loading={@models_loading}

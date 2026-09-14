@@ -1,9 +1,6 @@
 defmodule DoctransWeb.DocumentLive.UploadComponents do
   @moduledoc """
   The upload dialog and the per-file feedback it renders.
-
-  Split out of `DoctransWeb.DocumentLive.Components` so neither module has to
-  grow past the size the quality gate allows.
   """
   use DoctransWeb, :html
 
@@ -28,40 +25,32 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
 
   attr :started, :integer, default: 0, doc: "documents the same submission did queue"
 
+  attr :return_focus, :string,
+    required: true,
+    doc: "selector for the control that opened the dialog, owned by the caller"
+
   def upload_modal(assigns) do
     ~H"""
-    <div
-      class="modal modal-open"
+    <.dialog
       id="upload-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="upload-modal-title"
-      phx-window-keydown="hide_upload_modal"
-      phx-key="escape"
-      phx-hook="DialogFocus"
-      data-return-focus="#upload-document-btn"
+      title_id="upload-modal-title"
+      on_close="hide_upload_modal"
+      return_focus={@return_focus}
+      class="modal modal-open"
+      box_class="modal-box max-w-lg"
+      close_class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2"
+      backdrop_class="modal-backdrop bg-black/50"
     >
-      <div class="modal-box max-w-lg">
-        <button
-          type="button"
-          id="upload-modal-close"
-          phx-click="hide_upload_modal"
-          aria-label={gettext("Close")}
-          class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2"
-        >
-          <.icon name="hero-x-mark" class="w-5 h-5" />
-        </button>
+      <h3 id="upload-modal-title" class="font-bold text-lg mb-4">
+        {gettext("Upload New Document")}
+      </h3>
 
-        <h3 id="upload-modal-title" class="font-bold text-lg mb-4">
-          {gettext("Upload New Document")}
-        </h3>
-
-        <form phx-submit="upload_document" phx-change="validate_upload" id="upload-form">
-          <div class="form-control mb-4">
-            <label id="upload-files-label" for={@uploads.document.ref} class="label">
-              <span class="label-text">{gettext("Documents")}</span>
-            </label>
-            <%!-- `sr-only` clips the input rather than removing it. Under `hidden` it was
+      <form phx-submit="upload_document" phx-change="validate_upload" id="upload-form">
+        <div class="form-control mb-4">
+          <label id="upload-files-label" for={@uploads.document.ref} class="label">
+            <span class="label-text">{gettext("Documents")}</span>
+          </label>
+          <%!-- `sr-only` clips the input rather than removing it. Under `hidden` it was
                   `display:none`, which takes it out of both the accessibility tree and the
                   tab order: the `browse` and `+ Add more files` labels below are the only
                   other way in, and a `<label>` is not focusable, so there was no
@@ -72,81 +61,70 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
                   two proxy labels also point `for` at this input, and every label that
                   targets a control is concatenated into its name; the explicit reference
                   wins over all of them. --%>
-            <div class="relative">
-              <.live_file_input
-                upload={@uploads.document}
-                class="sr-only peer"
-                aria-labelledby="upload-files-label"
-                aria-describedby={if(@uploads.document.entries == [], do: "upload-files-hint")}
-              />
-              <div
-                class={[
-                  "border-2 border-dashed border-base-300 rounded-lg p-4 text-center",
-                  "transition-colors hover:border-primary",
-                  "peer-focus-visible:border-primary peer-focus-visible:ring-2",
-                  "peer-focus-visible:ring-primary/30"
-                ]}
-                phx-drop-target={@uploads.document.ref}
-              >
-                <.upload_empty_state
-                  :if={@uploads.document.entries == []}
-                  upload={@uploads.document}
-                />
-                <.upload_entries_list
-                  :if={@uploads.document.entries != []}
-                  upload={@uploads.document}
-                />
-                <.upload_error :for={err <- upload_errors(@uploads.document)} error={err} />
-              </div>
-            </div>
-            <.upload_outcomes
-              :if={@failures != [] or @pending != []}
-              failures={@failures}
-              pending={@pending}
-              started={@started}
+          <div class="relative">
+            <.live_file_input
+              upload={@uploads.document}
+              class="sr-only peer"
+              aria-labelledby="upload-files-label"
+              aria-describedby={if(@uploads.document.entries == [], do: "upload-files-hint")}
             />
-          </div>
-
-          <div class="form-control mb-6">
-            <label for="target-lang-select" class="label">
-              <span class="label-text">{gettext("Target Language")}</span>
-            </label>
-            <select
-              name="target_language"
-              class="select select-bordered w-full"
-              id="target-lang-select"
+            <div
+              class={[
+                "border-2 border-dashed border-base-300 rounded-lg p-4 text-center",
+                "transition-colors hover:border-primary",
+                "peer-focus-visible:border-primary peer-focus-visible:ring-2",
+                "peer-focus-visible:ring-primary/30"
+              ]}
+              phx-drop-target={@uploads.document.ref}
             >
-              <.language_options selected={@target_language} />
-            </select>
+              <.upload_empty_state
+                :if={@uploads.document.entries == []}
+                upload={@uploads.document}
+              />
+              <.upload_entries_list
+                :if={@uploads.document.entries != []}
+                upload={@uploads.document}
+              />
+              <.upload_error :for={err <- upload_errors(@uploads.document)} error={err} />
+            </div>
           </div>
+          <.upload_outcomes
+            :if={@failures != [] or @pending != []}
+            failures={@failures}
+            pending={@pending}
+            started={@started}
+          />
+        </div>
 
-          <div class="modal-action">
-            <button type="button" phx-click="hide_upload_modal" class="btn btn-ghost">
-              {gettext("Cancel")}
-            </button>
-            <button
-              type="submit"
-              class="btn btn-primary"
-              disabled={submit_blocked?(@uploads.document)}
-              id="start-translation-btn"
-            >
-              {gettext("Start Translation")}
-            </button>
-          </div>
-        </form>
-      </div>
-      <%!-- A button rather than a div so the click target is a control with a name
-            instead of unlabelled scenery. `tabindex="-1"` keeps it out of the tab
-            cycle: it duplicates Cancel, which is already in there. --%>
-      <button
-        type="button"
-        tabindex="-1"
-        aria-label={gettext("Cancel")}
-        class="modal-backdrop bg-black/50"
-        phx-click="hide_upload_modal"
-      >
-      </button>
-    </div>
+        <div class="form-control mb-6">
+          <label for="target-lang-select" class="label">
+            <span class="label-text">{gettext("Target Language")}</span>
+          </label>
+          <select
+            name="target_language"
+            class="select select-bordered w-full"
+            id="target-lang-select"
+            phx-hook="EscapeStaysInSelect"
+          >
+            <.language_options selected={@target_language} />
+          </select>
+        </div>
+
+        <div class="modal-action">
+          <button type="button" phx-click="hide_upload_modal" class="btn btn-ghost">
+            {gettext("Cancel")}
+          </button>
+          <button
+            type="submit"
+            class="btn btn-primary"
+            disabled={submit_blocked?(@uploads.document)}
+            id="start-translation-btn"
+          >
+            {gettext("Start Translation")}
+          </button>
+        </div>
+      </form>
+    </.dialog>
     """
   end
 
@@ -227,12 +205,9 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
     """
   end
 
-  @doc """
-  Renders language options for the select dropdown.
-  """
   attr :selected, :string, required: true
 
-  def language_options(assigns) do
+  defp language_options(assigns) do
     # Codes come from the canonical translation-target list and names from
     # `language_name/1`, so neither is spelled out twice. Sorting is by the
     # translated name, so the order follows the interface language.

@@ -8,12 +8,12 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
   file input is still in the tab order rather than `display:none`, and that the
   Escape key really closes a dialog through a handled event.
 
-  What these cannot cover: where the focus ring actually goes. `phx-hook`,
-  the DialogFocus hook runs in the
-  browser, and `Phoenix.LiveViewTest` has no DOM to move focus in. These tests
-  therefore assert only that the page *declares* the focus management; that it
-  works is a browser-level concern. The same goes for what a screen reader
-  announces: we assert the names exist and resolve, not how they are read out.
+  What these cannot cover: where the focus ring actually goes. The `DialogFocus`
+  hook runs in the browser, and `Phoenix.LiveViewTest` has no DOM to move focus
+  in. These tests therefore assert only that the page *declares* the focus
+  management; that it works is a browser-level concern. The same goes for what a
+  screen reader announces: we assert the names exist and resolve, not how they
+  are read out.
   """
   use DoctransWeb.ConnCase, async: false
 
@@ -51,6 +51,8 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
       # target has to exist and carry the heading text.
       title_id = attribute(view, "#upload-modal", "aria-labelledby")
       assert has_element?(view, "h3##{title_id}")
+      # An empty heading names the dialog nothing, same as a dangling reference.
+      assert text_of(view, "##{title_id}") != ""
     end
 
     test "closes on Escape", %{conn: conn} do
@@ -114,18 +116,23 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
     test "the close button has an accessible name", %{conn: conn} do
       view = open_upload_modal(conn)
 
-      assert has_element?(view, "#upload-modal-close[aria-label]")
+      assert named?(view, "#upload-modal-close")
       # An icon-only control whose icon is also announced reads its name twice.
       assert has_element?(view, ~s{#upload-modal-close .hero-x-mark[aria-hidden="true"]})
     end
 
-    test "the backdrop is a named control rather than unlabelled scenery", %{conn: conn} do
+    test "the backdrop is dismissable by pointer without being announced", %{conn: conn} do
       view = open_upload_modal(conn)
 
+      # It only duplicates Cancel, which is already in the tab order and already
+      # announced, so a second copy on the virtual cursor is noise. `tabindex`
+      # keeps it out of the tab cycle; `aria-hidden` keeps it off the cursor.
       assert has_element?(
                view,
-               ~s{#upload-modal button.modal-backdrop[aria-label][tabindex="-1"]}
+               ~s{#upload-modal button.modal-backdrop[tabindex="-1"][aria-hidden="true"]}
              )
+
+      refute has_element?(view, ~s{#upload-modal button.modal-backdrop[aria-label]})
     end
 
     test "each entry's remove button names the file it removes", %{conn: conn} do
@@ -190,15 +197,31 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
       assert has_element?(view, "input#dashboard-search-input")
 
       # A bare `<label tabindex="0">` is announced as nothing; the trigger has to
-      # say it is a button and say what it does.
-      assert has_element?(
-               view,
-               ~s{.dropdown div[tabindex="0"][role="button"][aria-haspopup="true"][aria-label]}
-             )
+      # be a real control that says what it does and whether it is showing its
+      # list. It deliberately does not claim `aria-haspopup="menu"`: nothing here
+      # implements arrow-key navigation between menu items.
+      assert named?(view, "#sort-documents-trigger")
+      assert has_element?(view, ~s{button#sort-documents-trigger[aria-expanded]})
+      refute has_element?(view, ~s{#sort-documents-trigger[aria-haspopup]})
+
+      controls = attribute(view, "#sort-documents-trigger", "aria-controls")
+      assert has_element?(view, "ul##{controls}")
 
       # Menu entries default to `type="submit"` without this, which submits the
-      # search form when activated by keyboard.
-      assert has_element?(view, ~s{.dropdown-content button[type="button"][phx-click="sort"]})
+      # search form when activated by keyboard. Every entry, not just one: three
+      # of the four could regress and a single-match assertion would still pass.
+      for {field, dir} <- [
+            {"inserted_at", "desc"},
+            {"inserted_at", "asc"},
+            {"title", "asc"},
+            {"title", "desc"}
+          ] do
+        assert has_element?(
+                 view,
+                 ~s{.dropdown-content button[type="button"][phx-click="sort"]} <>
+                   ~s{[phx-value-field="#{field}"][phx-value-dir="#{dir}"]}
+               )
+      end
     end
   end
 
@@ -212,8 +235,9 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
 
       title_id = attribute(view, "#reprocess-modal", "aria-labelledby")
       assert has_element?(view, "##{title_id}")
+      assert text_of(view, "##{title_id}") != ""
 
-      assert has_element?(view, "#reprocess-close[aria-label]")
+      assert named?(view, "#reprocess-modal-close")
     end
 
     test "closes on Escape", %{conn: conn} do
@@ -229,12 +253,8 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
       document = reprocessable_document()
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
-      assert has_element?(view, "#show-reprocess[aria-label]")
-
-      assert has_element?(
-               view,
-               ~s{button[phx-click="show_document_reprocess_modal"][aria-label]}
-             )
+      assert named?(view, "#show-reprocess")
+      assert named?(view, "#show-document-reprocess")
     end
   end
 
@@ -248,10 +268,8 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
     # assertions exist so the declarations cannot be dropped silently; the
     # behaviour itself is verified with Puppeteer against a running server.
     #
-    # `data-return-focus` is the load-bearing part. `JS.push_focus/0` pushes the
-    # element the command is attached to -- the dialog -- not whatever was
-    # focused before it opened, so popping focused a node that was being removed
-    # and focus fell to the body. The trigger is named explicitly instead.
+    # `data-return-focus` is the load-bearing part; see the `DialogFocus` hook for
+    # why the trigger is named explicitly rather than left to `JS.push_focus/0`.
     test "the upload dialog traps focus and names where it returns", %{conn: conn} do
       view = open_upload_modal(conn)
 
@@ -270,6 +288,62 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
       assert has_element?(view, ~s{#reprocess-modal[data-return-focus="#show-reprocess"]})
       assert has_element?(view, "#show-reprocess")
       assert has_element?(view, ~s{#reprocess-modal[phx-window-keydown][phx-key="escape"]})
+    end
+
+    @tag :stub_models
+    test "the document-scope dialog names the document trigger, not the page one",
+         %{conn: conn} do
+      document = reprocessable_document()
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      render_click(view, "show_document_reprocess_modal", %{})
+      render_async(view)
+
+      # The two scopes share one dialog and open from different buttons, so the
+      # scope has to decide where focus goes back to.
+      assert has_element?(
+               view,
+               ~s{#reprocess-modal[data-return-focus="#show-document-reprocess"]}
+             )
+
+      assert has_element?(view, "#show-document-reprocess")
+    end
+  end
+
+  describe "controls that change state describe it" do
+    test "the chat toggle only points at a panel that is on the page", %{conn: conn} do
+      document = reprocessable_document()
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      # Collapsed: `aria-controls` would otherwise name an element that is not
+      # rendered, which is exactly when `aria-expanded="false"` invites a user to
+      # go looking for it.
+      assert has_element?(view, ~s{#toggle-chat[aria-expanded="false"]})
+      refute has_element?(view, "#toggle-chat[aria-controls]")
+
+      view |> element("#toggle-chat") |> render_click()
+
+      assert has_element?(view, ~s{#toggle-chat[aria-expanded="true"]})
+      panel = attribute(view, "#toggle-chat", "aria-controls")
+      assert has_element?(view, "##{panel}")
+    end
+
+    test "a disabled reprocess button says why in its name, not only its tooltip",
+         %{conn: conn} do
+      # No source file on disk, so the button is disabled. `aria-label` overrides
+      # `title` for the accessible name: an explanation that lives only in the
+      # tooltip never reaches a screen reader.
+      document = document_fixture(%{total_pages: 1, status: "completed"})
+      completed_page_fixture(document)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      assert has_element?(view, "#show-document-reprocess[disabled]")
+
+      assert attribute(view, "#show-document-reprocess", "aria-label") ==
+               attribute(view, "#show-document-reprocess", "title")
+
+      # And it is the explanation, not the generic label.
+      assert attribute(view, "#show-document-reprocess", "aria-label") =~ "unavailable"
     end
   end
 
@@ -294,6 +368,21 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
     on_exit(fn -> Application.put_env(:doctrans, :openai, previous) end)
 
     :ok
+  end
+
+  # An accessible name has to say something. `[aria-label]` alone is satisfied by
+  # `aria-label=""`, which names the control nothing at all.
+  defp named?(view, selector) do
+    has_element?(view, selector) and String.trim(attribute(view, selector, "aria-label")) != ""
+  end
+
+  defp text_of(view, selector) do
+    view
+    |> render()
+    |> LazyHTML.from_document()
+    |> LazyHTML.query(selector)
+    |> LazyHTML.text()
+    |> String.trim()
   end
 
   # Reads one attribute off a single matched element, so an assertion can follow

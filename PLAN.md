@@ -1038,18 +1038,28 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `browse` labels stay as click targets, and `aria-labelledby` names the input from the `Documents`
   label alone so their `for` references do not concatenate into the name. The upload dialog gained
   the semantics the reprocess dialog already had -- `role="dialog"`, `aria-modal`, `aria-labelledby`,
-  Escape via `phx-window-keydown`, and `JS.push_focus`/`focus_first`/`pop_focus`, which is what
-  returns focus to the trigger. A `FocusTrap` hook keeps Tab inside either dialog; it re-reads the
-  focusable set on every keypress because LiveView repatches the dialog while it is open, and it
-  listens on the document because focus can still be outside the dialog when it opens. Accessible
+  Escape via `phx-window-keydown`, and focus management. Both dialogs now render through one
+  `<.dialog>` component in `core_components.ex` that owns the container semantics, the named close
+  button, the backdrop and the focus contract, so the two cannot drift apart; each caller passes only
+  its layout classes and the selector of the trigger it belongs to, which the dialogs no longer
+  hard-code for templates they do not own. A `DialogFocus` hook keeps Tab inside either dialog; it
+  re-reads the focusable set on every keypress because LiveView repatches the dialog while it is
+  open, and it listens on the document because focus can still be outside the dialog when it opens.
+  Accessible
   names were added to every icon-only control (delete, both dialog closes, per-entry remove naming
   its file, zoom, chat close/send, the card link), labels were associated with the target-language,
   page, search and chat inputs, the shared `<.input>` labels gained `for` plus `aria-invalid` and a
-  deterministic error target, `icon/1` is `aria-hidden`, and the sort trigger is no longer a bare
-  `<label tabindex="0">`. The upload modal moved to its own module to stay under the module-size
-  gate. Gettext's fuzzy matcher auto-filled four new msgids from unrelated strings -- `Sort documents`
-  shipped as "Search documents" in English until those `en` entries were blanked; verified against
-  the served page.
+  deterministic error target (all four `input/1` clauses share one error container component rather
+  than four copies of it), `icon/1` is `aria-hidden` -- documented there as the invariant it creates,
+  that an icon-only control must carry its own name -- and the sort trigger is no longer a bare
+  `<label tabindex="0">` but a real button that claims only what it delivers: a disclosure with
+  `aria-expanded` mirrored from focus by `DropdownExpanded`, not an `aria-haspopup="menu"` promising
+  arrow-key navigation nothing implements. The upload modal moved to its own module. Gettext's fuzzy
+  matcher auto-filled four new msgids from unrelated strings -- `Sort documents` shipped as
+  "Search documents" in English until those `en` entries were blanked; verified against the served
+  page. The same pass fixed three older fuzzy entries the dialogs render: `Drag and drop documents
+  here, or` still said "PDF files" in all eleven locales, `Failed to fetch models from OpenAI` said
+  "from Ollama" in all eleven, and `Danish` read "Spanisch"/"Espagnol" in `de`/`fr`.
   Found in the browser pass and fixed: `JS.push_focus/0` pushes the element the command is attached
   to -- the dialog -- not what was focused before it opened, so `pop_focus` focused a node being
   removed and focus fell to the body. The reprocess dialog had shipped that since it was written.
@@ -1061,6 +1071,19 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   first frame, so the initial focus call was a no-op -- it retries across nested frames, guarded so
   it cannot yank focus back once it has landed. Focus management is one mechanism in the hook now
   rather than split between the hook and JS commands that did not do what they read as.
+  Found in review and fixed: returning focus to the trigger only worked on the cancel paths. On
+  confirm, the patch that closes the dialog is the same one that rewrites the trigger -- reprocessing
+  a page resets it to `pending`, which drops `#show-reprocess` from the DOM, and reprocessing a
+  document sets `queued`, which disables `#show-document-reprocess` a patch later -- and `focus()` on
+  a removed or disabled element silently does nothing, so focus fell to the body exactly as before.
+  The trigger is re-resolved at close time and checked for `disabled`, rechecked across the next few
+  frames because the disabling patch arrives after the closing one, and falls back to `<main>` when
+  it is genuinely gone. Three further fixes: `ChatInput` re-focused itself whenever an answer
+  finished streaming, dragging focus out of an open dialog, so it now yields while one is up; the Tab
+  trap releases when the socket is down, since every way out of the dialog is a server round-trip
+  that cannot complete and holding Tab would leave no exit at all; and Escape inside a `<select>`
+  stays with the select, which is what macOS does natively and what Chromium elsewhere did not,
+  where it tore down the dialog and discarded the chosen files.
   Verified in Chrome via Puppeteer: an upload completed with Tab/Enter alone from the top of the
   page through to a queued document; Tab and Shift+Tab stay inside both dialogs; Escape closes both
   and focus returns to the trigger that opened them; the accessibility tree reports no unnamed
@@ -1069,7 +1092,8 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `upload_entries_list/1`), `lib/doctrans_web/live/document_live/components.ex` (`document_card/1`,
   `document_thumbnail/1`), `lib/doctrans_web/live/document_live/index.ex`,
   `lib/doctrans_web/live/document_live/reprocess_modal.ex`,
-  `lib/doctrans_web/components/form_components.ex`, `assets/js/app.js` (`FocusTrap`),
+  `lib/doctrans_web/components/form_components.ex`,
+  `lib/doctrans_web/components/core_components.ex` (`dialog/1`), `assets/js/app.js` (`DialogFocus`),
   `test/doctrans_web/live/document_live/keyboard_accessibility_test.exs`.
 
 - [ ] **U06 · P2 · Keep connectivity notices mounted.**
