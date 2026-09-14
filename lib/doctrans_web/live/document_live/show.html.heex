@@ -29,6 +29,7 @@
             type="button"
             phx-click="show_document_reprocess_modal"
             disabled={!@source_available || @document.status not in ~w(completed error)}
+            aria-label={gettext("Reprocess document")}
             title={
               if @source_available,
                 do: gettext("Reprocess document"),
@@ -47,6 +48,7 @@
             document={@document}
           />
           <button
+            id="toggle-chat"
             type="button"
             phx-click="toggle_chat"
             class={[
@@ -54,6 +56,9 @@
               @chat_open && "btn-primary",
               !@chat_open && "btn-ghost"
             ]}
+            aria-label={gettext("Chat")}
+            aria-expanded={to_string(@chat_open)}
+            aria-controls="chat-panel"
             title={gettext("Chat with document")}
           >
             <.icon name="hero-chat-bubble-left-right" class="w-5 h-5" />
@@ -123,6 +128,7 @@
                 id="show-reprocess"
                 phx-click="show_reprocess_modal"
                 class="btn btn-ghost btn-xs"
+                aria-label={gettext("Reprocess page")}
                 title={gettext("Reprocess this page")}
               >
                 <.icon name="hero-arrow-path" class="w-4 h-4" />

@@ -76,16 +76,18 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
         type="button"
         id="zoom-out"
         phx-click="zoom_out"
+        aria-label={gettext("Zoom out")}
         class="btn btn-ghost btn-xs"
         disabled={@zoom_level <= 50}
       >
         <.icon name="hero-minus" class="w-4 h-4" />
       </button>
-      <span class="text-xs w-12 text-center">{@zoom_level}%</span>
+      <span class="text-xs w-12 text-center" aria-live="polite">{@zoom_level}%</span>
       <button
         type="button"
         id="zoom-in"
         phx-click="zoom_in"
+        aria-label={gettext("Zoom in")}
         class="btn btn-ghost btn-xs"
         disabled={@zoom_level >= 200}
       >

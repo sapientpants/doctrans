@@ -71,6 +71,63 @@ const Hooks = {
         this.el.focus()
       }
     }
+  },
+  // Keeps Tab inside an open dialog. LiveView owns the dialog markup and
+  // re-patches it while it is open (upload entries appear and disappear as
+  // files are picked), so a list captured at mount would go stale — the
+  // focusable set is read again on every keypress. The listener sits on the
+  // document because focus can still be outside the dialog when it opens, and
+  // a keydown out there would never reach the dialog element.
+  FocusTrap: {
+    mounted() {
+      this.onKeyDown = event => this.trapTab(event)
+      document.addEventListener("keydown", this.onKeyDown, true)
+    },
+    destroyed() {
+      document.removeEventListener("keydown", this.onKeyDown, true)
+    },
+    trapTab(event) {
+      if (event.key !== "Tab") {
+        return
+      }
+
+      const focusable = this.focusableElements()
+      if (focusable.length === 0) {
+        return
+      }
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+
+      if (!this.el.contains(active)) {
+        event.preventDefault()
+        first.focus()
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    },
+    focusableElements() {
+      const selector = [
+        "a[href]",
+        "button:not([disabled])",
+        "input:not([disabled])",
+        "select:not([disabled])",
+        "textarea:not([disabled])",
+        "[tabindex]:not([tabindex=\"-1\"])"
+      ].join(", ")
+
+      // getClientRects() rather than offsetParent: the file input is `sr-only`
+      // (clipped to 1px) yet must stay reachable, while `display: none`
+      // elements have no rects and drop out.
+      return Array.from(this.el.querySelectorAll(selector)).filter(
+        el => el.getClientRects().length > 0
+      )
+    }
   }
 }
 

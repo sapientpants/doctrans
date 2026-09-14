@@ -197,7 +197,11 @@ defmodule DoctransWeb.SearchLive do
     <Layouts.app flash={@flash}>
       <div class="w-full px-6 py-8">
         <div class="flex items-center gap-4 mb-8">
-          <.link navigate={~p"/"} class="btn btn-ghost btn-sm">
+          <.link
+            navigate={~p"/"}
+            class="btn btn-ghost btn-sm"
+            aria-label={gettext("Back to documents")}
+          >
             <.icon name="hero-arrow-left" class="w-5 h-5" />
           </.link>
           <div>
@@ -208,8 +212,9 @@ defmodule DoctransWeb.SearchLive do
           </div>
         </div>
 
-        <form phx-submit="search" class="mb-8" id="search-form">
+        <form phx-submit="search" class="mb-8" id="search-form" role="search">
           <div class="relative max-w-xl">
+            <label for="search-input" class="sr-only">{gettext("Search documents")}</label>
             <.icon
               name="hero-magnifying-glass"
               class="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 z-10 text-base-content/60 pointer-events-none"

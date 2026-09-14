@@ -1027,13 +1027,37 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `lib/doctrans_web/live/document_live/components.ex` (`upload_modal/1`, `upload_outcomes/1`,
   `upload_entries_list/1`, `submit_blocked?/1`), `lib/doctrans_web/error_messages.ex`.
 
-- [ ] **U05 · P2 · Make upload and dialogs keyboard accessible.**
+- [x] **U05 · P2 · Make upload and dialogs keyboard accessible.**
   The file input is display-none and its browse labels are not focusable.
   Provide a keyboard-operable chooser, labeled shared inputs, dialog naming, focus management,
   Escape handling, and accessible names for icon-only controls.
   Acceptance: complete upload and reprocessing using only a keyboard; focus returns to the trigger;
   screen-reader names identify controls. Verify in a real browser.
-  Evidence: `lib/doctrans_web/live/document_live/components.ex:155,201`.
+  Implemented: the file input is `sr-only` instead of `hidden`, so it is focusable and its own
+  activation opens the chooser; the drop zone is its peer and draws the focus ring for it. The two
+  `browse` labels stay as click targets, and `aria-labelledby` names the input from the `Documents`
+  label alone so their `for` references do not concatenate into the name. The upload dialog gained
+  the semantics the reprocess dialog already had -- `role="dialog"`, `aria-modal`, `aria-labelledby`,
+  Escape via `phx-window-keydown`, and `JS.push_focus`/`focus_first`/`pop_focus`, which is what
+  returns focus to the trigger. A `FocusTrap` hook keeps Tab inside either dialog; it re-reads the
+  focusable set on every keypress because LiveView repatches the dialog while it is open, and it
+  listens on the document because focus can still be outside the dialog when it opens. Accessible
+  names were added to every icon-only control (delete, both dialog closes, per-entry remove naming
+  its file, zoom, chat close/send, the card link), labels were associated with the target-language,
+  page, search and chat inputs, the shared `<.input>` labels gained `for` plus `aria-invalid` and a
+  deterministic error target, `icon/1` is `aria-hidden`, and the sort trigger is no longer a bare
+  `<label tabindex="0">`. The upload modal moved to its own module to stay under the module-size
+  gate. Gettext's fuzzy matcher auto-filled four new msgids from unrelated strings -- `Sort documents`
+  shipped as "Search documents" in English until those `en` entries were blanked; verified against
+  the served page.
+  Not verified: real focus movement and screen-reader output. The regression tests cover the markup
+  contract and the server-side events only; a browser pass is still outstanding.
+  Evidence: `lib/doctrans_web/live/document_live/upload_components.ex` (`upload_modal/1`,
+  `upload_entries_list/1`), `lib/doctrans_web/live/document_live/components.ex` (`document_card/1`,
+  `document_thumbnail/1`), `lib/doctrans_web/live/document_live/index.ex`,
+  `lib/doctrans_web/live/document_live/reprocess_modal.ex`,
+  `lib/doctrans_web/components/form_components.ex`, `assets/js/app.js` (`FocusTrap`),
+  `test/doctrans_web/live/document_live/keyboard_accessibility_test.exs`.
 
 - [ ] **U06 · P2 · Keep connectivity notices mounted.**
   AutoDismiss removes all flash nodes after about 5.3 seconds, including initially hidden client/server

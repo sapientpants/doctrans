@@ -270,11 +270,14 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
       phx-key="escape"
       phx-mounted={JS.push_focus() |> JS.focus_first(to: "#reprocess-modal")}
       phx-remove={JS.pop_focus()}
+      phx-hook="FocusTrap"
     >
       <div class="relative z-10 w-full max-w-lg rounded-2xl border border-base-300 bg-base-100 p-6 shadow-2xl">
         <button
           type="button"
+          id="reprocess-close"
           phx-click="hide_reprocess_modal"
+          aria-label={gettext("Close")}
           class="absolute right-3 top-3 rounded-lg p-2 transition-colors hover:bg-base-200"
         >
           <.icon name="hero-x-mark" class="w-5 h-5" />
