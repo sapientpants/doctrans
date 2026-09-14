@@ -13,32 +13,33 @@ defmodule DoctransWeb.Live.Hooks.SetLocaleTest do
     :ok
   end
 
-  test "a supported session locale is assigned and applied to the process" do
-    assert {:cont, socket} = mount(%{Locale.session_key() => "de"})
+  test "a supported session locale is applied to the process" do
+    assert {:cont, _socket} = mount(%{Locale.session_key() => "de"})
 
-    assert socket.assigns.locale == "de"
     assert Gettext.get_locale(DoctransWeb.Gettext) == "de"
   end
 
   test "every configured locale is honoured" do
     for locale <- Locale.supported() do
-      assert {:cont, socket} = mount(%{Locale.session_key() => locale})
-      assert socket.assigns.locale == locale
+      assert {:cont, _socket} = mount(%{Locale.session_key() => locale})
       assert Gettext.get_locale(DoctransWeb.Gettext) == locale
     end
   end
 
   test "a session without a locale falls back to the default" do
-    assert {:cont, socket} = mount(%{})
+    Gettext.put_locale(DoctransWeb.Gettext, "fr")
 
-    assert socket.assigns.locale == Locale.default()
+    assert {:cont, _socket} = mount(%{})
+
     assert Gettext.get_locale(DoctransWeb.Gettext) == Locale.default()
   end
 
   test "an unsupported session locale falls back to the default" do
     for value <- ["xx", "", "de-DE", nil] do
-      assert {:cont, socket} = mount(%{Locale.session_key() => value})
-      assert socket.assigns.locale == Locale.default()
+      Gettext.put_locale(DoctransWeb.Gettext, "fr")
+
+      assert {:cont, _socket} = mount(%{Locale.session_key() => value})
+      assert Gettext.get_locale(DoctransWeb.Gettext) == Locale.default()
     end
   end
 
@@ -46,6 +47,15 @@ defmodule DoctransWeb.Live.Hooks.SetLocaleTest do
     Gettext.put_locale(DoctransWeb.Gettext, "fr")
 
     assert {:cont, _socket} = mount(%{Locale.session_key() => "de"})
+    assert Gettext.get_locale(DoctransWeb.Gettext) == "de"
+  end
+
+  test "the hook reads the locale, not the stored choice" do
+    # The plug resolves the choice; the hook only mirrors what was resolved, so
+    # a stale choice in the session must not reach the LiveView process.
+    assert {:cont, _socket} =
+             mount(%{Locale.session_key() => "de", Locale.choice_session_key() => "xx"})
+
     assert Gettext.get_locale(DoctransWeb.Gettext) == "de"
   end
 

@@ -72,10 +72,9 @@ defmodule Doctrans.Validation do
   """
   @spec validate_language(term()) :: {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def validate_language(language) when is_binary(language) do
-    supported_languages = ["en", "es", "fr", "de", "it", "pt", "nl", "no", "sv", "da", "pl"]
     normalized_language = String.downcase(String.trim(language))
 
-    if normalized_language in supported_languages do
+    if Doctrans.Languages.supported?(normalized_language) do
       {:ok, normalized_language}
     else
       {:error, {:unsupported_language, [language: language]}}

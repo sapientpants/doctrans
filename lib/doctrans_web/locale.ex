@@ -1,6 +1,10 @@
 defmodule DoctransWeb.Locale do
   @moduledoc """
-  Single source of truth for the locales the web layer supports.
+  Single source of truth for the locales the *interface* is available in.
+
+  This is the UI language, not the set of languages documents can be translated
+  into - those live in `Doctrans.Languages` and are a separate concern that
+  happens to cover the same codes today.
 
   The supported list and the default locale come from the `DoctransWeb.Gettext`
   configuration block. Gettext itself does not read `:locales` - it derives its
@@ -10,24 +14,28 @@ defmodule DoctransWeb.Locale do
   `DoctransWeb.Live.Hooks.SetLocale`, which reads them.
   """
 
-  @gettext_config Application.compile_env!(:doctrans, DoctransWeb.Gettext)
-  @supported Keyword.fetch!(@gettext_config, :locales)
-  @default Keyword.fetch!(@gettext_config, :default_locale)
+  @supported Application.compile_env!(:doctrans, [DoctransWeb.Gettext, :locales])
+  @default Application.compile_env!(:doctrans, [DoctransWeb.Gettext, :default_locale])
 
   @session_key "locale"
-  @explicit_session_key "locale_explicit"
+  @choice_session_key "locale_choice"
 
-  @doc "Locales with translations available."
+  @doc "Locales the interface has translations for."
   def supported, do: @supported
 
   @doc "Locale used when nothing else resolves."
   def default, do: @default
 
-  @doc "Session key holding the resolved locale."
+  @doc "Session key holding the locale resolved for the current request."
   def session_key, do: @session_key
 
-  @doc "Session key flagging the resolved locale as an explicit user choice."
-  def explicit_session_key, do: @explicit_session_key
+  @doc """
+  Session key holding the locale the user chose explicitly.
+
+  This holds a locale rather than a flag, so that a choice which is temporarily
+  unsupported is remembered rather than lost.
+  """
+  def choice_session_key, do: @choice_session_key
 
   @doc "Whether a locale is supported. Anything else (nil, garbage, stale values) is not."
   def supported?(locale), do: locale in @supported

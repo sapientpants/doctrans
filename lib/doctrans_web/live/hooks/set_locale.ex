@@ -10,16 +10,18 @@ defmodule DoctransWeb.Live.Hooks.SetLocale do
   request that mounted the LiveView: an explicit `lang` choice, the browser's
   Accept-Language preference, or the default. Values that are missing or no
   longer supported fall back to the default locale.
-  """
 
-  import Phoenix.Component, only: [assign: 2]
+  The locale is applied to the process rather than assigned to the socket:
+  `gettext/1` reads it from the process dictionary, and `<html lang>` is
+  rendered by the root layout from the connection, which a LiveView never
+  re-renders.
+  """
 
   alias DoctransWeb.Locale
 
   def on_mount(:default, _params, session, socket) do
-    locale = get_locale(session)
-    _previous_locale = Gettext.put_locale(DoctransWeb.Gettext, locale)
-    {:cont, assign(socket, locale: locale)}
+    _previous_locale = Gettext.put_locale(DoctransWeb.Gettext, get_locale(session))
+    {:cont, socket}
   end
 
   defp get_locale(session) do

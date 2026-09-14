@@ -256,20 +256,12 @@ defmodule DoctransWeb.DocumentLive.Components do
   attr :selected, :string, required: true
 
   def language_options(assigns) do
+    # Codes come from the canonical translation-target list and names from
+    # `language_name/1`, so neither is spelled out twice. Sorting is by the
+    # translated name, so the order follows the interface language.
     languages =
-      [
-        {"da", gettext("Danish")},
-        {"nl", gettext("Dutch")},
-        {"en", gettext("English")},
-        {"fr", gettext("French")},
-        {"de", gettext("German")},
-        {"it", gettext("Italian")},
-        {"no", gettext("Norwegian")},
-        {"pl", gettext("Polish")},
-        {"pt", gettext("Portuguese")},
-        {"es", gettext("Spanish")},
-        {"sv", gettext("Swedish")}
-      ]
+      Doctrans.Languages.supported()
+      |> Enum.map(&{&1, language_name(&1)})
       |> Enum.sort_by(fn {_code, name} -> name end)
 
     assigns = assign(assigns, :languages, languages)
