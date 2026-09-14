@@ -94,7 +94,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   def handle_event(event, params, socket)
-      when event in ~w(show_reprocess_modal show_document_reprocess_modal hide_reprocess_modal update_reprocess_models reprocess_page reprocess_document) do
+      when event in ~w(show_reprocess_modal show_document_reprocess_modal hide_reprocess_modal update_reprocess_models retry_reprocess_models reprocess_page reprocess_document) do
     ReprocessModal.handle_event(event, params, socket)
   end
 
@@ -110,6 +110,11 @@ defmodule DoctransWeb.DocumentLive.Show do
     {:noreply, ChatSession.ask(socket, message)}
   end
 
+  @impl true
+  def handle_async(:fetch_models, result, socket) do
+    ReprocessModal.handle_async(:fetch_models, result, socket)
+  end
+
   # PubSub Handlers
 
   @impl true
@@ -119,11 +124,6 @@ defmodule DoctransWeb.DocumentLive.Show do
     end
 
     :ok
-  end
-
-  @impl true
-  def handle_info(:fetch_available_models, socket) do
-    ReprocessModal.fetch_available_models(socket)
   end
 
   @impl true

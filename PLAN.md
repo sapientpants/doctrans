@@ -880,12 +880,60 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   header at all. The German-to-English reset no longer reproduces; the running app was not driven in a
   browser.
 
-- [ ] **U03 · P2 · Fetch model choices without blocking the viewer.**
+- [x] **U03 · P2 · Fetch model choices without blocking the viewer.**
   Sending a message to the same LiveView does not make its subsequent model-list HTTP request asynchronous.
   Move it into supervised LiveView async work with cancellation and stale-result handling.
   Acceptance: a slow/unavailable server does not block modal closing, page navigation, progress, or chat;
   late results cannot populate an obsolete modal; errors permit retry.
-  Evidence: `lib/doctrans_web/live/document_live/reprocess_modal.ex:37,118`.
+  Implemented: opening the modal now runs `OpenAI.list_models/0` under `start_async/4` on
+  `Doctrans.TaskSupervisor` instead of `send(self(), :fetch_available_models)`, which only deferred the
+  blocking call by one message. The LiveView keeps serving navigation, progress broadcasts and chat while
+  the request is outstanding, and the modal closes on demand rather than when the server answers.
+  Closing the modal -- Cancel, Escape, backdrop, or either submit path -- cancels the fetch, and starting
+  a fetch cancels the one it replaces, so a modal reopened over a stalled request does not accumulate
+  tasks or pay for an answer nobody will see. The error alert gained a Retry control, which is the only
+  way back from a failed fetch: the alert previously left the modal permanently unusable, since both
+  selects reset to no selection and the submit button stays disabled until a model list arrives.
+  Tradeoff accepted: a failed fetch still clears the current selections, so a successful retry means
+  picking the models again. That is the pre-existing `available_selection/2` behaviour for an empty list
+  and preserving selections across a failure is a separate behaviour change, not part of this fix.
+  Found in team review and fixed: the change made `document_live_reprocessing_test.exs:34` race and fail
+  on a full-suite run. Under the old self-send the fetch always completed before the next external
+  message, so the test could open the modal and submit the form in consecutive lines; with a real async
+  fetch the selects carry `disabled={@models_loading}` until the result lands on wall-clock time. The
+  test awaits the async work now, as do the other model-touching sites. Sites that never interact with a
+  disabled select were deliberately left alone: that file is `async: true` with no Bypass, so an await
+  there would point at the real default endpoint and trade a fixed race for an environment-dependent one.
+  Found in team review and fixed: a Retry click that raced the modal closing refetched unconditionally,
+  putting a real request on a server already known to be slow, discarding its own answer, and stranding
+  `models_loading` on a closed modal. Retry is now a no-op unless the modal is open.
+  Found in team review and fixed: the comment on `handle_async/3` claimed the request id and the
+  open-modal check together kept a stale result out of a modal that had closed or moved on. Read against
+  the installed LiveView, neither case is the id's: `prune_current_async/3` drops the result of any task a
+  later `start_async` superseded before the callback runs, and a cancelled task keeps its ref, so the
+  open-modal check is what rejects the one result that does arrive late. The id is kept as belt and
+  braces for a future second `start_async` on this name -- AGENTS.md requires identifying async results by
+  payload rather than arrival -- and the comment now says which layer does what instead of crediting it
+  with both.
+  Found in team review and fixed: mutation testing measured four claims as unpinned -- removing either
+  `cancel_async/2` call, dropping the open-modal guard, or deleting the `{:shutdown, :cancel}` clause all
+  failed zero tests. A probe explained why the stale-result test did not cover them: the held request is
+  still blocked in the plug when cancellation kills the task, so no late result is ever produced and the
+  test only pinned cancel-then-refetch. It is renamed to say that, and the uncovered behaviour is pinned
+  directly: a unit test of `handle_async/3` against a constructed socket for the open-modal and id
+  guards, task-pid monitoring through `Phoenix.LiveView.Channel.async_pids/1` for both cancellation
+  sites, and a `capture_log` assertion for the `{:shutdown, :cancel}` clause, whose absence is silent in
+  state but logs a spurious failure warning on paths the suite already drives.
+  Evidence: `lib/doctrans_web/live/document_live/reprocess_modal.ex` (`fetch_models/1`,
+  `handle_async/3`, `close_reprocess_modal/1`), `lib/doctrans_web/live/document_live/show.ex`.
+  12 tests in `reprocess_modal_test.exs`, measured rather than asserted: restoring the synchronous fetch
+  fails 2 at their 10-second bound and reverting the whole change fails 3, dropping either half of
+  `current_models_request?/2` fails 1, removing the cancellation on close fails 2, removing it from the
+  start path fails 1, deleting the `{:shutdown, :cancel}` clause fails 1, and removing the retry control,
+  its event wiring, or its open-modal guard fails 1 each. A held request was used to show the LiveView
+  still answers page navigation, `{:document_updated, _}` and `{:page_updated, _}` progress broadcasts,
+  the chat toggle, and modal close while the fetch is outstanding. The running app was not driven in a
+  browser.
 
 - [ ] **U04 · P2 · Report per-file upload outcomes accurately.**
   Mixed validation failures use a warning flash that the layout never renders. Accepted files are counted
