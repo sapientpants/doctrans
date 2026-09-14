@@ -16,6 +16,18 @@ defmodule DoctransWeb.DocumentLive.Show do
   import DoctransWeb.DocumentLive.ReprocessModal, only: [reprocess_modal: 1, can_reprocess?: 1]
   import DoctransWeb.DocumentLive.ChatComponents
 
+  # Every event `ReprocessModal` owns. The modal is a function component, so the
+  # events it declares arrive here and are forwarded verbatim.
+  @reprocess_events ~w(
+    show_reprocess_modal
+    show_document_reprocess_modal
+    hide_reprocess_modal
+    update_reprocess_models
+    retry_reprocess_models
+    reprocess_page
+    reprocess_document
+  )
+
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     case Documents.get_document(id) do
@@ -93,8 +105,7 @@ defmodule DoctransWeb.DocumentLive.Show do
     PageViewer.handle_event(event, params, socket)
   end
 
-  def handle_event(event, params, socket)
-      when event in ~w(show_reprocess_modal show_document_reprocess_modal hide_reprocess_modal update_reprocess_models retry_reprocess_models reprocess_page reprocess_document) do
+  def handle_event(event, params, socket) when event in @reprocess_events do
     ReprocessModal.handle_event(event, params, socket)
   end
 

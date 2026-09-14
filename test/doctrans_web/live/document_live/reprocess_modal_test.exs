@@ -6,7 +6,9 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
 
   alias Doctrans.{Config, Documents}
   alias Doctrans.Documents.{Pages, Topics}
+  alias Doctrans.Processing.Run
   alias DoctransWeb.DocumentLive.ReprocessModal
+  alias DoctransWeb.ErrorMessages
   alias Phoenix.LiveView.Channel
 
   setup do
@@ -206,8 +208,9 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   end
 
   # Long enough that a fetch running inside the LiveView process would trip the
-  # per-test timeout below instead of merely making the test slow.
-  @held_request_timeout 30_000
+  # per-test timeout below instead of merely making the test slow, but under that
+  # timeout so a failing test is not held in teardown by a still-blocked plug.
+  @held_request_timeout 8_000
 
   defp two_page_document do
     document = document_fixture(%{total_pages: 2, status: "completed"})
@@ -249,6 +252,24 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
       |> Plug.Conn.resp(200, Jason.encode!(%{data: Enum.map(models, &%{id: &1})}))
+    end)
+  end
+
+  # Fails the first `/v1/models` call and serves a list to every one after it, so
+  # a test can drive the error alert and then its Retry control.
+  defp fail_then_serve_models(bypass) do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+    Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
+      case Agent.get_and_update(counter, &{&1 + 1, &1 + 1}) do
+        1 ->
+          Plug.Conn.resp(conn, 401, "unauthorized")
+
+        _ ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}]}))
+      end
     end)
   end
 
@@ -299,7 +320,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
 
     {:ok, retitled} = Documents.update_document(document, %{title: "Still serving updates"})
     Topics.broadcast_document_update(retitled)
-    assert render(view) =~ "Still serving updates"
+    assert has_element?(view, "header h1", "Still serving updates")
 
     {:ok, page_two} =
       document.id
@@ -311,7 +332,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
 
     Topics.broadcast_page_update(page_two)
     render_click(view, "toggle_original")
-    assert render(view) =~ "Progress arrived"
+    assert has_element?(view, ".markdown h1", "Progress arrived")
 
     view |> element("header button[phx-click='toggle_chat']") |> render_click()
     assert has_element?(view, "#chat-messages")
@@ -334,7 +355,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
     view |> element("#show-reprocess") |> render_click()
-    assert_receive {:models_requested, handler}, 5_000
+    assert_receive {:models_requested, _handler}, 5_000
     held = async_task_pid(view)
     held_ref = Process.monitor(held)
 
@@ -348,6 +369,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
       end)
 
     refute log =~ "Model fetch failed"
+    refute log =~ "Model fetch crashed"
     refute has_element?(view, "#reprocess-modal")
 
     # The reopened modal asks again; only that newer answer may render.
@@ -357,12 +379,15 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     assert has_element?(view, "#extraction-model-select option[value='fresh-model']")
     refute has_element?(view, "#reprocess-model-error")
 
-    send(handler, :release)
-    render_async(view)
-
-    refute has_element?(view, "#extraction-model-select option[value='stale-model']")
-    refute has_element?(view, "#translation-model-select option[value='stale-model']")
-    assert has_element?(view, "#extraction-model-select option[value='fresh-model']")
+    # Waiting on the abandoned request being *answered* is what gives the refutes
+    # below their teeth: the stale payload demonstrably exists, and the render
+    # round-trip gives the LiveView a turn to mishandle it.
+    # No assertion about the abandoned answer belongs here. Cancelling the task
+    # closes its socket, which kills the plug process still holding the request,
+    # so the stale body is never produced and no implementation could render it.
+    # The proof that cancelling works is the `{:DOWN, ...}` above; the proof that
+    # a stale payload would be rejected on arrival is the `handle_async/3` unit
+    # test against a closed modal.
   end
 
   @tag timeout: 10_000
@@ -373,7 +398,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
     view |> element("#show-reprocess") |> render_click()
-    assert_receive {:models_requested, handler}, 5_000
+    assert_receive {:models_requested, _handler}, 5_000
     held = async_task_pid(view)
     held_ref = Process.monitor(held)
 
@@ -385,9 +410,6 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     render_async(view)
 
     assert has_element?(view, "#extraction-model-select option[value='fresh-model']")
-
-    send(handler, :release)
-    refute has_element?(view, "#extraction-model-select option[value='stale-model']")
   end
 
   @tag timeout: 10_000
@@ -401,7 +423,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
     view |> element("#show-reprocess") |> render_click()
-    assert_receive {:models_requested, handler}, 5_000
+    assert_receive {:models_requested, _handler}, 5_000
 
     view |> element("#reprocess-cancel") |> render_click()
     await_no_async(view)
@@ -409,33 +431,98 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     # A Retry click the client sent before it saw the modal close.
     render_click(view, "retry_reprocess_models")
     assert {:ok, []} = Channel.async_pids(view.pid)
-    refute_receive {:models_responded, 2}, 200
     refute has_element?(view, "#reprocess-modal")
-
-    send(handler, :release)
   end
 
   test "a model list is only applied to the open modal that asked for it" do
-    socket = models_socket(show_reprocess_modal: true, models_request_id: 7)
+    socket = models_socket(show_reprocess_modal: true)
 
     assert {:noreply, applied} =
-             ReprocessModal.handle_async(:fetch_models, {:ok, {7, {:ok, ["vision"]}}}, socket)
+             ReprocessModal.handle_async(:fetch_models, {:ok, {:ok, ["vision"]}}, socket)
 
     assert applied.assigns.available_models == ["vision"]
     refute applied.assigns.models_loading
 
     # A result that outran the close: the task was cancelled, so LiveView has no
     # newer ref to prune it against and it lands here regardless.
-    closed = models_socket(show_reprocess_modal: false, models_request_id: 7)
+    closed = models_socket(show_reprocess_modal: false)
 
     assert {:noreply, ^closed} =
-             ReprocessModal.handle_async(:fetch_models, {:ok, {7, {:ok, ["vision"]}}}, closed)
+             ReprocessModal.handle_async(:fetch_models, {:ok, {:ok, ["vision"]}}, closed)
+  end
 
-    # Belt and braces for a future second `start_async` on this name.
-    superseded = models_socket(show_reprocess_modal: true, models_request_id: 8)
+  test "a crashed fetch raises the error alert on the open modal" do
+    socket = models_socket(show_reprocess_modal: true)
 
-    assert {:noreply, ^superseded} =
-             ReprocessModal.handle_async(:fetch_models, {:ok, {7, {:ok, ["vision"]}}}, superseded)
+    {result, log} =
+      with_log(fn ->
+        ReprocessModal.handle_async(:fetch_models, {:exit, {%RuntimeError{}, []}}, socket)
+      end)
+
+    assert {:noreply, failed} = result
+    assert failed.assigns.model_fetch_error == ErrorMessages.message(:models_unavailable)
+    assert failed.assigns.available_models == []
+    refute failed.assigns.models_loading
+    assert log =~ "Model fetch crashed"
+  end
+
+  test "a crashed fetch that outran the close changes nothing" do
+    closed = models_socket(show_reprocess_modal: false)
+
+    {result, _log} =
+      with_log(fn ->
+        ReprocessModal.handle_async(:fetch_models, {:exit, {%RuntimeError{}, []}}, closed)
+      end)
+
+    assert {:noreply, ^closed} = result
+  end
+
+  test "a cancelled fetch is neither logged nor surfaced" do
+    socket = models_socket(show_reprocess_modal: false)
+
+    {result, log} =
+      with_log(fn ->
+        ReprocessModal.handle_async(:fetch_models, {:exit, {:shutdown, :cancel}}, socket)
+      end)
+
+    assert {:noreply, ^socket} = result
+    refute log =~ "Model fetch"
+  end
+
+  # An exit reason carries a stacktrace, and a frame can hold the Req struct the
+  # API key was built into. The inspect bounds are what keep it out of the log,
+  # so they are asserted rather than assumed.
+  test "a crash log cannot grow to hold the API key" do
+    key = "sk-" <> String.duplicate("s3cret", 40)
+    frame = {Req, :request, [%{headers: %{"authorization" => ["Bearer " <> key]}}], []}
+    reason = {%RuntimeError{message: String.duplicate("padding", 200)}, [frame, frame, frame]}
+
+    {_result, log} =
+      with_log(fn ->
+        ReprocessModal.handle_async(
+          :fetch_models,
+          {:exit, reason},
+          models_socket(show_reprocess_modal: true)
+        )
+      end)
+
+    assert log =~ "Model fetch crashed"
+    refute log =~ key
+  end
+
+  test "an ordinary fetch failure says what went wrong" do
+    socket = models_socket(show_reprocess_modal: true)
+
+    {result, log} =
+      with_log(fn ->
+        ReprocessModal.handle_async(:fetch_models, {:ok, {:error, :timeout}}, socket)
+      end)
+
+    assert {:noreply, failed} = result
+    assert failed.assigns.model_fetch_error == ErrorMessages.message(:models_unavailable)
+    refute failed.assigns.models_loading
+    assert log =~ "Model fetch failed"
+    assert log =~ ":timeout"
   end
 
   defp models_socket(overrides) do
@@ -444,7 +531,6 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
         %{
           __changed__: %{},
           show_reprocess_modal: true,
-          models_request_id: 1,
           models_loading: true,
           model_fetch_error: nil,
           available_models: [],
@@ -459,19 +545,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   end
 
   test "a failed model fetch can be retried from the modal", %{conn: conn, bypass: bypass} do
-    {:ok, counter} = Agent.start_link(fn -> 0 end)
-
-    Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
-      case Agent.get_and_update(counter, &{&1 + 1, &1 + 1}) do
-        1 ->
-          Plug.Conn.resp(conn, 401, "unauthorized")
-
-        _ ->
-          conn
-          |> Plug.Conn.put_resp_content_type("application/json")
-          |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}]}))
-      end
-    end)
+    fail_then_serve_models(bypass)
 
     document = document_fixture(%{total_pages: 1, status: "completed"})
     completed_page_fixture(document)
@@ -497,5 +571,65 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     |> render_change()
 
     refute has_element?(view, "#reprocess-submit-btn[disabled]")
+  end
+
+  test "the document modal can retry a failed fetch too", %{conn: conn, bypass: bypass} do
+    fail_then_serve_models(bypass)
+
+    document = document_fixture(%{total_pages: 1, status: "completed"})
+    completed_page_fixture(document)
+
+    # The document-scope trigger is disabled unless the original upload is still
+    # on disk.
+    directory = Documents.document_upload_dir(document.id)
+    File.mkdir_p!(directory)
+    File.write!(Run.source_path(document), "original pdf")
+    on_exit(fn -> File.rm_rf(directory) end)
+
+    {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+    view |> element("#show-document-reprocess") |> render_click()
+    render_async(view)
+
+    assert has_element?(view, "#document-reprocess-form")
+    assert has_element?(view, "#reprocess-model-retry")
+
+    view |> element("#reprocess-model-retry") |> render_click()
+    render_async(view)
+
+    refute has_element?(view, "#reprocess-model-error")
+    assert has_element?(view, "#extraction-model-select option[value='vision']")
+  end
+
+  # The button is hidden while a fetch runs, but the event is not: a client can
+  # push it regardless, and every extra push is a real request on an endpoint
+  # that is already failing.
+  @tag timeout: 10_000
+  test "retrying while a fetch is already in flight asks the server once", %{
+    conn: conn,
+    bypass: bypass
+  } do
+    hold_models_request(bypass, [["vision"]])
+
+    document = two_page_document()
+    {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+    view |> element("#show-reprocess") |> render_click()
+    assert_receive {:models_requested, _handler}, 5_000
+
+    held = async_task_pid(view)
+
+    for _ <- 1..5, do: render_click(view, "retry_reprocess_models")
+
+    # The original fetch was neither replaced nor joined by a second one.
+    assert {:ok, [^held]} = Channel.async_pids(view.pid)
+    refute_receive {:models_requested, _another}, 200
+  end
+
+  test "a retry is refused while one is already running" do
+    socket = models_socket(show_reprocess_modal: true, models_loading: true)
+
+    assert {:noreply, ^socket} =
+             ReprocessModal.handle_event("retry_reprocess_models", %{}, socket)
   end
 end

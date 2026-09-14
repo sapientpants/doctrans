@@ -892,8 +892,9 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Closing the modal -- Cancel, Escape, backdrop, or either submit path -- cancels the fetch, and starting
   a fetch cancels the one it replaces, so a modal reopened over a stalled request does not accumulate
   tasks or pay for an answer nobody will see. The error alert gained a Retry control, which is the only
-  way back from a failed fetch: the alert previously left the modal permanently unusable, since both
-  selects reset to no selection and the submit button stays disabled until a model list arrives.
+  way back from a failed fetch without closing the modal: the alert previously left the modal unusable
+  until it was dismissed and reopened, since both selects reset to no selection and the submit button
+  stays disabled until a model list arrives.
   Tradeoff accepted: a failed fetch still clears the current selections, so a successful retry means
   picking the models again. That is the pre-existing `available_selection/2` behaviour for an empty list
   and preserving selections across a failure is a separate behaviour change, not part of this fix.
@@ -907,33 +908,53 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Found in team review and fixed: a Retry click that raced the modal closing refetched unconditionally,
   putting a real request on a server already known to be slow, discarding its own answer, and stranding
   `models_loading` on a closed modal. Retry is now a no-op unless the modal is open.
-  Found in team review and fixed: the comment on `handle_async/3` claimed the request id and the
-  open-modal check together kept a stale result out of a modal that had closed or moved on. Read against
-  the installed LiveView, neither case is the id's: `prune_current_async/3` drops the result of any task a
-  later `start_async` superseded before the callback runs, and a cancelled task keeps its ref, so the
-  open-modal check is what rejects the one result that does arrive late. The id is kept as belt and
-  braces for a future second `start_async` on this name -- AGENTS.md requires identifying async results by
-  payload rather than arrival -- and the comment now says which layer does what instead of crediting it
-  with both.
+  Found in team review and removed: a `:models_request_id` counter rode along with each result so a
+  stale one could be recognised. Read against the installed LiveView it could never fire.
+  `prune_current_async/3` drops the result of any task a later `start_async` superseded before the
+  callback runs, and the id changes only inside the same pipeline that installs the new ref, so the two
+  can never disagree. The decisive evidence is internal: the `{:exit, _}` clause carries no id and is
+  protected by the open-modal check alone. AGENTS.md asks for results to be identified by payload, and
+  here the payload that does the work is the open-modal check -- keeping an inert counter beside it
+  documented a guarantee the code did not have. The assign, the tuple wrapper and the guard are gone.
+  Found in team review and fixed: `list_models/0` is the one OpenAI call not wrapped in
+  `CircuitBreaker.call/3`, but its failure path still melted the shared `:openai_api` fuse. Retry made
+  that reachable by held click: six clicks against a 5xx or unreachable server blew a breaker shared with
+  extraction, translation, chat and background jobs for 30 seconds. It now reports through
+  `handle_api_error/3` with `melt: false`, and Retry is refused server-side while a fetch is in flight,
+  since the event can be pushed whether or not the button is rendered.
+  Found in team review and fixed: the fetch had no `receive_timeout`, so with `retry: :safe_transient`
+  an unreachable server could hold the modal at "Loading models..." for about a minute with no in-modal
+  escape -- Retry only renders once an error is set. Capped at 5s per attempt.
+  Found in team review and fixed: clicking Retry cleared `:model_fetch_error`, which unmounted the alert
+  containing the just-clicked button and dropped focus to the body outside the dialog. The alert now
+  stays mounted and reads "Retrying..." until the result replaces or clears it; the error is cleared on
+  open instead. The alert also gained `role="alert"`, matching the flash in `core_components.ex`, and its
+  hover swapped `bg-base-100/20` for `bg-current/10` -- the only theme-dependent token on a surface whose
+  `--color-error` is identical in both themes.
+  Found in team review and fixed: the ordinary failure path, `{:error, reason}`, was the one that logged
+  nothing, while the rare task crash logged. Both log now, under distinct messages.
   Found in team review and fixed: mutation testing measured four claims as unpinned -- removing either
   `cancel_async/2` call, dropping the open-modal guard, or deleting the `{:shutdown, :cancel}` clause all
   failed zero tests. A probe explained why the stale-result test did not cover them: the held request is
-  still blocked in the plug when cancellation kills the task, so no late result is ever produced and the
-  test only pinned cancel-then-refetch. It is renamed to say that, and the uncovered behaviour is pinned
-  directly: a unit test of `handle_async/3` against a constructed socket for the open-modal and id
-  guards, task-pid monitoring through `Phoenix.LiveView.Channel.async_pids/1` for both cancellation
-  sites, and a `capture_log` assertion for the `{:shutdown, :cancel}` clause, whose absence is silent in
-  state but logs a spurious failure warning on paths the suite already drives.
+  still blocked in the plug when cancellation kills the task, and Ranch kills that plug process with the
+  socket, so no late result is ever produced. Two trailing refutes rested on that and could not fail
+  under any implementation; they are deleted rather than left reading as coverage. The uncovered
+  behaviour is pinned directly instead: unit tests of `handle_async/3` against a constructed socket for
+  the open-modal guard and both `{:exit, _}` clauses, task-pid monitoring through
+  `Phoenix.LiveView.Channel.async_pids/1` for both cancellation sites and for the in-flight retry guard,
+  and `capture_log` assertions for the `{:shutdown, :cancel}` clause and for the bound that keeps an API
+  key out of a crash log.
+  Incidental to the above: `openai.ex` was at 495 of its 500-line budget, so the `melt:` option tipped
+  it over. Rather than raise the limit, the failure path it shares across every call it makes --
+  completions, streaming, model listing and embedding, against two fuses -- moved to
+  `Doctrans.Processing.ApiFailure`, leaving `openai.ex` at 472.
   Evidence: `lib/doctrans_web/live/document_live/reprocess_modal.ex` (`fetch_models/1`,
-  `handle_async/3`, `close_reprocess_modal/1`), `lib/doctrans_web/live/document_live/show.ex`.
-  12 tests in `reprocess_modal_test.exs`, measured rather than asserted: restoring the synchronous fetch
-  fails 2 at their 10-second bound and reverting the whole change fails 3, dropping either half of
-  `current_models_request?/2` fails 1, removing the cancellation on close fails 2, removing it from the
-  start path fails 1, deleting the `{:shutdown, :cancel}` clause fails 1, and removing the retry control,
-  its event wiring, or its open-modal guard fails 1 each. A held request was used to show the LiveView
-  still answers page navigation, `{:document_updated, _}` and `{:page_updated, _}` progress broadcasts,
-  the chat toggle, and modal close while the fetch is outstanding. The running app was not driven in a
-  browser.
+  `start_models_fetch/1`, `handle_async/3`, `close_reprocess_modal/1`),
+  `lib/doctrans_web/live/document_live/show.ex`, `lib/doctrans/processing/openai.ex`
+  (`list_models/0`, `handle_api_error/3`).
+  20 tests in `reprocess_modal_test.exs`. A held request was used to show the LiveView still answers page
+  navigation, `{:document_updated, _}` and `{:page_updated, _}` progress broadcasts, the chat toggle, and
+  modal close while the fetch is outstanding. The running app was not driven in a browser.
 
 - [ ] **U04 · P2 · Report per-file upload outcomes accurately.**
   Mixed validation failures use a warning flash that the layout never renders. Accepted files are counted

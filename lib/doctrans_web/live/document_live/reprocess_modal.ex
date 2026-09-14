@@ -18,7 +18,6 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     |> assign(:available_models, [])
     |> assign(:models_loading, false)
     |> assign(:model_fetch_error, nil)
-    |> assign(:models_request_id, 0)
     |> assign(:extraction_model, Config.OpenAI.vision_model())
     |> assign(:translation_model, Config.OpenAI.translation_model())
     |> assign_form()
@@ -46,15 +45,19 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     {:noreply, fetch_models(socket)}
   end
 
-  # A Retry click can race the modal closing. Refetching then would put a real
-  # request on a server we already know is slow, for a modal that can no longer
-  # show the answer, and would strand the closed modal in its loading state.
+  # Both guards matter, and neither is enforceable in the template: the event can
+  # be pushed over the socket whether or not the button is rendered.
+  # `show_reprocess_modal` -- a Retry click can race the modal closing, and
+  # refetching then would put a real request on a server we already know is slow,
+  # for a modal that can no longer show the answer.
+  # `models_loading` -- without it, held click-spam issues one upstream request
+  # per click against an endpoint that is already failing.
   def handle_event(
         "retry_reprocess_models",
         _params,
-        %{assigns: %{show_reprocess_modal: true}} = socket
+        %{assigns: %{show_reprocess_modal: true, models_loading: false}} = socket
       ) do
-    {:noreply, fetch_models(socket)}
+    {:noreply, start_models_fetch(socket)}
   end
 
   def handle_event("retry_reprocess_models", _params, socket), do: {:noreply, socket}
@@ -119,6 +122,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     socket
     |> cancel_async(:fetch_models)
     |> assign(:show_reprocess_modal, false)
+    |> assign(:models_loading, false)
     |> assign(:reprocess_scope, :page)
   end
 
@@ -134,21 +138,23 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   defp submit(socket, :page, opts),
     do: DocumentReprocessing.reprocess_page(socket.assigns.current_page.id, opts)
 
+  # Opening the modal starts from a clean slate. A retry does not: clearing the
+  # error would unmount the alert, and with it the Retry button the user just
+  # clicked, dropping focus to the body outside the dialog. The alert stays up,
+  # reading as "retrying", until the new result replaces or clears it.
+  defp fetch_models(socket) do
+    socket
+    |> assign(:model_fetch_error, nil)
+    |> start_models_fetch()
+  end
+
   # The model list is fetched off-process so a slow or unreachable server cannot
   # stall the LiveView, which is also serving navigation, progress and chat.
-  # Each start takes the next `:models_request_id`; the task hands it back so a
-  # result can be matched to the fetch that asked for it.
-  defp fetch_models(socket) do
-    request_id = socket.assigns.models_request_id + 1
-
+  defp start_models_fetch(socket) do
     socket
-    |> assign(:models_request_id, request_id)
     |> assign(:models_loading, true)
-    |> assign(:model_fetch_error, nil)
     |> cancel_async(:fetch_models)
-    |> start_async(:fetch_models, fn -> {request_id, OpenAI.list_models()} end,
-      supervisor: Doctrans.TaskSupervisor
-    )
+    |> start_async(:fetch_models, &OpenAI.list_models/0, supervisor: Doctrans.TaskSupervisor)
   end
 
   # LiveView tracks one task per async name and discards the result of any task a
@@ -156,10 +162,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   # cancelled one still can: `cancel_async/2` kills the task without clearing the
   # ref it is tracked under, so a result already in flight when the modal closed
   # has nothing to be pruned against -- the open-modal check is what rejects it.
-  # The request id rides along as belt and braces should this name ever gain a
-  # second `start_async`; no path reachable today can make it differ.
-  def handle_async(:fetch_models, {:ok, {request_id, result}}, socket) do
-    if current_models_request?(socket, request_id) do
+  def handle_async(:fetch_models, {:ok, result}, socket) do
+    if socket.assigns.show_reprocess_modal do
       {:noreply, apply_models_result(socket, result)}
     else
       {:noreply, socket}
@@ -176,7 +180,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   def handle_async(:fetch_models, {:exit, reason}, socket) do
     # Bounded: an exit reason carries a stacktrace whose frames can hold the
     # request struct, headers and API key included.
-    Logger.warning("Model fetch failed: #{inspect(reason, limit: 10, printable_limit: 256)}")
+    Logger.warning("Model fetch crashed: #{inspect(reason, limit: 10, printable_limit: 256)}")
 
     if socket.assigns.show_reprocess_modal do
       {:noreply, models_unavailable(socket)}
@@ -185,14 +189,17 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     end
   end
 
-  defp current_models_request?(socket, request_id) do
-    socket.assigns.show_reprocess_modal and socket.assigns.models_request_id == request_id
-  end
-
   defp apply_models_result(socket, {:ok, models}),
     do: assign_models(socket, Enum.reject(models, &embedding_model?/1), nil)
 
-  defp apply_models_result(socket, {:error, _reason}), do: models_unavailable(socket)
+  # The ordinary failure -- a refused connection, a non-2xx -- lands here rather
+  # than in the `{:exit, _}` clause, so this is the path that needs to say what
+  # went wrong. `reason` is already normalized by `Doctrans.Processing.ApiFailure`,
+  # which keeps response bodies behind :debug.
+  defp apply_models_result(socket, {:error, reason}) do
+    Logger.warning("Model fetch failed: #{inspect(reason)}")
+    models_unavailable(socket)
+  end
 
   defp models_unavailable(socket),
     do: assign_models(socket, [], ErrorMessages.message(:models_unavailable))
@@ -286,19 +293,26 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
             else: gettext("Select models to use for re-extracting and re-translating this page.")}
         </p>
 
-        <div :if={@model_fetch_error} id="reprocess-model-error" class="alert alert-error mb-4">
+        <div
+          :if={@model_fetch_error}
+          id="reprocess-model-error"
+          role="alert"
+          class="alert alert-error mb-4"
+        >
           <.icon name="hero-exclamation-triangle" class="w-5 h-5 shrink-0" />
           <span class="flex-1">{@model_fetch_error}</span>
           <button
             type="button"
             id="reprocess-model-retry"
             phx-click="retry_reprocess_models"
+            disabled={@models_loading}
             class={[
               "shrink-0 rounded-lg border border-current/40 px-3 py-1 text-sm font-medium",
-              "transition-colors hover:bg-base-100/20"
+              "transition-colors hover:bg-current/10",
+              "disabled:cursor-not-allowed disabled:opacity-60"
             ]}
           >
-            {gettext("Retry")}
+            {if @models_loading, do: gettext("Retrying..."), else: gettext("Retry")}
           </button>
         </div>
 

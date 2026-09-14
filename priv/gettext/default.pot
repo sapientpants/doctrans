@@ -55,8 +55,8 @@ msgid "Back"
 msgstr ""
 
 #: lib/doctrans_web/live/document_live/components.ex:186
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:328
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:350
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:351
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:373
 #, elixir-autogen, elixir-format
 msgid "Cancel"
 msgstr ""
@@ -393,7 +393,7 @@ msgstr ""
 msgid "Drag and drop documents here, or"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:305
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:328
 #, elixir-autogen, elixir-format
 msgid "Extraction Model"
 msgstr ""
@@ -414,7 +414,7 @@ msgstr ""
 msgid "Invalid model selection"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:241
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:257
 #, elixir-autogen, elixir-format
 msgid "Loading models..."
 msgstr ""
@@ -424,7 +424,7 @@ msgstr ""
 msgid "Page %{page} of %{total}"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:100
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:112
 #, elixir-autogen, elixir-format
 msgid "Page queued for reprocessing"
 msgstr ""
@@ -434,12 +434,12 @@ msgstr ""
 msgid "Please try again in a moment."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:342
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:365
 #, elixir-autogen, elixir-format
 msgid "Reprocess"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:268
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:284
 #, elixir-autogen, elixir-format
 msgid "Reprocess Page"
 msgstr ""
@@ -464,7 +464,7 @@ msgstr ""
 msgid "Search unavailable"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:277
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:293
 #, elixir-autogen, elixir-format
 msgid "Select models to use for re-extracting and re-translating this page."
 msgstr ""
@@ -474,7 +474,7 @@ msgstr ""
 msgid "Showing %{start}-%{end} of %{total} results for \"%{query}\""
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:314
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:337
 #, elixir-autogen, elixir-format
 msgid "Translation Model"
 msgstr ""
@@ -615,7 +615,7 @@ msgstr ""
 msgid "Document processing"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:99
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:111
 #, elixir-autogen, elixir-format
 msgid "Document queued for reprocessing"
 msgstr ""
@@ -642,18 +642,18 @@ msgstr ""
 msgid "Processing progress"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:340
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:363
 #, elixir-autogen, elixir-format
 msgid "Queuing…"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:268
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:284
 #: lib/doctrans_web/live/document_live/show.html.heex:34
 #, elixir-autogen, elixir-format
 msgid "Reprocess document"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:274
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:290
 #, elixir-autogen, elixir-format
 msgid "Run every processing step again from the original upload. Existing pages and search results will be replaced. This may take some time."
 msgstr ""
@@ -668,7 +668,7 @@ msgstr ""
 msgid "This document still has active processing jobs. Please wait for them to finish."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:242
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:258
 #, elixir-autogen, elixir-format
 msgid "Select a model"
 msgstr ""
@@ -688,7 +688,12 @@ msgstr ""
 msgid "These results may be incomplete until it is back."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:292
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:315
 #, elixir-autogen, elixir-format
 msgid "Retry"
+msgstr ""
+
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:315
+#, elixir-autogen, elixir-format
+msgid "Retrying..."
 msgstr ""
