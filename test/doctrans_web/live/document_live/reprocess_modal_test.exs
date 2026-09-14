@@ -601,6 +601,55 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     assert has_element?(view, "#extraction-model-select option[value='vision']")
   end
 
+  # Clearing the error here would unmount the alert containing the button the
+  # user just clicked, dropping focus to the body outside the dialog.
+  @tag timeout: 10_000
+  test "retrying keeps the alert mounted until the answer lands", %{conn: conn, bypass: bypass} do
+    test_pid = self()
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    Bypass.pass(bypass)
+
+    Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
+      case Agent.get_and_update(counter, &{&1 + 1, &1 + 1}) do
+        1 ->
+          Plug.Conn.resp(conn, 401, "unauthorized")
+
+        _ ->
+          send(test_pid, {:models_requested, self()})
+
+          receive do
+            :release -> :ok
+          after
+            @held_request_timeout -> :ok
+          end
+
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}]}))
+      end
+    end)
+
+    document = two_page_document()
+    {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+    view |> element("#show-reprocess") |> render_click()
+    render_async(view)
+    assert has_element?(view, "#reprocess-model-retry")
+
+    view |> element("#reprocess-model-retry") |> render_click()
+    assert_receive {:models_requested, handler}, 5_000
+
+    # Mid-retry: the alert is still there, and so is the button that started it.
+    assert has_element?(view, "#reprocess-model-error")
+    assert has_element?(view, "#reprocess-model-retry[disabled]")
+
+    send(handler, :release)
+    render_async(view)
+
+    refute has_element?(view, "#reprocess-model-error")
+    assert has_element?(view, "#extraction-model-select option[value='vision']")
+  end
+
   # The button is hidden while a fetch runs, but the event is not: a client can
   # push it regardless, and every extra push is a real request on an endpoint
   # that is already failing.
@@ -624,6 +673,20 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     # The original fetch was neither replaced nor joined by a second one.
     assert {:ok, [^held]} = Channel.async_pids(view.pid)
     refute_receive {:models_requested, _another}, 200
+  end
+
+  # A closed modal keeps no meaningful loading state. It is masked today because
+  # every path that opens the modal refetches, so this pins the invariant rather
+  # than a visible symptom: the first open path that reuses a cached list would
+  # otherwise render a spinner with no Retry button to escape it.
+  test "closing the modal clears its loading flag" do
+    socket =
+      models_socket(show_reprocess_modal: true, models_loading: true, reprocess_scope: :page)
+
+    assert {:noreply, closed} = ReprocessModal.handle_event("hide_reprocess_modal", %{}, socket)
+
+    refute closed.assigns.show_reprocess_modal
+    refute closed.assigns.models_loading
   end
 
   test "a retry is refused while one is already running" do

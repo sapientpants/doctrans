@@ -952,7 +952,12 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `start_models_fetch/1`, `handle_async/3`, `close_reprocess_modal/1`),
   `lib/doctrans_web/live/document_live/show.ex`, `lib/doctrans/processing/openai.ex`
   (`list_models/0`, `handle_api_error/3`).
-  20 tests in `reprocess_modal_test.exs`. A held request was used to show the LiveView still answers page
+  22 tests in `reprocess_modal_test.exs`, plus one in `openai_request_test.exs` pinning `melt: false`
+  through the `[:doctrans, :circuit_breaker, :failure]` telemetry event, which also asserts that the same
+  failure through `chat/2` still melts, so the claim is about the option and not a dead fuse. The four
+  behaviours added here were measured rather than asserted: removing `melt: false`, the `models_loading`
+  half of the retry guard, the `models_loading` reset on close, or the retry path that preserves the
+  error alert each fails exactly one test. A held request was used to show the LiveView still answers page
   navigation, `{:document_updated, _}` and `{:page_updated, _}` progress broadcasts, the chat toggle, and
   modal close while the fetch is outstanding. The running app was not driven in a browser.
 
