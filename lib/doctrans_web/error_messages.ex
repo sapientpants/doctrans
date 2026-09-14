@@ -76,6 +76,10 @@ defmodule DoctransWeb.ErrorMessages do
     do:
       dgettext("errors", "Unsupported file format: %{format}", format: binding(bindings, :format))
 
+  # A file with no extension at all, where naming the format would say nothing.
+  def message(:unsupported_format),
+    do: dgettext("errors", "Only PDF, Word, OpenDocument, and RTF documents are accepted")
+
   def message({:pdf_extraction_failed, bindings}),
     do: dgettext("errors", "PDF extraction failed: %{reason}", reason: binding(bindings, :reason))
 
@@ -180,6 +184,23 @@ defmodule DoctransWeb.ErrorMessages do
 
   def message(:invalid_model), do: gettext("Invalid model selection")
   def message(:upload_unreadable), do: dgettext("errors", "Could not read uploaded file")
+
+  def message(:upload_store_failed),
+    do: dgettext("errors", "Could not store the uploaded file")
+
+  def message(:upload_start_failed),
+    do: dgettext("errors", "Could not start processing for this document")
+
+  # The upload list's own fallback. The generic one below is written in the chat
+  # assistant's first person ("Sorry, I encountered an error"), which reads as a
+  # non-sequitur next to a filename.
+  def message(:upload_failed),
+    do: dgettext("errors", "This file could not be uploaded. Please try again.")
+
+  # The changeset is dropped deliberately: a per-file upload message says the save
+  # failed, never which column the database objected to.
+  def message({:validation_failed, _bindings}),
+    do: dgettext("errors", "The document could not be saved")
 
   def message({:file_too_large, bindings}),
     do:

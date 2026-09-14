@@ -40,7 +40,9 @@ defmodule DoctransWeb.DocumentLive.UploadValidationTest do
       render_upload(upload, filename)
       view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
 
-      assert has_element?(view, "#flash-error")
+      # Named in the modal rather than flashed: the modal stays open over the
+      # toast, so the reason belongs beside the drop zone it goes back into.
+      assert has_element?(view, ~s{#upload-failures [data-failed-upload="#{filename}"]})
       assert Documents.list_documents() == []
       assert File.ls!(directory) == []
     end
@@ -91,7 +93,12 @@ defmodule DoctransWeb.DocumentLive.UploadValidationTest do
 
     view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
 
-    assert has_element?(view, "#flash-error")
+    assert has_element?(
+             view,
+             ~s{#upload-failures [data-failed-upload="large.pdf"]},
+             "File too large"
+           )
+
     assert Documents.list_documents() == []
     assert File.ls!(directory) == []
   end

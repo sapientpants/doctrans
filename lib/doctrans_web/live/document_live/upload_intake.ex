@@ -21,8 +21,22 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
 
   require Logger
 
-  @type upload_result ::
+  @max_entries 10
+
+  @typedoc "An entry that passed validation and now has a file of its own on disk."
+  @type accepted ::
           {:ok, document_id :: Ecto.UUID.t(), filename :: String.t(), path :: String.t()}
+
+  @type upload_result ::
+          accepted()
+          | {:error, filename :: String.t(), reason :: Doctrans.Errors.reason()}
+
+  @typedoc """
+  The outcome of starting one accepted upload: the document that is now queued for
+  processing, or the file it failed on and why.
+  """
+  @type start_result ::
+          {:ok, document_id :: Ecto.UUID.t()}
           | {:error, filename :: String.t(), reason :: Doctrans.Errors.reason()}
 
   @doc """
@@ -33,6 +47,49 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   """
   @spec max_file_size() :: pos_integer()
   def max_file_size, do: Uploads.max_file_size()
+
+  @doc """
+  The largest upload accepted, in whole megabytes.
+
+  Rounded up, so the figure a rejection reports is never equal to the limit it
+  says the file exceeded.
+  """
+  @spec max_file_size_mb() :: pos_integer()
+  def max_file_size_mb, do: ceil(max_file_size() / 1_000_000)
+
+  @doc """
+  How many files one submission may carry.
+  """
+  @spec max_entries() :: pos_integer()
+  def max_entries, do: @max_entries
+
+  @doc """
+  Translates the errors LiveView reports for an entry into the reasons the rest of
+  the upload path speaks.
+
+  A file the browser rejects and one the server rejects are described to the user
+  by the same `DoctransWeb.ErrorMessages` clause, so the two halves of the modal
+  cannot drift into separate vocabularies.
+  """
+  @spec entry_reason([atom()], Phoenix.LiveView.UploadEntry.t()) :: Doctrans.Errors.reason()
+  def entry_reason([:too_large | _], entry) do
+    {:file_too_large, [size: ceil(entry.client_size / 1_000_000), max: max_file_size_mb()]}
+  end
+
+  def entry_reason([:not_accepted | _], entry) do
+    # A file with no extension is exactly what trips `:not_accepted`, and naming
+    # the empty extension reads as a dangling colon, so it falls back to the
+    # message that lists what is accepted instead.
+    case Path.extname(entry.client_name) do
+      "" -> :unsupported_format
+      extension -> {:unsupported_format, [format: extension]}
+    end
+  end
+
+  # Anything else the client reports gets the upload path's own fallback rather
+  # than being spelled out here, where it would go stale against LiveView.
+  def entry_reason([_other | _], _entry), do: :upload_failed
+  def entry_reason([], _entry), do: :upload_unreadable
 
   @doc """
   Validates one consumed upload and moves it into its document directory.
@@ -48,18 +105,35 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
     extension = entry.client_name |> Path.extname() |> String.downcase()
 
     with :ok <- validate_disk_size(path, max_file_size()),
-         :ok <- Validation.validate_file_content(path, extension) do
-      document_id = Uniq.UUID.uuid7()
-      dest_dir = Documents.document_upload_dir(document_id)
-      File.mkdir_p!(dest_dir)
-
-      dest_path = Path.join(dest_dir, "original#{extension}")
-      File.cp!(path, dest_path)
+         :ok <- Validation.validate_file_content(path, extension),
+         {:ok, document_id, dest_path} <- store(path, extension) do
       {:ok, {:ok, document_id, entry.client_name, dest_path}}
     else
       {:error, reason} ->
         Logger.warning("Upload rejected for #{entry.client_name}: #{inspect(reason)}")
         {:ok, {:error, entry.client_name, reason}}
+    end
+  end
+
+  # Moving the file into its document directory is the one step here that touches
+  # a disk that can be full or read-only. It returns a reason like every other step
+  # rather than raising: a raise inside `consume_uploaded_entries/3` takes the
+  # dashboard down with it, and the other files in the same submission with it.
+  # Source: LiveView temp metadata. Destination: generated UUID + validated extension.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp store(path, extension) do
+    document_id = Uniq.UUID.uuid7()
+    dest_dir = Documents.document_upload_dir(document_id)
+    dest_path = Path.join(dest_dir, "original#{extension}")
+
+    with :ok <- File.mkdir_p(dest_dir),
+         :ok <- File.cp(path, dest_path) do
+      {:ok, document_id, dest_path}
+    else
+      {:error, posix} ->
+        Logger.error("Could not store upload at #{dest_path}: #{inspect(posix)}")
+        _ = File.rm_rf(dest_dir)
+        {:error, :upload_store_failed}
     end
   end
 
@@ -71,34 +145,149 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   def accepted?({:error, _filename, _reason}), do: false
 
   @doc """
-  Creates the document record for an accepted upload and queues it for processing.
+  Creates the document record for an accepted `consume_entry/2` result and queues it
+  for processing.
 
-  The file is removed if the record cannot be created, so a failed insert does not
-  leave an orphaned upload directory behind.
+  Returns `{:ok, document_id}` only once the extraction job is queued, so a file the
+  dashboard reports as uploaded is one that processing will actually pick up. Either
+  failure takes the upload directory with it, and a document whose job could not be
+  queued is deleted rather than left sitting in `uploading` forever with no job that
+  will ever move it.
+
+  `document_id` must be one `consume_entry/2` generated. Cleanup deletes the row it
+  inserted under that id, so handing this a persisted id would delete that document
+  and its files.
   """
-  # The cleanup path comes from consume_entry/2, never from the display filename.
-  # sobelow_skip ["Traversal.FileModule"]
-  def create_and_process({document_id, original_filename, pdf_path}, target_language) do
-    original_filename = Validation.sanitize_filename_string(original_filename)
+  @spec create_and_process(accepted(), String.t()) :: start_result()
+  def create_and_process({:ok, document_id, original_filename, pdf_path}, target_language) do
+    # Sanitized in the head of the function that carries the rescue: a rebinding
+    # inside a `try` body is not visible to its `rescue`, so sanitizing in there
+    # would leave the raise path reporting and logging the raw browser filename.
+    start_upload(
+      document_id,
+      Validation.sanitize_filename_string(original_filename),
+      pdf_path,
+      target_language
+    )
+  end
 
+  # The insert raises rather than returns when the database is unreachable, and a
+  # raise here would take the dashboard down along with the outcome of every other
+  # file in the same submission. `catch` covers the exits too -- a pool checkout
+  # timeout or a `:noproc` from a Repo that is not up exits rather than raises.
+  #
+  # Only the directory is cleaned up: the insert did not complete, so there is no
+  # row this call can claim, and deleting whatever happens to sit at that id is how
+  # a caller's own document would get destroyed.
+  defp start_upload(document_id, filename, pdf_path, target_language) do
     attrs = %{
       id: document_id,
-      title: title_from(original_filename),
-      original_filename: original_filename,
+      title: title_from(filename),
+      original_filename: filename,
       target_language: target_language,
       status: "uploading"
     }
 
+    case create_document(attrs, filename) do
+      {:ok, document} -> start_processing(document, pdf_path, filename)
+      {:error, _filename, _reason} = error -> error
+    end
+  rescue
+    exception ->
+      abandon(document_id, filename, Exception.format(:error, exception, __STACKTRACE__))
+  catch
+    kind, reason ->
+      abandon(document_id, filename, inspect({kind, reason}))
+  end
+
+  # Past the insert the row is this call's own, so cleanup may delete it. The outage
+  # that caused the raise can equally block the delete; what cannot be removed is
+  # left to the sweeper rather than to a second raise.
+  defp start_processing(document, pdf_path, filename) do
+    case enqueue(document, pdf_path, filename) do
+      :ok -> {:ok, document.id}
+      {:error, _filename, _reason} = error -> error
+    end
+  rescue
+    exception ->
+      abandon(document, filename, Exception.format(:error, exception, __STACKTRACE__))
+  catch
+    kind, reason ->
+      abandon(document, filename, inspect({kind, reason}))
+  end
+
+  defp abandon(%Documents.Document{} = document, filename, formatted) do
+    Logger.error("Upload of #{filename} failed: #{formatted}")
+    _ = Documents.Topics.unsubscribe_document(document.id)
+    _ = safely(fn -> delete_document(document) end, document.id)
+    {:error, filename, :upload_start_failed}
+  end
+
+  defp abandon(document_id, filename, formatted) do
+    Logger.error("Upload of #{filename} failed: #{formatted}")
+    _ = safely(fn -> discard_upload(document_id) end, document_id)
+    {:error, filename, :upload_start_failed}
+  end
+
+  defp safely(cleanup, document_id) do
+    cleanup.()
+  catch
+    kind, reason ->
+      Logger.error("Could not clean up #{document_id}: #{inspect({kind, reason})}")
+      :error
+  end
+
+  defp create_document(attrs, original_filename) do
     case Documents.create_document(attrs) do
       {:ok, document} ->
         Logger.debug("Dashboard now tracking new document:#{document.id}")
         _ = Documents.Topics.subscribe_document(document.id)
-        _ = Worker.process_document(document.id, pdf_path)
+        {:ok, document}
 
-      {:error, changeset} ->
-        Logger.error("Failed to create document: #{inspect(changeset)}")
-        File.rm(pdf_path)
+      {:error, reason} ->
+        Logger.error("Failed to create document for #{original_filename}: #{inspect(reason)}")
+        _ = discard_upload(attrs.id)
+        {:error, original_filename, reason}
     end
+  end
+
+  defp enqueue(document, pdf_path, original_filename) do
+    case Worker.process_document(document.id, pdf_path) do
+      {:ok, _job} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to queue #{original_filename} for processing: #{inspect(reason)}")
+        _ = Documents.Topics.unsubscribe_document(document.id)
+        _ = delete_document(document)
+        {:error, original_filename, reason}
+    end
+  end
+
+  # `Documents.delete_document/1` takes the upload directory with it. A delete that
+  # fails would leave a row the dashboard shows as `uploading` beside a modal saying
+  # the file was not uploaded, and nothing re-queues that status, so the row is
+  # marked `error` instead of being left to contradict the report next to it.
+  defp delete_document(document) do
+    case Documents.delete_document(document) do
+      {:ok, _document} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Could not delete document #{document.id}: #{inspect(reason)}")
+        # A stable atom, not `reason`: `update_document_status/3` inspects whatever
+        # it is given into a text column, and a changeset reason would persist the
+        # whole document struct there.
+        _ = Documents.update_document_status(document, "error", :delete_failed)
+        :ok
+    end
+  end
+
+  # The document directory is the one `consume_entry/2` generated from a fresh UUID,
+  # never a path derived from the display filename.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp discard_upload(document_id) do
+    document_id |> Documents.document_upload_dir() |> File.rm_rf()
   end
 
   defp title_from(original_filename) do

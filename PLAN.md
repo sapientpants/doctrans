@@ -961,14 +961,71 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   navigation, `{:document_updated, _}` and `{:page_updated, _}` progress broadcasts, the chat toggle, and
   modal close while the fetch is outstanding. The running app was not driven in a browser.
 
-- [ ] **U04 · P2 · Report per-file upload outcomes accurately.**
+- [x] **U04 · P2 · Report per-file upload outcomes accurately.**
   Mixed validation failures use a warning flash that the layout never renders. Accepted files are counted
   before document creation/enqueue outcomes are known, and enqueue results are discarded.
   Return per-file outcomes, count successful starts, and show entry-specific upload errors.
   Acceptance: mixed success/failure identifies each failed file; failed creation/enqueue never appears
   successful; rejected files have visible explanations and correct cleanup.
-  Evidence: `lib/doctrans_web/live/document_live/index.ex:350,365,401`,
-  `lib/doctrans_web/components/layouts.ex:58`.
+  Implemented: `create_and_process/2` returns `{:ok, document_id}` or `{:error, filename, reason}`, and
+  the former only once `Worker.process_document/2` has actually queued the extraction job, so the number
+  reported is the number of documents processing will pick up rather than the number of files that
+  survived magic-byte validation. The dashboard walks `@uploads.document.entries` once, in pick order,
+  and gives every entry one of three outcomes -- started, failed, or still uploading -- so the report
+  reads in the same order as the list above it and no entry can fall out of it. Failures are listed by
+  name with their own reason through `ErrorMessages.message/1`; the modal stays open to carry the list,
+  since that is where the retry happens and a flash dismisses itself after five seconds. The unrendered
+  `:warning` flash is gone -- it was the only `put_flash` using a kind `Layouts.flash_group/1` does not
+  render, so mixed submissions had been reporting their rejections into nothing.
+  Cleanup follows the outcome: a record that cannot be created takes its upload directory with it, and a
+  document whose job could not be queued is unsubscribed and deleted rather than left in `uploading`
+  forever with no job that would ever move it. `store/2` and `create_and_process/2` are both non-raising
+  (`rescue` and `catch`, since a pool timeout exits rather than raises), because a raise inside the loop
+  would take the dashboard down with the outcome of every other file in the same submission -- the exact
+  reporting failure this item exists to fix.
+  Decided rather than assumed: the started count renders inside the modal as well as in the flash.
+  daisyUI puts `.modal` at `z-index: 999` and the flash toast is `z-50`, so while the modal is open a
+  flash renders under its backdrop and the 5.3s AutoDismiss timer runs out unseen. Both render
+  `Components.upload_started_message/1` so they cannot drift. For the same reason there is no flash at
+  all for the nothing-started case: it only arises alongside failures, which hold the modal open.
+  Rejected: giving `{:operation_failed, _}` its own message in `ErrorMessages`. A test pins it to the
+  same generic string as `:unknown` so a dependency's response body can never reach a user.
+  `{:validation_failed, _}` did get one, and drops the changeset for the same reason.
+  Found in team review and fixed: the browser's own rejections were explained nowhere. Without
+  `auto_upload`, `phx-submit` runs the `allow_upload` preflight first, one entry in error fails it for
+  the whole config, and `handleFailedEntryPreflight` then cancels *every* entry -- so an oversized file
+  discarded the good files beside it and the server heard about none of them. `upload_errors/1` returns
+  only config-level errors, so the entry's own reason was never rendered either. Per-entry errors now
+  render on the entry itself as soon as it is picked, and the submit button is disabled while any entry
+  is in error or the config is, so the destructive preflight is never reached. `:too_many_files` is
+  covered by the same guard: it sits on the config with every entry still `valid?`, so nothing was
+  cancelled or named and each retry repeated the same message forever.
+  Found in team review and fixed: a valid entry still uploading was neither started nor reported, and
+  when the finished files all succeeded the modal closed over it. It is reported as its own outcome now.
+  Found in team review and fixed: cleanup on the raise path deleted whatever row sat at the document id.
+  Past the insert the row is the call's own and may be deleted; before it, only the directory is, so a
+  caller that passed a persisted id no longer loses that document. The contract is on the `@doc`.
+  Found in team review and fixed: the `rescue` clause reported and logged the *unsanitized* filename. A
+  rebinding inside a `try` body is not visible to its `rescue`, which sees the function head instead, so
+  a name carrying newlines reached `Logger.error` as forged log lines. Sanitizing happens in the head of
+  the function that carries the rescue.
+  Found in team review and fixed: `{:file_too_large, _}` truncated its megabytes with `div/2`, so a
+  100.4MB file was rejected with "max 100MB"; both figures round up now. `:not_accepted` on a file with
+  no extension rendered a dangling colon. The 100MB and 10-file limits were hardcoded in
+  `error_to_string/1` while the real limits came from config; both derive from `UploadIntake` now, and
+  that function no longer `inspect/1`s a LiveView internal into a user-facing string.
+  Found in team review and fixed: unknown reasons fell through to `ErrorMessages`' generic clause, which
+  is the chat assistant's first person ("Sorry, I encountered an error") and reads as a non-sequitur
+  beside a filename. The upload path has its own `:upload_failed` fallback.
+  Found in team review and fixed: `validate_upload` is the form's `phx-change` and so fires for the
+  target-language select too, clearing the failure list out from under a user who was still reading it.
+  It clears only when `_target` is the file input.
+  Evidence: `lib/doctrans_web/live/document_live/upload_intake.ex` (`consume_entry/2`, `store/2`,
+  `create_and_process/2`, `start_upload/4`, `start_processing/3`, `entry_reason/2`),
+  `lib/doctrans_web/live/document_live/index.ex` (`process_entry/4`, `handle_upload_results/2`,
+  `report_started/2`, `report_outcomes/4`),
+  `lib/doctrans_web/live/document_live/components.ex` (`upload_modal/1`, `upload_outcomes/1`,
+  `upload_entries_list/1`, `submit_blocked?/1`), `lib/doctrans_web/error_messages.ex`.
 
 - [ ] **U05 · P2 · Make upload and dialogs keyboard accessible.**
   The file input is display-none and its browse labels are not focusable.

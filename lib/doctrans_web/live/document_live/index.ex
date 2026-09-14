@@ -27,13 +27,16 @@ defmodule DoctransWeb.DocumentLive.Index do
       |> assign(:refresh_scheduled?, false)
       |> assign(:pending_document_ids, [])
       |> assign(:show_upload_modal, false)
+      |> assign(:upload_failures, [])
+      |> assign(:upload_pending, [])
+      |> assign(:upload_started, 0)
       |> assign(:target_language, defaults[:target_language] || "en")
       |> assign(:sort_by, :inserted_at)
       |> assign(:sort_dir, :desc)
       |> DocumentStream.init()
       |> allow_upload(:document,
         accept: ~w(.pdf .docx .doc .odt .rtf),
-        max_entries: 10,
+        max_entries: UploadIntake.max_entries(),
         # max_file_size: client-side limit; the on-disk size is re-verified
         # in UploadIntake.consume_entry/2 before the file is accepted
         max_file_size: UploadIntake.max_file_size()
@@ -178,6 +181,9 @@ defmodule DoctransWeb.DocumentLive.Index do
         :if={@show_upload_modal}
         uploads={@uploads}
         target_language={@target_language}
+        failures={@upload_failures}
+        pending={@upload_pending}
+        started={@upload_started}
       />
     </Layouts.app>
     """
@@ -187,7 +193,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def handle_event("show_upload_modal", _params, socket),
-    do: {:noreply, assign(socket, :show_upload_modal, true)}
+    do: {:noreply, socket |> assign(:show_upload_modal, true) |> clear_upload_outcomes()}
 
   @impl true
   def handle_event("hide_upload_modal", _params, socket),
@@ -196,7 +202,19 @@ defmodule DoctransWeb.DocumentLive.Index do
   @impl true
   def handle_event("validate_upload", params, socket) do
     target_language = params["target_language"] || socket.assigns.target_language
-    {:noreply, assign(socket, :target_language, target_language)}
+
+    socket = assign(socket, :target_language, target_language)
+
+    # Picking files again is the retry the failure list asks for, so the list of
+    # what failed last time goes with the submission it described. This event also
+    # fires for the target-language select, which is not that retry: clearing there
+    # would take the explanation away from a user who is still reading it.
+    socket =
+      if params["_target"] == ["document"],
+        do: clear_upload_outcomes(socket),
+        else: socket
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -264,58 +282,116 @@ defmodule DoctransWeb.DocumentLive.Index do
     end
   end
 
+  # One pass over the entries in the order the user picked them, so the outcome list
+  # reads the same way the drop zone above it does. Entries are consumed one at a
+  # time rather than through `consume_uploaded_entries/3`, which takes the whole
+  # config at once and raises while any entry is still pending -- that is how one
+  # file the browser rejected took the outcome of every file beside it down with
+  # the socket.
   defp upload_documents_with_validated_language(socket, target_language) do
-    uploaded_files =
-      consume_uploaded_entries(socket, :document, fn meta, entry ->
+    upload = socket.assigns.uploads.document
+
+    {socket, outcomes} =
+      Enum.reduce(upload.entries, {socket, []}, fn entry, {socket, acc} ->
+        {socket, outcome} = process_entry(socket, upload, entry, target_language)
+        {socket, [outcome | acc]}
+      end)
+
+    handle_upload_results(socket, Enum.reverse(outcomes))
+  end
+
+  # One entry's whole journey, so that its place in the report is its place in the
+  # list the user is looking at.
+  defp process_entry(socket, upload, entry, target_language) do
+    cond do
+      not entry.valid? ->
+        # Cancelled so it stops blocking the config it sits in; its reason travels
+        # in the outcome list instead.
+        {cancel_upload(socket, :document, entry.ref),
+         {:error, entry.client_name,
+          UploadIntake.entry_reason(upload_errors(upload, entry), entry)}}
+
+      not entry.done? ->
+        # Still on its way. Left in the modal for the submission that finishes it,
+        # and reported so it is never silently dropped from a submission that
+        # otherwise succeeded.
+        {socket, {:pending, entry.client_name}}
+
+      true ->
+        {socket, start_entry(socket, entry, target_language)}
+    end
+  end
+
+  defp start_entry(socket, entry, target_language) do
+    consumed =
+      consume_uploaded_entry(socket, entry, fn meta ->
         # `meta` is an opaque map from LiveView; coerce the path to a string
         # so the type stays concrete for downstream File calls.
         path = to_string(Map.get(meta, :path, ""))
         UploadIntake.consume_entry(path, entry)
       end)
 
-    {valid_files, rejected} = Enum.split_with(uploaded_files, &UploadIntake.accepted?/1)
-
-    handle_upload_results(socket, valid_files, rejected, target_language)
+    if UploadIntake.accepted?(consumed) do
+      UploadIntake.create_and_process(consumed, target_language)
+    else
+      consumed
+    end
   end
 
-  defp handle_upload_results(socket, [], [_ | _], _target_language) do
-    {:noreply,
-     put_flash(socket, :error, gettext("No valid files were uploaded. Check file formats."))}
-  end
-
-  defp handle_upload_results(socket, [], [], _target_language) do
-    {:noreply, put_flash(socket, :error, gettext("No files were uploaded"))}
-  end
-
-  defp handle_upload_results(socket, valid_files, rejected, target_language) do
-    Enum.each(valid_files, fn {:ok, document_id, client_name, dest_path} ->
-      UploadIntake.create_and_process(
-        {document_id, client_name, dest_path},
-        target_language
-      )
-    end)
-
-    message =
-      ngettext(
-        "Document uploaded! Processing will begin shortly.",
-        "%{count} documents uploaded! Processing will begin shortly.",
-        length(valid_files)
-      )
-
+  defp handle_upload_results(socket, []) do
     socket =
-      socket
-      |> assign(:show_upload_modal, false)
-      |> put_flash(:info, message)
-      |> DocumentStream.refresh()
+      socket |> clear_upload_outcomes() |> put_flash(:error, gettext("No files were uploaded"))
 
-    {:noreply, warn_about_rejected(socket, rejected)}
+    {:noreply, socket}
   end
 
-  defp warn_about_rejected(socket, []), do: socket
+  defp handle_upload_results(socket, outcomes) do
+    started = Enum.count(outcomes, &match?({:ok, _document_id}, &1))
+    failures = Enum.filter(outcomes, &match?({:error, _filename, _reason}, &1))
+    pending = for {:pending, filename} <- outcomes, do: filename
 
-  defp warn_about_rejected(socket, rejected) do
-    names = Enum.map_join(rejected, ", ", fn {:error, name, _reason} -> name end)
-    put_flash(socket, :warning, gettext("Some files were rejected: %{names}", names: names))
+    {:noreply,
+     socket
+     |> report_started(started)
+     |> report_outcomes(failures, pending, started)}
+  end
+
+  # No flash for the nothing-started case: it only happens alongside failures, which
+  # keep the modal open, and the modal's backdrop covers the toast (z-999 against
+  # z-50) until it dismisses itself unseen. The failure list says it instead.
+  defp report_started(socket, 0), do: socket
+
+  defp report_started(socket, count) do
+    socket
+    |> put_flash(:info, upload_started_message(count))
+    |> DocumentStream.refresh()
+  end
+
+  # The modal closes only when there is nothing left to say. Anything else keeps it
+  # open to carry the list: a rejected file needs its reason next to the drop zone
+  # it goes back into, and a file still uploading needs to stay visible.
+  defp report_outcomes(socket, [], [], _started) do
+    socket |> assign(:show_upload_modal, false) |> clear_upload_outcomes()
+  end
+
+  defp report_outcomes(socket, failures, pending, started) do
+    socket
+    |> assign(:upload_failures, Enum.map(failures, &describe_failure/1))
+    |> assign(:upload_pending, pending)
+    |> assign(:upload_started, started)
+  end
+
+  defp clear_upload_outcomes(socket) do
+    socket
+    |> assign(:upload_failures, [])
+    |> assign(:upload_pending, [])
+    |> assign(:upload_started, 0)
+  end
+
+  # The name is displayed, so it is the sanitized one rather than whatever the
+  # browser sent, matching the title the accepted files are stored under.
+  defp describe_failure({:error, filename, reason}) do
+    %{name: Validation.sanitize_filename_string(filename), message: ErrorMessages.message(reason)}
   end
 
   # --- PubSub: progress updates ----------------------------------------------
