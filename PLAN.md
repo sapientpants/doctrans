@@ -805,13 +805,50 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   and by measuring that neither pane nor page scrolls horizontally; the running app was not driven in a
   browser.
 
-- [ ] **U02 · P2 · Preserve the resolved browser locale through LiveView.**
+- [x] **U02 · P2 · Preserve the resolved browser locale through LiveView.**
   The HTTP plug detects Accept-Language but deletes the session locale; LiveView then defaults to English.
   Persist the resolved locale, retain explicit choices appropriately, and update the root HTML language.
   Acceptance: browser-language detection and explicit language choices survive mounting, navigation,
   and reload; unsupported locales fall back predictably.
-  Evidence: `lib/doctrans_web/plugs/set_locale.ex:39`, `lib/doctrans_web/live/hooks/set_locale.ex:21`,
-  `lib/doctrans_web/components/layouts/root.html.heex:2`. German-to-English reset reproduced.
+  Implemented: `delete_session/2` is gone and every resolution path persists what it resolved, so the
+  detected locale reaches the on_mount hook instead of being discarded. Precedence is supported `lang`
+  parameter, then an explicit choice already stored, then Accept-Language, then the default; only the
+  `lang` parameter sets the `locale_explicit` flag, so a detected locale is re-derived per request while
+  an explicit choice is pinned across navigation and reload. An unsupported `lang` value is ignored
+  rather than honoured or stored, so a bad link can neither reset a deliberate choice nor block
+  detection, and a stored locale that is no longer supported is discarded on read in both the plug and
+  the hook. `lang` values are normalised exactly like header tags, so `de-DE` and `DE` resolve the same
+  way in the URL as in the header, and a repeated or bracketed parameter is treated as no choice at all.
+  The plug assigns the resolved locale to the connection and the root layout renders it as `<html lang>`.
+  New `DoctransWeb.Locale` holds the supported list, default, and session keys, which were previously
+  duplicated across the plug and the hook.
+  Tradeoff accepted: a merely detected locale is recomputed from Accept-Language on every request rather
+  than pinned, so the language follows the browser rather than the session until the user chooses one.
+  Found in review and fixed: the new module's docstring claimed the supported list came from Gettext and
+  so could not drift from the translations. Gettext ignores the `:locales` key and derives its known
+  locales from `priv/gettext` instead, so the two lists are independent; the claim is corrected and a
+  test now asserts they stay equal, since a config-only locale would render untranslated English under
+  its own `<html lang>` and a `priv/`-only locale would be unreachable.
+  Found in review and recorded rather than fixed: a `lang` parameter carried by a live navigation never
+  reaches the plug, because the plug runs only on HTTP requests. Nothing in the app generates such a URL
+  today -- there is no language-switcher UI -- but a switcher built with `<.link navigate=>` would
+  silently do nothing until reload, so the constraint is recorded in the plug's moduledoc.
+  Found in review and recorded rather than fixed: Accept-Language `q` weights are not compared; the
+  first supported tag in header order wins. This is pre-existing and browsers send tags in preference
+  order, so it was left alone and documented rather than changed under a locale-persistence item.
+  Evidence: `lib/doctrans_web/locale.ex`, `lib/doctrans_web/plugs/set_locale.ex`,
+  `lib/doctrans_web/live/hooks/set_locale.ex`, `lib/doctrans_web/components/layouts/root.html.heex:2`.
+  38 tests across `plugs/set_locale_test.exs`, `live/locale_test.exs`, `live/hooks/set_locale_test.exs`,
+  and `gettext_test.exs`, measured rather than asserted: restoring `delete_session/2` fails 17, dropping
+  the hook's session read fails 12, re-hard-coding `lang="en"` fails 6, removing the unsupported-`lang`
+  guard fails 5, removing region stripping fails 2, dropping the stored-locale support check fails 2,
+  and dropping the explicit-flag check or the parameter normalisation fails 1 each. A German browser was
+  traced end to end -- dead render, connected mount, `live_redirect` between `/` and `/search`, and a
+  reload over the recycled cookie -- and an explicit `?lang=fr` survives all four. The German-to-English
+  reset no longer reproduces; the running app was not driven in a browser.
+  Pre-existing and out of scope: in a prod release bound to a LAN address over plain HTTP, the session
+  cookie is `Secure` and browsers will not store it, so the connected mount falls back to English. That
+  breaks the session generally, not just the locale, and is not caused by this change.
 
 - [ ] **U03 · P2 · Fetch model choices without blocking the viewer.**
   Sending a message to the same LiveView does not make its subsequent model-list HTTP request asynchronous.

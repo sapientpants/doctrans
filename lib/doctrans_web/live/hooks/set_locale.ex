@@ -5,12 +5,16 @@ defmodule DoctransWeb.Live.Hooks.SetLocale do
   This is necessary because Gettext.put_locale is process-specific, and the
   plug runs in a different process than the LiveView. This hook ensures the
   locale is set in the LiveView process after WebSocket connection.
+
+  The session locale is whatever `DoctransWeb.Plugs.SetLocale` resolved for the
+  request that mounted the LiveView: an explicit `lang` choice, the browser's
+  Accept-Language preference, or the default. Values that are missing or no
+  longer supported fall back to the default locale.
   """
 
   import Phoenix.Component, only: [assign: 2]
 
-  @supported_locales ~w(da de en es fr it nl no pl pt sv)
-  @default_locale "en"
+  alias DoctransWeb.Locale
 
   def on_mount(:default, _params, session, socket) do
     locale = get_locale(session)
@@ -19,9 +23,7 @@ defmodule DoctransWeb.Live.Hooks.SetLocale do
   end
 
   defp get_locale(session) do
-    case session["locale"] do
-      locale when locale in @supported_locales -> locale
-      _ -> @default_locale
-    end
+    locale = session[Locale.session_key()]
+    if Locale.supported?(locale), do: locale, else: Locale.default()
   end
 end
