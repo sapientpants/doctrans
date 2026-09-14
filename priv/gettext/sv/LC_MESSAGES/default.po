@@ -4,19 +4,19 @@ msgstr ""
 "Language: sv\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: lib/doctrans_web/live/document_live/components.ex:40
+#: lib/doctrans_web/live/document_live/components.ex:41
 #, elixir-autogen, elixir-format
 msgid "%{count} page"
 msgid_plural "%{count} pages"
 msgstr[0] "%{count} sida"
 msgstr[1] "%{count} sidor"
 
-#: lib/doctrans_web/live/document_live/components.ex:254
+#: lib/doctrans_web/live/document_live/components.ex:285
 #, elixir-autogen, elixir-format
 msgid "+ Add more files"
 msgstr "+ Lägg till fler filer"
 
-#: lib/doctrans_web/live/document_live/components.ex:366
+#: lib/doctrans_web/live/document_live/components.ex:438
 #, elixir-autogen, elixir-format
 msgid "A-Z"
 msgstr "A-Ö"
@@ -31,7 +31,7 @@ msgstr "Åtgärder"
 msgid "An error occurred processing this page"
 msgstr "Ett fel uppstod vid bearbetning av denna sida"
 
-#: lib/doctrans_web/live/document_live/components.ex:58
+#: lib/doctrans_web/live/document_live/components.ex:59
 #, elixir-autogen, elixir-format
 msgid "Are you sure you want to delete this document? This cannot be undone."
 msgstr "Är du säker på att du vill ta bort detta dokument? Detta kan inte ångras."
@@ -47,34 +47,34 @@ msgstr "Försöker återansluta"
 msgid "Back"
 msgstr "Tillbaka"
 
-#: lib/doctrans_web/live/document_live/components.ex:193
+#: lib/doctrans_web/live/document_live/components.ex:203
 #: lib/doctrans_web/live/document_live/reprocess_modal.ex:351
 #: lib/doctrans_web/live/document_live/reprocess_modal.ex:373
 #, elixir-autogen, elixir-format
 msgid "Cancel"
 msgstr "Avbryt"
 
-#: lib/doctrans_web/live/document_live/components.ex:357
+#: lib/doctrans_web/live/document_live/components.ex:429
 #, elixir-autogen, elixir-format
 msgid "Completed"
 msgstr "Slutförd"
 
-#: lib/doctrans_web/live/document_live/index.ex:69
+#: lib/doctrans_web/live/document_live/index.ex:70
 #, elixir-autogen, elixir-format
 msgid "Doctrans"
 msgstr "Doctrans"
 
-#: lib/doctrans_web/live/document_live/index.ex:255
+#: lib/doctrans_web/live/document_live/index.ex:266
 #, elixir-autogen, elixir-format
 msgid "Document deleted successfully"
 msgstr "Dokument borttaget"
 
-#: lib/doctrans_web/live/document_live/components.ex:379
+#: lib/doctrans_web/live/document_live/components.ex:451
 #, elixir-autogen, elixir-format
 msgid "Dutch"
 msgstr "Nederländska"
 
-#: lib/doctrans_web/live/document_live/components.ex:375
+#: lib/doctrans_web/live/document_live/components.ex:447
 #, elixir-autogen, elixir-format
 msgid "English"
 msgstr "Engelska"
@@ -84,72 +84,57 @@ msgstr "Engelska"
 msgid "Enter a search term to find content across all your documents."
 msgstr "Ange ett sökord för att hitta innehåll i alla dina dokument."
 
-#: lib/doctrans_web/live/document_live/components.ex:358
+#: lib/doctrans_web/live/document_live/components.ex:430
 #, elixir-autogen, elixir-format
 msgid "Error"
 msgstr "Fel"
-
-#: lib/doctrans_web/live/document_live/components.ex:337
-#, elixir-autogen, elixir-format
-msgid "Error: %{error}"
-msgstr "Fel: %{error}"
 
 #: lib/doctrans_web/live/document_live/viewer_components.ex:62
 #, elixir-autogen, elixir-format
 msgid "Extracting text from page..."
 msgstr "Extraherar text från sida..."
 
-#: lib/doctrans_web/error_messages.ex:211
+#: lib/doctrans_web/error_messages.ex:221
 #, elixir-autogen, elixir-format
 msgid "Failed to delete document"
 msgstr "Kunde inte ta bort dokument"
-
-#: lib/doctrans_web/live/document_live/components.ex:331
-#, elixir-autogen, elixir-format
-msgid "File is too large (max 100MB)"
-msgstr "Filen är för stor (max 100 MB)"
 
 #: lib/doctrans_web/live/search_live.ex:207
 #, elixir-autogen, elixir-format
 msgid "Find content across all documents"
 msgstr "Hitta innehåll i alla dokument"
 
-#: lib/doctrans_web/live/document_live/components.ex:377
+#: lib/doctrans_web/live/document_live/components.ex:449
 #, elixir-autogen, elixir-format
 msgid "French"
 msgstr "Franska"
 
-#: lib/doctrans_web/live/document_live/components.ex:374
+#: lib/doctrans_web/live/document_live/components.ex:446
 #, elixir-autogen, elixir-format
 msgid "German"
 msgstr "Tyska"
 
-#: lib/doctrans_web/live/document_live/components.ex:378
+#: lib/doctrans_web/live/document_live/components.ex:450
 #, elixir-autogen, elixir-format
 msgid "Italian"
 msgstr "Italienska"
 
-#: lib/doctrans_web/live/document_live/components.ex:332
-#, elixir-autogen, elixir-format
-msgid "Maximum 10 files can be uploaded at once"
-msgstr "Maximalt 10 filer kan laddas upp åt gången"
-
-#: lib/doctrans_web/live/document_live/index.ex:127
+#: lib/doctrans_web/live/document_live/index.ex:128
 #, elixir-autogen, elixir-format
 msgid "Name (A-Z)"
 msgstr "Namn (A-Ö)"
 
-#: lib/doctrans_web/live/document_live/index.ex:137
+#: lib/doctrans_web/live/document_live/index.ex:138
 #, elixir-autogen, elixir-format
 msgid "Name (Z-A)"
 msgstr "Namn (Ö-A)"
 
-#: lib/doctrans_web/live/document_live/components.ex:364
+#: lib/doctrans_web/live/document_live/components.ex:436
 #, elixir-autogen, elixir-format
 msgid "Newest"
 msgstr "Nyaste"
 
-#: lib/doctrans_web/live/document_live/index.ex:107
+#: lib/doctrans_web/live/document_live/index.ex:108
 #, elixir-autogen, elixir-format
 msgid "Newest First"
 msgstr "Nyaste först"
@@ -160,12 +145,12 @@ msgstr "Nyaste först"
 msgid "Next"
 msgstr "Nästa"
 
-#: lib/doctrans_web/live/document_live/index.ex:166
+#: lib/doctrans_web/live/document_live/index.ex:167
 #, elixir-autogen, elixir-format
 msgid "No documents yet"
 msgstr "Inga dokument ännu"
 
-#: lib/doctrans_web/live/document_live/index.ex:328
+#: lib/doctrans_web/live/document_live/index.ex:342
 #, elixir-autogen, elixir-format
 msgid "No files were uploaded"
 msgstr "Inga filer laddades upp"
@@ -180,12 +165,12 @@ msgstr "Ingen sida vald"
 msgid "No results found"
 msgstr "Inga resultat hittades"
 
-#: lib/doctrans_web/live/document_live/components.ex:365
+#: lib/doctrans_web/live/document_live/components.ex:437
 #, elixir-autogen, elixir-format
 msgid "Oldest"
 msgstr "Äldsta"
 
-#: lib/doctrans_web/live/document_live/index.ex:117
+#: lib/doctrans_web/live/document_live/index.ex:118
 #, elixir-autogen, elixir-format
 msgid "Oldest First"
 msgstr "Äldsta först"
@@ -215,12 +200,12 @@ msgstr "Sida %{number}"
 msgid "Page image not available"
 msgstr "Sidbild inte tillgänglig"
 
-#: lib/doctrans_web/live/document_live/components.ex:381
+#: lib/doctrans_web/live/document_live/components.ex:453
 #, elixir-autogen, elixir-format
 msgid "Polish"
 msgstr "Polska"
 
-#: lib/doctrans_web/live/document_live/components.ex:382
+#: lib/doctrans_web/live/document_live/components.ex:454
 #, elixir-autogen, elixir-format
 msgid "Portuguese"
 msgstr "Portugisiska"
@@ -231,13 +216,13 @@ msgstr "Portugisiska"
 msgid "Previous"
 msgstr "Föregående"
 
-#: lib/doctrans_web/live/document_live/components.ex:354
-#: lib/doctrans_web/live/document_live/components.ex:356
+#: lib/doctrans_web/live/document_live/components.ex:426
+#: lib/doctrans_web/live/document_live/components.ex:428
 #, elixir-autogen, elixir-format
 msgid "Processing"
 msgstr "Bearbetar"
 
-#: lib/doctrans_web/live/document_live/components.ex:355
+#: lib/doctrans_web/live/document_live/components.ex:427
 #, elixir-autogen, elixir-format
 msgid "Queued"
 msgstr "I kö"
@@ -252,7 +237,7 @@ msgstr "Sök"
 msgid "Search documents"
 msgstr "Sök dokument"
 
-#: lib/doctrans_web/live/document_live/index.ex:84
+#: lib/doctrans_web/live/document_live/index.ex:85
 #: lib/doctrans_web/live/search_live.ex:221
 #, elixir-autogen, elixir-format
 msgid "Search..."
@@ -273,22 +258,22 @@ msgstr "Visa original"
 msgid "Something went wrong!"
 msgstr "Något gick fel!"
 
-#: lib/doctrans_web/live/document_live/components.ex:368
+#: lib/doctrans_web/live/document_live/components.ex:440
 #, elixir-autogen, elixir-format
 msgid "Sort"
 msgstr "Sortera"
 
-#: lib/doctrans_web/live/document_live/components.ex:376
+#: lib/doctrans_web/live/document_live/components.ex:448
 #, elixir-autogen, elixir-format
 msgid "Spanish"
 msgstr "Spanska"
 
-#: lib/doctrans_web/live/document_live/components.ex:201
+#: lib/doctrans_web/live/document_live/components.ex:211
 #, elixir-autogen, elixir-format
 msgid "Start Translation"
 msgstr "Starta översättning"
 
-#: lib/doctrans_web/live/document_live/components.ex:180
+#: lib/doctrans_web/live/document_live/components.ex:190
 #, elixir-autogen, elixir-format
 msgid "Target Language"
 msgstr "Målspråk"
@@ -308,22 +293,22 @@ msgstr "Översätter innehåll..."
 msgid "Try a different search term."
 msgstr "Försök med ett annat sökord."
 
-#: lib/doctrans_web/live/document_live/components.ex:359
+#: lib/doctrans_web/live/document_live/components.ex:431
 #, elixir-autogen, elixir-format
 msgid "Unknown"
 msgstr "Okänd"
 
-#: lib/doctrans_web/live/document_live/index.ex:150
+#: lib/doctrans_web/live/document_live/index.ex:151
 #, elixir-autogen, elixir-format
 msgid "Upload"
 msgstr "Ladda upp"
 
-#: lib/doctrans_web/live/document_live/components.ex:159
+#: lib/doctrans_web/live/document_live/components.ex:164
 #, elixir-autogen, elixir-format
 msgid "Upload New Document"
 msgstr "Ladda upp nytt dokument"
 
-#: lib/doctrans_web/live/document_live/components.ex:353
+#: lib/doctrans_web/live/document_live/components.ex:425
 #, elixir-autogen, elixir-format
 msgid "Uploading"
 msgstr "Laddar upp"
@@ -338,12 +323,12 @@ msgstr "Väntar på bearbetning..."
 msgid "We can't find the internet"
 msgstr "Kan inte hitta internetanslutning"
 
-#: lib/doctrans_web/live/document_live/components.ex:367
+#: lib/doctrans_web/live/document_live/components.ex:439
 #, elixir-autogen, elixir-format
 msgid "Z-A"
 msgstr "Ö-A"
 
-#: lib/doctrans_web/live/document_live/components.ex:218
+#: lib/doctrans_web/live/document_live/components.ex:228
 #, elixir-autogen, elixir-format
 msgid "browse"
 msgstr "bläddra"
@@ -353,35 +338,35 @@ msgstr "bläddra"
 msgid "close"
 msgstr "stäng"
 
-#: lib/doctrans_web/live/document_live/components.ex:373
+#: lib/doctrans_web/live/document_live/components.ex:445
 #, elixir-autogen, elixir-format
 msgid "Danish"
 msgstr "Danska"
 
-#: lib/doctrans_web/live/document_live/components.ex:380
+#: lib/doctrans_web/live/document_live/components.ex:452
 #, elixir-autogen, elixir-format
 msgid "Norwegian"
 msgstr "Norska"
 
-#: lib/doctrans_web/live/document_live/components.ex:383
+#: lib/doctrans_web/live/document_live/components.ex:455
 #, elixir-autogen, elixir-format
 msgid "Swedish"
 msgstr "Svenska"
 
-#: lib/doctrans_web/live/document_live/components.ex:316
+#: lib/doctrans_web/live/document_live/components.ex:385
 #, elixir-autogen, elixir-format
 msgid "Document uploaded! Processing will begin shortly."
 msgid_plural "%{count} documents uploaded! Processing will begin shortly."
 msgstr[0] "Dokument uppladdat! Bearbetning börjar snart."
 msgstr[1] "%{count} dokument uppladdade! Bearbetning börjar snart."
 
-#: lib/doctrans_web/live/document_live/components.ex:164
+#: lib/doctrans_web/live/document_live/components.ex:169
 #: lib/doctrans_web/live/document_live/show.html.heex:188
 #, elixir-autogen, elixir-format
 msgid "Documents"
 msgstr "Dokument"
 
-#: lib/doctrans_web/live/document_live/components.ex:216
+#: lib/doctrans_web/live/document_live/components.ex:226
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Drag and drop documents here, or"
 msgstr "Dra och släpp PDF-filer här, eller"
@@ -391,7 +376,7 @@ msgstr "Dra och släpp PDF-filer här, eller"
 msgid "Extraction Model"
 msgstr "Extraction Model"
 
-#: lib/doctrans_web/error_messages.ex:212
+#: lib/doctrans_web/error_messages.ex:222
 #, elixir-autogen, elixir-format
 msgid "Failed to reset page for reprocessing"
 msgstr "Failed to reset page for reprocessing"
@@ -402,7 +387,7 @@ msgstr "Failed to reset page for reprocessing"
 msgid "Go to page %{page}"
 msgstr "Go to page %{page}"
 
-#: lib/doctrans_web/error_messages.ex:181
+#: lib/doctrans_web/error_messages.ex:185
 #, elixir-autogen, elixir-format
 msgid "Invalid model selection"
 msgstr "Invalid model selection"
@@ -442,7 +427,7 @@ msgstr "Reprocess Page"
 msgid "Reprocess this page"
 msgstr "Reprocess this page"
 
-#: lib/doctrans_web/error_messages.ex:205
+#: lib/doctrans_web/error_messages.ex:215
 #, elixir-autogen, elixir-format
 msgid "Search is temporarily unavailable. Please try again."
 msgstr "Search is temporarily unavailable. Please try again."
@@ -472,12 +457,7 @@ msgstr "Visar %{start}-%{end} av %{total} resultat för \"%{query}\""
 msgid "Translation Model"
 msgstr "Translation Model"
 
-#: lib/doctrans_web/live/document_live/components.ex:335
-#, elixir-autogen, elixir-format
-msgid "Only PDF, Word, OpenDocument, and RTF documents are accepted"
-msgstr "Endast PDF-, Word-, OpenDocument- och RTF-dokument accepteras"
-
-#: lib/doctrans_web/live/document_live/components.ex:222
+#: lib/doctrans_web/live/document_live/components.ex:232
 #, elixir-autogen, elixir-format
 msgid "PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Up to 10 files"
 msgstr "PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Upp till 10 filer"
@@ -513,7 +493,7 @@ msgstr "Stäng chatt"
 msgid "Document is still being processed. Chat will be available soon."
 msgstr "Dokumentet bearbetas fortfarande. Chatten blir tillgänglig när bearbetningen är klar."
 
-#: lib/doctrans_web/error_messages.ex:204
+#: lib/doctrans_web/error_messages.ex:214
 #, elixir-autogen, elixir-format
 msgid "Failed to search the document. Please try again."
 msgstr "Kunde inte söka i dokumentet. Försök igen."
@@ -523,12 +503,12 @@ msgstr "Kunde inte söka i dokumentet. Försök igen."
 msgid "I'll find relevant content and answer based on it."
 msgstr "Jag hittar relevant innehåll och svarar baserat på det."
 
-#: lib/doctrans_web/error_messages.ex:202
+#: lib/doctrans_web/error_messages.ex:212
 #, elixir-autogen, elixir-format
 msgid "Please enter a question."
 msgstr "Vänligen ange en fråga."
 
-#: lib/doctrans_web/live/document_live/index.ex:71
+#: lib/doctrans_web/live/document_live/index.ex:72
 #, elixir-autogen, elixir-format
 msgid "Private document translation powered by local AI"
 msgstr "Privat dokumentöversättning driven av lokal AI"
@@ -538,7 +518,7 @@ msgstr "Privat dokumentöversättning driven av lokal AI"
 msgid "Send message"
 msgstr "Skicka meddelande"
 
-#: lib/doctrans_web/error_messages.ex:214
+#: lib/doctrans_web/error_messages.ex:224
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Tyvärr uppstod ett fel. Försök igen."
@@ -548,12 +528,12 @@ msgstr "Tyvärr uppstod ett fel. Försök igen."
 msgid "Thinking..."
 msgstr "Tänker..."
 
-#: lib/doctrans_web/live/document_live/index.ex:168
+#: lib/doctrans_web/live/document_live/index.ex:169
 #, elixir-autogen, elixir-format
 msgid "Upload a document to get started. All processing happens locally on your device."
 msgstr "Ladda upp ett dokument för att komma igång. All bearbetning sker lokalt på din enhet."
 
-#: lib/doctrans_web/live/document_live/components.ex:226
+#: lib/doctrans_web/live/document_live/components.ex:236
 #, elixir-autogen, elixir-format
 msgid "Your documents never leave your device"
 msgstr "Dina dokument lämnar aldrig din enhet"
@@ -563,7 +543,7 @@ msgstr "Dina dokument lämnar aldrig din enhet"
 msgid "Checking the sources..."
 msgstr "Kollar källor..."
 
-#: lib/doctrans_web/error_messages.ex:213
+#: lib/doctrans_web/error_messages.ex:223
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Failed to fetch models from OpenAI"
 msgstr "Failed to fetch models from Ollama"
@@ -603,24 +583,24 @@ msgstr "Dokumentbearbetning"
 msgid "Document queued for reprocessing"
 msgstr "Dokumentet har lagts i kö för ny bearbetning"
 
-#: lib/doctrans_web/error_messages.ex:174
+#: lib/doctrans_web/error_messages.ex:178
 #: lib/doctrans_web/live/document_live/show.html.heex:36
 #: lib/doctrans_web/live/document_live/show.html.heex:81
 #, elixir-autogen, elixir-format
 msgid "Original upload unavailable. Re-upload this document to process it again."
 msgstr "Originalfilen är inte tillgänglig. Ladda upp dokumentet igen för att bearbeta det på nytt."
 
-#: lib/doctrans_web/live/document_live/components.ex:85
+#: lib/doctrans_web/live/document_live/components.ex:86
 #, elixir-autogen, elixir-format
 msgid "Preparing pages…"
 msgstr "Förbereder sidor…"
 
-#: lib/doctrans_web/live/document_live/components.ex:101
+#: lib/doctrans_web/live/document_live/components.ex:102
 #, elixir-autogen, elixir-format
 msgid "Processing failed. You can reprocess the document when its jobs have finished."
 msgstr "Bearbetningen misslyckades. Du kan bearbeta dokumentet igen när dess jobb är klara."
 
-#: lib/doctrans_web/live/document_live/components.ex:88
+#: lib/doctrans_web/live/document_live/components.ex:89
 #, elixir-autogen, elixir-format
 msgid "Processing progress"
 msgstr "Bearbetningsförlopp"
@@ -641,12 +621,12 @@ msgstr "Bearbeta dokumentet igen"
 msgid "Run every processing step again from the original upload. Existing pages and search results will be replaced. This may take some time."
 msgstr "Kör alla bearbetningssteg igen från originalfilen. Befintliga sidor och sökresultat ersätts. Det kan ta en stund."
 
-#: lib/doctrans_web/error_messages.ex:179
+#: lib/doctrans_web/error_messages.ex:183
 #, elixir-autogen, elixir-format
 msgid "The document has changed. Please try again."
 msgstr "Dokumentet har ändrats. Försök igen."
 
-#: lib/doctrans_web/error_messages.ex:177
+#: lib/doctrans_web/error_messages.ex:181
 #, elixir-autogen, elixir-format
 msgid "This document still has active processing jobs. Please wait for them to finish."
 msgstr "Det här dokumentet har fortfarande aktiva bearbetningsjobb. Vänta tills de är klara."
@@ -656,7 +636,7 @@ msgstr "Det här dokumentet har fortfarande aktiva bearbetningsjobb. Vänta till
 msgid "Select a model"
 msgstr "Välj en modell"
 
-#: lib/doctrans_web/error_messages.ex:209
+#: lib/doctrans_web/error_messages.ex:219
 #, elixir-autogen, elixir-format
 msgid "Document search is temporarily unavailable. Please try again."
 msgstr "Dokumentsökningen är tillfälligt otillgänglig. Försök igen."
@@ -681,12 +661,21 @@ msgstr "Försök igen"
 msgid "Retrying..."
 msgstr "Försöker igen..."
 
-#: lib/doctrans_web/live/document_live/index.ex:346
+#: lib/doctrans_web/live/document_live/components.ex:404
 #, elixir-autogen, elixir-format
-msgid "No documents were uploaded."
-msgstr "Inga dokument laddades upp."
+msgid "Maximum %{max} files can be uploaded at once"
+msgstr "Maximalt %{max} filer kan laddas upp åt gången"
 
-#: lib/doctrans_web/live/document_live/components.ex:297
+#: lib/doctrans_web/live/document_live/components.ex:361
 #, elixir-autogen, elixir-format
-msgid "These files were not uploaded"
-msgstr "Dessa filer laddades inte upp"
+msgid "This file is still uploading. Submit again to finish it."
+msgid_plural "These files are still uploading. Submit again to finish them."
+msgstr[0] "Den här filen laddas fortfarande upp. Skicka igen för att slutföra den."
+msgstr[1] "De här filerna laddas fortfarande upp. Skicka igen för att slutföra dem."
+
+#: lib/doctrans_web/live/document_live/components.ex:340
+#, elixir-autogen, elixir-format
+msgid "This file was not uploaded"
+msgid_plural "These files were not uploaded"
+msgstr[0] "Den här filen laddades inte upp"
+msgstr[1] "De här filerna laddades inte upp"

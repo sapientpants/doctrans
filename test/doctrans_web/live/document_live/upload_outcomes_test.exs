@@ -95,7 +95,7 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
   end
 
   describe "reporting a submission where nothing started" do
-    test "flashes the no-documents error and lists every rejected file", %{
+    test "lists every rejected file without a flash nobody could see", %{
       conn: conn,
       directory: directory
     } do
@@ -105,7 +105,9 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
           %{name: "second.pdf", content: "also not a pdf"}
         ])
 
-      assert has_element?(view, "#flash-error", "No documents were uploaded.")
+      # No flash for this case: the modal stays open to carry the list, and its
+      # backdrop covers the toast until the toast dismisses itself unseen.
+      refute has_element?(view, "#flash-error")
       refute has_element?(view, "#flash-info")
       refute has_element?(view, "#upload-started")
       assert has_element?(view, ~s{#upload-failures [data-failed-upload="first.pdf"]})
@@ -129,7 +131,7 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
 
       view = upload_files(conn, [%{name: "report.pdf", content: pdf_content()}])
 
-      assert has_element?(view, "#flash-error", "No documents were uploaded.")
+      refute has_element?(view, "#flash-error")
 
       assert has_element?(
                view,
@@ -173,7 +175,7 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       assert has_element?(
                view,
                ~s{#upload-failures [data-failed-upload="huge.pdf"]},
-               "File too large (2MB, max 1MB)"
+               "File too large (3MB, max 1MB)"
              )
 
       assert File.ls!(Path.join(directory, "documents")) == [document.id]
@@ -221,10 +223,54 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
              )
 
       # The file that never finished uploading is still listed, not thrown away with
-      # the entry that blocked it.
+      # the entry that blocked it, and it is named as still uploading rather than
+      # silently dropped from the report.
       assert has_element?(view, "#upload-modal", "report.pdf")
       refute has_element?(view, ~s{[data-failed-upload="report.pdf"]})
+      assert has_element?(view, ~s{#upload-pending [data-pending-upload="report.pdf"]})
       assert Documents.list_documents() == []
+    end
+
+    test "explains a rejected entry where it sits, before any submission", %{conn: conn} do
+      view = open_upload_modal(conn)
+
+      assert {:error, [[ref, :not_accepted]]} = add_file(view, "notes.txt", "plain text file")
+
+      # The reason is on the entry itself. `upload_errors/1` returns only the
+      # config's own errors, so without this the browser's rejection is explained
+      # nowhere until the user submits.
+      assert has_element?(
+               view,
+               ~s{[data-entry-error="#{ref}"]},
+               "Unsupported file format: .txt"
+             )
+    end
+
+    test "names no format for a file that has no extension", %{conn: conn} do
+      view = open_upload_modal(conn)
+
+      assert {:error, [[ref, :not_accepted]]} = add_file(view, "README", "plain text file")
+
+      # `Path.extname("README")` is "", which would render as a dangling colon.
+      assert has_element?(
+               view,
+               ~s{[data-entry-error="#{ref}"]},
+               "Only PDF, Word, OpenDocument, and RTF documents are accepted"
+             )
+    end
+
+    test "blocks the submission while an entry is in error", %{conn: conn} do
+      view = open_upload_modal(conn)
+      add_file(view, "report.pdf", pdf_content())
+
+      assert has_element?(view, "#start-translation-btn:not([disabled])")
+
+      assert {:error, [[_ref, :not_accepted]]} = add_file(view, "notes.txt", "plain text file")
+
+      # Submitting here would fail the whole config's preflight, and LiveView
+      # cancels every entry on that failure -- taking report.pdf with it and
+      # telling the server about neither.
+      assert has_element?(view, "#start-translation-btn[disabled]")
     end
   end
 
@@ -262,10 +308,28 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       add_file(view, "report.pdf", pdf_content())
       # `render_upload/2` does not fire the form's `phx-change`, which is what a
       # browser does when files are picked, so the change is sent explicitly.
-      view |> form("#upload-form", %{target_language: "en"}) |> render_change()
+      # `_target` is the file input's name, as the browser reports it.
+      render_change(view, "validate_upload", %{
+        "_target" => ["document"],
+        "target_language" => "en"
+      })
 
       refute has_element?(view, "#upload-failures")
       assert has_element?(view, "#upload-modal")
+    end
+
+    test "changing the target language keeps the failures on screen", %{conn: conn} do
+      view = upload_files(conn, [%{name: "broken.pdf", content: "not a pdf at all"}])
+
+      assert has_element?(view, "#upload-failures")
+
+      render_change(view, "validate_upload", %{
+        "_target" => ["target_language"],
+        "target_language" => "fr"
+      })
+
+      # Reading the list is not retrying the upload, so the explanation stays.
+      assert has_element?(view, ~s{#upload-failures [data-failed-upload="broken.pdf"]})
     end
 
     test "a submission with no entries clears the previous outcomes", %{conn: conn} do
@@ -323,8 +387,30 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       assert {:error, "dupe.pdf", :upload_start_failed} =
                UploadIntake.create_and_process({:ok, existing.id, "dupe.pdf", path}, "en")
 
-      assert Documents.list_documents() == []
+      # The insert never completed, so this call has no row to claim: cleanup takes
+      # the directory it was handed and nothing else. Deleting whatever happens to
+      # sit at that id is how a caller's own document would be destroyed by a
+      # failure that had nothing to do with it.
+      assert [kept] = Documents.list_documents()
+      assert kept.id == existing.id
       refute File.exists?(directory)
+    end
+
+    test "deletes only the document it created when the enqueue raises" do
+      # Past the insert the row is this call's own, so cleanup may delete it.
+      bystander = document_fixture()
+      {document_id, path} = stored_upload("original.pdf")
+
+      assert {:error, "notes.pdf", :upload_start_failed} =
+               UploadIntake.create_and_process(
+                 {:ok, document_id, "notes.pdf", nil},
+                 "en"
+               )
+
+      assert [kept] = Documents.list_documents()
+      assert kept.id == bystander.id
+      refute File.exists?(Documents.document_upload_dir(document_id))
+      refute File.exists?(path)
     end
   end
 

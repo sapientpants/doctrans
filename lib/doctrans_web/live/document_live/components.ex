@@ -4,6 +4,7 @@ defmodule DoctransWeb.DocumentLive.Components do
   """
   use DoctransWeb, :html
 
+  alias DoctransWeb.DocumentLive.UploadIntake
   alias DoctransWeb.ErrorMessages
 
   @doc """
@@ -142,6 +143,10 @@ defmodule DoctransWeb.DocumentLive.Components do
     default: [],
     doc: "files that did not reach the processing queue, as %{name:, message:} maps"
 
+  attr :pending, :list,
+    default: [],
+    doc: "names of files still uploading when the submission was reported"
+
   attr :started, :integer, default: 0, doc: "documents the same submission did queue"
 
   def upload_modal(assigns) do
@@ -172,7 +177,12 @@ defmodule DoctransWeb.DocumentLive.Components do
               <.upload_entries_list :if={@uploads.document.entries != []} upload={@uploads.document} />
               <.upload_error :for={err <- upload_errors(@uploads.document)} error={err} />
             </div>
-            <.upload_outcomes :if={@failures != []} failures={@failures} started={@started} />
+            <.upload_outcomes
+              :if={@failures != [] or @pending != []}
+              failures={@failures}
+              pending={@pending}
+              started={@started}
+            />
           </div>
 
           <div class="form-control mb-6">
@@ -195,7 +205,7 @@ defmodule DoctransWeb.DocumentLive.Components do
             <button
               type="submit"
               class="btn btn-primary"
-              disabled={@uploads.document.entries == []}
+              disabled={submit_blocked?(@uploads.document)}
               id="start-translation-btn"
             >
               {gettext("Start Translation")}
@@ -232,11 +242,32 @@ defmodule DoctransWeb.DocumentLive.Components do
   defp upload_entries_list(assigns) do
     ~H"""
     <div class="space-y-2">
-      <div :for={entry <- @upload.entries} class="flex items-center gap-2 bg-base-200 rounded-lg p-2">
+      <div
+        :for={entry <- @upload.entries}
+        class={[
+          "flex items-center gap-2 rounded-lg p-2",
+          if(entry.valid?, do: "bg-base-200", else: "bg-error/10 ring-1 ring-error/30")
+        ]}
+      >
         <.icon name="hero-document" class="w-6 h-6 text-primary shrink-0" />
         <div class="flex-1 text-left min-w-0">
           <p class="text-sm font-medium truncate">{entry.client_name}</p>
-          <progress class="progress progress-primary w-full h-1" value={entry.progress} max="100" />
+          <%!-- The reason sits on the file it belongs to. Without this a rejected
+                entry is explained nowhere: the config-level list below carries only
+                errors that belong to the whole upload, never to one entry. --%>
+          <p
+            :for={err <- upload_errors(@upload, entry)}
+            class="text-error text-xs mt-1"
+            data-entry-error={entry.ref}
+          >
+            {ErrorMessages.message(UploadIntake.entry_reason([err], entry))}
+          </p>
+          <progress
+            :if={entry.valid?}
+            class="progress progress-primary w-full h-1"
+            value={entry.progress}
+            max="100"
+          />
         </div>
         <button
           type="button"
@@ -280,24 +311,62 @@ defmodule DoctransWeb.DocumentLive.Components do
     """
   end
 
+  # A submission that would be cancelled wholesale is not worth offering. Without
+  # `auto_upload`, `phx-submit` runs the `allow_upload` preflight first, and one
+  # entry in error fails it for the whole config -- LiveView then cancels *every*
+  # entry, so a good file picked beside an oversized one is discarded with it and
+  # the server never hears about either. The button stays disabled until the user
+  # has removed what the per-entry errors point at.
+  defp submit_blocked?(upload) do
+    upload.entries == [] or upload_errors(upload) != [] or
+      Enum.any?(upload.entries, &(not &1.valid?))
+  end
+
   # Server-side outcomes, one line per file. The modal stays open to show them, and
   # it covers the flash toasts (z-999 against z-50), so what the submission did start
   # is reported in here as well rather than only in a flash nobody can see yet.
   defp upload_outcomes(assigns) do
     ~H"""
-    <div id="upload-outcomes" class="mt-3 space-y-2 text-left">
+    <div id="upload-outcomes" aria-live="polite" class="mt-3 space-y-2 text-left">
       <div :if={@started > 0} id="upload-started" class="alert alert-success items-start">
         <.icon name="hero-check-circle" class="size-5 shrink-0" />
         <p class="text-sm flex-1">{upload_started_message(@started)}</p>
       </div>
 
-      <div id="upload-failures" role="alert" class="alert alert-error items-start">
+      <div :if={@failures != []} id="upload-failures" class="alert alert-error items-start">
         <.icon name="hero-exclamation-circle" class="size-5 shrink-0" />
         <div class="flex-1 min-w-0">
-          <p class="font-semibold text-sm">{gettext("These files were not uploaded")}</p>
-          <ul class="mt-1 space-y-1">
+          <p class="font-semibold text-sm">
+            {ngettext(
+              "This file was not uploaded",
+              "These files were not uploaded",
+              length(@failures)
+            )}
+          </p>
+          <ul class="mt-1 space-y-1 max-h-40 overflow-y-auto">
             <li :for={failure <- @failures} class="text-sm" data-failed-upload={failure.name}>
               <span class="font-medium break-all">{failure.name}</span>: {failure.message}
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <%!-- Reported rather than dropped: a file still in flight when the submission
+            was accounted for would otherwise vanish from a modal that closed on the
+            strength of the files beside it. --%>
+      <div :if={@pending != []} id="upload-pending" class="alert alert-info items-start">
+        <.icon name="hero-arrow-path" class="size-5 shrink-0" />
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-sm">
+            {ngettext(
+              "This file is still uploading. Submit again to finish it.",
+              "These files are still uploading. Submit again to finish them.",
+              length(@pending)
+            )}
+          </p>
+          <ul class="mt-1 space-y-1 max-h-40 overflow-y-auto">
+            <li :for={name <- @pending} class="text-sm break-all" data-pending-upload={name}>
+              {name}
             </li>
           </ul>
         </div>
@@ -328,13 +397,16 @@ defmodule DoctransWeb.DocumentLive.Components do
     """
   end
 
-  defp error_to_string(:too_large), do: gettext("File is too large (max 100MB)")
-  defp error_to_string(:too_many_files), do: gettext("Maximum 10 files can be uploaded at once")
+  # Config-level errors only: `upload_errors/1` never returns an entry's own errors,
+  # and those go through `UploadIntake.entry_reason/2` so that the browser's
+  # rejection and the server's are worded by the same `ErrorMessages` clause.
+  defp error_to_string(:too_many_files) do
+    gettext("Maximum %{max} files can be uploaded at once", max: UploadIntake.max_entries())
+  end
 
-  defp error_to_string(:not_accepted),
-    do: gettext("Only PDF, Word, OpenDocument, and RTF documents are accepted")
-
-  defp error_to_string(err), do: gettext("Error: %{error}", error: inspect(err))
+  # Never `inspect/1` the term: it is rendered to the user, and a LiveView internal
+  # is not a sentence.
+  defp error_to_string(_err), do: ErrorMessages.message(:upload_failed)
 
   @doc """
   Returns the badge color class for a document status.
