@@ -355,6 +355,91 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
     end
   end
 
+  describe "Markdown tables in the viewer" do
+    # Shape an OCR pass produces from a ledger-like page: a header row, a
+    # delimiter row declaring per-column alignment, and numeric body rows.
+    @translated_table """
+    | Account     | Debit    | Credit |
+    | :---        | ---:     | :---:  |
+    | Cash        | 1,234.50 | 0.00   |
+    | Receivables | 98.00    | 12.00  |
+    | Total       | 1,332.50 | 12.00  |
+    """
+
+    @original_table """
+    | Konto       | Soll     | Haben |
+    | :---        | ---:     | :---: |
+    | Kasse       | 1.234,50 | 0,00  |
+    | Forderungen | 98,00    | 12,00 |
+    | Summe       | 1.332,50 | 12,00 |
+    """
+
+    test "renders a page's Markdown table as table elements in the markdown container", %{
+      conn: conn
+    } do
+      doc = completed_page_document(@original_table, @translated_table)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(view, ".markdown table thead th", "Account")
+      assert has_element?(view, ".markdown table thead th", "Credit")
+      assert has_element?(view, ".markdown table tbody td", "Receivables")
+      assert has_element?(view, ".markdown table tbody td", "1,234.50")
+      refute has_element?(view, ".markdown p", "| Account")
+    end
+
+    test "renders the original page's Markdown table as table elements when toggled", %{
+      conn: conn
+    } do
+      doc = completed_page_document(@original_table, @translated_table)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      view |> element("input[type='checkbox']") |> render_click()
+
+      assert has_element?(view, ".markdown table thead th", "Konto")
+      assert has_element?(view, ".markdown table tbody td", "Forderungen")
+      assert has_element?(view, ".markdown table tbody td", "1.234,50")
+      refute has_element?(view, ".markdown table tbody td", "Receivables")
+    end
+
+    test "renders markdown blocks as direct children of the markdown container", %{conn: conn} do
+      # `.markdown > :first-child` / `> :last-child` in app.css trim the margins at the
+      # container edges. A wrapper element around the rendered Markdown makes those
+      # rules match the wrapper instead, which restores the space they exist to remove.
+      doc = completed_page_document(@original_table, "## Ledger\n\n" <> @translated_table)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(view, ".markdown > h2", "Ledger")
+      assert has_element?(view, ".markdown > table tbody td", "Receivables")
+    end
+
+    test "carries the delimiter row's column alignment into the rendered cells", %{conn: conn} do
+      doc = completed_page_document(@original_table, @translated_table)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(view, ".markdown table thead th[align='right']", "Debit")
+      assert has_element?(view, ".markdown table tbody td[align='right']", "1,234.50")
+      assert has_element?(view, ".markdown table thead th[align='center']", "Credit")
+      assert has_element?(view, ".markdown table tbody td[align='left']", "Cash")
+    end
+
+    test "sanitizes table cell content while keeping alignment and structure", %{conn: conn} do
+      unsafe = """
+      | Item | Amount |
+      | :--- | ---:   |
+      | <script>alert('xss')</script>Widget | 1,234.50 |
+      | <span onclick="alert('xss')">Gadget</span> | 88.00 |
+      """
+
+      doc = completed_page_document(unsafe, unsafe)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(view, ".markdown table tbody td", "Widget")
+      assert has_element?(view, ".markdown table tbody td[align='right']", "1,234.50")
+      refute has_element?(view, ".markdown script")
+      refute has_element?(view, ".markdown [onclick]")
+    end
+  end
+
   describe "Reprocess functionality" do
     test "shows reprocess button for completed page", %{conn: conn} do
       doc = document_with_pages_fixture(%{}, 1)
@@ -504,5 +589,24 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       # Should show error flash
       assert render(view) =~ "Invalid model selection"
     end
+  end
+
+  defp completed_page_document(original_markdown, translated_markdown) do
+    doc = document_with_pages_fixture(%{}, 1)
+    [page] = doc.pages
+
+    {:ok, page} =
+      Documents.update_page_extraction(page, %{
+        extraction_status: "completed",
+        original_markdown: original_markdown
+      })
+
+    {:ok, _page} =
+      Documents.update_page_translation(page, %{
+        translation_status: "completed",
+        translated_markdown: translated_markdown
+      })
+
+    doc
   end
 end

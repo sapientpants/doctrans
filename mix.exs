@@ -104,7 +104,7 @@ defmodule Doctrans.MixProject do
       {:bandit, "~> 1.5"},
       {:uniq, "~> 0.6"},
       {:mdex, "~> 0.13"},
-      {:html_sanitize_ex, "~> 1.4"},
+      {:html_sanitize_ex, "~> 1.5"},
       {:pgvector, "~> 0.3"},
       {:oban, "~> 2.20"},
       # Code quality tools

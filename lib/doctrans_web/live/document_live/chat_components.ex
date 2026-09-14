@@ -71,7 +71,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
           id="chat-streaming"
           class="max-w-[95%] rounded-lg p-2.5 text-sm bg-base-200"
         >
-          <div class="prose prose-sm max-w-none">
+          <div class="markdown markdown-sm">
             <.markdown_content content={@chat_streaming_content} />
           </div>
         </div>
@@ -144,7 +144,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
       <div :if={@message.role == "user"} class="text-right">
         {@message.content}
       </div>
-      <div :if={@message.role == "assistant"} class="prose prose-sm max-w-none">
+      <div :if={@message.role == "assistant"} class="markdown markdown-sm">
         <.markdown_content content={@message.content} />
       </div>
       <div :if={@message.role == "error"} class="flex items-center gap-2">
@@ -169,6 +169,8 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
     # so the layout is preserved instead of collapsing into run-on text.
     html = render_markdown(assigns.content || "", hardbreaks: true)
     assigns = assign(assigns, :html, html)
-    ~H"<div>{raw(@html)}</div>"
+    # No wrapper element: the rendered blocks must be direct children of the
+    # `.markdown` container so its edge-margin rules (`.markdown > :first-child`) match.
+    ~H"{raw(@html)}"
   end
 end

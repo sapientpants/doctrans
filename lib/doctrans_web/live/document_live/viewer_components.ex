@@ -85,7 +85,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
       <.icon name="hero-exclamation-triangle" class="w-16 h-16" />
       <p class="mt-4">{gettext("An error occurred processing this page")}</p>
     </div>
-    <div :if={@page && show_content?(@page, @show_original)} class="prose prose-sm max-w-none">
+    <div :if={@page && show_content?(@page, @show_original)} class="markdown markdown-sm">
       <.markdown_content content={get_content(@page, @show_original)} />
     </div>
     <div :if={!@page} class="flex flex-col items-center justify-center h-64 text-base-content/50">
@@ -100,7 +100,9 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
   def markdown_content(assigns) do
     html = render_markdown(assigns.content || "")
     assigns = assign(assigns, :html, html)
-    ~H"<div>{raw(@html)}</div>"
+    # No wrapper element: the rendered blocks must be direct children of the
+    # `.markdown` container so its edge-margin rules (`.markdown > :first-child`) match.
+    ~H"{raw(@html)}"
   end
 
   defp show_content?(page, show_original) do
