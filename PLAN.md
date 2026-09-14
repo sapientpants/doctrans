@@ -711,12 +711,19 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   on `th`/`td` restricted to the three literal values a delimiter row can produce. Extending alone is not
   enough: without re-declaring both tags locally the generated fallback resolves their attributes against
   `BasicHTML`'s rules and drops `align` silently. The third is CSS. The Tailwind typography plugin is not
-  installed, so `.prose` is only the rules in `assets/css/app.css`, and headings, lists, blockquotes,
+  installed, so `.prose` was only the rules in `assets/css/app.css`, and headings, lists, blockquotes,
   code, rules and images had no styling at all under Preflight -- the document-typography half of this
-  item. `.prose` is now a self-contained sheet in `em` units with colours mixed from
-  `--color-base-content`, so it reads on `base-100` panes and `base-200` chat bubbles in both themes, and
-  `prose-sm` -- asked for by all three call sites and previously matching nothing -- tightens the heading
-  scale without changing body size.
+  item. The block is now a self-contained sheet whose type sizes and spacing are in `em` (hairlines and
+  radii stay in px/rem, which should not scale) with colours mixed from `--color-base-content`, so it
+  reads on `base-100` panes and `base-200` chat bubbles in both themes, and the compact modifier -- asked
+  for by all three call sites and previously matching nothing -- tightens the heading scale and the
+  vertical rhythm without changing body size.
+  Renamed in review from `.prose`/`.prose-sm` to `.markdown`/`.markdown-sm`. `.prose` is the Tailwind
+  Typography plugin's class, and daisyUI -- which *is* installed -- already ships `.prose` rules of its
+  own (`:root .prose` typography variables, and a live `.prose &` rule on `.btn`). Sharing the name meant
+  a future `@plugin "@tailwindcss/typography"` would silently collide 300 lines of these rules with
+  generated ones of comparable specificity. The call sites also dropped `max-w-none`, which existed only
+  to undo a `max-width` the plugin sets and this sheet never did.
   This is a regression, not an omission. `f70f1ee` added the `.prose table` rules for Earmark, which
   renders GFM tables by default; `18b5ecc` swapped Earmark for MDEx as an unrelated dependency change,
   and comrak's extensions are all off by default. Those table rules had been dead since 10 July 2026, and
@@ -740,12 +747,12 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   anchors lose the `id` they point at, and superscript is unwrapped so `x^2^` becomes `x2` -- each a net
   regression without sanitizer work of its own.
   Found in review: the new edge-margin rules use the child combinator
-  (`.prose > :first-child`), but `markdown_content/1` wrapped the rendered HTML in a bare `<div>`, so
+  (`.markdown > :first-child`), but `markdown_content/1` wrapped the rendered HTML in a bare `<div>`, so
   they matched the wrapper and the first and last block kept their margins -- measured at 12px of dead
   space at the top and bottom of every viewer page and chat bubble, 28.8px when the page opens on a
   heading, and worse than the rules they replaced, which were descendant selectors. The wrapper is gone
   from both components; a LiveView test in each path asserts the rendered blocks are direct children of
-  `.prose`, so the contract the CSS depends on is pinned rather than assumed.
+  `.markdown`, so the contract the CSS depends on is pinned rather than assumed.
   Found in review and recorded rather than fixed: a GFM table runs to the next blank line, so a sentence
   written on the line straight after the last row becomes another row. It is what every GFM renderer
   does, and chat is where it shows, since an answer may close its table without a blank line. A test
@@ -756,10 +763,30 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   growing 3.6x across the LiveView diff. Cost is linear in cell count, not super-linear, and no model
   produces such a page in practice, so no size cap was added here; U03 is where viewer work moves off
   the LiveView process.
+  Found in review and fixed: `mix.exs` required `{:html_sanitize_ex, "~> 1.4"}`, but `use HtmlSanitizeEx,
+  extend: :basic_html` and the module-level `sanitize/1` it generates arrived in 1.5.0, so the requirement
+  admitted a version that cannot compile the scrubber. `mix.lock` pins 1.5.5, so this never failed here;
+  the constraint is now `~> 1.5`.
+  Found in review and fixed: `.prose a` used `--color-primary`, which is the same lightness in both
+  themes and measures 2.8:1 on the light surface -- below AA for body-sized text, and this is the first
+  body-sized text in the app to use it. Links now mix it 70% toward `--color-base-content`, which darkens
+  on light and lightens on dark, measuring 4.8:1 and 6.4:1 with no per-theme override.
+  Found in review and fixed: the table block hand-rolled four `color-mix` percentages inline (cell
+  border, header underline, header fill, zebra) immediately after the sheet introduced `--md-rule`/
+  `--md-muted`/`--md-fill` for exactly that purpose, so a grep for the tokens would not have found them.
+  All four are tokens now. The compact modifier scaled only `--md-block-gap` while paragraph and list
+  margins were hard-coded literals, so paragraph rhythm -- the dominant spacing on an OCR'd page -- was
+  identical at both scales despite the comment claiming otherwise; a second `--md-tight-gap` token now
+  carries the intra-list spacing and every margin derives from one of the two.
+  Found in review and recorded rather than fixed: `display: block` on a table drops its table semantics
+  for assistive tech in WebKit, so the head/row relationship is not announced there. The usual mitigation
+  is `role="table"`, which is unavailable -- the scrubber allows no `role`, and there is no wrapper to
+  hang it on by design. Accepted, because the alternative is a table that either widens the pane or is
+  crushed to min-content, and recorded in the CSS comment beside the layout tradeoffs it sits with.
   Evidence: `lib/doctrans_web/live/document_live/markdown_helpers.ex` (`mdex_options/1`,
   `sanitize_html/1`), `lib/doctrans_web/live/document_live/markdown_scrubber.ex`,
   `lib/doctrans_web/live/document_live/viewer_components.ex` and `chat_components.ex`
-  (`markdown_content/1`), `assets/css/app.css` (`.prose`). 22 unit tests in `MarkdownHelpersTest` and 9
+  (`markdown_content/1`), `assets/css/app.css` (`.markdown`). 23 unit tests in `MarkdownHelpersTest` and 10
   LiveView tests across `document_live_show_test.exs` and `show_chat_test.exs`, every claim pinned by a
   mutation that fails a test, measured rather than asserted: of the 85 tests, dropping the extension from
   the viewer branch fails 11, from the chat branch 8, from both 19, reverting the scrubber to

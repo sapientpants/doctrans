@@ -374,15 +374,17 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
     | Summe       | 1.332,50 | 12,00 |
     """
 
-    test "renders a page's Markdown table as table elements in the prose container", %{conn: conn} do
+    test "renders a page's Markdown table as table elements in the markdown container", %{
+      conn: conn
+    } do
       doc = completed_page_document(@original_table, @translated_table)
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
-      assert has_element?(view, ".prose table thead th", "Account")
-      assert has_element?(view, ".prose table thead th", "Credit")
-      assert has_element?(view, ".prose table tbody td", "Receivables")
-      assert has_element?(view, ".prose table tbody td", "1,234.50")
-      refute has_element?(view, ".prose p", "| Account")
+      assert has_element?(view, ".markdown table thead th", "Account")
+      assert has_element?(view, ".markdown table thead th", "Credit")
+      assert has_element?(view, ".markdown table tbody td", "Receivables")
+      assert has_element?(view, ".markdown table tbody td", "1,234.50")
+      refute has_element?(view, ".markdown p", "| Account")
     end
 
     test "renders the original page's Markdown table as table elements when toggled", %{
@@ -393,31 +395,31 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       view |> element("input[type='checkbox']") |> render_click()
 
-      assert has_element?(view, ".prose table thead th", "Konto")
-      assert has_element?(view, ".prose table tbody td", "Forderungen")
-      assert has_element?(view, ".prose table tbody td", "1.234,50")
-      refute has_element?(view, ".prose table tbody td", "Receivables")
+      assert has_element?(view, ".markdown table thead th", "Konto")
+      assert has_element?(view, ".markdown table tbody td", "Forderungen")
+      assert has_element?(view, ".markdown table tbody td", "1.234,50")
+      refute has_element?(view, ".markdown table tbody td", "Receivables")
     end
 
-    test "renders markdown blocks as direct children of the prose container", %{conn: conn} do
-      # `.prose > :first-child` / `> :last-child` in app.css trim the margins at the
+    test "renders markdown blocks as direct children of the markdown container", %{conn: conn} do
+      # `.markdown > :first-child` / `> :last-child` in app.css trim the margins at the
       # container edges. A wrapper element around the rendered Markdown makes those
       # rules match the wrapper instead, which restores the space they exist to remove.
       doc = completed_page_document(@original_table, "## Ledger\n\n" <> @translated_table)
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
-      assert has_element?(view, ".prose > h2", "Ledger")
-      assert has_element?(view, ".prose > table tbody td", "Receivables")
+      assert has_element?(view, ".markdown > h2", "Ledger")
+      assert has_element?(view, ".markdown > table tbody td", "Receivables")
     end
 
     test "carries the delimiter row's column alignment into the rendered cells", %{conn: conn} do
       doc = completed_page_document(@original_table, @translated_table)
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
-      assert has_element?(view, ".prose table thead th[align='right']", "Debit")
-      assert has_element?(view, ".prose table tbody td[align='right']", "1,234.50")
-      assert has_element?(view, ".prose table thead th[align='center']", "Credit")
-      assert has_element?(view, ".prose table tbody td[align='left']", "Cash")
+      assert has_element?(view, ".markdown table thead th[align='right']", "Debit")
+      assert has_element?(view, ".markdown table tbody td[align='right']", "1,234.50")
+      assert has_element?(view, ".markdown table thead th[align='center']", "Credit")
+      assert has_element?(view, ".markdown table tbody td[align='left']", "Cash")
     end
 
     test "sanitizes table cell content while keeping alignment and structure", %{conn: conn} do
@@ -431,10 +433,10 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       doc = completed_page_document(unsafe, unsafe)
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
-      assert has_element?(view, ".prose table tbody td", "Widget")
-      assert has_element?(view, ".prose table tbody td[align='right']", "1,234.50")
-      refute has_element?(view, ".prose script")
-      refute has_element?(view, ".prose [onclick]")
+      assert has_element?(view, ".markdown table tbody td", "Widget")
+      assert has_element?(view, ".markdown table tbody td[align='right']", "1,234.50")
+      refute has_element?(view, ".markdown script")
+      refute has_element?(view, ".markdown [onclick]")
     end
   end
 

@@ -6,6 +6,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Repo
+  alias DoctransWeb.DocumentLive.ChatComponents
   alias DoctransWeb.DocumentLive.ChatSession
   alias DoctransWeb.DocumentLive.Show
 
@@ -430,18 +431,18 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
       view |> element("header button[phx-click='toggle_chat']") |> render_click()
 
-      message = "#chat_messages-#{answer.id} .prose"
+      message = "#chat_messages-#{answer.id} .markdown"
       assert has_element?(view, "#{message} table thead th", "Account")
       assert has_element?(view, "#{message} table tbody td", "Receivables")
       assert has_element?(view, "#{message} table tbody td", "1,234.50")
       refute has_element?(view, "#{message} p", "| Account")
     end
 
-    test "renders answer blocks as direct children of the prose container", %{
+    test "renders answer blocks as direct children of the markdown container", %{
       conn: conn,
       document: document
     } do
-      # Same edge-margin contract as the viewer: `.prose > :first-child` in app.css
+      # Same edge-margin contract as the viewer: `.markdown > :first-child` in app.css
       # only matches when nothing wraps the rendered Markdown.
       question = Conversations.start_question(document.id, "What are the balances?")
       {:ok, answer} = Conversations.finish(question, "assistant", @answer_table, [])
@@ -449,9 +450,49 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
       view |> element("header button[phx-click='toggle_chat']") |> render_click()
 
-      message = "#chat_messages-#{answer.id} .prose"
+      message = "#chat_messages-#{answer.id} .markdown"
       assert has_element?(view, "#{message} > p", "Here are the balances")
       assert has_element?(view, "#{message} > table tbody td", "Receivables")
+    end
+
+    test "renders a table in the still-streaming answer, not just the finalized one" do
+      # `#chat-streaming` is the third `.markdown` container and shares
+      # `markdown_content/1` with the finalized path, but renders partial Markdown.
+      # Rendered as a component: deltas only apply while a turn is in flight, and
+      # driving the real submit path races the async turn resetting the assign.
+      partial = "Here are the balances:\n\n| Account | Debit |\n"
+
+      assigns = %{
+        chat_messages: [],
+        chat_loading: true,
+        chat_streaming_content: partial,
+        embeddings_ready: true
+      }
+
+      document = render_panel(assigns)
+
+      # A header row with no delimiter row yet is not a table.
+      assert Enum.empty?(LazyHTML.query(document, "#chat-streaming .markdown table"))
+
+      completed =
+        %{
+          assigns
+          | chat_streaming_content: partial <> "| --- | ---: |\n| Receivables | 1,234.50 |\n"
+        }
+
+      document = render_panel(completed)
+
+      streaming = "#chat-streaming .markdown"
+
+      assert LazyHTML.query(document, "#{streaming} > p") |> Enum.map(&LazyHTML.text/1) == [
+               "Here are the balances:"
+             ]
+
+      assert LazyHTML.query(document, "#{streaming} table thead th")
+             |> Enum.map(&LazyHTML.text/1) == ["Account", "Debit"]
+
+      assert LazyHTML.query(document, "#{streaming} table tbody td[align='right']")
+             |> Enum.map(&LazyHTML.text/1) == ["1,234.50"]
     end
 
     test "carries the answer table's column alignment into the rendered cells", %{
@@ -464,7 +505,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
       view |> element("header button[phx-click='toggle_chat']") |> render_click()
 
-      message = "#chat_messages-#{answer.id} .prose"
+      message = "#chat_messages-#{answer.id} .markdown"
       assert has_element?(view, "#{message} table thead th[align='right']", "Debit")
       assert has_element?(view, "#{message} table tbody td[align='right']", "1,234.50")
       assert has_element?(view, "#{message} table thead th[align='center']", "Credit")
@@ -488,7 +529,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
       view |> element("header button[phx-click='toggle_chat']") |> render_click()
 
-      message = "#chat_messages-#{answer.id} .prose"
+      message = "#chat_messages-#{answer.id} .markdown"
       assert has_element?(view, "#{message} table tbody td", "Widget")
       assert has_element?(view, "#{message} table tbody td[align='right']", "1,234.50")
       refute has_element?(view, "#{message} script")
@@ -514,6 +555,10 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
     page
     |> context_chunk(page.original_markdown)
     |> Map.merge(%{chunk_index: nil, translated_markdown: page.translated_markdown})
+  end
+
+  defp render_panel(assigns) do
+    ChatComponents.chat_panel(assigns) |> rendered_to_string() |> LazyHTML.from_fragment()
   end
 
   defp create_completed_document_with_embeddings do

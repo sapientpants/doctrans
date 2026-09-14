@@ -142,6 +142,31 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
                "scrubber diverged from basic_html for: #{sample}"
       end
     end
+
+    # The test above is relative: it would still pass if a future html_sanitize_ex
+    # started allowing extra table-cell attributes, because both sides would gain
+    # them together. MarkdownScrubber's moduledoc asserts that `align` is the only
+    # attribute surviving on a cell, so pin that absolutely.
+    test "keeps align as the only attribute on a table cell" do
+      html =
+        MarkdownHelpers.sanitize_html("""
+        <table><tbody><tr>
+        <td align="right" colspan="2" rowspan="3" class="c" style="color:red"
+            width="4" title="t" id="i" role="cell" onclick="alert('x')">x</td>
+        </tr></tbody></table>
+        """)
+
+      document = document(html)
+
+      assert count(document, "td[align='right']") == 1
+
+      assert Enum.empty?(
+               LazyHTML.query(
+                 document,
+                 "td[colspan], td[rowspan], td[class], td[style], td[width], td[title], td[id], td[role], td[onclick]"
+               )
+             )
+    end
   end
 
   describe "render_markdown/2" do
@@ -190,7 +215,13 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
     end
 
     test "renders the same table through the hardbreaks chat path" do
-      document = @ocr_table |> MarkdownHelpers.render_markdown(hardbreaks: true) |> document()
+      # The paragraph's single newline must still become a `<br>` while the table
+      # rows become table structure. Asserting the `<br>` count outside the table
+      # keeps the in-table assertion below from passing vacuously: before the
+      # table extension, every one of these lines was one paragraph of `<br>`s.
+      answer = "Totals below:\nper the invoice.\n\n" <> @ocr_table
+
+      document = answer |> MarkdownHelpers.render_markdown(hardbreaks: true) |> document()
 
       assert count(document, "table") == 1
       assert count(document, "thead th") == 4
@@ -198,7 +229,9 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       assert count(document, "tbody td") == 12
       assert texts(document, "thead th") == ["Item", "Qty", "Unit Price", "Total"]
       assert texts(document, "tbody tr:first-child td") == ["Widget", "12", "3.50", "42.00"]
-      refute LazyHTML.to_html(LazyHTML.query(document, "table")) =~ "<br"
+
+      assert count(document, "p br") == 1
+      assert count(document, "table br") == 0
     end
 
     test "renders a table emitted mid-answer with single newlines around it" do
@@ -268,16 +301,23 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       html = MarkdownHelpers.render_markdown(markdown)
       document = document(html)
 
-      refute html =~ "<script"
-      refute html =~ "onclick"
-      refute html =~ "javascript:"
-
       assert Enum.empty?(
                LazyHTML.query(
                  document,
                  "script, iframe, style, [onclick], a[href^='javascript:']"
                )
              )
+
+      # Belt-and-braces on the serialized output, so a payload that LazyHTML
+      # parses into a shape the selectors above miss still fails the test.
+      refute html =~ "<script"
+      refute html =~ "onclick"
+
+      # `javascript:` never reaches the scrubber: MDEx blanks a non-http(s) link
+      # target itself. Asserted on the anchor rather than as `refute html =~
+      # "javascript:"`, which would pass even if the scrubber stopped running.
+      assert texts(document, "tbody a") == ["three"]
+      assert count(document, "tbody a[href='']") == 1
 
       assert count(document, "tbody td") == 5
 

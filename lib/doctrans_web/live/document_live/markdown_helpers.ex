@@ -62,12 +62,8 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpers do
   @doc """
   Sanitizes HTML to prevent XSS attacks from user-uploaded content.
 
-  Uses `DoctransWeb.DocumentLive.MarkdownScrubber`, which allows exactly the tags
-  and attributes `HtmlSanitizeEx.basic_html/1` allows — stripping scripts, event
-  handlers, and `javascript:` URLs — plus `align` on table cells so that Markdown
-  column alignment survives.
+  See `DoctransWeb.DocumentLive.MarkdownScrubber` for the allowed tag and
+  attribute set, and why it is what it is.
   """
-  def sanitize_html(html) do
-    MarkdownScrubber.sanitize(html)
-  end
+  defdelegate sanitize_html(html), to: MarkdownScrubber, as: :sanitize
 end
