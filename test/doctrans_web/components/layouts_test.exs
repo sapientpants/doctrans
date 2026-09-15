@@ -69,9 +69,7 @@ defmodule DoctransWeb.LayoutsTest do
       for id <- ["#client-error", "#server-error"] do
         notice = LazyHTML.query(document, id)
 
-        assert LazyHTML.to_tree(notice) != [], "expected #{id} to be rendered"
         assert LazyHTML.attribute(notice, "phx-hook") == []
-        assert LazyHTML.attribute(notice, "data-flash-key") == []
         assert [phx_click] = LazyHTML.attribute(notice, "phx-click")
         refute phx_click =~ "lv:clear-flash"
       end
@@ -94,26 +92,14 @@ defmodule DoctransWeb.LayoutsTest do
     test "flash-backed notices still auto-dismiss" do
       document = render_flash_group()
 
-      for {id, key} <- [{"#flash-info", "info"}, {"#flash-error", "error"}] do
+      for id <- ["#flash-info", "#flash-error"] do
         notice = LazyHTML.query(document, id)
 
         assert LazyHTML.attribute(notice, "phx-hook") == ["AutoDismiss"]
-        assert LazyHTML.attribute(notice, "data-flash-key") == [key]
         assert [phx_click] = LazyHTML.attribute(notice, "phx-click")
         assert phx_click =~ "lv:clear-flash"
       end
     end
-  end
-
-  # Renders the flash group with both flash kinds present, so all four notices --
-  # the two flash-backed ones and the two connectivity banners -- are in the tree.
-  defp render_flash_group do
-    assigns = %{flash: %{"info" => "Saved", "error" => "Failed"}}
-
-    rendered_to_string(~H"""
-    <Layouts.flash_group flash={@flash} />
-    """)
-    |> LazyHTML.from_fragment()
   end
 
   describe "theme_toggle/1" do
@@ -130,5 +116,16 @@ defmodule DoctransWeb.LayoutsTest do
       assert html =~ "data-phx-theme=\"light\""
       assert html =~ "data-phx-theme=\"dark\""
     end
+  end
+
+  # Renders the flash group with both flash kinds present, so all four notices --
+  # the two flash-backed ones and the two connectivity banners -- are in the tree.
+  defp render_flash_group do
+    assigns = %{flash: %{"info" => "Saved", "error" => "Failed"}}
+
+    rendered_to_string(~H"""
+    <Layouts.flash_group flash={@flash} />
+    """)
+    |> LazyHTML.from_fragment()
   end
 end

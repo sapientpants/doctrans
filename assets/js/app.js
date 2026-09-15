@@ -25,25 +25,22 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/doctrans"
 import topbar from "../vendor/topbar"
 
+// How long a transient flash notice stays on screen before it dismisses itself.
+const DISMISS_AFTER_MS = 5000
+
 // Custom hooks
 const Hooks = {
-  // Fades a transient flash out after a few seconds and then clears it on the
-  // server, so the LiveView -- not this hook -- removes its own DOM. Notices
-  // that must outlive a timer (the `phx-disconnected` connectivity banners,
-  // which are found by id when the socket drops) render without this hook.
+  // Dismisses a transient flash on a timer by running the very `phx-click` the
+  // server already rendered for a manual dismiss, so both paths animate the same
+  // way and clear the same state. Notices that must outlive a timer (the
+  // `phx-disconnected` connectivity banners, which are found by id when the
+  // socket drops) render without this hook.
   AutoDismiss: {
     mounted() {
       this.message = this.el.textContent
       this.scheduleDismiss()
     },
     updated() {
-      if (this.dismissing) {
-        // A patch strips inline styles the server markup does not carry, so
-        // re-apply the fade rather than leaving a half-faded notice behind.
-        this.fadeOut()
-        return
-      }
-
       // Restart the countdown only when the notice actually says something new.
       // Keying off the patch itself would let a frequently-rendering LiveView
       // hold a flash on screen indefinitely.
@@ -52,42 +49,20 @@ const Hooks = {
       }
 
       this.message = this.el.textContent
+      // A dismissal already under way left `display: none` on this node, and a
+      // patch carrying a replacement message reuses it. Undo that, or the new
+      // message is patched into a hidden node and never seen.
+      this.el.style.display = ""
       this.scheduleDismiss()
     },
     destroyed() {
-      this.cancelTimers()
+      clearTimeout(this.dismissTimer)
     },
     scheduleDismiss() {
-      this.cancelTimers()
-      this.dismissing = false
-      this.el.style.opacity = ""
-      this.dismissTimer = setTimeout(() => this.dismiss(), 5000)
-    },
-    cancelTimers() {
       clearTimeout(this.dismissTimer)
-      clearTimeout(this.clearTimer)
-    },
-    fadeOut() {
-      this.el.style.transition = "opacity 300ms ease-out"
-      this.el.style.opacity = "0"
-    },
-    dismiss() {
-      this.dismissing = true
-      this.fadeOut()
-      this.clearTimer = setTimeout(() => {
-        const key = this.el.dataset.flashKey
-        if (!key) {
-          // Nothing to clear on the server: this notice is not flash-backed.
-          this.el.remove()
-          return
-        }
-
-        // Clear the server-side flash so the message cannot come back on the
-        // next render, and let LiveView take the node out. The push rejects
-        // while the socket is down; drop the node ourselves rather than leave
-        // an invisible overlay sitting over the page.
-        this.pushEvent("lv:clear-flash", {key}).catch(() => this.el.remove())
-      }, 300)
+      this.dismissTimer = setTimeout(() => {
+        this.js().exec(this.el.getAttribute("phx-click"))
+      }, DISMISS_AFTER_MS)
     }
   },
   ScrollToBottom: {

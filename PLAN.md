@@ -1110,28 +1110,38 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `phx-disconnected`/`phx-connected` handlers now always have a node to target, however long the page
   has been open. The distinction is one attribute rather than an id allowlist in the hook, because the
   hook cannot know which notices a future caller will want to keep mounted; `flash/1` documents the
-  invariant at the attribute itself. Timed dismissal also stopped tearing out DOM that LiveView owns:
-  the hook fades the notice, then pushes `lv:clear-flash` for the kind it reads from `data-flash-key`
-  and lets the LiveView remove its own node on the next render. Previously it called `el.remove()` and
-  left the message in the server-side flash map, so any later render put the dismissed message back.
-  Clearing is keyed off the flash map rather than off `:transient`, because the two are orthogonal: a
-  notice rendered from the inner block -- the connectivity banners, or the component's own documented
-  example -- has no entry to clear, and pushing `lv:clear-flash` for it would have discarded an
-  unrelated message of the same kind while leaving the node itself parked at `opacity: 0`, invisible
-  but still swallowing clicks over the top-right corner of the page. Those notices get no
-  `data-flash-key` and the hook removes them directly. Conversely a flash-backed notice clears its
-  flash when clicked whether or not it auto-dismisses, so dismissing one by hand cannot be undone by
-  the next render. The push is also caught: `pushEvent` rejects outright while the socket is down,
-  which is precisely when a dismissal can land, so the hook falls back to removing the node rather
-  than leaving that same invisible overlay behind. The countdown restarts on the notice's text rather
-  than on the patch that delivered it -- a replaced message is readable for its full five seconds,
-  while a LiveView that repatches every hundred milliseconds cannot hold one on screen forever -- and
-  a patch arriving mid-fade re-applies the fade instead of cancelling it, since patching strips inline
-  styles the server markup does not carry. Timers are cancelled in `destroyed`.
+  invariant at the attribute itself. Both banners now render through a private `connectivity_notice/1`
+  in `flash_group/1`, so `transient={false}` and the handler pair are stated once.
+  Timed dismissal also stopped tearing out DOM that LiveView owns. Rather than reimplement dismissal in
+  JavaScript, the hook now runs the `phx-click` command the server already rendered
+  (`this.js().exec(...)`, LiveView 1.1.33). One definition therefore drives both paths: a flash-backed
+  notice pushes `lv:clear-flash` and hides, so a dismissed message cannot return on the next render;
+  anything else just hides. This removed the hand-rolled fade, the `data-flash-key` attribute, the
+  `dismissing` flag and the `pushEvent(...).catch(...)` fallback. It also removed the invisible-overlay
+  hazard those parts existed to manage: `hide/1` ends at `display: none`, where the old fade left the
+  notice at `opacity: 0` -- fully hit-testable, `position: fixed`, `z-50` -- until the server replied,
+  which on a socket that dropped after the push meant up to the 30s `PUSH_TIMEOUT`. Auto-dismiss and
+  click-dismiss also no longer animate differently.
+  Only a notice whose text *came from* the flash map may clear it, and that is now keyed on the inner
+  block being empty rather than on the flash entry merely existing. A caller passing both a slot and a
+  flash of the same kind previously rendered the slot text while carrying the clear: dismissing it
+  discarded an unrelated message the user never saw, and because `:if` stayed truthy from the slot,
+  LiveView never removed the node -- it parked invisible and click-blocking for the rest of the session.
+  No caller did this, but nothing stopped the next one. `core_components_test.exs` now pins it.
+  The countdown restarts on the notice's text rather than on the patch that delivered it -- a replaced
+  message is readable for its full five seconds, while a LiveView that repatches every hundred
+  milliseconds cannot hold one on screen forever. A patch carrying a replacement message also clears
+  the inline `display` left by a dismissal already under way, so the replacement is not patched into a
+  hidden node. The timer is cancelled in `destroyed`.
+  Known limitation: re-flashing a message whose text is *identical* to the one on screen does not
+  restart the countdown, so the second message can be visible only for the remainder of the first
+  one's five seconds. There is no signal to key on -- the flash map, the server's render and the DOM
+  are all byte-identical -- so distinguishing the two needs a change token threaded through every
+  `put_flash/3` call site. This behaviour predates U06; the branch neither introduced nor fixed it.
   Verified against the served page: `#client-error` and `#server-error` render with no `phx-hook`, no
-  `data-flash-key`, no `lv:clear-flash` in their click handler, and with `hidden` and both connection
-  handlers intact. The timing behaviour itself is not covered by tests -- the repo has no JavaScript
-  test runner -- so the hook's five-second path was not exercised automatically.
+  `lv:clear-flash` in their click handler, and with `hidden` and both connection handlers intact. The
+  timing behaviour itself is not covered by tests -- the repo has no JavaScript test runner -- so the
+  hook's five-second path was not exercised automatically.
   Evidence: `lib/doctrans_web/components/core_components.ex` (`flash/1`, the `:transient` attribute),
   `lib/doctrans_web/components/layouts.ex` (`flash_group/1`), `assets/js/app.js` (`AutoDismiss`).
 

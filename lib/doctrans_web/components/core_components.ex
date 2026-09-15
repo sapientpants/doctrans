@@ -25,17 +25,9 @@ defmodule DoctransWeb.CoreComponents do
 
   attr :transient, :boolean,
     default: true,
-    doc: """
-    whether the notice should dismiss itself after a few seconds. Set to `false` for notices
-    that must stay mounted until their own state resolves, such as the connectivity banners
-    driven by `phx-connected`/`phx-disconnected`: those handlers target the element by id, so
-    it has to still be in the DOM when the connection drops.
-
-    This is independent of whether the notice is backed by the flash map. Clearing server-side
-    flash state is driven by the flash map alone -- a notice rendered from the inner block has
-    no entry to clear, and pushing `lv:clear-flash` for it would discard an unrelated message
-    of the same kind.
-    """
+    doc:
+      "whether the notice dismisses itself on a timer; `false` for banners driven by " <>
+        "`phx-connected`/`phx-disconnected`, which need the node to survive"
 
   attr :rest, :global, doc: "the arbitrary HTML attributes to add to the flash container"
 
@@ -47,19 +39,24 @@ defmodule DoctransWeb.CoreComponents do
       |> assign_new(:id, fn -> "flash-#{assigns.kind}" end)
       |> assign(:flash_msg, Phoenix.Flash.get(assigns.flash, assigns.kind))
 
+    # Only a notice whose text *came from* the flash map may clear it. Keying off
+    # `@flash_msg` alone would let a notice rendering its inner block discard an
+    # unrelated message of the same kind that the user never saw.
+    assigns =
+      assign(assigns, :from_flash?, assigns.inner_block == [] and assigns.flash_msg != nil)
+
     ~H"""
     <div
       :if={msg = render_slot(@inner_block) || @flash_msg}
       id={@id}
       phx-click={
-        if @flash_msg do
+        if @from_flash? do
           JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")
         else
           hide("##{@id}")
         end
       }
       phx-hook={@transient && "AutoDismiss"}
-      data-flash-key={@transient && @flash_msg && @kind}
       role="alert"
       class="toast toast-top toast-end z-50"
       {@rest}
