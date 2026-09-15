@@ -14,7 +14,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   import DoctransWeb.DocumentLive.ViewerComponents
 
   import DoctransWeb.DocumentLive.PageViewer,
-    only: [zoom_controls: 1, navigation: 1, view_tabs: 1]
+    only: [zoom_controls: 1, navigation: 1, view_tabs: 1, content_panel_label: 1]
 
   import DoctransWeb.DocumentLive.ReprocessModal, only: [reprocess_modal: 1, can_reprocess?: 1]
   import DoctransWeb.DocumentLive.ChatComponents
@@ -29,6 +29,17 @@ defmodule DoctransWeb.DocumentLive.Show do
     retry_reprocess_models
     reprocess_page
     reprocess_document
+  )
+
+  # Every event `PageViewer` owns, forwarded the same way.
+  @page_viewer_events ~w(
+    prev_page
+    next_page
+    goto_page
+    toggle_original
+    zoom_in
+    zoom_out
+    select_view_tab
   )
 
   @impl true
@@ -103,8 +114,7 @@ defmodule DoctransWeb.DocumentLive.Show do
     {:noreply, socket}
   end
 
-  def handle_event(event, params, socket)
-      when event in ~w(prev_page next_page goto_page toggle_original zoom_in zoom_out select_view_tab) do
+  def handle_event(event, params, socket) when event in @page_viewer_events do
     PageViewer.handle_event(event, params, socket)
   end
 

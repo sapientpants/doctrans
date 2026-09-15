@@ -18,7 +18,6 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Repo
 
   describe "panel switcher below lg" do
     setup do
@@ -91,14 +90,14 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
 
       assert has_element?(view, "#original-panel")
       assert has_element?(view, "#translated-panel")
-      assert has_element?(view, "#translated-panel span", "Translated Content")
+      assert has_element?(view, "#translated-panel .markdown")
       assert has_element?(view, "#original-panel button[phx-click='zoom_in']")
 
       view |> element("#view-tab-translated") |> render_click()
 
       assert has_element?(view, "#original-panel")
       assert has_element?(view, "#translated-panel")
-      assert has_element?(view, "#translated-panel span", "Translated Content")
+      assert has_element?(view, "#translated-panel .markdown")
       assert has_element?(view, "#original-panel button[phx-click='zoom_in']")
     end
 
@@ -114,9 +113,9 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
       for params <- [%{"tab" => "nonsense"}, %{"tab" => ""}, %{}] do
         render_click(view, "select_view_tab", params)
 
-        assert view_tab(view) == :translated
         assert has_element?(view, ~s{#view-tab-translated[aria-pressed="true"]})
         assert_selected(view, "#translated-panel")
+        assert_unselected(view, "#original-panel")
       end
 
       view |> element("#view-tab-original") |> render_click()
@@ -124,9 +123,9 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
       for params <- [%{"tab" => "nonsense"}, %{}] do
         render_click(view, "select_view_tab", params)
 
-        assert view_tab(view) == :original
         assert has_element?(view, ~s{#view-tab-original[aria-pressed="true"]})
         assert_selected(view, "#original-panel")
+        assert_unselected(view, "#translated-panel")
       end
     end
 
@@ -139,17 +138,13 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
       assert has_element?(view, ~s{#viewer-tabs[role="group"]})
-      assert String.trim(attribute(view, "#viewer-tabs", "aria-label")) != ""
+      assert attribute(view, "#viewer-tabs", "aria-label") == "Document panels"
       assert has_element?(view, ~s{#viewer-tabs[class~="lg:hidden"]})
 
       # Each tab names the panel it governs, and that panel is on the page.
       for tab <- ~w(#view-tab-original #view-tab-translated) do
-        panel = attribute(view, tab, "aria-controls")
-        assert has_element?(view, "##{panel}")
+        assert has_element?(view, "##{attribute(view, tab, "aria-controls")}")
       end
-
-      assert attribute(view, "#view-tab-original", "aria-controls") == "original-panel"
-      assert attribute(view, "#view-tab-translated", "aria-controls") == "translated-panel"
     end
 
     test "the translated tab is labelled like the panel it opens", %{
@@ -157,20 +152,25 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
       document: document
     } do
       # With "Show Original" on, that panel shows the untranslated text, and a tab
-      # still reading "Translated Content" would name the wrong thing.
+      # still reading "Translated Content" would name the wrong thing. Asserted as
+      # an equality between the two labels rather than against literal English,
+      # so rewording the msgid is not a test failure while desynchronising the
+      # two copies of it still is.
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
-      assert text_of(view, "#view-tab-translated") == "Translated Content"
-      assert has_element?(view, "#translated-panel span", "Translated Content")
+      assert labels_agree(view)
+      translated = text_of(view, "#view-tab-translated")
 
       view |> element("#translated-panel input[phx-click='toggle_original']") |> render_click()
 
-      assert text_of(view, "#view-tab-translated") == "Original Content"
-      assert has_element?(view, "#translated-panel span", "Original Content")
+      assert labels_agree(view)
+      original = text_of(view, "#view-tab-translated")
+      assert original != translated
 
       view |> element("#translated-panel input[phx-click='toggle_original']") |> render_click()
 
-      assert text_of(view, "#view-tab-translated") == "Translated Content"
+      assert labels_agree(view)
+      assert text_of(view, "#view-tab-translated") == translated
     end
 
     test "opening the chat narrows both panels and closing restores them", %{
@@ -198,7 +198,39 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
       end
     end
 
-    test "the viewer contributes exactly one main landmark", %{conn: conn, document: document} do
+    test "the selected tab survives turning the page", %{conn: conn} do
+      # `:view_tab` and the page number are both PageViewer state, but only the
+      # page number is URL-driven. Moving the tab assign into `apply_params/2` --
+      # a plausible tidy-up, since that is where the other navigation state is
+      # handled -- would reset a reader to the translated panel on every page
+      # turn, below `lg`, and pass every other assertion in this file.
+      document = viewer_document(2)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      view |> element("#view-tab-original") |> render_click()
+      view |> element("#next-page") |> render_click()
+
+      assert has_element?(view, ~s{#view-tab-original[aria-pressed="true"]})
+      assert_selected(view, "#original-panel")
+
+      view |> element("#previous-page") |> render_click()
+
+      assert has_element?(view, ~s{#view-tab-original[aria-pressed="true"]})
+      assert_selected(view, "#original-panel")
+    end
+
+    test "the pager stays reachable once the page scrolls", %{conn: conn, document: document} do
+      # Below `lg` the viewer grows and the page scrolls, which puts the pager off
+      # the bottom unless it sticks. Its `z-10` is the floor the chat overlay's
+      # `z-30`/`z-40` is chosen against, so both halves are pinned here.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      assert has_element?(view, ~s{#page-navigation[class~="sticky"]})
+      assert has_element?(view, ~s{#page-navigation[class~="z-10"]})
+      assert has_element?(view, ~s{#page-navigation[class~="lg:static"]})
+    end
+
+    test "the page has exactly one main landmark", %{conn: conn, document: document} do
       # The layout already renders the page's `<main>`; a second one nested inside
       # it gives a screen reader two "main content" landmarks to choose between.
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
@@ -213,7 +245,7 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
 
   describe "chat overlay below lg" do
     setup do
-      %{document: create_completed_document_with_embeddings()}
+      %{document: completed_document_with_embedding_fixture()}
     end
 
     test "the open chat is a named aside that overlays narrow viewports and docks at lg", %{
@@ -288,40 +320,78 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
       assert has_element?(view, ~s{#chat-new-messages[class~="hidden"]})
       assert has_element?(view, "#chat-new-messages button#chat-jump-to-latest")
     end
+
+    test "every element the ChatScroll hook resolves is named and present", %{
+      conn: conn,
+      document: document
+    } do
+      # The hook looks these up by id and reports a miss to the console, which no
+      # CI run reads. Each data attribute is followed to the element it names, so
+      # renaming one without the other fails here instead of silently leaving a
+      # button that never binds.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      for attribute <- ~w(data-new-messages data-jump-to-latest data-live-region) do
+        assert has_element?(view, "##{attribute(view, "#chat-scroll", attribute)}")
+      end
+
+      # This one is a selector rather than an id, since it is matched against a
+      # submit event's target.
+      assert attribute(view, "#chat-scroll", "data-follow-on-submit") == "#chat-form"
+    end
+
+    test "the transcript is announced and reachable without a mouse", %{
+      conn: conn,
+      document: document
+    } do
+      # A scroll container only a pointer can reach makes "hold your reading
+      # position" unusable in Safari, and an affordance with no live region is
+      # invisible to a screen reader -- which is precisely the reader who cannot
+      # see that an answer landed off-screen.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      assert has_element?(view, ~s{#chat-scroll[tabindex="0"]})
+      assert has_element?(view, ~s{#chat-scroll[role="log"]})
+      assert attribute(view, "#chat-scroll", "aria-label") == "Chat transcript"
+
+      # Rendered at all times and never `hidden`: toggling `display` on a live
+      # region is not reliably announced, so the hook changes its text instead.
+      assert has_element?(view, ~s{#chat-new-messages-announcement[aria-live="polite"]})
+      assert has_element?(view, ~s{#chat-new-messages-announcement[phx-update="ignore"]})
+      refute has_element?(view, ~s{#chat-new-messages-announcement[class~="hidden"]})
+      assert attribute(view, "#chat-new-messages-announcement", "data-announce") != ""
+    end
+
+    test "the overlay carries the dialog affordances it deliberately is not getting for free", %{
+      conn: conn,
+      document: document
+    } do
+      # Consequence of the `aria-modal` decision above: Escape-to-close and focus
+      # returning to the trigger have to be wired by hand, and the overlay has to
+      # leave a strip of backdrop uncovered or tap-to-dismiss is unreachable on a
+      # phone narrower than the panel.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      assert has_element?(view, ~s{#chat-panel[phx-hook="ChatDismiss"]})
+      assert attribute(view, "#chat-panel", "data-return-focus") == "#toggle-chat"
+      assert attribute(view, "#chat-panel", "data-overlay-media") == "(max-width: 1023px)"
+
+      refute has_element?(view, ~s{#chat-panel[class~="w-full"]})
+      assert has_element?(view, ~s{#chat-panel[class~="lg:w-80"]})
+    end
   end
 
-  defp viewer_document do
-    document = document_fixture(%{status: "completed", total_pages: 1})
-    completed_page_fixture(document)
+  defp viewer_document(page_count \\ 1) do
+    document = document_fixture(%{status: "completed", total_pages: page_count})
+
+    for page_number <- 1..page_count do
+      completed_page_fixture(document, %{page_number: page_number})
+    end
+
     Documents.get_document_with_pages!(document.id)
-  end
-
-  # Mirrors the chat setup in `show_chat_test.exs`: a completed page carrying an
-  # embedding, so the chat opens with a usable context.
-  defp create_completed_document_with_embeddings do
-    {:ok, document} =
-      Documents.create_document(%{
-        title: "Test Document",
-        original_filename: "test.pdf",
-        target_language: "de",
-        status: "completed",
-        total_pages: 1
-      })
-
-    Repo.insert!(%Doctrans.Documents.Page{
-      id: Ecto.UUID.generate(),
-      document_id: document.id,
-      page_number: 1,
-      image_path: "documents/#{document.id}/pages/page_1.png",
-      original_markdown: "Test content for chat",
-      translated_markdown: "Testinhalt für Chat",
-      extraction_status: "completed",
-      translation_status: "completed",
-      embedding_status: "completed",
-      embedding: Pgvector.new(List.duplicate(0.1, 1024))
-    })
-
-    document
   end
 
   # A panel the narrow viewport shows: laid out (`flex`), not hidden.
@@ -337,7 +407,11 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
     refute has_element?(view, ~s{#{panel}[class~="flex"]})
   end
 
-  defp view_tab(view), do: :sys.get_state(view.pid).socket.assigns.view_tab
+  # The tab and the panel header render the same label from one helper; this is
+  # what would catch them drifting apart.
+  defp labels_agree(view) do
+    text_of(view, "#view-tab-translated") == text_of(view, "#translated-panel > div > span")
+  end
 
   defp main_count(view) do
     view

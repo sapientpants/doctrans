@@ -71,38 +71,42 @@ const Hooks = {
     }
   },
   // Follows streamed chat output, but only while the reader is already at the
-  // bottom of the transcript.
+  // bottom of the transcript. Scrolling up holds that position and reveals the
+  // "new messages" affordance instead; returning to the bottom, clicking it, or
+  // asking a question re-pins. Scrolling up alone never reveals the affordance:
+  // it announces content that arrived unseen, not content already read.
   //
-  // The hook this replaces slammed `scrollTop = scrollHeight` on every mutation
-  // and every patch, so scrolling up to re-read an earlier answer was undone by
-  // the very next streamed token -- while an answer was being written there was
-  // no way to hold a reading position at all. `pinned` records whether the
-  // reader is within CHAT_FOLLOW_THRESHOLD_PX of the bottom; only then does new
-  // content scroll. Otherwise the `#chat-new-messages` affordance appears and
-  // the scroll position is left exactly where the reader put it. Scrolling up
-  // on its own never reveals the affordance: it announces content that arrived
-  // unseen, not content already read.
+  // `updated()` cannot replace the MutationObserver. The finalized messages live
+  // in a `phx-update="stream"` container that is a *child* of this element, so
+  // an append patches the child without calling `updated()` here, and a streamed
+  // delta only rewrites text inside the streaming answer -- hence `characterData`
+  // alongside `childList`/`subtree`.
   //
-  // A MutationObserver is still what detects that content. `updated()` is not
-  // enough: the finalized messages live in a `phx-update="stream"` container
-  // that is a *child* of this element, so an append patches the child and never
-  // calls `updated()` here, and a streamed delta only rewrites text inside
-  // `#chat-streaming` -- hence `characterData` alongside `childList`/`subtree`.
+  // Neither observer sees a *resize*, and a container that gets shorter fires no
+  // scroll event either, because `scrollTop` stays legal when the maximum offset
+  // grows. Browser zoom, a window resize, crossing the `lg` breakpoint where the
+  // panel flips from viewport height to column height, and the soft keyboard all
+  // land there, so a ResizeObserver re-pins as well.
   //
-  // The affordance sits outside the scroll container in a `phx-update="ignore"`
-  // wrapper. Its visibility is client state that no server assign knows about,
-  // so without `ignore` the next unrelated patch would restore the rendered
-  // `hidden` and drop the notice mid-answer.
+  // Every element this reaches for is named by a `data-` attribute rather than a
+  // hardcoded id, and a miss is reported: each of these failures is otherwise
+  // silent, leaving an affordance that never appears or a button that never
+  // binds.
   ChatScroll: {
     mounted() {
-      this.newMessages = document.getElementById("chat-new-messages")
-      this.jumpButton = document.getElementById("chat-jump-to-latest")
+      this.newMessages = this.resolve("data-new-messages")
+      this.jumpButton = this.resolve("data-jump-to-latest")
+      this.liveRegion = this.resolve("data-live-region")
+      this.submitSelector = this.el.getAttribute("data-follow-on-submit")
 
       this.pinned = true
       this.scrollToBottom()
 
       this.observer = new MutationObserver(() => this.contentArrived())
       this.observer.observe(this.el, { childList: true, subtree: true, characterData: true })
+
+      this.resizeObserver = new ResizeObserver(() => this.containerResized())
+      this.resizeObserver.observe(this.el)
 
       this.onScroll = () => this.readerScrolled()
       this.el.addEventListener("scroll", this.onScroll, { passive: true })
@@ -112,7 +116,8 @@ const Hooks = {
       // DialogFocus: LiveView repatches the form as the input disables and
       // re-enables, and a listener on a node that gets swapped out is lost.
       this.onSubmit = event => {
-        if (event.target && event.target.id === "chat-form") {
+        const target = event.target
+        if (this.submitSelector && target instanceof Element && target.matches(this.submitSelector)) {
           this.followLatest()
         }
       }
@@ -127,6 +132,9 @@ const Hooks = {
       if (this.observer) {
         this.observer.disconnect()
       }
+      if (this.resizeObserver) {
+        this.resizeObserver.disconnect()
+      }
       this.el.removeEventListener("scroll", this.onScroll)
       document.removeEventListener("submit", this.onSubmit, true)
       if (this.jumpButton) {
@@ -134,10 +142,34 @@ const Hooks = {
       }
     },
     contentArrived() {
+      // `pinned` is refreshed from the `scroll` event, which the browser only
+      // dispatches on the next rendering frame, while this callback is a
+      // microtask running at the end of every task -- and each streamed delta
+      // arrives as its own WebSocket message task. A delta landing between the
+      // reader's gesture and that frame would otherwise still see the stale
+      // `true` and yank them back down, which is the exact thing this hook
+      // exists to prevent. Appending content leaves `scrollTop` untouched while
+      // `scrollHeight` grows, so an offset below the one we last set ourselves
+      // is always the reader's own move.
+      if (this.pinned && this.autoTop !== undefined && this.el.scrollTop < this.autoTop - 1) {
+        this.pinned = false
+      }
+
       if (this.pinned) {
         this.scrollToBottom()
+      } else if (this.nearBottom()) {
+        // Content shrinks as well as grows: interrupting an answer drops the
+        // streaming block. With nothing left below the fold there is nothing to
+        // announce, and a shrink to shorter than the container fires no scroll
+        // event that would clear the notice later.
+        this.toggleAffordance(false)
       } else {
         this.toggleAffordance(true)
+      }
+    },
+    containerResized() {
+      if (this.pinned) {
+        this.scrollToBottom()
       }
     },
     readerScrolled() {
@@ -159,10 +191,77 @@ const Hooks = {
     },
     scrollToBottom() {
       this.el.scrollTop = this.el.scrollHeight
+      // Remembered so `contentArrived` can tell our own scrolling apart from
+      // the reader's.
+      this.autoTop = this.el.scrollTop
     },
     toggleAffordance(visible) {
       if (this.newMessages) {
         this.newMessages.classList.toggle("hidden", !visible)
+      }
+
+      // The button is announced by changing the *text* of a region that stays
+      // rendered, not by unhiding one: toggling `display` on an `aria-live`
+      // element is not reliably announced across screen readers. Writing the
+      // same text twice can re-announce, so an unchanged value is left alone.
+      if (this.liveRegion) {
+        const announcement = visible ? this.liveRegion.getAttribute("data-announce") || "" : ""
+        if (this.liveRegion.textContent !== announcement) {
+          this.liveRegion.textContent = announcement
+        }
+      }
+    },
+    resolve(attribute) {
+      const id = this.el.getAttribute(attribute)
+      const el = id && document.getElementById(id)
+      if (!el) {
+        console.error(`ChatScroll: ${attribute}="${id}" matched no element`)
+      }
+      return el
+    }
+  },
+  // Escape-to-close and focus-return for the chat overlay -- the two things a
+  // modal dialog would provide for free. The panel deliberately is not one
+  // (`ChatInput` declines to focus inside an `aria-modal` element, which would
+  // stop the input being refocused after every answer), so they are added here.
+  //
+  // Only while it actually is an overlay: from `lg:` up the panel is an in-flow
+  // sidebar, where Escape closing a docked column would be a surprise.
+  ChatDismiss: {
+    mounted() {
+      this.onKeyDown = event => {
+        if (event.key !== "Escape" || !this.isOverlay()) {
+          return
+        }
+        // An open dialog owns Escape. Without this, dismissing the reprocess
+        // dialog would also close the chat behind it.
+        if (document.querySelector('[role="dialog"][aria-modal="true"]')) {
+          return
+        }
+        event.preventDefault()
+        this.pushEvent("toggle_chat", {})
+      }
+      document.addEventListener("keydown", this.onKeyDown, true)
+    },
+    destroyed() {
+      document.removeEventListener("keydown", this.onKeyDown, true)
+      this.restoreFocus()
+    },
+    isOverlay() {
+      const query = this.el.getAttribute("data-overlay-media")
+      return !query || window.matchMedia(query).matches
+    },
+    // Only when the closing panel took focus down with it. A reader who has
+    // already clicked or tabbed elsewhere is left where they are.
+    restoreFocus() {
+      const active = document.activeElement
+      if (active && active !== document.body && active !== document.documentElement) {
+        return
+      }
+      const selector = this.el.getAttribute("data-return-focus")
+      const target = selector && document.querySelector(selector)
+      if (target && target.isConnected && !target.disabled) {
+        target.focus()
       }
     }
   },

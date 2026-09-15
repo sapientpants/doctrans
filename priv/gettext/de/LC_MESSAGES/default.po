@@ -144,7 +144,7 @@ msgstr "Neueste"
 msgid "Newest First"
 msgstr "Neueste zuerst"
 
-#: lib/doctrans_web/live/document_live/page_viewer.ex:210
+#: lib/doctrans_web/live/document_live/page_viewer.ex:239
 #: lib/doctrans_web/live/search_live.ex:394
 #, elixir-autogen, elixir-format
 msgid "Next"
@@ -180,19 +180,18 @@ msgstr "Älteste"
 msgid "Oldest First"
 msgstr "Älteste zuerst"
 
-#: lib/doctrans_web/live/document_live/page_viewer.ex:143
-#: lib/doctrans_web/live/document_live/show.html.heex:120
+#: lib/doctrans_web/live/document_live/page_viewer.ex:173
 #, elixir-autogen, elixir-format
 msgid "Original Content"
 msgstr "Originalinhalt"
 
-#: lib/doctrans_web/live/document_live/page_viewer.ex:124
+#: lib/doctrans_web/live/document_live/page_viewer.ex:142
 #: lib/doctrans_web/live/document_live/show.html.heex:99
 #, elixir-autogen, elixir-format
 msgid "Original Page"
 msgstr "Originalseite"
 
-#: lib/doctrans_web/live/document_live/page_viewer.ex:197
+#: lib/doctrans_web/live/document_live/page_viewer.ex:226
 #, elixir-autogen, elixir-format
 msgid "Page %{current} of %{total}"
 msgstr "Seite %{current} von %{total}"
@@ -218,7 +217,7 @@ msgstr "Polnisch"
 msgid "Portuguese"
 msgstr "Portugiesisch"
 
-#: lib/doctrans_web/live/document_live/page_viewer.ex:193
+#: lib/doctrans_web/live/document_live/page_viewer.ex:222
 #: lib/doctrans_web/live/search_live.ex:383
 #, elixir-autogen, elixir-format
 msgid "Previous"
@@ -258,7 +257,7 @@ msgstr "Suchen..."
 msgid "Searching..."
 msgstr "Suche läuft..."
 
-#: lib/doctrans_web/live/document_live/show.html.heex:136
+#: lib/doctrans_web/live/document_live/show.html.heex:134
 #, elixir-autogen, elixir-format
 msgid "Show Original"
 msgstr "Original anzeigen"
@@ -288,8 +287,7 @@ msgstr "Übersetzung starten"
 msgid "Target Language"
 msgstr "Zielsprache"
 
-#: lib/doctrans_web/live/document_live/page_viewer.ex:144
-#: lib/doctrans_web/live/document_live/show.html.heex:121
+#: lib/doctrans_web/live/document_live/page_viewer.ex:174
 #, elixir-autogen, elixir-format
 msgid "Translated Content"
 msgstr "Übersetzter Inhalt"
@@ -366,7 +364,7 @@ msgid_plural "%{count} documents uploaded! Processing will begin shortly."
 msgstr[0] "Dokument hochgeladen! Die Verarbeitung beginnt in Kürze."
 msgstr[1] "%{count} Dokumente hochgeladen! Die Verarbeitung beginnt in Kürze."
 
-#: lib/doctrans_web/live/document_live/show.html.heex:197
+#: lib/doctrans_web/live/document_live/show.html.heex:195
 #: lib/doctrans_web/live/document_live/upload_components.ex:52
 #, elixir-autogen, elixir-format
 msgid "Documents"
@@ -463,18 +461,18 @@ msgstr "Translation Model"
 msgid "PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Up to 10 files"
 msgstr "PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Bis zu 10 Dateien"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:169
+#: lib/doctrans_web/live/document_live/chat_components.ex:207
 #, elixir-autogen, elixir-format
 msgid "Ask a question..."
 msgstr "Stellen Sie eine Frage..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:87
+#: lib/doctrans_web/live/document_live/chat_components.ex:110
 #, elixir-autogen, elixir-format
 msgid "Ask questions about this document"
 msgstr "Stellen Sie Fragen zu diesem Dokument"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:39
 #: lib/doctrans_web/live/document_live/chat_components.ex:46
+#: lib/doctrans_web/live/document_live/chat_components.ex:56
 #: lib/doctrans_web/live/document_live/show.html.heex:58
 #, elixir-autogen, elixir-format
 msgid "Chat"
@@ -486,13 +484,13 @@ msgstr "Chat"
 msgid "Chat with document"
 msgstr "Mit Dokument chatten"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:52
-#: lib/doctrans_web/live/document_live/chat_components.ex:53
+#: lib/doctrans_web/live/document_live/chat_components.ex:62
+#: lib/doctrans_web/live/document_live/chat_components.ex:63
 #, elixir-autogen, elixir-format
 msgid "Close chat"
 msgstr "Chat schließen"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:151
+#: lib/doctrans_web/live/document_live/chat_components.ex:189
 #, elixir-autogen, elixir-format
 msgid "Document is still being processed. Chat will be available soon."
 msgstr "Das Dokument wird noch verarbeitet. Der Chat wird verfügbar sein, sobald die Verarbeitung abgeschlossen ist."
@@ -502,7 +500,7 @@ msgstr "Das Dokument wird noch verarbeitet. Der Chat wird verfügbar sein, sobal
 msgid "Failed to search the document. Please try again."
 msgstr "Das Dokument konnte nicht durchsucht werden. Bitte versuchen Sie es erneut."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:89
+#: lib/doctrans_web/live/document_live/chat_components.ex:112
 #, elixir-autogen, elixir-format
 msgid "I'll find relevant content and answer based on it."
 msgstr "Ich finde relevante Inhalte und antworte darauf basierend."
@@ -517,8 +515,8 @@ msgstr "Bitte geben Sie eine Frage ein."
 msgid "Private document translation powered by local AI"
 msgstr "Private Dokumentenübersetzung mit lokaler KI"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:180
-#: lib/doctrans_web/live/document_live/chat_components.ex:181
+#: lib/doctrans_web/live/document_live/chat_components.ex:218
+#: lib/doctrans_web/live/document_live/chat_components.ex:219
 #, elixir-autogen, elixir-format
 msgid "Send message"
 msgstr "Nachricht senden"
@@ -528,7 +526,7 @@ msgstr "Nachricht senden"
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Entschuldigung, es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:220
+#: lib/doctrans_web/live/document_live/chat_components.ex:258
 #, elixir-autogen, elixir-format
 msgid "Thinking..."
 msgstr "Denke nach..."
@@ -543,7 +541,7 @@ msgstr "Laden Sie ein Dokument hoch, um zu beginnen. Die gesamte Verarbeitung er
 msgid "Your documents never leave your device"
 msgstr "Ihre Dokumente verlassen nie Ihr Gerät"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:218
+#: lib/doctrans_web/live/document_live/chat_components.ex:256
 #, elixir-autogen, elixir-format
 msgid "Checking the sources..."
 msgstr "Quellen werden überprüft..."
@@ -553,27 +551,27 @@ msgstr "Quellen werden überprüft..."
 msgid "Failed to fetch models from OpenAI"
 msgstr "Modelle konnten nicht von OpenAI abgerufen werden"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:217
+#: lib/doctrans_web/live/document_live/chat_components.ex:255
 #, elixir-autogen, elixir-format
 msgid "Searching the document..."
 msgstr "Dokument wird durchsucht..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:216
+#: lib/doctrans_web/live/document_live/chat_components.ex:254
 #, elixir-autogen, elixir-format
 msgid "Understanding your question..."
 msgstr "Ihre Frage wird verarbeitet..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:219
+#: lib/doctrans_web/live/document_live/chat_components.ex:257
 #, elixir-autogen, elixir-format
 msgid "Writing the answer..."
 msgstr "Antwort wird verfasst..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:60
+#: lib/doctrans_web/live/document_live/chat_components.ex:70
 #, elixir-autogen, elixir-format
 msgid "Chat is saved on this device. The latest 100 messages are kept per document."
 msgstr "Der Chat wird auf diesem Gerät gespeichert. Die letzten 100 Nachrichten werden pro Dokument aufbewahrt."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:68
+#: lib/doctrans_web/live/document_live/chat_components.ex:78
 #, elixir-autogen, elixir-format
 msgid "The last question has no saved answer. Send it again to retry."
 msgstr "Für die letzte Frage ist keine Antwort gespeichert. Senden Sie sie erneut, um es noch einmal zu versuchen."
@@ -589,7 +587,7 @@ msgid "Document queued for reprocessing"
 msgstr "Dokument zur erneuten Verarbeitung eingereiht"
 
 #: lib/doctrans_web/error_messages.ex:178
-#: lib/doctrans_web/live/document_live/show.ex:295
+#: lib/doctrans_web/live/document_live/show.ex:305
 #: lib/doctrans_web/live/document_live/show.html.heex:79
 #, elixir-autogen, elixir-format
 msgid "Original upload unavailable. Re-upload this document to process it again."
@@ -616,7 +614,7 @@ msgid "Queuing…"
 msgstr "Wird eingereiht…"
 
 #: lib/doctrans_web/live/document_live/reprocess_modal.ex:278
-#: lib/doctrans_web/live/document_live/show.ex:292
+#: lib/doctrans_web/live/document_live/show.ex:302
 #, elixir-autogen, elixir-format
 msgid "Reprocess document"
 msgstr "Dokument erneut verarbeiten"
@@ -685,7 +683,7 @@ msgid_plural "These files were not uploaded"
 msgstr[0] "Diese Datei wurde nicht hochgeladen"
 msgstr[1] "Diese Dateien wurden nicht hochgeladen"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:163
+#: lib/doctrans_web/live/document_live/chat_components.ex:201
 #, elixir-autogen, elixir-format
 msgid "Ask a question about this document"
 msgstr "Stellen Sie eine Frage zu diesem Dokument"
@@ -721,8 +719,8 @@ msgstr "Seite"
 msgid "Remove %{file}"
 msgstr "%{file} entfernen"
 
-#: lib/doctrans_web/live/document_live/show.html.heex:130
-#: lib/doctrans_web/live/document_live/show.html.heex:131
+#: lib/doctrans_web/live/document_live/show.html.heex:128
+#: lib/doctrans_web/live/document_live/show.html.heex:129
 #, elixir-autogen, elixir-format
 msgid "Reprocess page"
 msgstr "Seite erneut verarbeiten"
@@ -747,12 +745,12 @@ msgstr "Helles Design verwenden"
 msgid "Use system theme"
 msgstr "Systemdesign verwenden"
 
-#: lib/doctrans_web/live/document_live/page_viewer.ex:170
+#: lib/doctrans_web/live/document_live/page_viewer.ex:196
 #, elixir-autogen, elixir-format
 msgid "Zoom in"
 msgstr "Vergrößern"
 
-#: lib/doctrans_web/live/document_live/page_viewer.ex:159
+#: lib/doctrans_web/live/document_live/page_viewer.ex:185
 #, elixir-autogen, elixir-format
 msgid "Zoom out"
 msgstr "Verkleinern"
@@ -832,13 +830,18 @@ msgstr "Übersetzung: Durchlauf fehlgeschlagen"
 msgid "Translation: unknown"
 msgstr "Übersetzung: unbekannt"
 
-#: lib/doctrans_web/live/document_live/page_viewer.ex:105
+#: lib/doctrans_web/live/document_live/page_viewer.ex:123
 #, elixir-autogen, elixir-format
 msgid "Document panels"
 msgstr "Dokumentbereiche"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:125
-#: lib/doctrans_web/live/document_live/chat_components.ex:128
+#: lib/doctrans_web/live/document_live/chat_components.ex:150
+#: lib/doctrans_web/live/document_live/chat_components.ex:166
 #, elixir-autogen, elixir-format
 msgid "New messages"
 msgstr "Neue Nachrichten"
+
+#: lib/doctrans_web/live/document_live/chat_components.ex:100
+#, elixir-autogen, elixir-format
+msgid "Chat transcript"
+msgstr "Chat-Verlauf"

@@ -1,6 +1,7 @@
 defmodule DoctransWeb.DocumentLive.ShowChatTest do
   use DoctransWeb.ConnCase, async: true
 
+  import Doctrans.Fixtures
   import Phoenix.LiveViewTest
 
   alias Doctrans.Chat.Conversations
@@ -12,7 +13,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
   describe "chat panel" do
     setup do
-      document = create_completed_document_with_embeddings()
+      document = completed_document_with_embedding_fixture()
       %{document: document}
     end
 
@@ -354,7 +355,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
   describe "sending chat messages" do
     setup do
-      document = create_completed_document_with_embeddings()
+      document = completed_document_with_embedding_fixture()
       %{document: document}
     end
 
@@ -407,7 +408,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
   describe "Markdown tables in chat answers" do
     setup do
-      %{document: create_completed_document_with_embeddings()}
+      %{document: completed_document_with_embedding_fixture()}
     end
 
     # Answers quote OCR'd tables back verbatim, so the chat path must render the
@@ -559,37 +560,6 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
   defp render_panel(assigns) do
     ChatComponents.chat_panel(assigns) |> rendered_to_string() |> LazyHTML.from_fragment()
-  end
-
-  defp create_completed_document_with_embeddings do
-    {:ok, document} =
-      Documents.create_document(%{
-        title: "Test Document",
-        original_filename: "test.pdf",
-        target_language: "de",
-        status: "completed",
-        total_pages: 1
-      })
-
-    # Use direct Repo insert to set deterministic embedding with Pgvector type
-    embedding =
-      List.duplicate(0.1, 1024)
-      |> Pgvector.new()
-
-    Repo.insert!(%Doctrans.Documents.Page{
-      id: Ecto.UUID.generate(),
-      document_id: document.id,
-      page_number: 1,
-      image_path: "documents/#{document.id}/pages/page_1.png",
-      original_markdown: "Test content for chat",
-      translated_markdown: "Testinhalt für Chat",
-      extraction_status: "completed",
-      translation_status: "completed",
-      embedding_status: "completed",
-      embedding: embedding
-    })
-
-    document
   end
 
   defp create_document_without_embeddings do

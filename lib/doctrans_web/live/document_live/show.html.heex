@@ -1,6 +1,6 @@
 <Layouts.app flash={@flash}>
   <%= if @document do %>
-    <div class="flex min-h-dvh flex-col bg-base-100 max-w-full lg:h-dvh lg:min-h-0 lg:overflow-hidden">
+    <div class="flex min-h-dvh flex-col bg-base-100 max-w-full fitscreen:h-dvh fitscreen:min-h-0 fitscreen:overflow-hidden">
       <%!-- Header --%>
       <header class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 pr-8 py-3 border-b border-base-300 bg-base-200">
         <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
@@ -84,22 +84,22 @@
       <.view_tabs view_tab={@view_tab} show_original={@show_original} />
 
       <%!-- Main content - stacked tabs below lg, split screen at lg: and up --%>
-      <div class="flex flex-1 flex-col lg:min-h-0 lg:flex-row lg:overflow-hidden">
+      <div class="flex flex-1 flex-col lg:flex-row fitscreen:min-h-0 fitscreen:overflow-hidden">
         <%!-- Left panel - Page image --%>
         <div
           id="original-panel"
           class={[
             "w-full flex-col bg-base-200 transition-all duration-200",
-            "lg:flex lg:min-h-0 lg:border-r lg:border-base-300",
+            "lg:flex lg:border-r lg:border-base-300 fitscreen:min-h-0",
             if(@view_tab == :original, do: "flex", else: "hidden"),
             if(@chat_open, do: "lg:w-2/5", else: "lg:w-1/2")
           ]}
         >
           <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-base-300">
-            <span class="text-sm font-medium">{gettext("Original Page")}</span>
+            <span class="hidden text-sm font-medium lg:inline">{gettext("Original Page")}</span>
             <.zoom_controls zoom_level={@zoom_level} />
           </div>
-          <div class="flex-1 p-4 flex items-start justify-center lg:min-h-0 lg:overflow-auto">
+          <div class="flex-1 p-4 flex items-start justify-center overflow-auto fitscreen:min-h-0">
             <.page_image page={@current_page} zoom_level={@zoom_level} />
           </div>
         </div>
@@ -109,16 +109,14 @@
           id="translated-panel"
           class={[
             "w-full flex-col transition-all duration-200",
-            "lg:flex lg:min-h-0",
+            "lg:flex fitscreen:min-h-0",
             if(@view_tab == :translated, do: "flex", else: "hidden"),
             if(@chat_open, do: "lg:w-2/5", else: "lg:w-1/2")
           ]}
         >
           <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-base-300">
-            <span class="text-sm font-medium">
-              {if @show_original,
-                do: gettext("Original Content"),
-                else: gettext("Translated Content")}
+            <span class="hidden text-sm font-medium lg:inline">
+              {content_panel_label(@show_original)}
             </span>
             <div class="flex items-center gap-2">
               <button
@@ -144,7 +142,7 @@
             </div>
           </div>
           <.page_provenance page={@current_page} />
-          <div class="flex-1 p-6 lg:min-h-0 lg:overflow-auto">
+          <div class="flex-1 p-6 overflow-auto fitscreen:min-h-0">
             <.page_content page={@current_page} show_original={@show_original} />
           </div>
         </div>

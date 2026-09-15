@@ -26,7 +26,14 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
          It is *not* `role="dialog" aria-modal="true"`: `ChatInput` refuses to
          take focus while such a dialog is open, and the chat input has to keep
          being refocused after every answer. An `<aside>` with a name gives it a
-         landmark instead. --%>
+         landmark instead -- and the `ChatDismiss` hook hand-adds the two things
+         a modal would have provided, Escape-to-close and focus back to
+         `#toggle-chat`, neither of which a landmark brings with it.
+
+         The overlay stops short of the full width so a strip of backdrop stays
+         tappable. At `w-full` the panel covered the backdrop entirely on any
+         phone narrower than `max-w-sm`, which is exactly where tap-to-dismiss
+         is the affordance being relied on. --%>
     <div
       id="chat-backdrop"
       class="fixed inset-0 z-30 bg-black/40 lg:hidden"
@@ -37,7 +44,10 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
     <aside
       id="chat-panel"
       aria-label={gettext("Chat")}
-      class="fixed inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col bg-base-100 shadow-xl lg:static lg:z-auto lg:w-80 lg:max-w-none lg:flex-shrink-0 lg:border-l lg:border-base-300 lg:shadow-none"
+      phx-hook="ChatDismiss"
+      data-overlay-media="(max-width: 1023px)"
+      data-return-focus="#toggle-chat"
+      class="fixed inset-y-0 right-0 z-40 flex w-[calc(100%-3rem)] max-w-sm flex-col bg-base-100 shadow-xl lg:static lg:z-auto lg:w-80 lg:max-w-none lg:flex-shrink-0 lg:border-l lg:border-base-300 lg:shadow-none"
     >
       <%!-- Header --%>
       <div class="px-4 py-3 border-b border-base-300 flex items-center justify-between bg-base-200">
@@ -71,10 +81,23 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
       <%!-- Messages area: the scroll container plus the "new messages"
            affordance floating over its bottom edge. --%>
       <div class="relative flex flex-1 flex-col min-h-0">
+        <%!-- `tabindex="0"` because a scroll container that only a mouse can
+             reach strands a keyboard user: Chrome and Firefox now focus
+             scrollers themselves, Safari does not, and holding a reading
+             position is the whole point of this panel. The ids the hook needs
+             are passed as data attributes so renaming one stays a change to
+             this file. --%>
         <div
           id="chat-scroll"
           class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3"
           phx-hook="ChatScroll"
+          data-new-messages="chat-new-messages"
+          data-jump-to-latest="chat-jump-to-latest"
+          data-live-region="chat-new-messages-announcement"
+          data-follow-on-submit="#chat-form"
+          tabindex="0"
+          role="log"
+          aria-label={gettext("Chat transcript")}
         >
           <%!-- Finalized messages (managed by LiveView streams) --%>
           <div id="chat-messages" phx-update="stream" class="space-y-3">
@@ -121,12 +144,27 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
           <button
             id="chat-jump-to-latest"
             type="button"
-            class="btn btn-primary btn-xs gap-1 rounded-full shadow-lg transition-transform hover:scale-105"
-            title={gettext("New messages")}
+            class="btn btn-primary btn-sm gap-1 rounded-full shadow-lg transition-transform hover:scale-105 lg:btn-xs"
           >
             <.icon name="hero-arrow-down" class="w-3.5 h-3.5" />
             {gettext("New messages")}
           </button>
+        </div>
+
+        <%!-- Unhiding an `aria-live` region is not reliably announced, so the
+             region stays rendered and the hook writes its text instead. It sits
+             outside `#chat-scroll` on purpose: a text change inside the
+             observed subtree would retrigger the very MutationObserver that
+             wrote it. `ignore`, like the button, because the text is client
+             state no assign knows about. --%>
+        <div
+          id="chat-new-messages-announcement"
+          phx-update="ignore"
+          class="sr-only"
+          role="status"
+          aria-live="polite"
+          data-announce={gettext("New messages")}
+        >
         </div>
       </div>
 

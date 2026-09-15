@@ -1290,12 +1290,24 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   The height trap mattered as much as the width. The page was `h-screen` with `overflow-hidden` on the
   content region, which does not clip at a *narrow* viewport so much as at a *short* one: at 200% browser
   zoom a 1280×800 desktop has a 640×400 CSS viewport, and the panels' contents were unreachable with no
-  page scroll to recover them. The wrapper is now `min-h-dvh` with the fixed-viewport behavior restored only
-  at `lg:`, and panel bodies scroll internally only where a height actually constrains them; below `lg` they
-  grow and the page scrolls. The pager is `sticky bottom-0 … lg:static` so it stays reachable once it does.
+  page scroll to recover them. The wrapper is now `min-h-dvh` and the fixed-viewport behavior is restored
+  by the `fitscreen` variant — `@media (min-width: 64rem) and (min-height: 40rem)` — rather than by `lg:`.
+  Gating on width alone was the first cut and it was wrong for the bug it was written against: short-but-wide
+  is still `lg`, so a 2560×800 display at 200% zoom (~1280×400) kept `h-dvh overflow-hidden` and reproduced
+  the trap the change was supposed to close. Width decides the side-by-side split; height decides whether
+  the page scrolls. Panel bodies scroll internally only where a height constrains them; below that they grow
+  and the page scrolls, and the pager is `sticky bottom-0 … lg:static` so it stays reachable once it does.
+  The page-image pane keeps `overflow-auto` at *every* width, which the first cut dropped below `lg`: the
+  `.zoom-*` classes are transforms, and a transform overflows its box without widening it, so with no scroll
+  container on the pane a zoomed page pushed the whole document sideways. For the same reason `.zoom-125`
+  and up now use `transform-origin: top left`; at `top center` the image grew in both directions and the
+  left half could not be scrolled back into reach at any pane width.
   Measured in Chromium at 375×667, 768×1024, 1280×800, and 640×400 (the 200% zoom case): no horizontal
-  overflow in any of them with the chat both open and closed, tabs present only below `lg`, and
-  `#chat-panel` computed `position: fixed` below `lg` and `static` at `1280`.
+  overflow at zoom 100% in any of them with the chat both open and closed, tabs present only below `lg`, and
+  `#chat-panel` computed `position: fixed` below `lg` and `static` at `1280`. Those measurements predate the
+  `fitscreen` variant, the pane-level `overflow-auto`, and the `transform-origin` change; the short-and-wide
+  case (~1280×400) and the zoomed-page cases have **not** been re-measured in a browser. The suite covers
+  the class tokens, not the computed layout, so re-measuring those three is outstanding.
   The reading-position fix replaces `ScrollToBottom`, which set `scrollTop = scrollHeight` on every mutation
   and every patch. While an answer streamed there was no way to hold a position at all: each token undid the
   scroll. `ChatScroll` follows only while the reader is within 64px of the bottom, and otherwise reveals
@@ -1311,12 +1323,45 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   — hence `characterData` as well. The affordance sits outside the scroll container under
   `phx-update="ignore"`, because whether it is visible is client state no assign knows about; without that,
   the next unrelated patch would restore the rendered `hidden` and drop the notice mid-answer.
+  Two things a mutation observer cannot see are now handled alongside it. A *resize* produces no mutation,
+  and a container that gets shorter produces no scroll event either — `scrollTop` stays legal when the
+  maximum offset grows — so browser zoom, a window resize, crossing `lg` where the panel flips from viewport
+  height to column height, and the soft keyboard all dropped a pinned reader off the bottom with no
+  affordance to recover, since `pinned` was still true. A `ResizeObserver` re-pins. And `pinned` itself is
+  refreshed from the `scroll` event, which the browser dispatches on the next frame, while the observer
+  callback is a microtask running at the end of every task and each streamed delta arrives as its own task:
+  a delta landing in that gap read the stale `true` and yanked the reader down, the exact failure the hook
+  exists to prevent. `scrollToBottom` now records the offset it sets, and an offset below it is taken as the
+  reader's own move. Appending leaves `scrollTop` untouched while `scrollHeight` grows, so nothing else
+  trips it.
+  The affordance is also cleared when content *shrinks* past it: interrupting an answer drops the streaming
+  block, and a shrink to shorter than the container fires no scroll event, which left the notice standing
+  over an answer that had been discarded.
+  Every element the hook reaches for is named by a `data-` attribute on `#chat-scroll` rather than hardcoded,
+  and an unresolved one is reported to the console. All four failures are otherwise silent — the affordance
+  never appears, the button never binds, submitting stops re-pinning — and a test follows each attribute to
+  the element it names, so a rename that lands in only one place fails in CI rather than in a browser.
   The overlay is deliberately not `role="dialog" aria-modal="true"`. `ChatInput` declines focus while such a
   dialog is open — it has to, or an answer finishing behind the reprocess dialog drags focus out of it — so
   a modal chat panel would silently stop refocusing the input after every answer. It is a named `<aside>`
   instead, at `z-40` over a `z-30` backdrop: the only band that clears the now-sticky pager (`z-10`) while
   staying under the reprocess dialog and flash toasts (`z-50`) and the upload modal (`z-999`), so an open
   dialog still renders above the chat.
+  What that decision does not excuse is shipping an overlay with none of the behavior a dialog would have
+  brought. The `ChatDismiss` hook adds the two that matter: Escape closes the panel, and focus returns to
+  `#toggle-chat` when it goes — but only while it *is* an overlay (`data-overlay-media`), since Escape
+  closing a docked `lg:` sidebar would be a surprise, and only when the closing panel took focus down with
+  it. An open `aria-modal` dialog keeps Escape, so dismissing the reprocess dialog no longer also closes the
+  chat behind it. The panel is `w-[calc(100%-3rem)]` rather than `w-full`: at full width it covered the
+  backdrop completely on any phone narrower than `max-w-sm`, which is exactly the viewport where
+  tap-to-dismiss is the affordance being relied on.
+  The transcript is a `role="log"` region with `tabindex="0"`. Chrome and Firefox now make scroll containers
+  focusable themselves and Safari does not, and a transcript only a pointer can scroll makes "hold your
+  reading position" unusable there. The jump button announces through a permanently rendered `sr-only`
+  `role="status"` region whose *text* the hook writes, not by unhiding one — toggling `display` on a live
+  region is not reliably announced — and that region sits outside `#chat-scroll`, or writing to it would
+  retrigger the MutationObserver that wrote it. It is `btn-sm` below `lg` (`lg:btn-xs`), since a 24px target
+  on the layout the button exists for is at the WCAG 2.5.8 floor.
   The panel switcher is two `aria-pressed` toggle buttons in a named `role="group"`, not `role="tablist"`.
   The ARIA tabs pattern moves between tabs with the arrow keys and takes unselected tabs out of the Tab
   order via a roving `tabindex`; declaring the roles without that behavior tells a screen reader user to
@@ -1326,14 +1371,17 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   named "Documents" in every language, and "New messages" from `Send message`, arriving in `en` as fuzzy
   with an *empty* msgstr, which `en` is exempt from the completeness check for. The fuzzy gate added in
   `2450c8a` was the only thing between that and a blank button; all 22 translations are written out.
-  Known limitations: backdrop dismissal is pointer-only by design (the close button and the header toggle
-  are the keyboard paths). The panel bodies' labels are hidden below `lg` where the selected tab already
-  names them. Nothing pins the hook's near-bottom logic in CI — this repo has no JavaScript test harness —
-  so the suite asserts the wiring (`phx-hook`, the ignored affordance container) and the behavior rests on
-  the browser measurements recorded above. A sibling height change while pinned (the loading indicator
-  appearing and shrinking the container) can still leave the view a few pixels off the bottom; neither
-  `updated()` nor a `MutationObserver` on the container sees it, and a `ResizeObserver` was judged out of
-  scope.
+  The panel bodies' labels are `hidden lg:inline`, where the selected tab already names them — the first cut
+  claimed this and did not do it, so below `lg` a tab reading "Original Page" sat directly above a header
+  repeating it, and with Show Original on, two differently scoped controls both read "Original". The tab and
+  the content panel's header now render from one `content_panel_label/1`; they were two copies of the same
+  `if`/`gettext` pair in two modules, kept in sync by nothing but a test.
+  Known limitations: the near-bottom logic still has no CI coverage — this repo has no JavaScript test
+  harness, so the suite pins the wiring (`phx-hook`, the ignored containers, every `data-` attribute followed
+  to the element it names) and the behavior itself rests on browser measurement. That is now the largest gap
+  in this change, and the three layout cases listed above are un-remeasured. `prefers-reduced-motion` is
+  honored for the decorative transitions only; the loading spinner is left animating on purpose, because it
+  is the sole signal that an answer is coming and freezing it removes feedback rather than motion.
   Evidence: `lib/doctrans_web/live/document_live/show.html.heex`,
   `lib/doctrans_web/live/document_live/page_viewer.ex` (`view_tabs/1`, `select_view_tab`, `:view_tab`),
   `lib/doctrans_web/live/document_live/chat_components.ex`, `assets/js/app.js` (`ChatScroll`),

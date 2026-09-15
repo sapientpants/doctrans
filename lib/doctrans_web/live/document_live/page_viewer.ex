@@ -2,6 +2,8 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
   @moduledoc "Page selection, zoom state, and controls for the document viewer."
   use DoctransWeb, :html
 
+  require Logger
+
   alias Doctrans.Documents
 
   @doc "Initializes the first page and display settings."
@@ -15,13 +17,8 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
 
   def apply_params(socket, %{"page" => page_str}) do
     case Integer.parse(page_str) do
-      {page_number, _} ->
-        max_page = socket.assigns.document.total_pages || 1
-        page_number = max(1, min(page_number, max_page))
-        goto_page(socket, page_number)
-
-      :error ->
-        socket
+      {page_number, _} -> goto_page(socket, clamp_page(socket, page_number))
+      :error -> socket
     end
   end
 
@@ -40,7 +37,7 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
 
   def handle_event("goto_page", %{"page" => page_str}, socket) do
     case Integer.parse(page_str) do
-      {page_number, _} -> {:noreply, goto_page(socket, page_number)}
+      {page_number, _} -> {:noreply, goto_page(socket, clamp_page(socket, page_number))}
       :error -> {:noreply, socket}
     end
   end
@@ -56,7 +53,13 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
     {:noreply, assign(socket, :view_tab, :translated)}
   end
 
-  def handle_event("select_view_tab", _params, socket), do: {:noreply, socket}
+  def handle_event("select_view_tab", params, socket) do
+    # Dropping the value is right -- it arrives from the client -- but dropping
+    # it silently also swallows a `phx-value-tab` typo, which then looks like a
+    # tab that simply does not respond.
+    Logger.warning("select_view_tab ignored unknown tab: #{inspect(params)}")
+    {:noreply, socket}
+  end
 
   def handle_event("toggle_original", _params, socket) do
     {:noreply, assign(socket, :show_original, !socket.assigns.show_original)}
@@ -70,6 +73,15 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
   def handle_event("zoom_out", _params, socket) do
     new_zoom = max(50, socket.assigns.zoom_level - 25)
     {:noreply, assign(socket, :zoom_level, new_zoom)}
+  end
+
+  # `pages.page_number` is an int4: a value past that range makes Postgres raise
+  # `numeric_out_of_range` rather than simply miss, taking the LiveView -- and
+  # the chat session with it -- down. `apply_params/2` clamped already; the
+  # event handler did not, so both now go through here.
+  defp clamp_page(socket, page_number) do
+    max_page = socket.assigns.document.total_pages || 1
+    max(1, min(page_number, max_page))
   end
 
   defp goto_page(socket, page_number) do
@@ -93,9 +105,15 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
   does not maintain. Declaring the role without the behavior tells a screen
   reader user to press keys that do nothing, so the buttons report their
   state with `aria-pressed` and stay ordinary Tab stops instead.
+
+  The two panels are named rather than assumed: each tab points `aria-controls`
+  at an element this component does not render, and taking the ids as attrs
+  keeps that contract visible at the call site instead of buried in the markup.
   """
   attr :view_tab, :atom, required: true
   attr :show_original, :boolean, required: true
+  attr :original_panel_id, :string, default: "original-panel"
+  attr :translated_panel_id, :string, default: "translated-panel"
 
   def view_tabs(assigns) do
     ~H"""
@@ -111,7 +129,7 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
         phx-click="select_view_tab"
         phx-value-tab="original"
         aria-pressed={to_string(@view_tab == :original)}
-        aria-controls="original-panel"
+        aria-controls={@original_panel_id}
         class={[
           "-mb-px flex-1 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
@@ -129,7 +147,7 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
         phx-click="select_view_tab"
         phx-value-tab="translated"
         aria-pressed={to_string(@view_tab == :translated)}
-        aria-controls="translated-panel"
+        aria-controls={@translated_panel_id}
         class={[
           "-mb-px flex-1 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
@@ -139,13 +157,21 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
           )
         ]}
       >
-        {if @show_original,
-          do: gettext("Original Content"),
-          else: gettext("Translated Content")}
+        {content_panel_label(@show_original)}
       </button>
     </div>
     """
   end
+
+  @doc """
+  Name of the content panel, which tracks the "Show Original" toggle.
+
+  Shared with the panel's own header in `show.html.heex`: the tab names the
+  panel it opens, so a reworded label that only lands in one of the two makes
+  the tab point at something that no longer exists under that name.
+  """
+  def content_panel_label(true), do: gettext("Original Content")
+  def content_panel_label(false), do: gettext("Translated Content")
 
   attr :zoom_level, :integer, required: true
 
@@ -182,7 +208,10 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
 
   def navigation(assigns) do
     ~H"""
-    <footer class="sticky bottom-0 z-10 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 px-4 py-3 border-t border-base-300 bg-base-200 lg:static">
+    <footer
+      id="page-navigation"
+      class="sticky bottom-0 z-10 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 px-4 py-3 border-t border-base-300 bg-base-200 lg:static"
+    >
       <button
         type="button"
         id="previous-page"
