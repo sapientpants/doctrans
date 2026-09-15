@@ -11,7 +11,7 @@ msgid_plural "%{count} pages"
 msgstr[0] "%{count} side"
 msgstr[1] "%{count} sider"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:205
+#: lib/doctrans_web/live/document_live/upload_components.ex:206
 #, elixir-autogen, elixir-format
 msgid "+ Add more files"
 msgstr "+ Legg til flere filer"
@@ -26,7 +26,7 @@ msgstr "A-Å"
 msgid "Actions"
 msgstr "Handlinger"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:87
+#: lib/doctrans_web/live/document_live/viewer_components.ex:129
 #, elixir-autogen, elixir-format
 msgid "An error occurred processing this page"
 msgstr "Det oppstod en feil under behandling av denne siden"
@@ -47,7 +47,7 @@ msgid "Back"
 msgstr "Tilbake"
 
 #: lib/doctrans_web/live/document_live/reprocess_modal.ex:347
-#: lib/doctrans_web/live/document_live/upload_components.ex:115
+#: lib/doctrans_web/live/document_live/upload_components.ex:116
 #, elixir-autogen, elixir-format
 msgid "Cancel"
 msgstr "Avbryt"
@@ -57,12 +57,12 @@ msgstr "Avbryt"
 msgid "Completed"
 msgstr "Fullført"
 
-#: lib/doctrans_web/live/document_live/index.ex:71
+#: lib/doctrans_web/live/document_live/index.ex:72
 #, elixir-autogen, elixir-format
 msgid "Doctrans"
 msgstr "Doctrans"
 
-#: lib/doctrans_web/live/document_live/index.ex:298
+#: lib/doctrans_web/live/document_live/index.ex:299
 #, elixir-autogen, elixir-format
 msgid "Document deleted successfully"
 msgstr "Dokument slettet"
@@ -87,7 +87,7 @@ msgstr "Skriv inn et søkeord for å finne innhold på tvers av alle dokumentene
 msgid "Error"
 msgstr "Feil"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:63
+#: lib/doctrans_web/live/document_live/viewer_components.ex:105
 #, elixir-autogen, elixir-format
 msgid "Extracting text from page..."
 msgstr "Henter tekst fra side..."
@@ -117,12 +117,12 @@ msgstr "Tysk"
 msgid "Italian"
 msgstr "Italiensk"
 
-#: lib/doctrans_web/live/document_live/index.ex:160
+#: lib/doctrans_web/live/document_live/index.ex:161
 #, elixir-autogen, elixir-format
 msgid "Name (A-Z)"
 msgstr "Navn (A-Å)"
 
-#: lib/doctrans_web/live/document_live/index.ex:171
+#: lib/doctrans_web/live/document_live/index.ex:172
 #, elixir-autogen, elixir-format
 msgid "Name (Z-A)"
 msgstr "Navn (Å-A)"
@@ -132,7 +132,7 @@ msgstr "Navn (Å-A)"
 msgid "Newest"
 msgstr "Nyeste"
 
-#: lib/doctrans_web/live/document_live/index.ex:138
+#: lib/doctrans_web/live/document_live/index.ex:139
 #, elixir-autogen, elixir-format
 msgid "Newest First"
 msgstr "Nyeste først"
@@ -143,17 +143,17 @@ msgstr "Nyeste først"
 msgid "Next"
 msgstr "Neste"
 
-#: lib/doctrans_web/live/document_live/index.ex:200
+#: lib/doctrans_web/live/document_live/index.ex:201
 #, elixir-autogen, elixir-format
 msgid "No documents yet"
 msgstr "Ingen dokumenter ennå"
 
-#: lib/doctrans_web/live/document_live/index.ex:375
+#: lib/doctrans_web/live/document_live/index.ex:376
 #, elixir-autogen, elixir-format
 msgid "No files were uploaded"
 msgstr "Ingen filer ble lastet opp"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:94
+#: lib/doctrans_web/live/document_live/viewer_components.ex:136
 #, elixir-autogen, elixir-format
 msgid "No page selected"
 msgstr "Ingen side valgt"
@@ -168,17 +168,17 @@ msgstr "Ingen resultater funnet"
 msgid "Oldest"
 msgstr "Eldste"
 
-#: lib/doctrans_web/live/document_live/index.ex:149
+#: lib/doctrans_web/live/document_live/index.ex:150
 #, elixir-autogen, elixir-format
 msgid "Oldest First"
 msgstr "Eldste først"
 
-#: lib/doctrans_web/live/document_live/show.html.heex:114
+#: lib/doctrans_web/live/document_live/show.html.heex:108
 #, elixir-autogen, elixir-format
 msgid "Original Content"
 msgstr "Originalt innhold"
 
-#: lib/doctrans_web/live/document_live/show.html.heex:97
+#: lib/doctrans_web/live/document_live/show.html.heex:91
 #, elixir-autogen, elixir-format
 msgid "Original Page"
 msgstr "Original side"
@@ -188,13 +188,13 @@ msgstr "Original side"
 msgid "Page %{current} of %{total}"
 msgstr "Side %{current} av %{total}"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:39
+#: lib/doctrans_web/live/document_live/viewer_components.ex:41
 #: lib/doctrans_web/live/search_live.ex:292
 #, elixir-autogen, elixir-format
 msgid "Page %{number}"
 msgstr "Side %{number}"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:48
+#: lib/doctrans_web/live/document_live/viewer_components.ex:50
 #, elixir-autogen, elixir-format
 msgid "Page image not available"
 msgstr "Sidebilde ikke tilgjengelig"
@@ -231,14 +231,14 @@ msgstr "I kø"
 msgid "Search"
 msgstr "Søk"
 
-#: lib/doctrans_web/live/document_live/index.ex:86
+#: lib/doctrans_web/live/document_live/index.ex:87
 #: lib/doctrans_web/live/search_live.ex:217
 #: lib/doctrans_web/live/search_live.ex:333
 #, elixir-autogen, elixir-format
 msgid "Search documents"
 msgstr "Søk i dokumenter"
 
-#: lib/doctrans_web/live/document_live/index.ex:95
+#: lib/doctrans_web/live/document_live/index.ex:96
 #: lib/doctrans_web/live/search_live.ex:226
 #, elixir-autogen, elixir-format
 msgid "Search..."
@@ -249,7 +249,7 @@ msgstr "Søk..."
 msgid "Searching..."
 msgstr "Søker..."
 
-#: lib/doctrans_web/live/document_live/show.html.heex:130
+#: lib/doctrans_web/live/document_live/show.html.heex:124
 #, elixir-autogen, elixir-format
 msgid "Show Original"
 msgstr "Vis original"
@@ -269,22 +269,22 @@ msgstr "Sorter"
 msgid "Spanish"
 msgstr "Spansk"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:123
+#: lib/doctrans_web/live/document_live/upload_components.ex:124
 #, elixir-autogen, elixir-format
 msgid "Start Translation"
 msgstr "Start oversettelse"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:101
+#: lib/doctrans_web/live/document_live/upload_components.ex:102
 #, elixir-autogen, elixir-format
 msgid "Target Language"
 msgstr "Målspråk"
 
-#: lib/doctrans_web/live/document_live/show.html.heex:115
+#: lib/doctrans_web/live/document_live/show.html.heex:109
 #, elixir-autogen, elixir-format
 msgid "Translated Content"
 msgstr "Oversatt innhold"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:73
+#: lib/doctrans_web/live/document_live/viewer_components.ex:115
 #, elixir-autogen, elixir-format
 msgid "Translating content..."
 msgstr "Oversetter innhold..."
@@ -299,12 +299,12 @@ msgstr "Prøv et annet søkeord."
 msgid "Unknown"
 msgstr "Ukjent"
 
-#: lib/doctrans_web/live/document_live/index.ex:184
+#: lib/doctrans_web/live/document_live/index.ex:185
 #, elixir-autogen, elixir-format
 msgid "Upload"
 msgstr "Last opp"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:45
+#: lib/doctrans_web/live/document_live/upload_components.ex:46
 #, elixir-autogen, elixir-format
 msgid "Upload New Document"
 msgstr "Last opp nytt dokument"
@@ -314,7 +314,7 @@ msgstr "Last opp nytt dokument"
 msgid "Uploading"
 msgstr "Laster opp"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:80
+#: lib/doctrans_web/live/document_live/viewer_components.ex:122
 #, elixir-autogen, elixir-format
 msgid "Waiting to process..."
 msgstr "Venter på behandling..."
@@ -329,7 +329,7 @@ msgstr "Kan ikke finne internettforbindelse"
 msgid "Z-A"
 msgstr "Å-A"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:138
+#: lib/doctrans_web/live/document_live/upload_components.ex:139
 #, elixir-autogen, elixir-format
 msgid "browse"
 msgstr "bla gjennom"
@@ -349,20 +349,20 @@ msgstr "Norsk"
 msgid "Swedish"
 msgstr "Svensk"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:302
+#: lib/doctrans_web/live/document_live/upload_components.ex:303
 #, elixir-autogen, elixir-format
 msgid "Document uploaded! Processing will begin shortly."
 msgid_plural "%{count} documents uploaded! Processing will begin shortly."
 msgstr[0] "Dokument lastet opp! Behandling starter snart."
 msgstr[1] "%{count} dokumenter lastet opp! Behandling starter snart."
 
-#: lib/doctrans_web/live/document_live/show.html.heex:190
-#: lib/doctrans_web/live/document_live/upload_components.ex:51
+#: lib/doctrans_web/live/document_live/show.html.heex:185
+#: lib/doctrans_web/live/document_live/upload_components.ex:52
 #, elixir-autogen, elixir-format
 msgid "Documents"
 msgstr "Dokumenter"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:136
+#: lib/doctrans_web/live/document_live/upload_components.ex:137
 #, elixir-autogen, elixir-format
 msgid "Drag and drop documents here, or"
 msgstr "Dra og slipp dokumenter her, eller"
@@ -448,7 +448,7 @@ msgstr "Viser %{start}-%{end} av %{total} resultater for \"%{query}\""
 msgid "Translation Model"
 msgstr "Translation Model"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:146
+#: lib/doctrans_web/live/document_live/upload_components.ex:147
 #, elixir-autogen, elixir-format
 msgid "PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Up to 10 files"
 msgstr "PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Opptil 10 filer"
@@ -501,7 +501,7 @@ msgstr "Jeg finner relevant innhold og svarer basert på det."
 msgid "Please enter a question."
 msgstr "Vennligst skriv inn et spørsmål."
 
-#: lib/doctrans_web/privacy_copy.ex:33
+#: lib/doctrans_web/privacy_copy.ex:36
 #, elixir-autogen, elixir-format
 msgid "Private document translation powered by local AI"
 msgstr "Privat dokumentoversettelse drevet av lokal AI"
@@ -522,12 +522,12 @@ msgstr "Beklager, det oppstod en feil. Vennligst prøv igjen."
 msgid "Thinking..."
 msgstr "Tenker..."
 
-#: lib/doctrans_web/privacy_copy.ex:45
+#: lib/doctrans_web/privacy_copy.ex:48
 #, elixir-autogen, elixir-format
 msgid "Upload a document to get started. All processing happens locally on your device."
 msgstr "Last opp et dokument for å komme i gang. All behandling skjer lokalt på enheten din."
 
-#: lib/doctrans_web/privacy_copy.ex:60
+#: lib/doctrans_web/privacy_copy.ex:63
 #, elixir-autogen, elixir-format
 msgid "Your documents never leave your device"
 msgstr "Dokumentene dine forlater aldri enheten din"
@@ -655,19 +655,19 @@ msgstr "Prøv igjen"
 msgid "Retrying..."
 msgstr "Prøver igjen..."
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:321
+#: lib/doctrans_web/live/document_live/upload_components.ex:322
 #, elixir-autogen, elixir-format
 msgid "Maximum %{max} files can be uploaded at once"
 msgstr "Maksimalt %{max} filer kan lastes opp om gangen"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:278
+#: lib/doctrans_web/live/document_live/upload_components.ex:279
 #, elixir-autogen, elixir-format
 msgid "This file is still uploading. Submit again to finish it."
 msgid_plural "These files are still uploading. Submit again to finish them."
 msgstr[0] "Denne filen lastes fortsatt opp. Send inn på nytt for å fullføre den."
 msgstr[1] "Disse filene lastes fortsatt opp. Send inn på nytt for å fullføre dem."
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:257
+#: lib/doctrans_web/live/document_live/upload_components.ex:258
 #, elixir-autogen, elixir-format
 msgid "This file was not uploaded"
 msgid_plural "These files were not uploaded"
@@ -700,23 +700,23 @@ msgstr "Slett %{title}"
 msgid "Open %{title}"
 msgstr "Åpne %{title}"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:15
+#: lib/doctrans_web/live/document_live/viewer_components.ex:17
 #, elixir-autogen, elixir-format
 msgid "Page"
 msgstr "Side"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:195
+#: lib/doctrans_web/live/document_live/upload_components.ex:196
 #, elixir-autogen, elixir-format
 msgid "Remove %{file}"
 msgstr "Fjern %{file}"
 
-#: lib/doctrans_web/live/document_live/show.html.heex:124
-#: lib/doctrans_web/live/document_live/show.html.heex:125
+#: lib/doctrans_web/live/document_live/show.html.heex:118
+#: lib/doctrans_web/live/document_live/show.html.heex:119
 #, elixir-autogen, elixir-format
 msgid "Reprocess page"
 msgstr "Behandle siden på nytt"
 
-#: lib/doctrans_web/live/document_live/index.ex:119
+#: lib/doctrans_web/live/document_live/index.ex:120
 #, elixir-autogen, elixir-format
 msgid "Sort documents"
 msgstr "Sorter dokumenter"
@@ -746,17 +746,77 @@ msgstr "Zoom inn"
 msgid "Zoom out"
 msgstr "Zoom ut"
 
-#: lib/doctrans_web/privacy_copy.ex:35
+#: lib/doctrans_web/privacy_copy.ex:38
 #, elixir-autogen, elixir-format
 msgid "Document translation powered by AI on %{host}"
 msgstr "Dokumentoversettelse drevet av AI på %{host}"
 
-#: lib/doctrans_web/privacy_copy.ex:62
+#: lib/doctrans_web/privacy_copy.ex:65
 #, elixir-autogen, elixir-format
 msgid "Documents are sent to %{host} for processing"
 msgstr "Dokumenter sendes til %{host} for behandling"
 
-#: lib/doctrans_web/privacy_copy.ex:47
+#: lib/doctrans_web/privacy_copy.ex:50
 #, elixir-autogen, elixir-format
 msgid "Upload a document to get started. Document content is sent to %{host} for processing."
 msgstr "Last opp et dokument for å komme i gang. Dokumentinnhold sendes til %{host} for behandling."
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:153
+#, elixir-autogen, elixir-format
+msgid "Extraction: %{model}"
+msgstr "Uthenting: %{model}"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:87
+#, elixir-autogen, elixir-format
+msgid "Model names are the aliases reported during processing and may not identify the exact weights used."
+msgstr "Modellnavn er aliasene som ble rapportert under behandlingen, og de identifiserer ikke nødvendigvis de nøyaktige vektene som ble brukt."
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:162
+#, elixir-autogen, elixir-format
+msgid "Translation: %{model}"
+msgstr "Oversettelse: %{model}"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:154
+#, elixir-autogen, elixir-format
+msgid "Extraction: not recorded yet"
+msgstr "Uthenting: ennå ikke registrert"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:155
+#, elixir-autogen, elixir-format
+msgid "Extraction: run failed"
+msgstr "Uthenting: kjøringen mislyktes"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:156
+#, elixir-autogen, elixir-format
+msgid "Extraction: unknown"
+msgstr "Uthenting: ukjent"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:75
+#, elixir-autogen, elixir-format
+msgid "Page processing models"
+msgstr "Modeller for sidebehandling"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:165
+#, elixir-autogen, elixir-format
+msgid "Translation: did not run"
+msgstr "Oversettelse: ble ikke kjørt"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:166
+#, elixir-autogen, elixir-format
+msgid "Translation: no content to translate"
+msgstr "Oversettelse: intet innhold å oversette"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:163
+#, elixir-autogen, elixir-format
+msgid "Translation: not recorded yet"
+msgstr "Oversettelse: ennå ikke registrert"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:164
+#, elixir-autogen, elixir-format
+msgid "Translation: run failed"
+msgstr "Oversettelse: kjøringen mislyktes"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:167
+#, elixir-autogen, elixir-format
+msgid "Translation: unknown"
+msgstr "Oversettelse: ukjent"

@@ -78,12 +78,6 @@
         >
           {gettext("Original upload unavailable. Re-upload this document to process it again.")}
         </p>
-        <p
-          :if={@current_page}
-          id="page-processing-models"
-          class="mt-1 text-xs text-base-content/60"
-        >
-        </p>
       </section>
       <%!-- Main content - Split screen --%>
       <main class="flex-1 flex overflow-hidden">
@@ -137,6 +131,7 @@
               </label>
             </div>
           </div>
+          <.page_provenance page={@current_page} />
           <div class="flex-1 overflow-auto p-6">
             <.page_content page={@current_page} show_original={@show_original} />
           </div>

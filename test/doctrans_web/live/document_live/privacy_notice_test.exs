@@ -26,8 +26,6 @@ defmodule DoctransWeb.DocumentLive.PrivacyNoticeTest do
     view
   end
 
-  defp text(view, selector), do: view |> element(selector) |> render()
-
   describe "a local endpoint" do
     setup %{conn: conn} do
       configure("http://localhost:8000")
@@ -36,14 +34,14 @@ defmodule DoctransWeb.DocumentLive.PrivacyNoticeTest do
     end
 
     test "keeps the on-device promise in the tagline and the empty state", %{view: view} do
-      assert text(view, @tagline) =~ "local AI"
-      assert text(view, @empty_state) =~ "All processing happens locally on your device."
+      assert element_html(view, @tagline) =~ "local AI"
+      assert element_html(view, @empty_state) =~ "All processing happens locally on your device."
     end
 
     test "keeps the promise and its padlock in the upload modal", %{view: view} do
       view = open_upload_modal(view)
 
-      assert text(view, @upload_notice) =~ "never leave your device"
+      assert element_html(view, @upload_notice) =~ "never leave your device"
       assert has_element?(view, "#{@upload_notice} span.hero-lock-closed")
     end
   end
@@ -56,20 +54,20 @@ defmodule DoctransWeb.DocumentLive.PrivacyNoticeTest do
     end
 
     test "replaces the promise and names the host in the tagline", %{view: view} do
-      assert text(view, @tagline) =~ "api.example.com"
-      refute text(view, @tagline) =~ "local AI"
+      assert element_html(view, @tagline) =~ "api.example.com"
+      refute element_html(view, @tagline) =~ "local AI"
     end
 
     test "replaces the promise and names the host in the empty state", %{view: view} do
-      assert text(view, @empty_state) =~ "api.example.com"
-      refute text(view, @empty_state) =~ "All processing happens locally on your device."
+      assert element_html(view, @empty_state) =~ "api.example.com"
+      refute element_html(view, @empty_state) =~ "All processing happens locally on your device."
     end
 
     test "drops the promise and the padlock from the upload modal", %{view: view} do
       view = open_upload_modal(view)
 
-      assert text(view, @upload_notice) =~ "api.example.com"
-      refute text(view, @upload_notice) =~ "never leave your device"
+      assert element_html(view, @upload_notice) =~ "api.example.com"
+      refute element_html(view, @upload_notice) =~ "never leave your device"
       refute has_element?(view, "#{@upload_notice} span.hero-lock-closed")
       assert has_element?(view, "#{@upload_notice} span.hero-arrow-up-tray")
     end
@@ -85,9 +83,9 @@ defmodule DoctransWeb.DocumentLive.PrivacyNoticeTest do
 
     {:ok, view, _html} = live(conn, ~p"/")
 
-    assert text(view, @tagline) =~ "embeddings.example.com"
-    refute text(view, @tagline) =~ "local AI"
-    assert text(view, @empty_state) =~ "embeddings.example.com"
+    assert element_html(view, @tagline) =~ "embeddings.example.com"
+    refute element_html(view, @tagline) =~ "local AI"
+    assert element_html(view, @empty_state) =~ "embeddings.example.com"
   end
 
   test "an unreadable endpoint names the configured value rather than promising anything",
@@ -96,8 +94,8 @@ defmodule DoctransWeb.DocumentLive.PrivacyNoticeTest do
 
     {:ok, view, _html} = live(conn, ~p"/")
 
-    assert text(view, @tagline) =~ "llm:8000"
-    refute text(view, @empty_state) =~ "All processing happens locally on your device."
+    assert element_html(view, @tagline) =~ "llm:8000"
+    refute element_html(view, @empty_state) =~ "All processing happens locally on your device."
   end
 
   test "the configured API key never reaches the rendered page", %{conn: conn} do
@@ -118,7 +116,7 @@ defmodule DoctransWeb.DocumentLive.PrivacyNoticeTest do
     {:ok, view, html} = live(conn, ~p"/")
 
     refute html =~ "s3cret"
-    assert text(view, @tagline) =~ "llm.example.com"
+    assert element_html(view, @tagline) =~ "llm.example.com"
     refute view |> open_upload_modal() |> render() =~ "s3cret"
   end
 end
