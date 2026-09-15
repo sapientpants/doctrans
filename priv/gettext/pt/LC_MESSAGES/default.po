@@ -26,7 +26,7 @@ msgstr "A-Z"
 msgid "Actions"
 msgstr "Ações"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:126
+#: lib/doctrans_web/live/document_live/viewer_components.ex:129
 #, elixir-autogen, elixir-format
 msgid "An error occurred processing this page"
 msgstr "Ocorreu um erro ao processar esta página"
@@ -87,7 +87,7 @@ msgstr "Introduza um termo de pesquisa para encontrar conteúdo em todos os seus
 msgid "Error"
 msgstr "Erro"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:102
+#: lib/doctrans_web/live/document_live/viewer_components.ex:105
 #, elixir-autogen, elixir-format
 msgid "Extracting text from page..."
 msgstr "A extrair texto da página..."
@@ -153,7 +153,7 @@ msgstr "Ainda sem documentos"
 msgid "No files were uploaded"
 msgstr "Nenhum ficheiro foi carregado"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:133
+#: lib/doctrans_web/live/document_live/viewer_components.ex:136
 #, elixir-autogen, elixir-format
 msgid "No page selected"
 msgstr "Nenhuma página selecionada"
@@ -188,13 +188,13 @@ msgstr "Página original"
 msgid "Page %{current} of %{total}"
 msgstr "Página %{current} de %{total}"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:39
+#: lib/doctrans_web/live/document_live/viewer_components.ex:41
 #: lib/doctrans_web/live/search_live.ex:292
 #, elixir-autogen, elixir-format
 msgid "Page %{number}"
 msgstr "Página %{number}"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:48
+#: lib/doctrans_web/live/document_live/viewer_components.ex:50
 #, elixir-autogen, elixir-format
 msgid "Page image not available"
 msgstr "Imagem da página não disponível"
@@ -284,7 +284,7 @@ msgstr "Língua de destino"
 msgid "Translated Content"
 msgstr "Conteúdo traduzido"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:112
+#: lib/doctrans_web/live/document_live/viewer_components.ex:115
 #, elixir-autogen, elixir-format
 msgid "Translating content..."
 msgstr "A traduzir conteúdo..."
@@ -295,7 +295,6 @@ msgid "Try a different search term."
 msgstr "Tente um termo de pesquisa diferente."
 
 #: lib/doctrans_web/live/document_live/components.ex:165
-#: lib/doctrans_web/live/document_live/viewer_components.ex:153
 #, elixir-autogen, elixir-format
 msgid "Unknown"
 msgstr "Desconhecido"
@@ -315,7 +314,7 @@ msgstr "Carregar novo documento"
 msgid "Uploading"
 msgstr "A carregar"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:119
+#: lib/doctrans_web/live/document_live/viewer_components.ex:122
 #, elixir-autogen, elixir-format
 msgid "Waiting to process..."
 msgstr "A aguardar processamento..."
@@ -701,7 +700,7 @@ msgstr "Eliminar %{title}"
 msgid "Open %{title}"
 msgstr "Abrir %{title}"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:15
+#: lib/doctrans_web/live/document_live/viewer_components.ex:17
 #, elixir-autogen, elixir-format
 msgid "Page"
 msgstr "Página"
@@ -762,22 +761,62 @@ msgstr "Os documentos são enviados para %{host} para processamento"
 msgid "Upload a document to get started. Document content is sent to %{host} for processing."
 msgstr "Envie um documento para começar. O conteúdo do documento é enviado para %{host} para processamento."
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:73
+#: lib/doctrans_web/live/document_live/viewer_components.ex:153
 #, elixir-autogen, elixir-format
 msgid "Extraction: %{model}"
 msgstr "Extração: %{model}"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:84
+#: lib/doctrans_web/live/document_live/viewer_components.ex:87
 #, elixir-autogen, elixir-format
 msgid "Model names are the aliases reported during processing and may not identify the exact weights used."
 msgstr "Os nomes dos modelos são os aliases comunicados durante o processamento e podem não identificar os pesos exatos utilizados."
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:78
+#: lib/doctrans_web/live/document_live/viewer_components.ex:162
 #, elixir-autogen, elixir-format
 msgid "Translation: %{model}"
 msgstr "Tradução: %{model}"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:151
+#: lib/doctrans_web/live/document_live/viewer_components.ex:154
 #, elixir-autogen, elixir-format
-msgid "not recorded yet"
-msgstr "ainda não registado"
+msgid "Extraction: not recorded yet"
+msgstr "Extração: ainda não registada"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:155
+#, elixir-autogen, elixir-format
+msgid "Extraction: run failed"
+msgstr "Extração: execução falhada"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:156
+#, elixir-autogen, elixir-format
+msgid "Extraction: unknown"
+msgstr "Extração: desconhecida"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:75
+#, elixir-autogen, elixir-format
+msgid "Page processing models"
+msgstr "Modelos de processamento da página"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:165
+#, elixir-autogen, elixir-format
+msgid "Translation: did not run"
+msgstr "Tradução: não executada"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:166
+#, elixir-autogen, elixir-format
+msgid "Translation: no content to translate"
+msgstr "Tradução: sem conteúdo para traduzir"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:163
+#, elixir-autogen, elixir-format
+msgid "Translation: not recorded yet"
+msgstr "Tradução: ainda não registada"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:164
+#, elixir-autogen, elixir-format
+msgid "Translation: run failed"
+msgstr "Tradução: execução falhada"
+
+#: lib/doctrans_web/live/document_live/viewer_components.ex:167
+#, elixir-autogen, elixir-format
+msgid "Translation: unknown"
+msgstr "Tradução: desconhecida"
