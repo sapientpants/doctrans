@@ -12,7 +12,10 @@ defmodule DoctransWeb.DocumentLive.Show do
     only: [status_color: 1, status_text: 1, language_name: 1, processing_progress: 1]
 
   import DoctransWeb.DocumentLive.ViewerComponents
-  import DoctransWeb.DocumentLive.PageViewer, only: [zoom_controls: 1, navigation: 1]
+
+  import DoctransWeb.DocumentLive.PageViewer,
+    only: [zoom_controls: 1, navigation: 1, view_tabs: 1]
+
   import DoctransWeb.DocumentLive.ReprocessModal, only: [reprocess_modal: 1, can_reprocess?: 1]
   import DoctransWeb.DocumentLive.ChatComponents
 
@@ -101,7 +104,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   def handle_event(event, params, socket)
-      when event in ~w(prev_page next_page goto_page toggle_original zoom_in zoom_out) do
+      when event in ~w(prev_page next_page goto_page toggle_original zoom_in zoom_out select_view_tab) do
     PageViewer.handle_event(event, params, socket)
   end
 

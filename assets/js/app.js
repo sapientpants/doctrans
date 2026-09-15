@@ -28,6 +28,11 @@ import topbar from "../vendor/topbar"
 // How long a transient flash notice stays on screen before it dismisses itself.
 const DISMISS_AFTER_MS = 5000
 
+// How close to the bottom of the chat transcript still counts as "reading the
+// latest". Inside this band the message list follows streamed output; outside
+// it, the reader's position is theirs to keep.
+const CHAT_FOLLOW_THRESHOLD_PX = 64
+
 // Custom hooks
 const Hooks = {
   // Dismisses a transient flash on a timer by running the very `phx-click` the
@@ -65,22 +70,100 @@ const Hooks = {
       }, DISMISS_AFTER_MS)
     }
   },
-  ScrollToBottom: {
+  // Follows streamed chat output, but only while the reader is already at the
+  // bottom of the transcript.
+  //
+  // The hook this replaces slammed `scrollTop = scrollHeight` on every mutation
+  // and every patch, so scrolling up to re-read an earlier answer was undone by
+  // the very next streamed token -- while an answer was being written there was
+  // no way to hold a reading position at all. `pinned` records whether the
+  // reader is within CHAT_FOLLOW_THRESHOLD_PX of the bottom; only then does new
+  // content scroll. Otherwise the `#chat-new-messages` affordance appears and
+  // the scroll position is left exactly where the reader put it. Scrolling up
+  // on its own never reveals the affordance: it announces content that arrived
+  // unseen, not content already read.
+  //
+  // A MutationObserver is still what detects that content. `updated()` is not
+  // enough: the finalized messages live in a `phx-update="stream"` container
+  // that is a *child* of this element, so an append patches the child and never
+  // calls `updated()` here, and a streamed delta only rewrites text inside
+  // `#chat-streaming` -- hence `characterData` alongside `childList`/`subtree`.
+  //
+  // The affordance sits outside the scroll container in a `phx-update="ignore"`
+  // wrapper. Its visibility is client state that no server assign knows about,
+  // so without `ignore` the next unrelated patch would restore the rendered
+  // `hidden` and drop the notice mid-answer.
+  ChatScroll: {
     mounted() {
+      this.newMessages = document.getElementById("chat-new-messages")
+      this.jumpButton = document.getElementById("chat-jump-to-latest")
+
+      this.pinned = true
       this.scrollToBottom()
-      this.observer = new MutationObserver(() => this.scrollToBottom())
-      this.observer.observe(this.el, { childList: true, subtree: true })
-    },
-    updated() {
-      this.scrollToBottom()
+
+      this.observer = new MutationObserver(() => this.contentArrived())
+      this.observer.observe(this.el, { childList: true, subtree: true, characterData: true })
+
+      this.onScroll = () => this.readerScrolled()
+      this.el.addEventListener("scroll", this.onScroll, { passive: true })
+
+      // Asking a question is the reader's own move, so it should always take
+      // them to their message. The listener sits on the document, as in
+      // DialogFocus: LiveView repatches the form as the input disables and
+      // re-enables, and a listener on a node that gets swapped out is lost.
+      this.onSubmit = event => {
+        if (event.target && event.target.id === "chat-form") {
+          this.followLatest()
+        }
+      }
+      document.addEventListener("submit", this.onSubmit, true)
+
+      this.onJump = () => this.followLatest()
+      if (this.jumpButton) {
+        this.jumpButton.addEventListener("click", this.onJump)
+      }
     },
     destroyed() {
       if (this.observer) {
         this.observer.disconnect()
       }
+      this.el.removeEventListener("scroll", this.onScroll)
+      document.removeEventListener("submit", this.onSubmit, true)
+      if (this.jumpButton) {
+        this.jumpButton.removeEventListener("click", this.onJump)
+      }
+    },
+    contentArrived() {
+      if (this.pinned) {
+        this.scrollToBottom()
+      } else {
+        this.toggleAffordance(true)
+      }
+    },
+    readerScrolled() {
+      this.pinned = this.nearBottom()
+      // Arriving back at the bottom is what dismisses the notice; there is
+      // nothing left to announce once the latest message is on screen.
+      if (this.pinned) {
+        this.toggleAffordance(false)
+      }
+    },
+    followLatest() {
+      this.pinned = true
+      this.toggleAffordance(false)
+      this.scrollToBottom()
+    },
+    nearBottom() {
+      const remaining = this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight
+      return remaining <= CHAT_FOLLOW_THRESHOLD_PX
     },
     scrollToBottom() {
       this.el.scrollTop = this.el.scrollHeight
+    },
+    toggleAffordance(visible) {
+      if (this.newMessages) {
+        this.newMessages.classList.toggle("hidden", !visible)
+      }
     }
   },
   // Keeps the chat input focused: on mount, and again whenever it re-enables
