@@ -10,6 +10,7 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
     |> goto_page(1)
     |> assign(:show_original, false)
     |> assign(:zoom_level, 100)
+    |> assign(:view_tab, :translated)
   end
 
   def apply_params(socket, %{"page" => page_str}) do
@@ -44,6 +45,19 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
     end
   end
 
+  # Narrow viewports show one panel at a time. The two accepted values are
+  # matched literally: the tab arrives from the client, so it must never reach
+  # `String.to_atom/1`.
+  def handle_event("select_view_tab", %{"tab" => "original"}, socket) do
+    {:noreply, assign(socket, :view_tab, :original)}
+  end
+
+  def handle_event("select_view_tab", %{"tab" => "translated"}, socket) do
+    {:noreply, assign(socket, :view_tab, :translated)}
+  end
+
+  def handle_event("select_view_tab", _params, socket), do: {:noreply, socket}
+
   def handle_event("toggle_original", _params, socket) do
     {:noreply, assign(socket, :show_original, !socket.assigns.show_original)}
   end
@@ -65,6 +79,72 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
     socket
     |> assign(:current_page_number, page_number)
     |> assign(:current_page, page)
+  end
+
+  @doc """
+  Panel switcher for viewports too narrow for the side-by-side split.
+
+  Hidden from `lg:` up, where both panels are visible at once and the tabs
+  would describe a choice that no longer exists.
+
+  A pair of toggle buttons in a named group, not `role="tablist"`: the ARIA
+  tabs pattern moves between tabs with the arrow keys and takes the unselected
+  ones out of the Tab order, which needs a roving `tabindex` this component
+  does not maintain. Declaring the role without the behavior tells a screen
+  reader user to press keys that do nothing, so the buttons report their
+  state with `aria-pressed` and stay ordinary Tab stops instead.
+  """
+  attr :view_tab, :atom, required: true
+  attr :show_original, :boolean, required: true
+
+  def view_tabs(assigns) do
+    ~H"""
+    <div
+      id="viewer-tabs"
+      role="group"
+      aria-label={gettext("Document panels")}
+      class="flex items-stretch gap-1 border-b border-base-300 bg-base-200 px-2 lg:hidden"
+    >
+      <button
+        id="view-tab-original"
+        type="button"
+        phx-click="select_view_tab"
+        phx-value-tab="original"
+        aria-pressed={to_string(@view_tab == :original)}
+        aria-controls="original-panel"
+        class={[
+          "-mb-px flex-1 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
+          if(@view_tab == :original,
+            do: "border-primary text-primary",
+            else: "border-transparent text-base-content/70 hover:text-base-content"
+          )
+        ]}
+      >
+        {gettext("Original Page")}
+      </button>
+      <button
+        id="view-tab-translated"
+        type="button"
+        phx-click="select_view_tab"
+        phx-value-tab="translated"
+        aria-pressed={to_string(@view_tab == :translated)}
+        aria-controls="translated-panel"
+        class={[
+          "-mb-px flex-1 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
+          if(@view_tab == :translated,
+            do: "border-primary text-primary",
+            else: "border-transparent text-base-content/70 hover:text-base-content"
+          )
+        ]}
+      >
+        {if @show_original,
+          do: gettext("Original Content"),
+          else: gettext("Translated Content")}
+      </button>
+    </div>
+    """
   end
 
   attr :zoom_level, :integer, required: true
@@ -102,7 +182,7 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
 
   def navigation(assigns) do
     ~H"""
-    <footer class="flex items-center justify-center gap-4 px-4 py-3 border-t border-base-300 bg-base-200">
+    <footer class="sticky bottom-0 z-10 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 px-4 py-3 border-t border-base-300 bg-base-200 lg:static">
       <button
         type="button"
         id="previous-page"

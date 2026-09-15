@@ -1275,14 +1275,70 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `test/doctrans_web/live/document_live_reprocessing_test.exs`, `test/support/conn_case.ex`
   (`element_html/2`, lifted out of two test files that had copied it).
 
-- [ ] **U09 · P3 · Make the viewer responsive and preserve chat reading position.**
+- [x] **U09 · P3 · Make the viewer responsive and preserve chat reading position.**
   Two horizontal document panels plus a fixed-width chat panel are unsuitable for narrow screens.
   Use mobile tabs/stacking and an overlay chat panel; follow streaming output only when the reader is already
   near the bottom, with a new-message affordance otherwise.
   Acceptance: narrow and desktop layouts remain usable at zoom; streaming does not pull a reader away
   from earlier messages. Verify representative viewports in a browser.
-  Evidence: `lib/doctrans_web/live/document_live/show.html.heex:90`,
-  `lib/doctrans_web/live/document_live/chat_components.ex:16`, `assets/js/app.js:41`.
+  Implemented: below `lg` the two document panels stack into one switchable panel and the chat becomes a
+  right-edge overlay with a dismissing backdrop; from `lg:` up the three-column split is byte-for-byte the
+  layout that shipped before. Both panels stay in the DOM in both states and carry `lg:flex`, so the switch
+  is a display decision at one breakpoint rather than two rendering paths — a test pins that, because
+  "simplifying" the switch to render only the selected panel passes every other assertion while quietly
+  deleting the desktop split.
+  The height trap mattered as much as the width. The page was `h-screen` with `overflow-hidden` on the
+  content region, which does not clip at a *narrow* viewport so much as at a *short* one: at 200% browser
+  zoom a 1280×800 desktop has a 640×400 CSS viewport, and the panels' contents were unreachable with no
+  page scroll to recover them. The wrapper is now `min-h-dvh` with the fixed-viewport behavior restored only
+  at `lg:`, and panel bodies scroll internally only where a height actually constrains them; below `lg` they
+  grow and the page scrolls. The pager is `sticky bottom-0 … lg:static` so it stays reachable once it does.
+  Measured in Chromium at 375×667, 768×1024, 1280×800, and 640×400 (the 200% zoom case): no horizontal
+  overflow in any of them with the chat both open and closed, tabs present only below `lg`, and
+  `#chat-panel` computed `position: fixed` below `lg` and `static` at `1280`.
+  The reading-position fix replaces `ScrollToBottom`, which set `scrollTop = scrollHeight` on every mutation
+  and every patch. While an answer streamed there was no way to hold a position at all: each token undid the
+  scroll. `ChatScroll` follows only while the reader is within 64px of the bottom, and otherwise reveals
+  `#chat-jump-to-latest` and leaves the scroll exactly where they put it. Scrolling up alone never reveals
+  the affordance — it announces content that arrived unseen, not content already read — and returning to the
+  bottom dismisses it. Submitting a question re-pins: that is the reader's own move and should land on their
+  message. Verified in the browser, not only asserted: with the transcript scrolled up, appending content
+  left `scrollTop` at 0 and showed the affordance; pinned at the bottom, the same append was followed and
+  the affordance stayed hidden.
+  A `MutationObserver` is still what notices content. `updated()` cannot replace it: the finalized messages
+  live in a `phx-update="stream"` container that is a *child* of the hook element, so an append patches the
+  child without calling `updated()` there, and a streamed delta only rewrites text inside `#chat-streaming`
+  — hence `characterData` as well. The affordance sits outside the scroll container under
+  `phx-update="ignore"`, because whether it is visible is client state no assign knows about; without that,
+  the next unrelated patch would restore the rendered `hidden` and drop the notice mid-answer.
+  The overlay is deliberately not `role="dialog" aria-modal="true"`. `ChatInput` declines focus while such a
+  dialog is open — it has to, or an answer finishing behind the reprocess dialog drags focus out of it — so
+  a modal chat panel would silently stop refocusing the input after every answer. It is a named `<aside>`
+  instead, at `z-40` over a `z-30` backdrop: the only band that clears the now-sticky pager (`z-10`) while
+  staying under the reprocess dialog and flash toasts (`z-50`) and the upload modal (`z-999`), so an open
+  dialog still renders above the chat.
+  The panel switcher is two `aria-pressed` toggle buttons in a named `role="group"`, not `role="tablist"`.
+  The ARIA tabs pattern moves between tabs with the arrow keys and takes unselected tabs out of the Tab
+  order via a roving `tabindex`; declaring the roles without that behavior tells a screen reader user to
+  press keys that do nothing. The first cut of this change did declare them, and dropping the roles was the
+  correction. Both new messages came back from `gettext.extract --merge` flagged fuzzy in all 11 locales,
+  auto-filled from unrelated msgids — "Document panels" from `Documents`, so the switcher would have been
+  named "Documents" in every language, and "New messages" from `Send message`, arriving in `en` as fuzzy
+  with an *empty* msgstr, which `en` is exempt from the completeness check for. The fuzzy gate added in
+  `2450c8a` was the only thing between that and a blank button; all 22 translations are written out.
+  Known limitations: backdrop dismissal is pointer-only by design (the close button and the header toggle
+  are the keyboard paths). The panel bodies' labels are hidden below `lg` where the selected tab already
+  names them. Nothing pins the hook's near-bottom logic in CI — this repo has no JavaScript test harness —
+  so the suite asserts the wiring (`phx-hook`, the ignored affordance container) and the behavior rests on
+  the browser measurements recorded above. A sibling height change while pinned (the loading indicator
+  appearing and shrinking the container) can still leave the view a few pixels off the bottom; neither
+  `updated()` nor a `MutationObserver` on the container sees it, and a `ResizeObserver` was judged out of
+  scope.
+  Evidence: `lib/doctrans_web/live/document_live/show.html.heex`,
+  `lib/doctrans_web/live/document_live/page_viewer.ex` (`view_tabs/1`, `select_view_tab`, `:view_tab`),
+  `lib/doctrans_web/live/document_live/chat_components.ex`, `assets/js/app.js` (`ChatScroll`),
+  `test/doctrans_web/live/document_live/responsive_viewer_test.exs`,
+  `priv/gettext` (two new messages across 11 locales).
 
 - [ ] **U10 · P3 · Move theme initialization into the supported JavaScript bundle.**
   The inline root script conflicts with the router's script-src self policy and project conventions.

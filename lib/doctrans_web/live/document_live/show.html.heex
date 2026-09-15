@@ -1,18 +1,18 @@
 <Layouts.app flash={@flash}>
   <%= if @document do %>
-    <div class="h-screen flex flex-col bg-base-100 max-w-full">
+    <div class="flex min-h-dvh flex-col bg-base-100 max-w-full lg:h-dvh lg:min-h-0 lg:overflow-hidden">
       <%!-- Header --%>
-      <header class="flex items-center justify-between px-4 pr-8 py-3 border-b border-base-300 bg-base-200">
-        <div class="flex items-center gap-4">
+      <header class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 pr-8 py-3 border-b border-base-300 bg-base-200">
+        <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
           <.link
             navigate={back_url(@from, @search_query, @search_page)}
             class="btn btn-ghost btn-sm"
           >
             <.icon name="hero-arrow-left" class="w-5 h-5" /> {gettext("Back")}
           </.link>
-          <div>
-            <h1 class="font-semibold text-lg">{@document.title}</h1>
-            <div class="flex items-center gap-2 text-sm text-base-content/70">
+          <div class="min-w-0">
+            <h1 class="font-semibold text-lg break-words">{@document.title}</h1>
+            <div class="flex flex-wrap items-center gap-2 text-sm text-base-content/70">
               <span class={"badge badge-sm #{status_color(@document.status)}"}>
                 {status_text(@document.status)}
               </span>
@@ -79,30 +79,42 @@
           {gettext("Original upload unavailable. Re-upload this document to process it again.")}
         </p>
       </section>
-      <%!-- Main content - Split screen --%>
-      <main class="flex-1 flex overflow-hidden">
+
+      <%!-- Panel switcher - narrow viewports only (both panels show side by side at lg:) --%>
+      <.view_tabs view_tab={@view_tab} show_original={@show_original} />
+
+      <%!-- Main content - stacked tabs below lg, split screen at lg: and up --%>
+      <div class="flex flex-1 flex-col lg:min-h-0 lg:flex-row lg:overflow-hidden">
         <%!-- Left panel - Page image --%>
-        <div class={[
-          "border-r border-base-300 flex flex-col bg-base-200 transition-all duration-200",
-          @chat_open && "w-2/5",
-          !@chat_open && "w-1/2"
-        ]}>
-          <div class="flex items-center justify-between px-4 py-2 border-b border-base-300">
+        <div
+          id="original-panel"
+          class={[
+            "w-full flex-col bg-base-200 transition-all duration-200",
+            "lg:flex lg:min-h-0 lg:border-r lg:border-base-300",
+            if(@view_tab == :original, do: "flex", else: "hidden"),
+            if(@chat_open, do: "lg:w-2/5", else: "lg:w-1/2")
+          ]}
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-base-300">
             <span class="text-sm font-medium">{gettext("Original Page")}</span>
             <.zoom_controls zoom_level={@zoom_level} />
           </div>
-          <div class="flex-1 overflow-auto p-4 flex items-start justify-center">
+          <div class="flex-1 p-4 flex items-start justify-center lg:min-h-0 lg:overflow-auto">
             <.page_image page={@current_page} zoom_level={@zoom_level} />
           </div>
         </div>
 
         <%!-- Right panel - Translated content --%>
-        <div class={[
-          "flex flex-col transition-all duration-200",
-          @chat_open && "w-2/5",
-          !@chat_open && "w-1/2"
-        ]}>
-          <div class="flex items-center justify-between px-4 py-2 border-b border-base-300">
+        <div
+          id="translated-panel"
+          class={[
+            "w-full flex-col transition-all duration-200",
+            "lg:flex lg:min-h-0",
+            if(@view_tab == :translated, do: "flex", else: "hidden"),
+            if(@chat_open, do: "lg:w-2/5", else: "lg:w-1/2")
+          ]}
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-base-300">
             <span class="text-sm font-medium">
               {if @show_original,
                 do: gettext("Original Content"),
@@ -132,12 +144,12 @@
             </div>
           </div>
           <.page_provenance page={@current_page} />
-          <div class="flex-1 overflow-auto p-6">
+          <div class="flex-1 p-6 lg:min-h-0 lg:overflow-auto">
             <.page_content page={@current_page} show_original={@show_original} />
           </div>
         </div>
 
-        <%!-- Chat panel --%>
+        <%!-- Chat panel - fixed overlay below lg, in-flow sidebar at lg: and up --%>
         <.chat_panel
           :if={@chat_open}
           chat_messages={@streams.chat_messages}
@@ -147,7 +159,7 @@
           chat_streaming_content={@chat_streaming_content}
           embeddings_ready={@embeddings_ready}
         />
-      </main>
+      </div>
 
       <%!-- Footer - Navigation --%>
       <.navigation current_page_number={@current_page_number} total_pages={@document.total_pages} />
