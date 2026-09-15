@@ -1145,14 +1145,53 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Evidence: `lib/doctrans_web/components/core_components.ex` (`flash/1`, the `:transient` attribute),
   `lib/doctrans_web/components/layouts.ex` (`flash_group/1`), `assets/js/app.js` (`AutoDismiss`).
 
-- [ ] **U07 · P2 · Make privacy claims match configured inference.**
+- [x] **U07 · P2 · Make privacy claims match configured inference.**
   Upload text and metadata promise that documents never leave the device even when a remote endpoint is used.
   Match README's conditional wording and identify the processing destination without revealing credentials.
   Acceptance: remote configuration makes the destination clear; local mode accurately describes local
   processing; neither logs nor UI expose API keys. The existing CSP blocks external Markdown images;
   the review did not identify an automatic external-image leak.
-  Evidence: `lib/doctrans_web/live/document_live/components.ex:210`,
-  `lib/doctrans_web/components/layouts/root.html.heex:9`.
+  Implemented: the interface no longer promises what only the configuration can deliver.
+  `Doctrans.Config.Inference` is the single source of truth for where inference runs, and it
+  answers for *both* paths: `Config.OpenAI.base_url/0` carries chat, vision and translation,
+  while `Config.Embedding.base_url/0` carries embeddings and falls back to the chat host only
+  when unset. The two are independently retargetable, and an embedding request carries the chunk
+  text it is embedding, so a remote embedding host is document egress even when chat stays local;
+  `local?/0` is therefore true only when every path is local.
+  Locality is decided from the URL host. `host.docker.internal` and `172.17.0.1` count as local:
+  they are the user's own machine reached from inside a container, and `host.docker.internal:8000`
+  is this project's shipped compose default -- a loopback-only test would have labelled the
+  standard setup "remote" and made the UI lie in the other direction. A host that cannot be read
+  at all (a scheme-less `"llm:8000"`) is `:unknown` and counts as not local: an unreadable
+  endpoint must never buy a privacy guarantee.
+  `DoctransWeb.PrivacyCopy` holds each claim next to its replacement, so it is hard to soften one
+  and leave its twin overclaiming. The local strings are reused verbatim, which kept all ten
+  non-English translations valid -- rewording those msgids would have marked every one fuzzy and
+  failed the translation gate. Three new msgids cover the remote case, each naming the
+  destination through a single `%{host}` binding fed by `destination_label/0`, which always has
+  something to show: a readable host, or the configured URL when there is none. The padlock icon
+  beside the upload notice is a guarantee, so it appears only with the local promise; remote
+  processing gets an outbound arrow.
+  The `<head>` meta tags and the `mix.exs` package description are not gettext-backed and had no
+  runtime context, so they were reworded to the README's conditional form rather than made
+  dynamic. README needed no change -- it was already the honest version this task points to.
+  On credentials: the acceptance criterion already held. An upstream failure is normalized by
+  `Processing.ApiFailure.handle/3` before it is logged, `ErrorMessages.binding/2` interpolates
+  only binaries and numbers so an opaque reason cannot surface, Req 0.7.4 redacts `authorization`
+  unconditionally, and nothing in `doctrans_web` reads a key. Two gaps were closed anyway: the raw
+  base URL was interpolated into two `Logger.debug` lines before Req ever saw it, so an
+  `OPENAI_HOST` carrying userinfo leaked verbatim in dev, now stripped by `redact_url/1`; and the
+  DOM half of the criterion had no regression guard, which `privacy_notice_test.exs` now supplies
+  to match the log half already pinned in `reprocess_modal_test.exs`.
+  Not addressed: LiveDashboard renders `:application.get_all_env(:doctrans)`, including `api_key`,
+  at `/dev/dashboard`. It is compiled out of prod by `:dev_routes`, so it is a dev-only exposure
+  and out of scope here, but it is the one place a key is rendered at all.
+  Evidence: `lib/doctrans/config/inference.ex`, `lib/doctrans_web/privacy_copy.ex`,
+  `lib/doctrans_web/live/document_live/index.ex`, `.../upload_components.ex`,
+  `lib/doctrans_web/components/layouts/root.html.heex`, `lib/doctrans/processing/openai.ex`
+  (`redact_url/1`), `mix.exs`, `test/doctrans/config/inference_test.exs`,
+  `test/doctrans_web/privacy_copy_test.exs`,
+  `test/doctrans_web/live/document_live/privacy_notice_test.exs`.
 
 - [ ] **U08 · P3 · Display recorded model provenance.**
   The page-processing-models paragraph is empty and hidden with the progress section at 100% completion.

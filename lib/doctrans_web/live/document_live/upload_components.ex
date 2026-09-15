@@ -146,8 +146,11 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
         {gettext("PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Up to 10 files")}
       </p>
       <p class="mt-2 text-xs text-base-content/40">
-        <.icon name="hero-lock-closed" class="w-3 h-3 inline-block align-text-top" />
-        {gettext("Your documents never leave your device")}
+        <.icon
+          name={DoctransWeb.PrivacyCopy.upload_notice_icon()}
+          class="w-3 h-3 inline-block align-text-top"
+        />
+        {DoctransWeb.PrivacyCopy.upload_notice()}
       </p>
     </div>
     """

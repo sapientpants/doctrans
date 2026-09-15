@@ -93,7 +93,7 @@ defmodule Doctrans.Processing.OpenAI do
     key = api_key()
 
     Logger.debug(
-      "OpenAI request: url=#{url}, auth=#{if key, do: "<set>", else: "<none>"}, body_keys=#{inspect(Map.keys(request_body))}"
+      "OpenAI request: url=#{redact_url(url)}, auth=#{if key, do: "<set>", else: "<none>"}, body_keys=#{inspect(Map.keys(request_body))}"
     )
 
     post_chat_completion(request_body, opts)
@@ -335,7 +335,7 @@ defmodule Doctrans.Processing.OpenAI do
     fuse = :embedding_api
 
     Logger.debug(
-      "Embedding POST #{embed_url("/v1/embeddings")}, model: #{model}, api_key: #{if(embed_api_key(), do: "<set>", else: "<none>")}"
+      "Embedding POST #{redact_url(embed_url("/v1/embeddings"))}, model: #{model}, api_key: #{if(embed_api_key(), do: "<set>", else: "<none>")}"
     )
 
     request = %{model: model, input: text}
@@ -379,6 +379,13 @@ defmodule Doctrans.Processing.OpenAI do
 
   defp api_url(path) do
     "#{base_url()}/#{String.trim_leading(path, "/")}"
+  end
+
+  # The base URL is operator-supplied and may carry credentials in its userinfo
+  # (`http://user:secret@host`). Req redacts its own auth header, but these URLs
+  # are logged before Req ever sees them, and dev logs at :debug.
+  defp redact_url(url) do
+    url |> URI.parse() |> Map.put(:userinfo, nil) |> URI.to_string()
   end
 
   defp base_url do

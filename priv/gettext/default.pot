@@ -18,7 +18,7 @@ msgid_plural "%{count} pages"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:202
+#: lib/doctrans_web/live/document_live/upload_components.ex:205
 #, elixir-autogen, elixir-format
 msgid "+ Add more files"
 msgstr ""
@@ -28,7 +28,7 @@ msgstr ""
 msgid "A-Z"
 msgstr ""
 
-#: lib/doctrans_web/components/core_components.ex:158
+#: lib/doctrans_web/components/core_components.ex:181
 #, elixir-autogen, elixir-format
 msgid "Actions"
 msgstr ""
@@ -43,8 +43,7 @@ msgstr ""
 msgid "Are you sure you want to delete this document? This cannot be undone."
 msgstr ""
 
-#: lib/doctrans_web/components/layouts.ex:70
-#: lib/doctrans_web/components/layouts.ex:82
+#: lib/doctrans_web/components/layouts.ex:97
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
 msgstr ""
@@ -70,7 +69,7 @@ msgstr ""
 msgid "Doctrans"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:300
+#: lib/doctrans_web/live/document_live/index.ex:298
 #, elixir-autogen, elixir-format
 msgid "Document deleted successfully"
 msgstr ""
@@ -156,7 +155,7 @@ msgstr ""
 msgid "No documents yet"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:377
+#: lib/doctrans_web/live/document_live/index.ex:375
 #, elixir-autogen, elixir-format
 msgid "No files were uploaded"
 msgstr ""
@@ -262,7 +261,7 @@ msgstr ""
 msgid "Show Original"
 msgstr ""
 
-#: lib/doctrans_web/components/layouts.ex:77
+#: lib/doctrans_web/components/layouts.ex:71
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
 msgstr ""
@@ -357,7 +356,7 @@ msgstr ""
 msgid "Swedish"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:299
+#: lib/doctrans_web/live/document_live/upload_components.ex:302
 #, elixir-autogen, elixir-format
 msgid "Document uploaded! Processing will begin shortly."
 msgid_plural "%{count} documents uploaded! Processing will begin shortly."
@@ -509,7 +508,7 @@ msgstr ""
 msgid "Please enter a question."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:73
+#: lib/doctrans_web/privacy_copy.ex:33
 #, elixir-autogen, elixir-format
 msgid "Private document translation powered by local AI"
 msgstr ""
@@ -530,12 +529,12 @@ msgstr ""
 msgid "Thinking..."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/index.ex:202
+#: lib/doctrans_web/privacy_copy.ex:45
 #, elixir-autogen, elixir-format
 msgid "Upload a document to get started. All processing happens locally on your device."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:150
+#: lib/doctrans_web/privacy_copy.ex:60
 #, elixir-autogen, elixir-format
 msgid "Your documents never leave your device"
 msgstr ""
@@ -663,19 +662,19 @@ msgstr ""
 msgid "Retrying..."
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:318
+#: lib/doctrans_web/live/document_live/upload_components.ex:321
 #, elixir-autogen, elixir-format
 msgid "Maximum %{max} files can be uploaded at once"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:275
+#: lib/doctrans_web/live/document_live/upload_components.ex:278
 #, elixir-autogen, elixir-format
 msgid "This file is still uploading. Submit again to finish it."
 msgid_plural "These files are still uploading. Submit again to finish them."
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:254
+#: lib/doctrans_web/live/document_live/upload_components.ex:257
 #, elixir-autogen, elixir-format
 msgid "This file was not uploaded"
 msgid_plural "These files were not uploaded"
@@ -692,8 +691,8 @@ msgstr ""
 msgid "Back to documents"
 msgstr ""
 
-#: lib/doctrans_web/components/core_components.ex:53
-#: lib/doctrans_web/components/core_components.ex:279
+#: lib/doctrans_web/components/core_components.ex:76
+#: lib/doctrans_web/components/core_components.ex:302
 #, elixir-autogen, elixir-format
 msgid "Close"
 msgstr ""
@@ -713,7 +712,7 @@ msgstr ""
 msgid "Page"
 msgstr ""
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:192
+#: lib/doctrans_web/live/document_live/upload_components.ex:195
 #, elixir-autogen, elixir-format
 msgid "Remove %{file}"
 msgstr ""
@@ -729,17 +728,17 @@ msgstr ""
 msgid "Sort documents"
 msgstr ""
 
-#: lib/doctrans_web/components/layouts.ex:121
+#: lib/doctrans_web/components/layouts.ex:135
 #, elixir-autogen, elixir-format
 msgid "Use dark theme"
 msgstr ""
 
-#: lib/doctrans_web/components/layouts.ex:111
+#: lib/doctrans_web/components/layouts.ex:125
 #, elixir-autogen, elixir-format
 msgid "Use light theme"
 msgstr ""
 
-#: lib/doctrans_web/components/layouts.ex:101
+#: lib/doctrans_web/components/layouts.ex:115
 #, elixir-autogen, elixir-format
 msgid "Use system theme"
 msgstr ""
@@ -752,4 +751,19 @@ msgstr ""
 #: lib/doctrans_web/live/document_live/page_viewer.ex:79
 #, elixir-autogen, elixir-format
 msgid "Zoom out"
+msgstr ""
+
+#: lib/doctrans_web/privacy_copy.ex:35
+#, elixir-autogen, elixir-format
+msgid "Document translation powered by AI on %{host}"
+msgstr ""
+
+#: lib/doctrans_web/privacy_copy.ex:62
+#, elixir-autogen, elixir-format
+msgid "Documents are sent to %{host} for processing"
+msgstr ""
+
+#: lib/doctrans_web/privacy_copy.ex:47
+#, elixir-autogen, elixir-format
+msgid "Upload a document to get started. Document content is sent to %{host} for processing."
 msgstr ""
