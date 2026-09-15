@@ -1219,12 +1219,42 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `test/doctrans_web/live/document_live/privacy_notice_test.exs`,
   `test/doctrans/processing/openai_request_test.exs`, `test/scripts/check_translations_test.exs`.
 
-- [ ] **U08 · P3 · Display recorded model provenance.**
+- [x] **U08 · P3 · Display recorded model provenance.**
   The page-processing-models paragraph is empty and hidden with the progress section at 100% completion.
   Render extraction/translation identifiers and Unknown fallbacks outside the progress-only section.
   Acceptance: processing, completed, and legacy pages display appropriate provenance, including model aliases
   without claiming they identify immutable weights.
-  Evidence: `lib/doctrans_web/live/document_live/show.html.heex:82`.
+  Implemented: provenance is now a `page_provenance/1` component rendered in the translated-content panel,
+  above the page body, so it no longer shares the `:if={@processing_progress < 100}` section that commit
+  `6953656` made progress-only. The empty paragraph that section still carried is gone; the section keeps
+  only the progress bar and the missing-original notice, which are genuinely progress-scoped.
+  The line reports what the page columns actually hold, and distinguishes three cases the previous
+  single `|| Unknown` fallback collapsed into one. A stage still `pending` or `processing` has nothing
+  recorded yet and says so ("not recorded yet"); a stage that finished without a recorded identifier —
+  a page processed before `20260910190000_add_processing_runs` added the columns, or one whose stage
+  never succeeded — reads Unknown; anything else is the recorded string, verbatim. The distinction is
+  real, not cosmetic: `LlmProcessor` writes `extraction_model`/`translation_model` only on success
+  (`llm_processor.ex:161`, `:278`), and `Pages.reset_page_for_reprocessing/1` nulls them again at the
+  start of a rerun, so a blank column during a rerun means "in flight", not "unknown forever".
+  The recorded value is never substituted from today's configuration. `Run.choices/1` fills the
+  configured defaults into the job options, so a stage that succeeds always records the identifier it
+  actually ran with — but reading `Config.OpenAI.vision_model/0` at render time for a page that has no
+  column value would attribute the *current* setting to a *past* run, which is precisely the false
+  provenance `document_reprocessing_test.exs:419` pins at the storage layer. `requested_*_model` is not
+  displayed either: it records what was asked for at enqueue time, which a failed run never delivered.
+  A caveat line states that these names are aliases reported during processing and may not identify the
+  exact weights used. An endpoint alias such as `gpt-4o` names a route, not a fixed set of weights, and
+  it can be repointed server-side between two runs that record the same string, so the line stops short
+  of a reproducibility claim the application cannot substantiate.
+  Known limitation: provenance is per page and only for the page in view; a document whose pages ran
+  under different models (possible via per-page reprocessing) has no aggregate display. The document-level
+  "Run models" line removed in `6953656` was not restored — the document columns describe the latest run
+  configuration, not what produced any particular page, and the two disagree exactly when per-page
+  reprocessing has happened.
+  Evidence: `lib/doctrans_web/live/document_live/viewer_components.ex` (`page_provenance/1`, `model_label/2`),
+  `lib/doctrans_web/live/document_live/show.html.heex`, `priv/gettext` (four new messages across 11 locales),
+  `test/doctrans_web/live/document_live/model_provenance_test.exs`,
+  `test/doctrans_web/live/document_live_reprocessing_test.exs`.
 
 - [ ] **U09 · P3 · Make the viewer responsive and preserve chat reading position.**
   Two horizontal document panels plus a fixed-width chat panel are unsuitable for narrow screens.

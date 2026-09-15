@@ -77,6 +77,9 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
     {:ok, missing, _} = live(conn, ~p"/documents/#{document.id}")
     assert has_element?(missing, "#show-document-reprocess[disabled]")
     refute has_element?(missing, "#original-upload-missing")
-    refute has_element?(missing, "#page-processing-models")
+    # Provenance belongs to the page, not to the reprocessing controls: a
+    # missing original disables reprocessing without hiding what produced the
+    # content that is already there.
+    assert has_element?(missing, "#page-processing-models")
   end
 end

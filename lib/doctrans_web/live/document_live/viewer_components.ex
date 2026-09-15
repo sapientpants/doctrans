@@ -51,6 +51,45 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
   end
 
   attr :page, :map, default: nil
+
+  @doc """
+  Shows which models produced the current page's content.
+
+  The identifiers are whatever the processing run recorded: an alias such as
+  `gpt-4o` names an endpoint, not a fixed set of weights, so the line says the
+  models were *reported*, and never claims the page can be reproduced from them.
+  Pages processed before provenance was recorded keep a null column, which is
+  reported as unknown rather than backfilled with today's configuration.
+  """
+  def page_provenance(assigns) do
+    ~H"""
+    <div
+      :if={@page}
+      id="page-processing-models"
+      class="border-b border-base-300 px-4 py-2 text-xs text-base-content/60"
+    >
+      <p class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span id="page-extraction-model">
+          {gettext("Extraction: %{model}",
+            model: model_label(@page.extraction_model, @page.extraction_status)
+          )}
+        </span>
+        <span id="page-translation-model">
+          {gettext("Translation: %{model}",
+            model: model_label(@page.translation_model, @page.translation_status)
+          )}
+        </span>
+      </p>
+      <p id="page-processing-models-caveat" class="mt-1 text-base-content/50">
+        {gettext(
+          "Model names are the aliases reported during processing and may not identify the exact weights used."
+        )}
+      </p>
+    </div>
+    """
+  end
+
+  attr :page, :map, default: nil
   attr :show_original, :boolean, required: true
 
   def page_content(assigns) do
@@ -105,6 +144,14 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
     # `.markdown` container so its edge-margin rules (`.markdown > :first-child`) match.
     ~H"{raw(@html)}"
   end
+
+  # A stage that has not finished has nothing recorded yet, which is a different
+  # statement from a stage that finished without recording anything.
+  defp model_label(nil, status) when status in ~w(pending processing),
+    do: gettext("not recorded yet")
+
+  defp model_label(nil, _status), do: gettext("Unknown")
+  defp model_label(model, _status), do: model
 
   defp show_content?(page, show_original) do
     if show_original do
