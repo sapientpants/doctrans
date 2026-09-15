@@ -176,6 +176,87 @@ defmodule Scripts.CheckTranslationsTest do
     end
   end
 
+  describe "interpolation bindings" do
+    test "a translation keeping every binding passes", %{tmp_dir: dir} do
+      pot(dir, ~s(msgid "Sent to %{host}"\nmsgstr ""\n))
+      po(dir, "de", ~s(msgid "Sent to %{host}"\nmsgstr "Gesendet an %{host}"\n))
+
+      assert %{bindings: [], missing: [], fuzzy: []} = TranslationChecker.check(dir)
+    end
+
+    test "a translation dropping a binding is rejected", %{tmp_dir: dir} do
+      # The failure this check exists for: Gettext logs and renders, so the
+      # sentence ships with the destination silently missing.
+      pot(dir, ~s(msgid "Sent to %{host}"\nmsgstr ""\n))
+      po(dir, "de", ~s(msgid "Sent to %{host}"\nmsgstr "Gesendet"\n))
+
+      assert %{bindings: [{"de", "default", issue}], missing: [], fuzzy: []} =
+               TranslationChecker.check(dir)
+
+      assert issue =~ "Sent to %{host}"
+      assert issue =~ "msgstr drops %{host}"
+    end
+
+    test "a translation renaming a binding is rejected", %{tmp_dir: dir} do
+      pot(dir, ~s(msgid "Sent to %{host}"\nmsgstr ""\n))
+      po(dir, "fr", ~s(msgid "Sent to %{host}"\nmsgstr "Envoyé à %{hôte}"\n))
+
+      assert %{bindings: [{"fr", "default", issue}]} = TranslationChecker.check(dir)
+      assert issue =~ "drops %{host}"
+    end
+
+    test "an empty msgstr is missing, not a binding mismatch", %{tmp_dir: dir} do
+      # It falls back to the msgid, which carries the right bindings already;
+      # reporting it twice would just make the missing-translation report noisier.
+      pot(dir, ~s(msgid "Sent to %{host}"\nmsgstr ""\n))
+      po(dir, "de", ~s(msgid "Sent to %{host}"\nmsgstr ""\n))
+
+      assert %{bindings: [], missing: [{"de", "default", "Sent to %{host}"}]} =
+               TranslationChecker.check(dir)
+    end
+
+    test "the source language's empty msgstr is not a binding mismatch", %{tmp_dir: dir} do
+      pot(dir, ~s(msgid "Sent to %{host}"\nmsgstr ""\n))
+      po(dir, "en", ~s(msgid "Sent to %{host}"\nmsgstr ""\n))
+      po(dir, "de", ~s(msgid "Sent to %{host}"\nmsgstr "Gesendet an %{host}"\n))
+
+      assert %{bindings: [], missing: [], fuzzy: []} = TranslationChecker.check(dir)
+    end
+
+    test "each plural form is compared against the source it renders", %{tmp_dir: dir} do
+      # msgstr[0] answers the msgid, higher forms answer msgid_plural -- comparing
+      # every form against the msgid would mis-report a correct plural.
+      pot(
+        dir,
+        ~s(msgid "%{count} file on %{host}"\nmsgid_plural "%{count} files on %{host}"\n) <>
+          ~s(msgstr[0] ""\nmsgstr[1] ""\n)
+      )
+
+      po(
+        dir,
+        "de",
+        ~s(msgid "%{count} file on %{host}"\nmsgid_plural "%{count} files on %{host}"\n) <>
+          ~s(msgstr[0] "%{count} Datei auf %{host}"\nmsgstr[1] "%{count} Dateien"\n)
+      )
+
+      assert %{bindings: [{"de", "default", issue}], missing: []} = TranslationChecker.check(dir)
+      assert issue =~ "msgstr[1] drops %{host}"
+    end
+
+    test "an obsolete entry's bindings are not checked", %{tmp_dir: dir} do
+      pot(dir, ~s(msgid "Sent to %{host}"\nmsgstr ""\n))
+
+      po(
+        dir,
+        "de",
+        ~s(msgid "Sent to %{host}"\nmsgstr "Gesendet an %{host}"\n\n) <>
+          ~s(#~ msgid "Old %{host}"\n#~ msgstr "Alt"\n)
+      )
+
+      assert %{bindings: []} = TranslationChecker.check(dir)
+    end
+  end
+
   describe "configuration guards" do
     test "a tree with no pot files is a problem, not a pass", %{tmp_dir: dir} do
       po(dir, "de", ~s(msgid "Hello"\nmsgstr "Hallo"\n))

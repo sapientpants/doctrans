@@ -796,6 +796,86 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     end
   end
 
+  describe "endpoint URLs in the debug log" do
+    # These URLs are logged before Req ever sees them, so Req's own header
+    # redaction does not cover them, and dev runs at :debug. The chat and
+    # embedding lines are separate call sites and each needs its own guard.
+    setup do
+      # The suite runs Logger at :warning, which drops these lines before any
+      # capture handler sees them; dev runs at :debug, which is the case at issue.
+      previous_level = Logger.level()
+      Logger.configure(level: :debug)
+      on_exit(fn -> Logger.configure(level: previous_level) end)
+
+      :ok
+    end
+
+    # Both forms matter, and only the second one ever failed: with a parseable
+    # host, stripping `URI.userinfo` worked. A scheme-less endpoint -- the
+    # realistic operator typo, since OPENAI_HOST is a raw env var -- leaves the
+    # credentials in the authority, where the old redaction never touched them.
+    for {shape, scheme} <- [{"a parseable", "http://"}, {"a scheme-less", ""}] do
+      test "the chat request line carries no credentials from #{shape} endpoint", %{
+        bypass: bypass
+      } do
+        configure_endpoints("#{unquote(scheme)}user:s3cret@localhost:#{bypass.port}")
+
+        Bypass.stub(bypass, "POST", "/v1/chat/completions", fn conn ->
+          json(conn, 200, %{"choices" => [%{"message" => %{"content" => "hi"}}]})
+        end)
+
+        log =
+          ExUnit.CaptureLog.capture_log([level: :debug], fn ->
+            attempt(fn -> OpenAI.chat([%{role: "user", content: "hi"}]) end)
+          end)
+
+        assert log =~ "OpenAI request:"
+        refute log =~ "s3cret"
+      end
+
+      test "the embedding request line carries no credentials from #{shape} endpoint", %{
+        bypass: bypass
+      } do
+        configure_endpoints("#{unquote(scheme)}user:s3cret@localhost:#{bypass.port}")
+
+        Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
+          json(conn, 200, %{"data" => [%{"embedding" => List.duplicate(0.1, 1024)}]})
+        end)
+
+        log =
+          ExUnit.CaptureLog.capture_log([level: :debug], fn ->
+            attempt(fn -> OpenAI.embed("text") end)
+          end)
+
+        assert log =~ "Embedding POST"
+        refute log =~ "s3cret"
+      end
+    end
+
+    # A scheme-less base URL cannot be requested at all; the log line under test
+    # is written before that failure, so whatever the call does with it is moot.
+    defp attempt(fun) do
+      fun.()
+    rescue
+      _ -> :error
+    catch
+      _, _ -> :error
+    end
+
+    defp configure_endpoints(base_url) do
+      Application.put_env(:doctrans, :openai,
+        base_url: base_url,
+        api_key: "sk-test-123",
+        chat_model: "test-chat-model"
+      )
+
+      Application.put_env(:doctrans, :embedding,
+        base_url: base_url,
+        model: "test-embedding-model"
+      )
+    end
+  end
+
   describe "list_models/0" do
     test "returns model names", %{bypass: bypass} do
       Bypass.expect(bypass, "GET", "/v1/models", fn conn ->

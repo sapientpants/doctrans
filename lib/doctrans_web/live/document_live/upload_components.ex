@@ -6,6 +6,7 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
 
   alias DoctransWeb.DocumentLive.UploadIntake
   alias DoctransWeb.ErrorMessages
+  alias DoctransWeb.PrivacyCopy
 
   import DoctransWeb.DocumentLive.Components, only: [language_name: 1]
 
@@ -145,9 +146,12 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
       <p id="upload-files-hint" class="mt-1 text-xs text-base-content/50">
         {gettext("PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Up to 10 files")}
       </p>
-      <p class="mt-2 text-xs text-base-content/40">
-        <.icon name="hero-lock-closed" class="w-3 h-3 inline-block align-text-top" />
-        {gettext("Your documents never leave your device")}
+      <p id="upload-privacy-notice" class="mt-2 text-xs text-base-content/40">
+        <.icon
+          name={PrivacyCopy.upload_notice_icon()}
+          class="w-3 h-3 inline-block align-text-top"
+        />
+        {PrivacyCopy.upload_notice()}
       </p>
     </div>
     """

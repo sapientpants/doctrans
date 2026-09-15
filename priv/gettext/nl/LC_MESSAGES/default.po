@@ -11,7 +11,7 @@ msgid_plural "%{count} pages"
 msgstr[0] "%{count} pagina"
 msgstr[1] "%{count} pagina's"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:202
+#: lib/doctrans_web/live/document_live/upload_components.ex:205
 #, elixir-autogen, elixir-format
 msgid "+ Add more files"
 msgstr "+ Meer bestanden toevoegen"
@@ -21,7 +21,7 @@ msgstr "+ Meer bestanden toevoegen"
 msgid "A-Z"
 msgstr "A-Z"
 
-#: lib/doctrans_web/components/core_components.ex:158
+#: lib/doctrans_web/components/core_components.ex:181
 #, elixir-autogen, elixir-format
 msgid "Actions"
 msgstr "Acties"
@@ -36,8 +36,7 @@ msgstr "Er is een fout opgetreden bij het verwerken van deze pagina"
 msgid "Are you sure you want to delete this document? This cannot be undone."
 msgstr "Weet u zeker dat u dit document wilt verwijderen? Dit kan niet ongedaan worden gemaakt."
 
-#: lib/doctrans_web/components/layouts.ex:70
-#: lib/doctrans_web/components/layouts.ex:82
+#: lib/doctrans_web/components/layouts.ex:97
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
 msgstr "Poging tot opnieuw verbinden"
@@ -63,7 +62,7 @@ msgstr "Voltooid"
 msgid "Doctrans"
 msgstr "Doctrans"
 
-#: lib/doctrans_web/live/document_live/index.ex:300
+#: lib/doctrans_web/live/document_live/index.ex:298
 #, elixir-autogen, elixir-format
 msgid "Document deleted successfully"
 msgstr "Document succesvol verwijderd"
@@ -149,7 +148,7 @@ msgstr "Volgende"
 msgid "No documents yet"
 msgstr "Nog geen documenten"
 
-#: lib/doctrans_web/live/document_live/index.ex:377
+#: lib/doctrans_web/live/document_live/index.ex:375
 #, elixir-autogen, elixir-format
 msgid "No files were uploaded"
 msgstr "Geen bestanden geüpload"
@@ -255,7 +254,7 @@ msgstr "Zoeken..."
 msgid "Show Original"
 msgstr "Origineel tonen"
 
-#: lib/doctrans_web/components/layouts.ex:77
+#: lib/doctrans_web/components/layouts.ex:71
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
 msgstr "Er is iets misgegaan!"
@@ -350,7 +349,7 @@ msgstr "Noors"
 msgid "Swedish"
 msgstr "Zweeds"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:299
+#: lib/doctrans_web/live/document_live/upload_components.ex:302
 #, elixir-autogen, elixir-format
 msgid "Document uploaded! Processing will begin shortly."
 msgid_plural "%{count} documents uploaded! Processing will begin shortly."
@@ -502,7 +501,7 @@ msgstr "Ik zoek relevante inhoud en geef een antwoord op basis daarvan."
 msgid "Please enter a question."
 msgstr "Voer een vraag in."
 
-#: lib/doctrans_web/live/document_live/index.ex:73
+#: lib/doctrans_web/privacy_copy.ex:33
 #, elixir-autogen, elixir-format
 msgid "Private document translation powered by local AI"
 msgstr "Privé documentvertaling aangedreven door lokale AI"
@@ -523,12 +522,12 @@ msgstr "Sorry, er is een fout opgetreden. Probeer het opnieuw."
 msgid "Thinking..."
 msgstr "Nadenken..."
 
-#: lib/doctrans_web/live/document_live/index.ex:202
+#: lib/doctrans_web/privacy_copy.ex:45
 #, elixir-autogen, elixir-format
 msgid "Upload a document to get started. All processing happens locally on your device."
 msgstr "Upload een document om te beginnen. Alle verwerking gebeurt lokaal op uw apparaat."
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:150
+#: lib/doctrans_web/privacy_copy.ex:60
 #, elixir-autogen, elixir-format
 msgid "Your documents never leave your device"
 msgstr "Uw documenten verlaten nooit uw apparaat"
@@ -656,19 +655,19 @@ msgstr "Opnieuw proberen"
 msgid "Retrying..."
 msgstr "Bezig met opnieuw proberen..."
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:318
+#: lib/doctrans_web/live/document_live/upload_components.ex:321
 #, elixir-autogen, elixir-format
 msgid "Maximum %{max} files can be uploaded at once"
 msgstr "Maximaal %{max} bestanden kunnen tegelijk worden geüpload"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:275
+#: lib/doctrans_web/live/document_live/upload_components.ex:278
 #, elixir-autogen, elixir-format
 msgid "This file is still uploading. Submit again to finish it."
 msgid_plural "These files are still uploading. Submit again to finish them."
 msgstr[0] "Dit bestand wordt nog geüpload. Verstuur opnieuw om het te voltooien."
 msgstr[1] "Deze bestanden worden nog geüpload. Verstuur opnieuw om ze te voltooien."
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:254
+#: lib/doctrans_web/live/document_live/upload_components.ex:257
 #, elixir-autogen, elixir-format
 msgid "This file was not uploaded"
 msgid_plural "These files were not uploaded"
@@ -685,8 +684,8 @@ msgstr "Stel een vraag over dit document"
 msgid "Back to documents"
 msgstr "Terug naar documenten"
 
-#: lib/doctrans_web/components/core_components.ex:53
-#: lib/doctrans_web/components/core_components.ex:279
+#: lib/doctrans_web/components/core_components.ex:76
+#: lib/doctrans_web/components/core_components.ex:302
 #, elixir-autogen, elixir-format
 msgid "Close"
 msgstr "Sluiten"
@@ -706,7 +705,7 @@ msgstr "%{title} openen"
 msgid "Page"
 msgstr "Pagina"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:192
+#: lib/doctrans_web/live/document_live/upload_components.ex:195
 #, elixir-autogen, elixir-format
 msgid "Remove %{file}"
 msgstr "%{file} verwijderen"
@@ -722,17 +721,17 @@ msgstr "Pagina opnieuw verwerken"
 msgid "Sort documents"
 msgstr "Documenten sorteren"
 
-#: lib/doctrans_web/components/layouts.ex:121
+#: lib/doctrans_web/components/layouts.ex:135
 #, elixir-autogen, elixir-format
 msgid "Use dark theme"
 msgstr "Donker thema gebruiken"
 
-#: lib/doctrans_web/components/layouts.ex:111
+#: lib/doctrans_web/components/layouts.ex:125
 #, elixir-autogen, elixir-format
 msgid "Use light theme"
 msgstr "Licht thema gebruiken"
 
-#: lib/doctrans_web/components/layouts.ex:101
+#: lib/doctrans_web/components/layouts.ex:115
 #, elixir-autogen, elixir-format
 msgid "Use system theme"
 msgstr "Systeemthema gebruiken"
@@ -746,3 +745,18 @@ msgstr "Inzoomen"
 #, elixir-autogen, elixir-format
 msgid "Zoom out"
 msgstr "Uitzoomen"
+
+#: lib/doctrans_web/privacy_copy.ex:35
+#, elixir-autogen, elixir-format
+msgid "Document translation powered by AI on %{host}"
+msgstr "Documentvertaling aangedreven door AI op %{host}"
+
+#: lib/doctrans_web/privacy_copy.ex:62
+#, elixir-autogen, elixir-format
+msgid "Documents are sent to %{host} for processing"
+msgstr "Documenten worden voor verwerking naar %{host} gestuurd"
+
+#: lib/doctrans_web/privacy_copy.ex:47
+#, elixir-autogen, elixir-format
+msgid "Upload a document to get started. Document content is sent to %{host} for processing."
+msgstr "Upload een document om te beginnen. Documentinhoud wordt voor verwerking naar %{host} gestuurd."

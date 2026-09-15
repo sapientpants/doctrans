@@ -8,6 +8,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   alias DoctransWeb.DocumentLive.DocumentStream
   alias DoctransWeb.DocumentLive.UploadIntake
   alias DoctransWeb.ErrorMessages
+  alias DoctransWeb.PrivacyCopy
 
   require Logger
 
@@ -69,8 +70,8 @@ defmodule DoctransWeb.DocumentLive.Index do
         <div class="flex justify-between items-center mb-6">
           <div>
             <h1 class="text-3xl font-bold text-base-content">{gettext("Doctrans")}</h1>
-            <p class="text-base-content/70 mt-1">
-              {gettext("Private document translation powered by local AI")}
+            <p id="privacy-tagline" class="text-base-content/70 mt-1">
+              {PrivacyCopy.tagline()}
             </p>
           </div>
           <div class="flex items-center gap-3">
@@ -199,9 +200,7 @@ defmodule DoctransWeb.DocumentLive.Index do
             <.icon name="hero-document-text" class="w-16 h-16 mx-auto text-base-content/30" />
             <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No documents yet")}</h3>
             <p class="mt-2 text-base-content/70">
-              {gettext(
-                "Upload a document to get started. All processing happens locally on your device."
-              )}
+              {PrivacyCopy.empty_state()}
             </p>
           </div>
           <div :for={{id, document} <- @streams.documents} id={id}>

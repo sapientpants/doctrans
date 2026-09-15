@@ -6,7 +6,7 @@ defmodule Doctrans.Processing.OpenAI do
   model listing against OpenAI-compatible API endpoints.
   """
 
-  alias Doctrans.Config.{Embedding, OpenAI}
+  alias Doctrans.Config.{Embedding, Inference, OpenAI}
   alias Doctrans.Processing.ApiFailure
   alias Doctrans.Processing.SSECollector
   alias Doctrans.Resilience.CircuitBreaker
@@ -93,7 +93,7 @@ defmodule Doctrans.Processing.OpenAI do
     key = api_key()
 
     Logger.debug(
-      "OpenAI request: url=#{url}, auth=#{if key, do: "<set>", else: "<none>"}, body_keys=#{inspect(Map.keys(request_body))}"
+      "OpenAI request: url=#{redact_url(url)}, auth=#{if key, do: "<set>", else: "<none>"}, body_keys=#{inspect(Map.keys(request_body))}"
     )
 
     post_chat_completion(request_body, opts)
@@ -123,7 +123,13 @@ defmodule Doctrans.Processing.OpenAI do
           receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
           # :transient retries all methods (incl. POST) on 408/429/5xx and
           # connection errors; chat-completion POSTs are safe to replay
-          retry: :transient
+          retry: :transient,
+          # Req follows redirects by default, and a 307/308 replays the POST
+          # body at the Location host. That would send document text somewhere
+          # `Doctrans.Config.Inference` never classified, breaking the privacy
+          # claim the UI makes from it. An inference server has no cause to
+          # redirect; if one does, fail loudly rather than silently re-target.
+          redirect: false
         )
       end,
       melt: false
@@ -171,6 +177,9 @@ defmodule Doctrans.Processing.OpenAI do
            json: build_request_body(opts ++ [messages: messages, stream: true]),
            receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
            retry: :transient,
+           # See post_chat_completion/2: a redirect would replay the document
+           # text at an endpoint the privacy copy never accounted for.
+           redirect: false,
            into: stream_into(collector)
          ) do
       {:ok, %Req.Response{status: 200} = resp} ->
@@ -335,7 +344,7 @@ defmodule Doctrans.Processing.OpenAI do
     fuse = :embedding_api
 
     Logger.debug(
-      "Embedding POST #{embed_url("/v1/embeddings")}, model: #{model}, api_key: #{if(embed_api_key(), do: "<set>", else: "<none>")}"
+      "Embedding POST #{redact_url(embed_url("/v1/embeddings"))}, model: #{model}, api_key: #{if(embed_api_key(), do: "<set>", else: "<none>")}"
     )
 
     request = %{model: model, input: text}
@@ -346,7 +355,10 @@ defmodule Doctrans.Processing.OpenAI do
            json: request,
            receive_timeout: timeout,
            # Embedding POSTs are idempotent; replay them on transient failures
-           retry: :transient
+           retry: :transient,
+           # An embedding request carries the chunk text it is embedding, so a
+           # followed redirect is document egress. See post_chat_completion/2.
+           redirect: false
          ) do
       {:ok, %Req.Response{status: 200, body: body}} ->
         parse_embed_response(body)
@@ -380,6 +392,12 @@ defmodule Doctrans.Processing.OpenAI do
   defp api_url(path) do
     "#{base_url()}/#{String.trim_leading(path, "/")}"
   end
+
+  # The base URL is operator-supplied and may carry credentials. Req redacts its
+  # own auth header, but these URLs are logged before Req ever sees them, and dev
+  # logs at :debug. `Doctrans.Config.Inference` owns the redaction because it
+  # renders the same URLs into the privacy copy; one rule, one place.
+  defp redact_url(url), do: Inference.redact_url(url)
 
   defp base_url do
     OpenAI.base_url()

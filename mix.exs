@@ -6,7 +6,7 @@ defmodule Doctrans.MixProject do
       app: :doctrans,
       version: "0.1.0",
       description:
-        "Privacy-first document translation powered by local AI models. All processing stays on your device.",
+        "Privacy-first document translation. Processing stays on your device when you use a local inference server.",
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
