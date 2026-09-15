@@ -1096,15 +1096,54 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `lib/doctrans_web/components/core_components.ex` (`dialog/1`), `assets/js/app.js` (`DialogFocus`),
   `test/doctrans_web/live/document_live/keyboard_accessibility_test.exs`.
 
-- [ ] **U06 · P2 · Keep connectivity notices mounted.**
+- [x] **U06 · P2 · Keep connectivity notices mounted.**
   AutoDismiss removes all flash nodes after about 5.3 seconds, including initially hidden client/server
   connection-error banners. Later disconnect handlers target missing nodes.
   Limit timed dismissal to transient notifications and update LiveView flash state instead of removing
   LiveView-owned DOM. Keep connectivity notices until connection state resolves.
   Acceptance: disconnecting after a minute still displays a reconnect notice, which clears on reconnect;
   manually dismissed flashes do not reappear from stale server state.
-  Evidence: `lib/doctrans_web/components/core_components.ex:36`,
-  `lib/doctrans_web/components/layouts.ex:62`, `assets/js/app.js:30`.
+  Implemented: `flash/1` gained a `:transient` attribute that decides whether a notice is a one-off
+  message or a piece of connection state. Only transient notices get `phx-hook="AutoDismiss"`, so the
+  `#client-error` and `#server-error` banners -- which render `hidden` on first paint and are found by
+  id when the socket drops -- are no longer deleted 5.3 seconds into a healthy session. Their
+  `phx-disconnected`/`phx-connected` handlers now always have a node to target, however long the page
+  has been open. The distinction is one attribute rather than an id allowlist in the hook, because the
+  hook cannot know which notices a future caller will want to keep mounted; `flash/1` documents the
+  invariant at the attribute itself. Both banners now render through a private `connectivity_notice/1`
+  in `flash_group/1`, so `transient={false}` and the handler pair are stated once.
+  Timed dismissal also stopped tearing out DOM that LiveView owns. Rather than reimplement dismissal in
+  JavaScript, the hook now runs the `phx-click` command the server already rendered
+  (`this.js().exec(...)`, LiveView 1.1.33). One definition therefore drives both paths: a flash-backed
+  notice pushes `lv:clear-flash` and hides, so a dismissed message cannot return on the next render;
+  anything else just hides. This removed the hand-rolled fade, the `data-flash-key` attribute, the
+  `dismissing` flag and the `pushEvent(...).catch(...)` fallback. It also removed the invisible-overlay
+  hazard those parts existed to manage: `hide/1` ends at `display: none`, where the old fade left the
+  notice at `opacity: 0` -- fully hit-testable, `position: fixed`, `z-50` -- until the server replied,
+  which on a socket that dropped after the push meant up to the 30s `PUSH_TIMEOUT`. Auto-dismiss and
+  click-dismiss also no longer animate differently.
+  Only a notice whose text *came from* the flash map may clear it, and that is now keyed on the inner
+  block being empty rather than on the flash entry merely existing. A caller passing both a slot and a
+  flash of the same kind previously rendered the slot text while carrying the clear: dismissing it
+  discarded an unrelated message the user never saw, and because `:if` stayed truthy from the slot,
+  LiveView never removed the node -- it parked invisible and click-blocking for the rest of the session.
+  No caller did this, but nothing stopped the next one. `core_components_test.exs` now pins it.
+  The countdown restarts on the notice's text rather than on the patch that delivered it -- a replaced
+  message is readable for its full five seconds, while a LiveView that repatches every hundred
+  milliseconds cannot hold one on screen forever. A patch carrying a replacement message also clears
+  the inline `display` left by a dismissal already under way, so the replacement is not patched into a
+  hidden node. The timer is cancelled in `destroyed`.
+  Known limitation: re-flashing a message whose text is *identical* to the one on screen does not
+  restart the countdown, so the second message can be visible only for the remainder of the first
+  one's five seconds. There is no signal to key on -- the flash map, the server's render and the DOM
+  are all byte-identical -- so distinguishing the two needs a change token threaded through every
+  `put_flash/3` call site. This behaviour predates U06; the branch neither introduced nor fixed it.
+  Verified against the served page: `#client-error` and `#server-error` render with no `phx-hook`, no
+  `lv:clear-flash` in their click handler, and with `hidden` and both connection handlers intact. The
+  timing behaviour itself is not covered by tests -- the repo has no JavaScript test runner -- so the
+  hook's five-second path was not exercised automatically.
+  Evidence: `lib/doctrans_web/components/core_components.ex` (`flash/1`, the `:transient` attribute),
+  `lib/doctrans_web/components/layouts.ex` (`flash_group/1`), `assets/js/app.js` (`AutoDismiss`).
 
 - [ ] **U07 · P2 · Make privacy claims match configured inference.**
   Upload text and metadata promise that documents never leave the device even when a remote endpoint is used.

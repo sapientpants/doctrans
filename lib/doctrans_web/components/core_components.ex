@@ -16,24 +16,47 @@ defmodule DoctransWeb.CoreComponents do
 
       <.flash kind={:info} flash={@flash} />
       <.flash kind={:info} phx-mounted={show("#flash")}>Welcome Back!</.flash>
+      <.flash kind={:error} transient={false}>Connection lost</.flash>
   """
   attr :id, :string, doc: "the optional id of flash container"
   attr :flash, :map, default: %{}, doc: "the map of flash messages to display"
   attr :title, :string, default: nil
   attr :kind, :atom, values: [:info, :error], doc: "used for styling and flash lookup"
+
+  attr :transient, :boolean,
+    default: true,
+    doc:
+      "whether the notice dismisses itself on a timer; `false` for banners driven by " <>
+        "`phx-connected`/`phx-disconnected`, which need the node to survive"
+
   attr :rest, :global, doc: "the arbitrary HTML attributes to add to the flash container"
 
   slot :inner_block, doc: "the optional inner block that renders the flash message"
 
   def flash(assigns) do
-    assigns = assign_new(assigns, :id, fn -> "flash-#{assigns.kind}" end)
+    assigns =
+      assigns
+      |> assign_new(:id, fn -> "flash-#{assigns.kind}" end)
+      |> assign(:flash_msg, Phoenix.Flash.get(assigns.flash, assigns.kind))
+
+    # Only a notice whose text *came from* the flash map may clear it. Keying off
+    # `@flash_msg` alone would let a notice rendering its inner block discard an
+    # unrelated message of the same kind that the user never saw.
+    assigns =
+      assign(assigns, :from_flash?, assigns.inner_block == [] and assigns.flash_msg != nil)
 
     ~H"""
     <div
-      :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
+      :if={msg = render_slot(@inner_block) || @flash_msg}
       id={@id}
-      phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
-      phx-hook="AutoDismiss"
+      phx-click={
+        if @from_flash? do
+          JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")
+        else
+          hide("##{@id}")
+        end
+      }
+      phx-hook={@transient && "AutoDismiss"}
       role="alert"
       class="toast toast-top toast-end z-50"
       {@rest}

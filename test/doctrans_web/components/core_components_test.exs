@@ -51,6 +51,73 @@ defmodule DoctransWeb.CoreComponentsTest do
 
       refute html =~ "alert"
     end
+
+    test "transient flash carries the auto-dismiss hook and a clearing click" do
+      flash =
+        render_component(&CoreComponents.flash/1,
+          kind: :info,
+          flash: %{"info" => "Operation successful"}
+        )
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#flash-info")
+
+      assert LazyHTML.attribute(flash, "phx-hook") == ["AutoDismiss"]
+
+      # The hook dismisses by running this command, so it carries the clear.
+      assert [phx_click] = LazyHTML.attribute(flash, "phx-click")
+      assert phx_click =~ "lv:clear-flash"
+    end
+
+    test "non-transient flash has no auto-dismiss hook but still clears its flash on click" do
+      flash =
+        render_component(&CoreComponents.flash/1,
+          kind: :error,
+          transient: false,
+          flash: %{"error" => "Connection lost"}
+        )
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#flash-error")
+
+      assert LazyHTML.attribute(flash, "phx-hook") == []
+
+      # Transience is independent of flash backing, so a dismissal by hand must
+      # still clear the server state -- otherwise the next render brings it back.
+      assert [phx_click] = LazyHTML.attribute(flash, "phx-click")
+      assert phx_click =~ "lv:clear-flash"
+    end
+
+    test "flash rendered from its inner block never clears server flash state" do
+      assigns = %{}
+
+      flash =
+        rendered_to_string(~H"""
+        <CoreComponents.flash kind={:info}>Welcome back!</CoreComponents.flash>
+        """)
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#flash-info")
+
+      assert LazyHTML.attribute(flash, "phx-hook") == ["AutoDismiss"]
+      assert [phx_click] = LazyHTML.attribute(flash, "phx-click")
+      refute phx_click =~ "lv:clear-flash"
+    end
+
+    test "inner block wins over a flash entry of the same kind without clearing it" do
+      assigns = %{flash: %{"info" => "Background job finished"}}
+
+      flash =
+        rendered_to_string(~H"""
+        <CoreComponents.flash kind={:info} flash={@flash}>Welcome back!</CoreComponents.flash>
+        """)
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#flash-info")
+
+      # The inner block is what's on screen, so dismissing must not discard the
+      # unrelated flash entry -- the user never saw it.
+      assert LazyHTML.text(flash) =~ "Welcome back!"
+      refute LazyHTML.text(flash) =~ "Background job finished"
+      assert [phx_click] = LazyHTML.attribute(flash, "phx-click")
+      refute phx_click =~ "lv:clear-flash"
+    end
   end
 
   describe "button component" do

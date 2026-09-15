@@ -59,30 +59,44 @@ defmodule DoctransWeb.Layouts do
       <.flash kind={:info} flash={@flash} />
       <.flash kind={:error} flash={@flash} />
 
-      <.flash
+      <.connectivity_notice
         id="client-error"
-        kind={:error}
+        error_class="phx-client-error"
         title={gettext("We can't find the internet")}
-        phx-disconnected={show(".phx-client-error #client-error") |> JS.remove_attribute("hidden")}
-        phx-connected={hide("#client-error") |> JS.set_attribute({"hidden", ""})}
-        hidden
-      >
-        {gettext("Attempting to reconnect")}
-        <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
-      </.flash>
+      />
 
-      <.flash
+      <.connectivity_notice
         id="server-error"
-        kind={:error}
+        error_class="phx-server-error"
         title={gettext("Something went wrong!")}
-        phx-disconnected={show(".phx-server-error #server-error") |> JS.remove_attribute("hidden")}
-        phx-connected={hide("#server-error") |> JS.set_attribute({"hidden", ""})}
-        hidden
-      >
-        {gettext("Attempting to reconnect")}
-        <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
-      </.flash>
+      />
     </div>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+
+  attr :error_class, :string,
+    required: true,
+    doc: "the LiveView body class that marks this kind of disconnection"
+
+  # Rendered with `transient={false}` so the auto-dismiss hook never takes the node
+  # out: `phx-disconnected` looks the element up by id, long after mount.
+  defp connectivity_notice(assigns) do
+    ~H"""
+    <.flash
+      id={@id}
+      kind={:error}
+      title={@title}
+      transient={false}
+      phx-disconnected={show(".#{@error_class} ##{@id}") |> JS.remove_attribute("hidden")}
+      phx-connected={hide("##{@id}") |> JS.set_attribute({"hidden", ""})}
+      hidden
+    >
+      {gettext("Attempting to reconnect")}
+      <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
+    </.flash>
     """
   end
 
