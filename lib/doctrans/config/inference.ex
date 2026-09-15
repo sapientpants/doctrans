@@ -27,8 +27,9 @@ defmodule Doctrans.Config.Inference do
   The API key is deliberately absent from everything here. Its presence is not a
   locality signal — a server on loopback may well demand a bearer token — and it
   must never reach the UI. Endpoint URLs are equally credential-bearing, since
-  an operator may write `http://user:secret@host`, so every URL this module
-  returns has its userinfo stripped first.
+  an operator may write `http://user:secret@host` or a gateway URL that carries
+  its key in the query, so every URL this module returns goes through
+  `redact_url/1` first.
   """
 
   alias Doctrans.Config.Embedding
@@ -82,7 +83,8 @@ defmodule Doctrans.Config.Inference do
   Returns `""` when everything is local — there is no destination to name, and
   the caller should be rendering the privacy copy rather than this.
 
-  Never contains credentials: userinfo is stripped from any URL it falls back to.
+  Never contains credentials: any URL it falls back to is passed through
+  `redact_url/1`.
   """
   @spec destination_label() :: String.t()
   def destination_label do
@@ -158,18 +160,47 @@ defmodule Doctrans.Config.Inference do
 
   defp classify(host) do
     # Hosts are case-insensitive; compare folded, but report the host as written.
-    if String.downcase(host) in @local_hosts, do: :local, else: :remote
+    # Fold ASCII-only: full Unicode folding maps U+212A KELVIN SIGN onto `k`, so
+    # `host.docKer.internal` would otherwise be granted the on-device promise.
+    if String.downcase(host, :ascii) in @local_hosts, do: :local, else: :remote
   end
 
-  # A base URL is operator-supplied and may carry credentials in its userinfo
-  # (`http://user:secret@host`), which must not reach the UI; this matches the
-  # redaction `Doctrans.Processing.OpenAI` applies before logging the same URLs.
+  # Everything up to and including the `@` that closes the userinfo, with an
+  # optional `scheme://` kept in front of it. Anchored and non-greedy about the
+  # authority (`[^/?#@]*` cannot cross into the path), so an `@` in a path —
+  # `http://host/v1/@me` — is left alone.
+  @credentials ~r{\A([a-zA-Z][a-zA-Z0-9+.\-]*://)?(?:[^/?#@]*@)?}
+
+  @doc """
+  Strips credentials from an operator-supplied URL so it is safe to show or log.
+
+  Removes the userinfo (`http://user:secret@host`) and the whole query string,
+  which is where a gateway-style endpoint carries its key.
+
+  Works on the string rather than on a parsed `URI`, because nulling
+  `URI.userinfo` does not: `URI.parse/1` fills `:userinfo` only when it finds a
+  host, and `URI.to_string/1` re-emits the untouched `:authority` when it does
+  not — so `"user:secret@llm:8000"` and `"http://user:secret@/v1"` both survive
+  that redaction with the password intact. Those are exactly the values this
+  module classifies `:unknown`, and `:unknown` is exactly when
+  `destination_label/0` falls back to showing a URL.
+  """
+  @spec redact_url(String.t()) :: String.t()
+  def redact_url(url) when is_binary(url) do
+    url
+    |> String.split(["?", "#"], parts: 2)
+    |> hd()
+    |> then(&Regex.replace(@credentials, &1, "\\1", global: false))
+  end
+
   # A value that survives redaction as blank, or that is not a string at all, is
   # reported inspected, so the result is always non-empty and always renderable.
+  # Note this inspects the *redacted* value: inspecting the raw one would put
+  # back the credentials this exists to remove.
   defp displayable_url(base_url) when is_binary(base_url) do
-    redacted = base_url |> URI.parse() |> Map.put(:userinfo, nil) |> URI.to_string()
+    redacted = redact_url(base_url)
 
-    if String.trim(redacted) == "", do: inspect(base_url), else: redacted
+    if String.trim(redacted) == "", do: inspect(redacted), else: redacted
   end
 
   defp displayable_url(base_url), do: inspect(base_url)

@@ -1172,9 +1172,11 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   something to show: a readable host, or the configured URL when there is none. The padlock icon
   beside the upload notice is a guarantee, so it appears only with the local promise; remote
   processing gets an outbound arrow.
-  The `<head>` meta tags and the `mix.exs` package description are not gettext-backed and had no
-  runtime context, so they were reworded to the README's conditional form rather than made
-  dynamic. README needed no change -- it was already the honest version this task points to.
+  The `<head>` meta tags and the `mix.exs` package description are not gettext-backed. Both are
+  crawler-facing text that should stay stable rather than track a setting, so they were reworded
+  to the README's conditional form rather than made dynamic -- `root.html.heex` renders per
+  request and could have read `local?/0`, so this is a choice, not a constraint. README needed no
+  change -- it was already the honest version this task points to.
   On credentials: the acceptance criterion already held. An upstream failure is normalized by
   `Processing.ApiFailure.handle/3` before it is logged, `ErrorMessages.binding/2` interpolates
   only binaries and numbers so an opaque reason cannot surface, Req 0.7.4 redacts `authorization`
@@ -1183,15 +1185,39 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `OPENAI_HOST` carrying userinfo leaked verbatim in dev, now stripped by `redact_url/1`; and the
   DOM half of the criterion had no regression guard, which `privacy_notice_test.exs` now supplies
   to match the log half already pinned in `reprocess_modal_test.exs`.
+  Review follow-ups, all found by review of the first cut of this item and fixed on the same
+  branch:
+  - Redaction by nulling `URI.userinfo` was a no-op on exactly the URLs that needed it.
+    `URI.parse/1` fills `:userinfo` only when it finds a host, and `URI.to_string/1` re-emits the
+    untouched `:authority` when it does not, so `"user:secret@llm:8000"` and
+    `"http://user:secret@/v1"` survived it intact -- and those are the `:unknown` values, which
+    is exactly when `destination_label/0` falls back to rendering the URL. The password was
+    therefore rendered on the dashboard and logged. `Inference.redact_url/1` now strips
+    credentials from the string, covering the query string too (a gateway endpoint carries its
+    key there), and `Processing.OpenAI` delegates to it so one rule lives in one place.
+  - Two LiveView assertions were vacuously true: the upload notice lives inside a modal no test
+    opened, and the tagline had no DOM id, so the empty state satisfied the assertion meant for
+    it. Reverting either call site to its hardcoded string left the suite green. Both elements
+    now carry ids and the tests select through them.
+  - Hosts were folded with full Unicode `String.downcase/1`, which maps U+212A KELVIN SIGN onto
+    `k`, so `host.docKer.internal` was granted the on-device promise. Now folded ASCII-only.
+  - Req follows redirects by default and a 307/308 replays the POST body, so a redirecting
+    endpoint could send document text to a host `Inference` never classified. The three
+    document-bearing calls now pass `redirect: false`.
+  - The translation gate checked completeness and fuzzy but not interpolation. Gettext's default
+    `handle_missing_bindings/2` logs and renders rather than raising, so a msgstr dropping
+    `%{host}` would ship this very disclosure with the destination silently gone, in one
+    language, with everything green. The gate now compares bindings per plural form.
   Not addressed: LiveDashboard renders `:application.get_all_env(:doctrans)`, including `api_key`,
   at `/dev/dashboard`. It is compiled out of prod by `:dev_routes`, so it is a dev-only exposure
   and out of scope here, but it is the one place a key is rendered at all.
   Evidence: `lib/doctrans/config/inference.ex`, `lib/doctrans_web/privacy_copy.ex`,
   `lib/doctrans_web/live/document_live/index.ex`, `.../upload_components.ex`,
   `lib/doctrans_web/components/layouts/root.html.heex`, `lib/doctrans/processing/openai.ex`
-  (`redact_url/1`), `mix.exs`, `test/doctrans/config/inference_test.exs`,
-  `test/doctrans_web/privacy_copy_test.exs`,
-  `test/doctrans_web/live/document_live/privacy_notice_test.exs`.
+  (`redact_url/1`), `mix.exs`, `scripts/check_translations.exs`,
+  `test/doctrans/config/inference_test.exs`, `test/doctrans_web/privacy_copy_test.exs`,
+  `test/doctrans_web/live/document_live/privacy_notice_test.exs`,
+  `test/doctrans/processing/openai_request_test.exs`, `test/scripts/check_translations_test.exs`.
 
 - [ ] **U08 · P3 · Display recorded model provenance.**
   The page-processing-models paragraph is empty and hidden with the progress section at 100% completion.

@@ -2,20 +2,11 @@ defmodule Doctrans.Config.InferenceTest do
   use ExUnit.Case, async: false
 
   alias Doctrans.Config.Inference
-
-  setup do
-    previous = Map.new([:openai, :embedding], &{&1, Application.fetch_env!(:doctrans, &1)})
-
-    on_exit(fn ->
-      for {key, value} <- previous, do: Application.put_env(:doctrans, key, value)
-    end)
-
-    :ok
-  end
+  alias Doctrans.TestEnv
 
   defp configure(chat_url, embedding_url) do
-    Application.put_env(:doctrans, :openai, base_url: chat_url, chat_model: "chat")
-    Application.put_env(:doctrans, :embedding, base_url: embedding_url)
+    TestEnv.put_env(:openai, base_url: chat_url, chat_model: "chat")
+    TestEnv.put_env(:embedding, base_url: embedding_url)
   end
 
   test "the shipped default configuration is local" do
@@ -181,14 +172,56 @@ defmodule Doctrans.Config.InferenceTest do
     assert [%{base_url: "http://api.somewhere.com:8000"} | _] = Inference.endpoints()
   end
 
+  # These are the shapes that defeat stripping `URI.userinfo`: with no parseable
+  # host, `URI.to_string/1` re-emits the authority verbatim. They are also the
+  # shapes classified `:unknown`, which is precisely when `destination_label/0`
+  # falls back to showing the URL -- so the leak would always have been rendered.
+  test "credentials survive no better in an endpoint with no parseable host" do
+    for base_url <- [
+          "user:s3cret@llm.example.com:8000",
+          "http://user:s3cret@",
+          "http://user:s3cret@/v1",
+          "llm:8000?api-key=s3cret"
+        ] do
+      configure(base_url, nil)
+
+      label = Inference.destination_label()
+
+      refute Inference.local?(), "expected #{inspect(base_url)} to be treated as not local"
+      refute label =~ "s3cret", "#{inspect(base_url)} leaked its password into #{inspect(label)}"
+      assert String.trim(label) != "", "expected #{inspect(base_url)} to yield a label"
+      refute Inference.endpoints() |> inspect() |> String.contains?("s3cret")
+    end
+  end
+
+  test "redact_url/1 keeps the endpoint recognisable while dropping credentials" do
+    assert Inference.redact_url("http://user:s3cret@api.somewhere.com:8000/v1") ==
+             "http://api.somewhere.com:8000/v1"
+
+    assert Inference.redact_url("user:s3cret@llm.example.com:8000") == "llm.example.com:8000"
+    assert Inference.redact_url("https://gw.example/v1?api-key=s3cret") == "https://gw.example/v1"
+    assert Inference.redact_url("http://localhost:8000/v1") == "http://localhost:8000/v1"
+
+    # An `@` past the authority belongs to the path, not to any credential.
+    assert Inference.redact_url("http://localhost:8000/v1/@me") == "http://localhost:8000/v1/@me"
+  end
+
+  test "a host is folded ASCII-only, so a lookalike cannot buy the local promise" do
+    # U+212A KELVIN SIGN folds to ASCII "k" under full Unicode downcasing.
+    configure("http://host.doc\u212Aer.internal:8000", nil)
+
+    refute Inference.local?()
+    assert Inference.locality("http://host.doc\u212Aer.internal:8000") == :remote
+  end
+
   test "the API key never surfaces and does not decide locality" do
-    Application.put_env(:doctrans, :openai,
+    TestEnv.put_env(:openai,
       base_url: "http://localhost:8000",
       api_key: "secret-chat-key",
       chat_model: "chat"
     )
 
-    Application.put_env(:doctrans, :embedding, base_url: nil, api_key: "secret-embedding-key")
+    TestEnv.put_env(:embedding, base_url: nil, api_key: "secret-embedding-key")
 
     # A local server may still demand a bearer token; that is not egress.
     assert Inference.local?()

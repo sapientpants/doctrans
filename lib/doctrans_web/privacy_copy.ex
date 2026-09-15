@@ -15,9 +15,12 @@ defmodule DoctransWeb.PrivacyCopy do
   translations across the ten non-English locales stay valid -- rewording a
   msgid would mark every translation fuzzy and fail the translation gate.
 
-  Only the host is ever interpolated, never a base URL and never an API key: a
-  configured URL may carry credentials in its userinfo, and
-  `Doctrans.Config.Inference` strips them before any value reaches this module.
+  What gets interpolated is `Doctrans.Config.Inference.destination_label/0`:
+  the host, or — for an endpoint whose host cannot be parsed — the configured
+  URL itself, which is the only thing left to name. Never an API key, and never
+  credentials: a configured URL may carry them in its userinfo or its query, and
+  `Doctrans.Config.Inference.redact_url/1` strips both before any value reaches
+  this module.
   """
 
   use Gettext, backend: DoctransWeb.Gettext

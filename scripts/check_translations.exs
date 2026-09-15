@@ -1,7 +1,8 @@
 #!/usr/bin/env elixir
 # Translation Checker
 # Ensures every translation key has a translation for each supported language,
-# and that none of them is still flagged `fuzzy`.
+# that none of them is still flagged `fuzzy`, and that each one interpolates the
+# same `%{bindings}` as the msgid it translates.
 #
 # A fuzzy entry is one `mix gettext.extract --merge` auto-filled from a *different*
 # msgid it found similar. Elixir's Gettext renders those at runtime, so a fuzzy
@@ -19,15 +20,24 @@
 # forms, and `msgctxt`. Getting any of those wrong makes the gate pass a file it
 # should reject, which is the one failure mode a gate must not have.
 #
+# The binding check exists because Gettext does not enforce it. Its default
+# `handle_missing_bindings/2` logs an error and renders the string as written --
+# it does not raise -- so a msgstr that drops `%{host}` from "Documents are sent
+# to %{host} for processing" ships a privacy disclosure with the destination
+# silently gone, in one language, with every test green. A msgstr that renames a
+# binding renders the placeholder literally instead.
+#
 # Usage: mix run --no-start scripts/check_translations.exs [--path PATH]
 #
 # Default path: priv/gettext
-# Exit code: 1 if any translation is missing or fuzzy, 0 otherwise
+# Exit code: 1 if any translation is missing, fuzzy, or has mismatched bindings
 
 defmodule TranslationChecker do
   @default_path "priv/gettext"
   # Source language uses msgid as translation, so empty msgstr is acceptable
   @source_language "en"
+  # Gettext's interpolation syntax, the only thing a msgstr must reproduce exactly.
+  @binding ~r/%\{([a-zA-Z0-9_]+)\}/
 
   def run(args) do
     {opts, _} = parse_args(args)
@@ -42,6 +52,7 @@ defmodule TranslationChecker do
     report(
       result.missing,
       result.fuzzy,
+      result.bindings,
       result.problems,
       result.language_dirs,
       result.fuzzy_langs
@@ -66,6 +77,7 @@ defmodule TranslationChecker do
     # ahead of the configuration guards below. Ordering it after them would let a
     # fuzzy `en` entry through with a green exit in a tree that has no other locale.
     fuzzy_issues = check_fuzzy(gettext_path, fuzzy_langs)
+    binding_issues = check_bindings(gettext_path, fuzzy_langs)
     missing_issues = check_missing(gettext_path, pot_files, language_dirs)
 
     # An empty tree means the gate looked somewhere it should not have -- a moved
@@ -82,28 +94,46 @@ defmodule TranslationChecker do
     %{
       missing: missing_issues,
       fuzzy: fuzzy_issues,
+      bindings: binding_issues,
       problems: problems,
       language_dirs: language_dirs,
       fuzzy_langs: fuzzy_langs
     }
   end
 
-  defp report([], [], [], language_dirs, fuzzy_langs) do
+  defp report([], [], [], [], language_dirs, fuzzy_langs) do
     IO.puts(
       IO.ANSI.green() <>
-        "All translations are complete for #{length(language_dirs)} languages, " <>
-        "and none of the #{length(fuzzy_langs)} locales scanned is fuzzy." <>
+        "All translations are complete for #{length(language_dirs)} languages, and none of " <>
+        "the #{length(fuzzy_langs)} locales scanned is fuzzy or drops an interpolation." <>
         IO.ANSI.reset()
     )
 
     System.halt(0)
   end
 
-  defp report(missing_issues, fuzzy_issues, problems, _language_dirs, _fuzzy_langs) do
+  defp report(missing, fuzzy, bindings, problems, _language_dirs, _fuzzy_langs) do
     Enum.each(problems, &IO.puts(IO.ANSI.red() <> &1 <> IO.ANSI.reset()))
-    report_missing(missing_issues)
-    report_fuzzy(fuzzy_issues)
+    report_missing(missing)
+    report_fuzzy(fuzzy)
+    report_bindings(bindings)
     System.halt(1)
+  end
+
+  defp report_bindings([]), do: :ok
+
+  defp report_bindings(issues) do
+    IO.puts(IO.ANSI.red() <> "Interpolation mismatches found:" <> IO.ANSI.reset())
+    IO.puts("")
+    print_grouped(issues)
+
+    IO.puts(
+      IO.ANSI.yellow() <>
+        "Total: #{length(issues)} translation(s) whose bindings do not match their msgid. " <>
+        "Gettext logs and renders these rather than raising, so a dropped binding is a " <>
+        "sentence shipping with the value missing. Restore the placeholder in the msgstr." <>
+        IO.ANSI.reset()
+    )
   end
 
   defp report_fuzzy([]), do: :ok
@@ -165,6 +195,58 @@ defmodule TranslationChecker do
         Expo.Message.has_flag?(message, "fuzzy") do
       {lang, Path.basename(po_file, ".po"), label(message)}
     end
+  end
+
+  # Bindings are compared per form: `msgstr[0]` against the msgid, every higher
+  # form against msgid_plural, matching how Gettext picks the string to render.
+  defp check_bindings(gettext_path, langs) do
+    for lang <- langs,
+        po_file <- po_files(gettext_path, lang),
+        message <- live_messages(po_file),
+        issue <- binding_issues(message) do
+      {lang, Path.basename(po_file, ".po"), "#{label(message)} -- #{issue}"}
+    end
+  end
+
+  defp binding_issues(%Expo.Message.Singular{msgid: msgid, msgstr: msgstr}) do
+    compare_bindings(msgid, msgstr, "msgstr")
+  end
+
+  defp binding_issues(%Expo.Message.Plural{} = message) do
+    Enum.flat_map(message.msgstr, fn {form, translation} ->
+      source = if form == 0, do: message.msgid, else: message.msgid_plural
+      compare_bindings(source, translation, "msgstr[#{form}]")
+    end)
+  end
+
+  # An empty msgstr falls back to the msgid and so carries the right bindings by
+  # construction; reporting it here would just duplicate `check_missing/3`, and
+  # would fail the source language, where empty is the expected state.
+  defp compare_bindings(source, translation, form) do
+    if blank?(translation) do
+      []
+    else
+      expected = bindings(source)
+      actual = bindings(translation)
+
+      describe_bindings(form, MapSet.difference(expected, actual), "drops") ++
+        describe_bindings(form, MapSet.difference(actual, expected), "adds unknown")
+    end
+  end
+
+  defp describe_bindings(form, diff, verb) do
+    if Enum.empty?(diff) do
+      []
+    else
+      ["#{form} #{verb} #{Enum.map_join(Enum.sort(diff), ", ", &"%{#{&1}}")}"]
+    end
+  end
+
+  defp bindings(segments) do
+    @binding
+    |> Regex.scan(Enum.join(segments), capture: :all_but_first)
+    |> List.flatten()
+    |> MapSet.new()
   end
 
   defp check_missing(gettext_path, pot_files, language_dirs) do
