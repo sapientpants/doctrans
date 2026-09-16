@@ -255,6 +255,27 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   # Chat response handlers (async_nolink pattern)
 
+  # A turn can outlive its document: `Worker.cancel_document/1` does not reach a
+  # task this LiveView spawned, so a deletion elsewhere empties `:document` while
+  # the answer is still generating. Both landings below write through
+  # `Doctrans.Chat.Conversations`, which fences the answer against the document's
+  # current run and saves it into a chat session that cascaded away with the row --
+  # so with no document there is nothing left to save the turn against, and it is
+  # dropped instead. The viewer is already showing the not-found branch, where the
+  # chat panel does not render.
+  @impl true
+  def handle_info({ref, _result}, %{assigns: %{document: nil}} = socket)
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, interrupt_chat(socket)}
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{assigns: %{document: nil}} = socket)
+      when is_reference(ref) do
+    {:noreply, interrupt_chat(socket)}
+  end
+
   @impl true
   def handle_info({ref, {:ok, response, retrieved_context}}, socket)
       when socket.assigns.chat_task_ref == ref do

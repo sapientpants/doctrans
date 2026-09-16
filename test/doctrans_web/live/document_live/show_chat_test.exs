@@ -302,6 +302,52 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       assert length(Conversations.load(document.id).messages) == 1
     end
 
+    # A deletion in another tab clears `:document` mid-turn -- U11 broadcasts it on
+    # the topic this viewer subscribes to, and `Worker.cancel_document/1` does not
+    # reach a task this LiveView spawned. Every landing a turn has writes through
+    # `Conversations`, whose chat session cascaded away with the document, so each
+    # one has to be dropped rather than saved against rows that are gone.
+    for {name, message} <- [
+          {"an answer", {:ok, "Answer", []}},
+          {"a failure", {:error, :timeout}},
+          {"a crash", :down}
+        ] do
+      test "#{name} arriving after the document was deleted elsewhere leaves the viewer standing",
+           %{conn: conn, document: document} do
+        {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+        question = Conversations.start_question(document.id, "Question")
+        ref = make_ref()
+
+        socket =
+          :sys.get_state(view.pid).socket
+          |> Phoenix.Component.assign(
+            chat_loading: true,
+            chat_question: question,
+            chat_task_ref: ref,
+            chat_last_question: question.content
+          )
+
+        # The nil state is reached the way it is in production: the real deletion
+        # broadcast empties the assign while the turn is still in flight.
+        {:ok, _} = Documents.delete_document(document)
+        assert has_element?(view, "#document-not-found")
+        socket = Phoenix.Component.assign(socket, :document, nil)
+
+        message =
+          case unquote(Macro.escape(message)) do
+            :down -> {:DOWN, ref, :process, self(), :boom}
+            result -> {ref, result}
+          end
+
+        {:noreply, updated} = Show.handle_info(message, socket)
+
+        refute updated.assigns.chat_loading
+        assert updated.assigns.chat_task_ref == nil
+        assert Process.alive?(view.pid)
+        assert has_element?(view, "#document-not-found")
+      end
+    end
+
     test "chat button is visible in header", %{conn: conn, document: document} do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
