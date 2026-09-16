@@ -1761,7 +1761,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `dev` and `test` (86 and 100 files). The test-load question is deliberately left open as Q07, because
   `mix compile` never sees `test/**/*.exs` and exactly one warning hides in that blind spot.
 
-- [ ] **Q02 · P2 · Include critical workers in meaningful coverage.**
+- [x] **Q02 · P2 · Include critical workers in meaningful coverage.**
   The reported percentage excludes Worker, LlmProcessor, and the health/sweeper workers.
   Gradually remove production exclusions while adding behavior-focused tests; keep the 80% requirement.
   Remove obsolete Ollama exclusions, clarify the active coverage configuration, and correct the ignore rule
@@ -1775,24 +1775,61 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   397 missed); the measured subset reports 89.6%; the excluded files sit at **66.2%**. Because 86.2%
   clears the existing 80% gate, the seven production exclusions can be deleted outright with no
   threshold change and no new tests — do that first, then close the gaps below.
-  Per-file reality: `health_check_worker.ex` 37.2%, `embedding_worker.ex` 59.1%, `llm_processor.ex` 67.5%,
-  `sweeper_worker.ex` 70.0%, `health_check.ex` 78.2%, `worker.ex` 95.9%. Two entries
-  (`processing/ollama.ex`, `test/support/ollama_stub.ex`) named files that no longer exist and were
-  removed in G07. Superseded in part by R01: `embedding_worker.ex` was deleted and its exclusion with it,
-  so its successors `search/indexer.ex` and `jobs/embedding_job.ex` are measured. Five production
-  exclusions remain; the measurement above predates that change.
-  What the exclusion hides is exactly the reliability logic this plan prioritizes, all of it unexecuted:
-  both retry-with-backoff and permanent-failure arms in `llm_processor.ex:183-215,292-324`; the whole of
-  `handle_chunk_error/5` and the `Ecto.StaleEntryError` rescue, and `chunks_match_page_content?/2` (the
-  C01 alignment decision) — all three formerly in `embedding_worker.ex` and now measured in
-  `search/indexer.ex`;
-  and the entire check cycle in `health_check_worker.ex:98-180`, which never runs because
-  `config/test.exs:60` disables the worker. The retry paths are cheap to cover — `config/test.exs:52-55`
-  already sets `max_attempts: 2, base_delay_ms: 10`, so a retry test costs about 20 ms.
-  `.coveragerc` is dead configuration: it is a `coverage.py` filename holding Elixir list syntax, nothing
-  reads it, and `grep -r coveragerc` matches only this plan. Delete it rather than reconciling it — a
-  second exclusion list that cannot take effect makes the real one look reviewed.
-
+  Implemented 16 September 2026, in that order. Re-measured on the branch before touching anything,
+  because the September figures had drifted: with `skip_files` reduced to non-application code, all of
+  `lib/` reported **89.9%**, not 86.2%. That still cleared the 80% gate, so all five remaining
+  production exclusions were deleted in one commit with no threshold change, and the tests below were
+  written against an already-honest number rather than to rescue a failing gate.
+  Two of the three configuration sub-items were already closed by earlier work, and are recorded here
+  rather than re-fixed: the two Ollama entries went with G07, and the `.gitignore` rule went with G19,
+  which removed `# Excoveralls artifacts` / `/coveralls.json` on exactly this reasoning — it is
+  excoveralls' configuration, not its output. `git check-ignore -v coveralls.json` now exits 1.
+  `docs/CONTRIBUTING.md` states that it is tracked configuration so the rule cannot come back by
+  reflex.
+  `.coveragerc` deleted as dead configuration, as the diagnosis proposed. The surviving `skip_files`
+  list is collapsed from nine enumerated files to the three directories that are not the application —
+  `test/support/`, `lib/mix/`, `deps/` — so the entry states a rule instead of a roster that drifts.
+  No production module is excluded, and `docs/CONTRIBUTING.md` says none should be added.
+  The acceptance clause about configuration drift was already satisfied and is now unambiguous: the
+  pre-commit hook and the CI step both run `mix test --cover`
+  (`.pre-commit-config.yaml:238`, `.github/workflows/ci.yml:130`), reading the same `coveralls.json`.
+  Deleting `.coveragerc` leaves the project exactly one coverage configuration.
+  Per-file result, before → after, measured on this branch with the real configuration:
+  `health_check_worker.ex` 37.2% → **100.0%**, `worker.ex` 89.7% → **100.0%**,
+  `sweeper_worker.ex` 92.5% → **100.0%**, `health_check.ex` 84.7% → **97.8%**,
+  `llm_processor.ex` 67.7% → **96.6%**. Whole project 89.9% → **92.2%**, suite 1355 passed / 1 skipped
+  / 0 failures.
+  The reliability logic this plan prioritizes now executes. Both retry-with-backoff arms and both
+  exhaustion arms in `llm_processor.ex` are driven by a fail-then-succeed stub cleared inside the
+  `[:doctrans, :retry, :attempt]` handler, so the sequence is deterministic without a sleep; the
+  `MatchError → :obsolete_run` and `Ecto.NoResultsError` rescues are driven by interrupting a run
+  mid-flight. The whole `HealthCheckWorker` check cycle runs against a Bypass endpoint, including
+  circuit auto-reset on recovery and its three negative cases. `SweeperWorker` asserts what a sweep
+  deletes *and* what it keeps, and that a sweep which cannot tell orphans from live documents deletes
+  neither.
+  Worth stating, because the module's 92.5% baseline was not what it looked like: `sweeper_worker.ex`
+  appeared partly covered only because the application's own worker fires a real sweep one minute
+  after boot, in `:test` as well, and the suite runs ~120 s. Its `handle_info(:sweep, ...)` and rescue
+  arm were being executed by an accidental production sweep of the live uploads root from a process
+  with no sandbox owner — not by any test. Recorded against Q03, which owns test background work.
+  Method note, since it shaped the result: the three test modules were written in parallel in separate
+  git worktrees, one module per agent, each against its own `MIX_TEST_PARTITION` so the suites could
+  not collide on the shared Postgres. Every new test was required to be capable of failing — no
+  `is_map/1`, no `Map.has_key?`, no `rescue -> :ok`, no `Process.sleep` standing in for a signal —
+  which is the same standard Q03 applies to the tests it deletes.
+  Deliberately left uncovered, stated rather than forced: the `rescue` in `check_database/0`
+  (reaching it means denying a process sandbox access, which prints the very ownership error Q03 is
+  closing); the `queue_indexing/1` error arm (needs `Oban.insert/1` to fail under `testing: :inline`);
+  `llm_processor.ex`'s two `nil -> []` option arms, which are unreachable because `Run.choices/1`
+  always fills both model keys; and one `Logger.info` argument the test log level never evaluates.
+  Handed to other items rather than fixed here, since Q02 is a coverage item and these are `lib/`
+  defects: `HealthCheckWorker.handle_info(:check, ...)` ignores `state.enabled` where
+  `handle_cast(:check_now, ...)` honours it, so a disabled worker that receives a stray `:check` runs a
+  full round of HTTP and DB checks; the OpenAI probe inherits Req's default `retry: :safe_transient`,
+  so a health check against an unreachable endpoint spends ~7 s retrying despite its 5 s
+  `receive_timeout`; `max_attempts` means "extra retries" in `LlmProcessor` and "total attempts" in
+  Oban, an off-by-one collision of the same name; and `LlmProcessor` sleeps in-process between
+  retries, holding its Oban queue slot for the whole backoff.
 - [ ] **Q03 · P2 · Assert successful outcomes and control test background work.**
   Some search tests allow either results or no results and conditionally skip link assertions.
   The passing suite logged database-ownership errors from background tasks.
@@ -1812,6 +1849,19 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   The second source named in this diagnosis — `EmbeddingWorker` tasks spawned under
   `Doctrans.TaskSupervisor` — no longer exists: R01 deleted the module, and indexing now runs inside an
   Oban job. Re-measure before acting; only the `Processing.Worker` source above is known to remain.
+  Re-measured 16 September 2026 during Q02, on a full `mix coveralls` run: **20 ownership errors, all
+  20 from `Processing.Worker`** at the `Process.send_after` line above, confirming both halves of that
+  paragraph — the source named here is still live, and no other source remains. The count is timing
+  jitter, not a fixed number: the same command across that day's runs produced 0, 20 and 21, depending
+  on whether the 1 s reschedule happened to land inside an owned test.
+  A second always-on GenServer belongs in this item, found while covering it for Q02:
+  `SweeperWorker.init/1` (`lib/doctrans/documents/sweeper_worker.ex:78`) schedules its first sweep one
+  minute after boot **unconditionally, `:test` included**, and the suite runs ~120 s. Every full run
+  therefore performs a real sweep of the live uploads root from a process with no sandbox owner. It is
+  worse than noise: it deleted directories under `tmp/uploads_test` on a timer, and it inflated that
+  module's reported coverage, because the `handle_info(:sweep, ...)` and rescue arms were executed by
+  the accidental sweep rather than by any test. Coverage of a module that depends on how long the
+  suite takes is exactly the jitter this item exists to remove.
   The fix already exists and is dead code: `test/support/worker_helpers.ex:20` calls
   `Ecto.Adapters.SQL.Sandbox.allow/3` correctly, but `grep -rn "WorkerHelpers\|setup_worker_sandbox"`
   matches only its own definition. That single call site is the only `Sandbox.allow/3` in the tree.
@@ -1821,11 +1871,17 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Related cleanup in the same pass — tests that cannot fail:
   `test/doctrans/search/embedding_worker_test.exs` was 26 lines covering a 361-line module, asserting that
   `GenServer.cast` returns `:ok` and that the compiler compiled — deleted in R01 along with its subject;
-  `test/doctrans/resilience/health_check_worker_test.exs` is 7 `Map.has_key?` assertions on a static struct
-  plus `interval_ms == 60_000`; `test/doctrans/processing/pdf_extractor_test.exs:65-108` wraps three error
+  `test/doctrans/resilience/health_check_worker_test.exs` was 7 `Map.has_key?` assertions on a static
+  struct plus `interval_ms == 60_000`, and `test/doctrans/documents/sweeper_worker_test.exs` was four
+  `is_map`/`Map.has_key?`/`is_boolean` assertions around two `Process.sleep(100)`s — both rewritten in
+  Q02 against the behaviour of the module they name, since Q02 had to drive those two workers anyway;
+  `test/doctrans/processing/pdf_extractor_test.exs:65-108` wraps three error
   tests in `rescue ErlangError -> :ok`, so any unexpected crash is rescued into a pass;
   `test/doctrans/processing/openai_test.exs:30-47` asserts `is_boolean(...)` and reaches the live network;
-  and `worker_test.exs` has five `is_map(status)` assertions each preceded by a sleep.
+  and `worker_test.exs` has five `is_map(status)` assertions each preceded by a sleep — still open, and
+  deliberately left to this item, because fixing it means fixing the reschedule above rather than
+  rewriting assertions. Q02 added `worker_callbacks_test.exs` alongside it, driving an unnamed instance
+  that owns its sandbox connection, as a worked example of the shape the rewrite should take.
   Of 13 `Process.sleep` calls in tests, 11 are races being papered over; the two in
   `document_converter_test.exs:253,419` and two in `openai_request_test.exs:642,644` are legitimate fixture
   behavior. Only 8% of suite wall time is parallel (0.9 s async vs 55.8 s sync), mostly because
