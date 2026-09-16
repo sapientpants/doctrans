@@ -44,20 +44,48 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Documents.get_document(id) do
+    # Subscribe before reading, and record the id in one place for both outcomes.
+    #
+    # Before, because a deletion committing between the read and the subscribe
+    # would broadcast to nobody and leave this viewer rendering a document that
+    # no longer exists, with nothing left to tell it otherwise. Subscribing first
+    # makes the worst case a redundant `{:document_deleted, _}` for a row already
+    # gone, which the handler below ignores.
+    #
+    # In one place, because `terminate/2` has to unsubscribe from the topic this
+    # process actually took out -- and it cannot read the id back off `:document`,
+    # which a deletion elsewhere clears out from under it. Assigning it here,
+    # ahead of the branch, is what stops a mount path from forgetting to.
+    #
+    # Canonicalised first. `Ecto.UUID.cast/1` accepts an uppercase UUID and
+    # downcases it, so `/documents/ABC...` loads the document fine while the raw
+    # param would name a topic -- `document:ABC...` -- that no broadcast, which
+    # always uses the stored id, ever reaches. Anything that is not a UUID at all
+    # subscribes to nothing rather than turning a URL into a topic name.
+    document_id = canonical_id(id)
+
+    subscribed_document_id =
+      if document_id && connected?(socket) do
+        _ = Topics.subscribe_document(document_id)
+        document_id
+      end
+
+    socket = assign(socket, :subscribed_document_id, subscribed_document_id)
+
+    case document_id && Documents.get_document(document_id) do
       nil -> {:ok, assign(socket, :document, nil)}
       document -> mount_document(socket, document)
     end
   end
 
-  defp mount_document(socket, document) do
-    _ =
-      if connected?(socket) do
-        _ = Topics.subscribe_document(document.id)
-      else
-        :ok
-      end
+  defp canonical_id(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, canonical} -> canonical
+      :error -> nil
+    end
+  end
 
+  defp mount_document(socket, document) do
     socket =
       socket
       |> assign(:document, document)
@@ -143,14 +171,23 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def terminate(_reason, socket) do
-    if connected?(socket) && socket.assigns.document do
-      Topics.unsubscribe_document(socket.assigns.document.id)
+    # No `connected?/1` check: `terminate/2` only runs for a connected LiveView,
+    # and a disconnected mount leaves this assign nil, so the id alone decides.
+    if socket.assigns.subscribed_document_id do
+      Topics.unsubscribe_document(socket.assigns.subscribed_document_id)
     end
 
     :ok
   end
 
+  # A document topic outlives its document: a job cancelled alongside a deletion
+  # is not stopped synchronously, so it can still broadcast an update after
+  # `{:document_deleted, _}` has emptied the assign. Nothing left to refresh.
   @impl true
+  def handle_info({:document_updated, _document}, %{assigns: %{document: nil}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_info({:document_updated, _document}, socket) do
     document = Documents.get_document(socket.assigns.document.id)
 
@@ -171,8 +208,24 @@ defmodule DoctransWeb.DocumentLive.Show do
        |> PageViewer.apply_params(%{"page" => to_string(max(1, number))})
        |> refresh_progress()}
     else
-      {:noreply, assign(socket, :document, nil)}
+      {:noreply, document_vanished(socket)}
     end
+  end
+
+  # Already showing not-found. Nothing to clear, and this socket may never have
+  # mounted a document at all -- `mount/3` subscribes before it reads -- so it has
+  # no chat assigns for `document_vanished/1` to reach for.
+  @impl true
+  def handle_info({:document_deleted, _id}, %{assigns: %{document: nil}} = socket) do
+    {:noreply, socket}
+  end
+
+  # A deletion from elsewhere reaches this viewer on its own document topic. The
+  # document is gone, so the assign says so and the template's not-found branch
+  # renders -- the same landing as a `{:document_updated, _}` that re-reads a row
+  # already deleted.
+  def handle_info({:document_deleted, _id}, socket) do
+    {:noreply, document_vanished(socket)}
   end
 
   @impl true
@@ -279,6 +332,26 @@ defmodule DoctransWeb.DocumentLive.Show do
       [] ->
         socket |> assign(:processing_progress, 0.0) |> assign(:failed_pages, [])
     end
+  end
+
+  # The document this viewer is on has gone: deleted in another tab, or already
+  # gone by the time a `{:document_updated, _}` made us re-read it.
+  #
+  # A turn in flight has to be stopped here rather than when its result lands.
+  # `Worker.cancel_document/1` cancels Oban jobs and never reaches a task this
+  # LiveView spawned, and the task is `async_nolink`, so nothing else will: left
+  # alone it runs the whole agent pipeline -- several LLM calls, up to a 300s
+  # receive timeout each -- to produce an answer with nowhere to go. Every landing
+  # a turn has writes through `Doctrans.Chat.Conversations`, whose chat session
+  # cascaded away with the document, so the answer could not be saved in any case.
+  # It also survives the user navigating away, being unlinked from this process.
+  #
+  # Killing the task and clearing the ref here is also what lets the stale-ref
+  # catch-alls at the bottom of this module handle a result that was already in
+  # flight: `chat_task_ref` is nil by the time it arrives, so it matches nothing
+  # else and is dropped -- identified by its ref, not by when it turned up.
+  defp document_vanished(socket) do
+    socket |> interrupt_chat() |> assign(:document, nil)
   end
 
   defp interrupt_chat(socket) do

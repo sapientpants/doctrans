@@ -319,7 +319,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     refute has_element?(view, "#previous-page[disabled]")
 
     {:ok, retitled} = Documents.update_document(document, %{title: "Still serving updates"})
-    Topics.broadcast_document_update(retitled)
+    Topics.broadcast_document_updated(retitled)
     assert has_element?(view, "header h1", "Still serving updates")
 
     {:ok, page_two} =
@@ -330,7 +330,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
         original_markdown: "# Progress arrived"
       })
 
-    Topics.broadcast_page_update(page_two)
+    Topics.broadcast_page_updated(page_two)
     render_click(view, "toggle_original")
     assert has_element?(view, ".markdown h1", "Progress arrived")
 

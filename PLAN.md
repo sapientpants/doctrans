@@ -1457,12 +1457,111 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Evidence added: `assets/js/theme.js`, `config/config.exs` (esbuild entry points),
   `test/doctrans_web/theme_script_test.exs`.
 
-- [ ] **U11 · P3 · Refresh the dashboard across tabs.**
+- [x] **U11 · P3 · Refresh the dashboard across tabs.**
   The dashboard subscribes to known document IDs, so another tab's newly uploaded document is missed.
   Subscribe to collection notifications and broadcast creation/deletion consistently.
   Acceptance: upload, deletion, and status changes appear in another open dashboard without a reload;
   subscriptions remain bounded and document streams remain consistent.
   Evidence: `lib/doctrans_web/live/document_live/index.ex:471`, `lib/doctrans/documents/topics.ex`.
+  The dashboard now holds exactly one subscription, to the `"documents"` collection topic, and
+  `Doctrans.Documents` announces creation and deletion the way it already announced updates.
+  Two independent halves were broken. `Topics.subscribe_documents/0` existed and was called from
+  nowhere, so the collection topic had no subscriber at all; and nothing ever broadcast a creation or
+  a deletion, so even a subscriber would have heard neither. The dashboard instead subscribed to one
+  `"document:<id>"` topic per card on screen, reconciled on every refresh — which can only carry news
+  about documents it already knows about, and a document uploaded in another tab is by definition not
+  one of those.
+  The per-document subscriptions are gone rather than supplemented. `broadcast_document_update/1` and
+  `broadcast_page_update/1` already fanned out to `"documents"` as well as to the per-document topic,
+  so one collection subscription delivers a strict superset of what the old set did; keeping both would
+  have handed the same LiveView every update twice. That is also what makes the bound real: one
+  subscription regardless of how many documents exist, where it used to grow with the list.
+  `DocumentStream` loses `:document_topics` and its `subscribe/1`/`unsubscribe/1` entirely, and
+  `UploadIntake` loses the three calls that existed only to make the uploading tab track its own new row.
+  The broadcasts live in `create_document/1` and `delete_document/1` rather than at their call sites,
+  which is what "consistently" required: documents are deleted from the dashboard's own event handler
+  and from two of `UploadIntake`'s cleanup paths, and an announcement wired into each would be one
+  `rescue` away from being skipped. `delete_document/1` broadcasts strictly **after** the transaction
+  commits — from inside, a rollback could unsay a deletion that subscribers had already acted on, and
+  the message would reach them before the row was actually gone. The payload is the bare id, not the
+  struct, because the row no longer exists and a struct would only be a stale copy of it.
+  `Show` needed three changes, two of which were latent crashes this item made reachable rather than
+  introduced. It has no catch-all `handle_info/2`, so the new `{:document_deleted, _}` arriving on its
+  own document topic would have killed it; it now assigns `:document` to `nil`, which is the exact state
+  the `{:document_updated, _}` clause already produced when it re-read a vanished document, and which
+  `show.html.heex` already renders a not-found branch for. That clause in turn read
+  `socket.assigns.document.id` with no nil guard, which every other nil-sensitive path in the module has
+  — harmless while `nil` was a race, routine once a deletion announces itself. Oban cancellation is not
+  synchronous, so an already-executing job can broadcast an update on the same topic *after* the
+  deletion lands. And `terminate/2` unsubscribed via `socket.assigns.document.id`, so once that assign
+  was cleared it skipped the unsubscribe and leaked the registration into the next LiveView, since live
+  navigation reuses the channel process. The subscribed id is now remembered in its own assign at mount.
+  Found while fixing, and fixed here because it defeats this item's own acceptance criterion: the
+  dashboard's empty state never disappeared. `#documents-empty` was an id-bearing child *inside* the
+  `phx-update="stream"` container, and LiveView's client refuses to discard exactly that, while a stream
+  `reset` only removes children carrying `data-phx-stream`. So a dashboard that mounted empty kept "No
+  documents yet" on screen underneath the first card that arrived — through `stream_insert` and through
+  a full reset alike. It predates this change and was near-unreachable before it, because a dashboard
+  that mounted empty had nothing to subscribe to and so learned about nothing. It is now a sibling above
+  the container, keeping its server-driven `:if={@documents_count == 0}`. `AGENTS.md`'s `hidden
+  only:block` idiom would also have worked and was not used: it leaves the element permanently in the
+  DOM, which makes "empty" and "not empty" indistinguishable to `has_element?/2`, so the bug could
+  return unnoticed by the suite that exists to catch it.
+  One unrelated function moved to pay for the change. Credo's `max_deps: 10` had `Doctrans.Documents`
+  sitting at exactly 10, and aliasing `Topics` made it 11, so `chunks_embedded?/1` now reaches chunks
+  through the existing `Page has_many :chunks` association instead of naming `Chunk` directly. It is the
+  same inner join over the same pairs with the same predicates under `Repo.exists?`, verified rather
+  than assumed. Raising the ceiling would have been the more honest lever; removing a dependency rather
+  than loosening the gate was preferred, and it is recorded here because a query rewrite inside a
+  subscription change is exactly the kind of thing that looks unmotivated later.
+  The test suite needed a structural concession, which is the part of this change most likely to bite
+  someone later. `Doctrans.PubSub` is process-global and the Ecto sandbox does not isolate it, so once
+  the dashboard listens to a topic every `document_fixture/1` in the suite publishes to, an `async: true`
+  neighbour's broadcast reaches a dashboard mounted by an unrelated file. It produced a real
+  intermittent failure: a stray `{:page_updated, _}` from a concurrently running processing test flipped
+  `Index`'s `refresh_scheduled?`, so a test's own page update was swallowed into the 1.5s coalescing
+  window and the assertion ran before the progress bar moved — timing-dependent, not seed-dependent, and
+  invisible when the file ran alone. `document_live_cross_tab_test.exs` and `document_live_index_test.exs`
+  are therefore `async: false`, each with a comment saying why, so nobody optimises it back. That is not
+  the blunt instrument it looks like: every other file that mounts the dashboard was already sync, these
+  two were the last async holdouts, and the suite is ~1.2s async against ~110s sync, so the measured cost
+  is inside run-to-run noise. ExUnit runs sync modules only after every async module has finished and
+  then one at a time, which was verified against the runner's source rather than assumed, as was the
+  absence of any background process that could broadcast on its own (Oban is inline, the health-check
+  worker is disabled, the sweeper touches files and never rows, and startup recovery dies on the sandbox
+  before it broadcasts).
+  A first attempt had instead skipped foreign queries with a helper, which silently downgraded
+  `refute_receive {:dashboard_query, _}` from "no further queries" to "no further queries about my own
+  documents"; serializing let the strict form come back. That detour did find one thing worth keeping:
+  the pre-existing `refute untouched.id in List.flatten(metadata.params)` was **vacuous**, because
+  `params` carries UUIDs already dumped to 16-byte binaries and a string id can never appear there. It
+  matches `cast_params` now, and both halves of that claim were shown by mutation — the new form fails
+  when pointed at an id the dashboard does re-query, the old form passes.
+  Verified through the real mechanism, not by hand-delivering messages: every cross-tab test drives
+  `Documents.create_document/1` or `delete_document/1` and lets the broadcast travel, because a message
+  sent straight to `view.pid` proves a handler exists while still passing against the bug this item
+  fixes. Two dashboards mounted from one connection see each other's creations, in sorted position, and
+  each other's deletions; status changes still arrive now that the per-document subscriptions are gone;
+  a create and a delete leave the card set, order and `:documents_count` agreeing, including when the
+  acting tab receives the echo of its own broadcast. The bound is pinned by observation rather than
+  argument — `Registry.keys(Doctrans.PubSub, pid)` returns `["documents"]` for a dashboard with four
+  cards on screen, after a fifth arrives and after a delete, with a guard test confirming the check
+  would actually see a second registration — and `terminate/2` is checked to release it, for the viewer
+  as well as the dashboard. Each new test was confirmed to fail without its fix.
+  Not closed: the acting tab still handles the echo of its own broadcast, so a ten-file upload does one
+  full refresh and then ten single-id refreshes. They are idempotent and the extra queries are cheap;
+  avoiding them means `broadcast_from/4` and threading the caller's pid through the context, which buys
+  less than it costs. And the deeper test-isolation issue is worked around, not solved: any future test
+  that mounts a dashboard and counts queries, asserts timing, or refutes a message must be sync, and
+  nothing enforces that beyond the two comments.
+  Evidence added: `lib/doctrans/documents/topics.ex` (`broadcast_document_created/1`,
+  `broadcast_document_deleted/1`, `unsubscribe_documents/0`), `lib/doctrans/documents.ex`,
+  `lib/doctrans_web/live/document_live/document_stream.ex`,
+  `lib/doctrans_web/live/document_live/index.ex`, `lib/doctrans_web/live/document_live/show.ex`,
+  `lib/doctrans_web/live/document_live/upload_intake.ex`,
+  `test/doctrans_web/live/document_live_cross_tab_test.exs`,
+  `test/doctrans/documents/topics_test.exs`, `test/doctrans_web/live/document_live_index_test.exs`,
+  `test/doctrans_web/live/document_live_show_test.exs`.
 
 - [x] **U12 · P3 · Render the theme toggle somewhere a reader can reach it.**
   `Layouts.theme_toggle/1` was defined and unit-tested but called from no template, so the light/dark

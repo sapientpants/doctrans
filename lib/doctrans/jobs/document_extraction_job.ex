@@ -139,7 +139,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
     _ =
       with {:ok, updated} <-
              Documents.update_document_status(document, "error", :document_file_not_found) do
-        Topics.broadcast_document_update(updated)
+        Topics.broadcast_document_updated(updated)
       end
 
     {:error, :document_file_not_found}

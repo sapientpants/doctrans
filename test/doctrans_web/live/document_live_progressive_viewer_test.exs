@@ -13,7 +13,7 @@ defmodule DoctransWeb.DocumentLive.ProgressiveViewerTest do
     refute has_element?(view, ".markdown")
 
     page = completed_page_fixture(document)
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     assert has_element?(view, "img[src='/uploads/#{page.image_path}']")
     assert has_element?(view, ".markdown h1", "Translated Content")
@@ -30,7 +30,7 @@ defmodule DoctransWeb.DocumentLive.ProgressiveViewerTest do
     refute has_element?(view, ".markdown")
 
     page = completed_page_fixture(document, %{page_number: 2, image_path: "page_2.png"})
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     assert has_element?(view, "img[src='/uploads/#{page.image_path}']")
     assert has_element?(view, ".markdown h1", "Translated Content")
@@ -43,17 +43,17 @@ defmodule DoctransWeb.DocumentLive.ProgressiveViewerTest do
     other_page = completed_page_fixture(document, %{page_number: 2, image_path: "other.png"})
     foreign_page = completed_page_fixture(document_fixture())
 
-    Topics.broadcast_page_update(other_page)
+    Topics.broadcast_page_updated(other_page)
     send(view.pid, {:page_updated, foreign_page})
 
     refute has_element?(view, "img[alt='Page image']")
     refute has_element?(view, ".markdown")
 
     page = completed_page_fixture(document)
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
     assert has_element?(view, "img[src='/uploads/#{page.image_path}']")
 
-    Topics.broadcast_page_update(other_page)
+    Topics.broadcast_page_updated(other_page)
     send(view.pid, {:page_updated, foreign_page})
 
     assert has_element?(view, "img[src='/uploads/#{page.image_path}']")
