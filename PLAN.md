@@ -1619,16 +1619,71 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `lib/doctrans_web/live/document_live/show.html.heex`,
   `test/doctrans_web/theme_script_test.exs`, `priv/gettext` (one new message across 11 locales).
 
-- [ ] **U13 · P3 · Give LiveDashboard the CSP nonce it renders.**
+- [x] **U13 · P3 · Give LiveDashboard the CSP nonce it renders.**
   `live_dashboard "/dashboard"` is mounted through the `:browser` pipeline, so it receives the same
   `script-src 'self'`, but its layout emits an inline `<script nonce={csp_nonce(@conn, :script)}>` and
-  the route sets no `:csp_nonce_assign_key`. The nonce renders empty and the browser refuses the
-  script — the identical defect U10 just fixed, in a dependency's template rather than ours. Dev-only:
+  the route sets no `:csp_nonce_assign_key`. `csp_nonce/2` returns `nil`, HEEx drops a `nil`
+  attribute rather than rendering it empty, so the markup carries no nonce at all and the browser
+  refuses the script — the identical defect U10 just fixed, in a dependency's template rather than
+  ours. Dev-only:
   the route is behind `dev_routes`. `live_dashboard` accepts `csp_nonce_assign_key`, so this is a
   router option plus a plug that assigns the nonces, not a policy change.
   Acceptance: the dashboard works in dev with the CSP unchanged for every other route.
-  Evidence: `lib/doctrans_web/router.ex:50`, `lib/doctrans_web/router.ex:14`,
+  The nonce is minted per request by `DoctransWeb.Plugs.DashboardCsp`, which assigns it and replaces
+  the response policy in the same `call/2`. Both halves have to come from one request: LiveDashboard
+  copies the assign into the LiveView session at dead render, so the socket keeps rendering the nonce
+  the document's own header admitted, and a nonce minted again for the connect would be refused
+  against a header that is never sent a second time.
+  A scope, not a pipeline change. `/dev` held both the dashboard and the Swoosh mailbox preview; the
+  dashboard moved into `scope "/dev/dashboard"` and the mailbox kept a `scope "/dev"` piping through
+  `:browser` alone, so the widened policy reaches exactly one route. Scoping it to the dashboard's own
+  path rather than to `/dev` is what keeps that true: a dev route added later cannot inherit the
+  relaxation merely by being written next to the dashboard. `/`, `/search` and `/dev/mailbox` are each asserted to receive
+  `ContentSecurityPolicy.base()` byte for byte.
+  Three sources are added and no more: the nonce in `script-src` and in `style-src`, and `data:` in
+  `font-src`. The third was not in the finding and is load-bearing — the dashboard's stylesheet embeds
+  its icon font as a `data:` URI, which `font-src 'self'` refuses, and that failure shows up as empty
+  boxes rather than as an error. `style-src 'unsafe-inline'` is **not** needed: every inline `<style>`
+  LiveDashboard renders is nonced, and the single inline `style` attribute in the dependency, which no
+  nonce can cover, is reachable only through `live_layered_graph/1` on a custom page — none of which
+  this application mounts. Adding `'unsafe-inline'` would in any case be dead code next to a nonce,
+  which browsers let override it.
+  The `:browser` pipeline's literal moved into `DoctransWeb.ContentSecurityPolicy` so the exception is
+  rendered from the same directive list as the base rather than being a second literal free to drift.
+  The rendered base is byte-identical to the string it replaced, checked against `HEAD` independently
+  of the module and then pinned by a test carrying the pre-U13 literal. The directives the exception
+  widens are a second list, checked against the first at compile time, so a directive renamed in one
+  and not the other fails the build rather than silently dropping a nonce.
+  The router reads the assign key from `DashboardCsp.assign_key()` instead of repeating `:csp_nonce`.
+  The first cut repeated it, on the belief that a macro option cannot call a function; `live_dashboard`
+  binds its options as values, so it can. What that removes is a drift that fails silently on the
+  server: a key the router names but nothing assigns leaves `conn.assigns[key]` nil, so the nonce
+  attributes drop out of the markup entirely — indistinguishable from the original defect, and with
+  no `nonce=""` left behind to grep for. It was reproduced by accident during verification, when the two spellings
+  disagreed for about two seconds — the browser refused the script and logged `Cannot read properties
+  of undefined (reading 'customHooks')`, with nothing at all on the server side.
+  `config/test.exs` now sets `dev_routes: true`, which is the only reason any of this is testable at
+  all: the route is compiled behind `Application.compile_env(:doctrans, :dev_routes)` and did not exist
+  in the test environment. Nothing else in the tree reads that flag.
+  Verified in Chromium against a running dev server, which is the only place a CSP is enforced:
+  `/dev/dashboard/home` renders eleven nonce attributes, all non-empty and all equal to the value in
+  that response's own header; `typeof window.LiveDashboard` is `"object"`, which is the direct evidence
+  that the refused inline script now runs; the socket connects; all ten reachable tabs render,
+  including the Home usage bars and Metrics' live charts, both of which come from nonced inline
+  `<style>`; and `document.fonts.check('12px LiveDashboardFont')` is true. Sixty-six console entries
+  across a full walk, every one of them LiveView debug output — no violations, no errors, no 4xx or
+  5xx. `/` and `/search` are unchanged, theme toggle included.
+  Not fixed, and deliberately: `/dev/mailbox` has the same defect. Swoosh's preview template nonces its
+  own inline `<script>` and `<style>`, `Plug.Swoosh.MailboxPreview` accepts its own
+  `:csp_nonce_assign_key`, and nothing sets it, so that inline script is still refused — confirmed in
+  the browser. It is dev-only and the page's static content renders. Fixing it would widen a second
+  route's policy, which this item's own acceptance criterion forbids; it belongs in an item of its own.
+  Defect sites: `lib/doctrans_web/router.ex:14` (the pipeline's CSP literal) and `router.ex:50` (the
+  route that named no assign key), against the markup they refused,
   `deps/phoenix_live_dashboard/lib/phoenix/live_dashboard/layouts/dash.html.heex:4`.
+  Evidence: `lib/doctrans_web/content_security_policy.ex`, `lib/doctrans_web/plugs/dashboard_csp.ex`,
+  `lib/doctrans_web/router.ex`, `config/test.exs`,
+  `test/doctrans_web/dashboard_csp_test.exs`, `test/doctrans_web/content_security_policy_test.exs`.
 
 ## Phase 5 — Verification and maintenance
 
