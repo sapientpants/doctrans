@@ -118,7 +118,7 @@ defmodule DoctransWeb.ThemeScriptTest do
 
       # Selection: the event `Layouts.theme_toggle/1` dispatches from phx-click.
       assert code =~ ~s|addEventListener("phx:set-theme"|
-      assert code =~ "dataset.phxTheme"
+      assert code =~ "dataset?.phxTheme"
 
       # Reload persistence: read the stored choice and apply it, but only over
       # an element that has no theme already.
@@ -135,6 +135,26 @@ defmodule DoctransWeb.ThemeScriptTest do
       # freezing at the preference in force when the choice was made.
       assert code =~ "removeItem(STORAGE_KEY)"
       assert code =~ ~s|removeAttribute("data-theme")|
+    end
+
+    test "applies only the themes that exist, and survives storage it cannot use" do
+      code = theme_code()
+
+      # Review found both of these by dispatching the event by hand. An event
+      # from a node with no `data-phx-theme` arrived as `undefined` and was
+      # written straight through to `data-theme` and to storage, where it stuck
+      # across reloads: it matches no theme, it suppresses
+      # `prefers-color-scheme` because the attribute is present, and it leaves
+      # every button unpressed. Dispatching on `window` threw outright.
+      assert code =~ "THEMES"
+      assert code =~ "THEMES.includes(theme)"
+      assert code =~ "event.target?.dataset?.phxTheme"
+
+      # Storage throws rather than returning null when a browser is set to deny
+      # site data. Unhandled, it would abort this file before the listeners
+      # below it are registered, which is the dead toggle U10 set out to fix.
+      assert code =~ ~r/try\s*\{/
+      assert code =~ ~r/catch\s*\{/
     end
 
     test "imports nothing, so it stays a small render-blocking request" do

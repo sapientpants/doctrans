@@ -1414,8 +1414,20 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   acceptance criterion and was not used: both re-admit inline script to the policy, and a hash has to be
   recomputed by hand every time the script is edited, so the gate it provides is one a future edit
   silently breaks.
-  Behavior is carried over unchanged, including the contract that "system" is the *absence* of a stored
-  value — the key is removed and the attribute comes off, so the daisyUI themes resolve through
+  Hardened past the original in two places, both found by dispatching `phx:set-theme` by hand during
+  review. The value was applied and stored without being checked against the three themes that exist,
+  so an event from a node carrying no `data-phx-theme` arrived as `undefined` and was written through
+  verbatim — and `data-theme="undefined"` is worse than it sounds: it matches no theme, it suppresses
+  `prefers-color-scheme` *because the attribute is present*, it leaves every button unpressed, and it
+  survived reloads, so the page sat in the wrong theme with nothing on screen explaining why. The same
+  dispatch aimed at `window` threw outright, since `window.dataset` is undefined. Unknown values are now
+  ignored, which also self-heals a catalog of storage already holding one, and the read is
+  optional-chained. Separately, `localStorage` throws rather than returning null in a browser set to
+  deny site data; unhandled, that would have aborted the file before its listeners were registered,
+  which is the dead toggle this item exists to fix. Reads and writes are wrapped, so such a browser
+  loses persistence but keeps the control.
+  Behavior is otherwise carried over unchanged, including the contract that "system" is the *absence* of
+  a stored value — the key is removed and the attribute comes off, so the daisyUI themes resolve through
   `prefers-color-scheme` rather than freezing at whatever the system preference was on the day it was
   picked.
   Known limitation, the same one U09 recorded: there is no JavaScript test harness in this repo, so the

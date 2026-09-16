@@ -117,11 +117,9 @@ defmodule DoctransWeb.Layouts do
   would promise arrow-key navigation and a roving `tabindex` that nothing here
   implements. The pressed state is written by the `ThemeToggle` hook, not
   rendered: the choice lives in `localStorage` and the server never learns it.
+  The rendered `aria-pressed` values are the "system" placeholder the hook
+  corrects on mount, not a claim about what is actually selected.
   """
-  attr :theme, :string,
-    default: "system",
-    doc: "the theme assumed before the ThemeToggle hook reports the stored one"
-
   def theme_toggle(assigns) do
     ~H"""
     <div
@@ -139,7 +137,7 @@ defmodule DoctransWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="system"
-        aria-pressed={to_string(@theme == "system")}
+        aria-pressed="true"
       >
         <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
@@ -150,7 +148,7 @@ defmodule DoctransWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="light"
-        aria-pressed={to_string(@theme == "light")}
+        aria-pressed="false"
       >
         <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
@@ -161,7 +159,7 @@ defmodule DoctransWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="dark"
-        aria-pressed={to_string(@theme == "dark")}
+        aria-pressed="false"
       >
         <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
