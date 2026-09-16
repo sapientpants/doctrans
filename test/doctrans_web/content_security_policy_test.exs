@@ -86,6 +86,26 @@ defmodule DoctransWeb.ContentSecurityPolicyTest do
     end
   end
 
+  describe "nonce/0" do
+    test "mints a fresh, unguessable value on every call" do
+      # Stated here as well as in the plug's own test, because a weak nonce is
+      # a property of the minting rather than of the route. A nonce reused
+      # across requests is worth no more than `'unsafe-inline'`: whoever reads
+      # one response can write markup the next one admits.
+      nonces = for _ <- 1..20, do: ContentSecurityPolicy.nonce()
+
+      assert nonces |> Enum.uniq() |> length() == 20
+
+      # 18 random bytes, base64-encoded. The CSP specification asks for at least
+      # 128 bits; anything a page's own markup can be guessed against is a nonce
+      # in name only.
+      for nonce <- nonces do
+        assert {:ok, bytes} = Base.decode64(nonce)
+        assert byte_size(bytes) >= 16
+      end
+    end
+  end
+
   describe "headers/0" do
     test "is the map shape put_secure_browser_headers/2 takes" do
       # It is passed straight to a function plug, which has no `init/1`, so a

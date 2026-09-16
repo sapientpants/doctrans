@@ -43,7 +43,7 @@ defmodule DoctransWeb.Plugs.DashboardCsp do
 
   @impl true
   def call(conn, _opts) do
-    nonce = 18 |> :crypto.strong_rand_bytes() |> Base.encode64()
+    nonce = ContentSecurityPolicy.nonce()
 
     conn
     |> assign(@assign_key, nonce)

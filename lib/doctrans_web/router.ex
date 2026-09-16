@@ -32,7 +32,7 @@ defmodule DoctransWeb.Router do
   #   pipe_through :api
   # end
 
-  # Enable LiveDashboard and Swoosh mailbox preview in development
+  # Enable LiveDashboard in development
   if Application.compile_env(:doctrans, :dev_routes) do
     # If you want to use the LiveDashboard in production, you should put
     # it behind authentication and allow only admins to access it.
@@ -47,7 +47,7 @@ defmodule DoctransWeb.Router do
 
     # The widened policy is scoped to the dashboard's own path rather than to
     # `/dev`, so a dev route added later cannot inherit it just by being written
-    # in the same block. The mailbox preview below keeps the base policy.
+    # in the same block.
     pipeline :dashboard_csp do
       plug DashboardCsp
     end
@@ -62,12 +62,6 @@ defmodule DoctransWeb.Router do
       live_dashboard "/",
         metrics: DoctransWeb.Telemetry,
         csp_nonce_assign_key: DashboardCsp.assign_key()
-    end
-
-    scope "/dev" do
-      pipe_through :browser
-
-      forward "/mailbox", Plug.Swoosh.MailboxPreview
     end
   end
 end

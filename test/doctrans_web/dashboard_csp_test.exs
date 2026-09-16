@@ -165,14 +165,26 @@ defmodule DoctransWeb.DashboardCspTest do
   end
 
   describe "every other route" do
-    test "is served the base policy, with no usable nonce on the page", %{conn: conn} do
-      # The regression guard for the scope split. `/dev/mailbox` used to share
-      # the dashboard's scope, so the obvious way to wire the nonce in -- adding
-      # the plug to the existing `/dev` scope -- would hand the relaxed policy
-      # to a page that has no need of it. The application's own routes are here
-      # for the same reason at the other end: the U13 refactor rewrote the
-      # pipeline every one of them passes through.
-      for path <- [~p"/", ~p"/search", ~p"/dev/mailbox"] do
+    setup do
+      # Every route the application serves itself, `/documents/:id` included --
+      # it renders through the same pipeline as the other two but is the only
+      # one needing a row to exist, which is why it is easy to leave out of a
+      # list like this and worth the fixture to keep in.
+      document = Doctrans.Fixtures.document_fixture()
+
+      %{paths: [~p"/", ~p"/search", ~p"/documents/#{document.id}"]}
+    end
+
+    test "is served the base policy, with no usable nonce on the page", %{
+      conn: conn,
+      paths: paths
+    } do
+      # The regression guard for the dashboard's scope. The widened policy is
+      # scoped to `/dev/dashboard` rather than to `/dev`, so a dev route added
+      # later cannot inherit it just by being written in the same block. What
+      # is asserted here is the application's own routes, whose shared pipeline
+      # the U13 refactor rewrote underneath them.
+      for path <- paths do
         conn = get(conn, path)
 
         assert conn.status == 200
@@ -187,28 +199,25 @@ defmodule DoctransWeb.DashboardCspTest do
           |> LazyHTML.query("[nonce]")
           |> LazyHTML.attribute("nonce")
 
-        # `/dev/mailbox` is known broken here, not correct: it has the same
-        # defect U13 fixed for the dashboard, and PLAN.md records why it is left
-        # for an item of its own -- closing it would widen a second route's
-        # policy, which this item's acceptance criterion forbids. Swoosh's
-        # template is EEx rather than HEEx and nonces its inline script and
-        # style unconditionally, so it renders `nonce=""` whether or not a key
-        # is configured, and an empty nonce admits nothing. That is why the
-        # assertion below tolerates empty values on this one path.
-        #
-        # On the application's own routes any nonce attribute at all would mean
-        # the dashboard's plug had escaped its scope.
-        assert Enum.uniq(nonces) -- [""] == [],
+        # Absence, not emptiness. These are the application's own HEEx
+        # templates, which drop a nil nonce rather than rendering it empty, and
+        # nothing on them asks for one -- so any nonce attribute at all would
+        # mean a plug had escaped its scope onto a page served the base policy.
+        assert nonces == [],
                "#{path} renders a nonce its policy does not admit"
       end
     end
 
-    test "does not carry the dashboard's assign either", %{conn: conn} do
+    test "does not carry the dev tool's assign", %{conn: conn, paths: paths} do
       # The header is the enforcement, but the assign is what a template could
-      # pick up. Neither should exist outside the dashboard's scope.
-      conn = get(conn, ~p"/")
+      # pick up. The dashboard's nonce should not exist outside its own scope,
+      # on any route the application serves itself.
+      for path <- paths do
+        conn = get(conn, path)
 
-      refute Map.has_key?(conn.assigns, DashboardCsp.assign_key())
+        refute Map.has_key?(conn.assigns, DashboardCsp.assign_key()),
+               "#{path} carries the dashboard's nonce assign"
+      end
     end
   end
 
@@ -249,9 +258,13 @@ defmodule DoctransWeb.DashboardCspTest do
 
       assert nonces |> Enum.uniq() |> length() == 20
 
-      # 18 random bytes, base64-encoded. The CSP specification asks for at least
-      # 128 bits; anything a page's own markup can be guessed against is a nonce
-      # in name only.
+      # Asserted on the value the plug actually assigned, not only against
+      # `ContentSecurityPolicy.nonce/0` in isolation: uniqueness over 20 calls
+      # is satisfied by a counter, so without this a plug rewritten to mint its
+      # own weak value would pass every test here. 18 random bytes,
+      # base64-encoded. The CSP specification asks for at least 128 bits;
+      # anything a page's own markup can be guessed against is a nonce in name
+      # only.
       for nonce <- nonces do
         assert {:ok, bytes} = Base.decode64(nonce)
         assert byte_size(bytes) >= 16

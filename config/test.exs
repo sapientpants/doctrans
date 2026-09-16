@@ -21,12 +21,6 @@ config :doctrans, DoctransWeb.Endpoint,
   live_view: [signing_salt: "P9wT4yH6jN2mV8kD0qL3xR7zB5cF1aG4"],
   server: false
 
-# In test we don't send emails
-config :doctrans, Doctrans.Mailer, adapter: Swoosh.Adapters.Test
-
-# Disable swoosh api client as it is only required for production adapters
-config :swoosh, :api_client, false
-
 # Print only warnings and errors during test
 config :logger, level: :warning
 

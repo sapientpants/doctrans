@@ -166,15 +166,6 @@ config :doctrans, DoctransWeb.Endpoint,
   ],
   pubsub_server: Doctrans.PubSub
 
-# Configures the mailer
-#
-# By default it uses the "Local" adapter which stores the emails
-# locally. You can see the emails in your browser, at "/dev/mailbox".
-#
-# For production it's recommended to configure a different adapter
-# at the `config/runtime.exs`.
-config :doctrans, Doctrans.Mailer, adapter: Swoosh.Adapters.Local
-
 # Configure esbuild (the version is required)
 # `js/theme.js` is a second entry point, not an import of `js/app.js`: it is
 # loaded render-blocking from `<head>` so the saved theme is on the document

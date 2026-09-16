@@ -52,6 +52,17 @@ defmodule DoctransWeb.ContentSecurityPolicy do
   end
 
   @doc """
+  A fresh nonce for one request.
+
+  144 bits from `:crypto.strong_rand_bytes/1`, comfortably over the 128 the CSP
+  specification asks for. A nonce a page's own markup can be guessed against is
+  a nonce in name only, and one reused across responses is worth no more than
+  `'unsafe-inline'` -- so this is called per request, by the plug that heads the
+  policy carrying it.
+  """
+  def nonce, do: 18 |> :crypto.strong_rand_bytes() |> Base.encode64()
+
+  @doc """
   The response headers for `Plug.Conn.put_secure_browser_headers/2`.
   """
   def headers, do: %{"content-security-policy" => base()}
@@ -81,9 +92,11 @@ defmodule DoctransWeb.ContentSecurityPolicy do
   application mounts uses one; `live_layered_graph/1` on a custom page would,
   and would need `style-src-attr` rather than another source here.
   """
-  def dashboard(nonce) when is_binary(nonce) do
+  def dashboard(nonce) when is_binary(nonce), do: widen(@dashboard_additions, nonce)
+
+  defp widen(additions, nonce) do
     additions =
-      Map.new(@dashboard_additions, fn
+      Map.new(additions, fn
         {directive, :nonce} -> {directive, ["'nonce-#{nonce}'"]}
         {directive, sources} -> {directive, sources}
       end)
