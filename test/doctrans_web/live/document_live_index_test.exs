@@ -462,7 +462,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
 
       # Update and broadcast
       {:ok, updated} = Doctrans.Documents.update_document(doc, %{title: "Updated PubSub"})
-      Topics.broadcast_document_update(updated)
+      Topics.broadcast_document_updated(updated)
 
       assert render(view) =~ "Updated PubSub"
     end
@@ -480,7 +480,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       {:ok, updated_page} =
         Doctrans.Documents.update_page_extraction(page, %{extraction_status: "completed"})
 
-      Topics.broadcast_page_update(updated_page)
+      Topics.broadcast_page_updated(updated_page)
 
       assert has_element?(view, "#documents-#{doc.id} progress[value='25.0']")
       assert has_element?(view, "#documents-#{other.id} progress[value='0.0']")

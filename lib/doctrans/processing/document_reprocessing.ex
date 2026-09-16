@@ -67,8 +67,8 @@ defmodule Doctrans.Processing.DocumentReprocessing do
 
     case result do
       {:ok, {document, page}} ->
-        _ = Topics.broadcast_document_update(document)
-        Topics.broadcast_page_update(page)
+        _ = Topics.broadcast_document_updated(document)
+        Topics.broadcast_page_updated(page)
         {:ok, page}
 
       error ->
@@ -150,7 +150,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   end
 
   defp publish({:ok, document}) do
-    _ = Topics.broadcast_document_update(document)
+    _ = Topics.broadcast_document_updated(document)
     {:ok, document}
   end
 

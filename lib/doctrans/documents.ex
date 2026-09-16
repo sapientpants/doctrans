@@ -179,8 +179,13 @@ defmodule Doctrans.Documents do
     chunks_embedded?(document_id) or pages_embedded?(document_id)
   end
 
-  # Reached through the page association rather than `Chunk` directly, so the
-  # context does not name a schema it otherwise never touches.
+  # Reached through the page association rather than by naming `Chunk`, which this
+  # module can no longer afford to alias: Credo's `ModuleDependencies` check caps a
+  # module at `max_deps: 10` first-party dependencies (`.credo.exs`), and aliasing
+  # `Topics` for the U11 broadcasts put `Documents` exactly at the ceiling. Going
+  # through `Page has_many :chunks` is equivalent -- same inner join, same three
+  # predicates, same `exists?` -- so re-adding the alias would fail the build for
+  # nothing.
   defp chunks_embedded?(document_id) do
     Page
     |> where([p], p.document_id == ^document_id)
@@ -250,7 +255,7 @@ defmodule Doctrans.Documents do
            |> Doctrans.Errors.result() do
       # Announce the new document on the collection topic every open dashboard
       # subscribes to, so an upload made in one tab appears in the others.
-      :ok = Topics.broadcast_document_created(document)
+      _ = Topics.broadcast_document_created(document)
       {:ok, document}
     end
   end
@@ -307,12 +312,16 @@ defmodule Doctrans.Documents do
         error -> Doctrans.Errors.result(error)
       end
 
-    with {:ok, deleted} <- result do
-      # Broadcast only after the transaction has committed: announcing from
-      # inside it would advertise a deletion a rollback could still undo, and
-      # would reach subscribers before the row was actually gone.
-      :ok = Topics.broadcast_document_deleted(deleted)
-      {:ok, deleted}
+    # Broadcast only after the transaction has committed: announcing from inside
+    # it would advertise a deletion a rollback could still undo, and would reach
+    # subscribers before the row was actually gone.
+    case result do
+      {:ok, deleted} ->
+        _ = Topics.broadcast_document_deleted(deleted)
+        {:ok, deleted}
+
+      error ->
+        error
     end
   end
 

@@ -28,6 +28,7 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
   alias Doctrans.Documents.Document
   alias Doctrans.Documents.Topics
   alias Doctrans.Repo
+  alias Doctrans.TestEnv
   alias DoctransWeb.DocumentLive.Index
   alias DoctransWeb.DocumentLive.Show
 
@@ -130,14 +131,14 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
       assert has_element?(observer, "#{card} .badge", "Processing")
 
       {:ok, updated} = Documents.update_document(document, %{status: "completed"})
-      Topics.broadcast_document_update(updated)
+      Topics.broadcast_document_updated(updated)
 
       assert has_element?(observer, "#{card} .badge", "Completed")
 
       [page, _second] = document.pages
 
       {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "completed"})
-      Topics.broadcast_page_update(page)
+      Topics.broadcast_page_updated(page)
 
       assert has_element?(observer, "#{card} progress[value='25.0']")
       assert has_element?(observer, "#documents-#{untouched.id} progress[value='0.0']")
@@ -180,7 +181,13 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
       :ok = Topics.subscribe_documents()
       assert "documents" in Registry.keys(Doctrans.PubSub, self())
 
-      assert :ok = Index.terminate(:shutdown, :unused_socket)
+      # A bare socket on purpose. The dashboard used to unsubscribe from a list of
+      # per-document topics it kept in its assigns, and the whole point of the
+      # single collection subscription is that `terminate/2` no longer needs to
+      # read anything off the socket to release it. An empty `assigns` is a real
+      # socket rather than a stand-in, so reaching for an assign here raises
+      # instead of quietly passing.
+      assert :ok = Index.terminate(:shutdown, %Phoenix.LiveView.Socket{})
 
       refute "documents" in Registry.keys(Doctrans.PubSub, self())
     end
@@ -200,14 +207,52 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
       {:ok, _} = Documents.delete_document(document)
       assert has_element?(view, "#document-not-found")
 
-      # The assigns a viewer is left holding once the deletion broadcast has
-      # cleared `:document`: navigating away from here must still unsubscribe,
-      # so the id has to have been remembered somewhere the deletion cannot reach.
-      socket = %Phoenix.LiveView.Socket{
-        transport_pid: self(),
-        assigns: %{__changed__: %{}, document: nil, subscribed_document_id: document.id}
-      }
+      # The viewer's own socket, taken from the running process rather than
+      # authored here: it is already in the state a deletion leaves behind, with
+      # `:document` cleared. Writing those assigns by hand instead would assert
+      # nothing about `mount/3` -- the test would keep passing if the viewer
+      # stopped recording the id it subscribed with, which is the one thing
+      # `terminate/2` cannot get from anywhere else.
+      socket = :sys.get_state(view.pid).socket
+      assert socket.assigns.document == nil
 
+      assert :ok = Show.terminate(:shutdown, socket)
+
+      refute topic in Registry.keys(Doctrans.PubSub, self())
+    end
+
+    test "a viewer reached through an uppercase id still hears its deletion", %{conn: conn} do
+      document = document_fixture(%{title: "Shouty"})
+      upper = String.upcase(document.id)
+
+      # `Ecto.UUID.cast/1` downcases, so this URL loads the document. The topic
+      # has to be the stored id all the same -- subscribing with the raw param
+      # would name `document:<UPPER>`, which nothing ever broadcasts to, and the
+      # viewer would sit there rendering a document that no longer exists.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{upper}")
+      refute has_element?(view, "#document-not-found")
+
+      {:ok, _} = Documents.delete_document(document)
+
+      assert has_element?(view, "#document-not-found")
+    end
+
+    test "a viewer that never found its document still releases the topic", %{conn: conn} do
+      missing = Ecto.UUID.generate()
+      topic = "document:#{missing}"
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{missing}")
+      assert has_element?(view, "#document-not-found")
+
+      # `mount/3` subscribes before it reads, so the not-found branch holds a
+      # subscription too and has the same release to make. This is the path that
+      # used to be able to drop the assign without a single test noticing --
+      # `terminate/2` reads it unconditionally, and a crash on the way out is
+      # only logged, never failed on.
+      assert Registry.keys(Doctrans.PubSub, view.pid) == [topic]
+
+      :ok = Topics.subscribe_document(missing)
+      socket = :sys.get_state(view.pid).socket
       assert :ok = Show.terminate(:shutdown, socket)
 
       refute topic in Registry.keys(Doctrans.PubSub, self())
@@ -288,6 +333,92 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
     end
   end
 
+  describe "the serial constraint this file documents" do
+    test "no test file that mounts the dashboard runs async" do
+      offenders =
+        "test/**/*_test.exs"
+        |> Path.wildcard()
+        |> Enum.filter(fn path ->
+          source = File.read!(path)
+
+          String.contains?(source, ~s|live(conn, ~p"/")|) and
+            Regex.match?(~r/^\s*use\s+\S+,\s+async:\s+true/m, source)
+        end)
+
+      assert offenders == [],
+             """
+             These files mount the dashboard under `async: true`:
+
+             #{Enum.map_join(offenders, "\n", &"  - #{&1}")}
+
+             `Index` subscribes to the process-global "documents" topic. The Ecto
+             SQL sandbox isolates the database but not PubSub, so a document
+             fixture or a page broadcast from any file running concurrently lands
+             in these dashboards, sets the coalescing timer and races whatever
+             they assert. The moduledoc at the top of this file has the long
+             version. Add `async: false`, or mount something other than the
+             dashboard.
+             """
+    end
+  end
+
+  describe "a chat turn whose document is deleted elsewhere" do
+    test "is killed rather than left running against rows that are gone", %{conn: conn} do
+      document = completed_document_with_embedding_fixture()
+      question = "What does this document say?"
+      barrier = install_barrier(question)
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> form("#chat-form", %{"message" => question}) |> render_submit()
+
+      # Parked inside the agent pipeline, which is where a real turn spends its
+      # time. The task is `async_nolink`, so nothing that happens to the LiveView
+      # or to the document reaches it on its own.
+      assert_receive {:embedding_started, ^barrier, task_pid}, 2_000
+      monitor = Process.monitor(task_pid)
+
+      {:ok, _} = Documents.delete_document(document)
+
+      # The turn is stopped when the document goes, not when its answer lands.
+      # Left alone it would run the rest of the pipeline -- several LLM calls, a
+      # 300s receive timeout each -- to produce an answer whose chat session
+      # cascaded away with the row, and it would outlive the viewer as well.
+      assert_receive {:DOWN, ^monitor, :process, ^task_pid, :killed}, 2_000
+
+      assert has_element?(view, "#document-not-found")
+      assert Process.alive?(view.pid)
+    end
+
+    test "a landing that was already in flight is dropped by the live viewer", %{conn: conn} do
+      document = document_fixture(%{title: "Doomed"})
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      {:ok, _} = Documents.delete_document(document)
+      assert has_element?(view, "#document-not-found")
+
+      # Both shapes a killed turn can still deliver: a result sent before the kill
+      # landed, and a `:DOWN` for a monitor already flushed. `interrupt_chat/1`
+      # cleared `chat_task_ref`, so each is identified by its ref -- not by having
+      # turned up late -- and falls to the stale-ref clauses that drop it.
+      send(view.pid, {make_ref(), {:ok, "Stale answer", []}})
+      send(view.pid, {:DOWN, make_ref(), :process, self(), :boom})
+
+      # Rendering round-trips through the viewer, so a message that killed it
+      # fails here rather than going unnoticed.
+      assert has_element?(view, "#document-not-found")
+      assert Process.alive?(view.pid)
+    end
+  end
+
+  # Parks the embedding stub on `text` until this test releases it, so a chat
+  # turn can be observed mid-flight.
+  defp install_barrier(text) do
+    barrier = make_ref()
+    TestEnv.put_env(:embedding_stub_barrier, {text, self(), barrier})
+    barrier
+  end
+
   defp insert_without_broadcast(title) do
     Repo.insert!(%Document{
       title: title,
@@ -306,10 +437,17 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
 
     refute has_element?(view, "#documents > div:nth-child(#{length(ids) + 1})")
 
-    # Structural, not cosmetic: the client refuses to discard an id-bearing child
-    # of a stream container and a reset only removes `data-phx-stream` children,
-    # so anything else parked in here -- the empty state above all -- would stay
-    # on screen forever. Everything inside `#documents` is a stream child.
+    # `documents_count` drives the empty state and nothing else, so on its own it
+    # only ever shows up as zero-or-not: a count that drifts while cards are still
+    # on screen stays hidden until the last delete fails to bring the empty state
+    # back. Pinned against the cards here, every case in this file checks it.
+    assert has_element?(view, "#documents[data-documents-count='#{length(ids)}']")
+    assert has_element?(view, "#documents-empty") == (ids == [])
+
+    # Structural, not cosmetic. `Index`'s template explains why an id-bearing
+    # child cannot live inside the stream container; this is the assertion that
+    # holds it to that, by requiring everything in `#documents` to be a stream
+    # child.
     refute has_element?(view, "#documents > :not([data-phx-stream])")
   end
 end

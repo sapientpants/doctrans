@@ -45,12 +45,7 @@ defmodule DoctransWeb.DocumentLive.Index do
         max_file_size: UploadIntake.max_file_size()
       )
 
-    _ =
-      if connected?(socket) do
-        _ = Topics.subscribe_documents()
-      else
-        :ok
-      end
+    _ = if connected?(socket), do: Topics.subscribe_documents()
 
     {:ok, DocumentStream.refresh(socket)}
   end
@@ -209,8 +204,14 @@ defmodule DoctransWeb.DocumentLive.Index do
           </p>
         </div>
 
+        <%!-- `data-documents-count` publishes the assign the empty state above is
+             driven by. It is the one piece of list state the page cannot show on
+             its own -- a stream is not countable from the DOM alone -- and without
+             it a count that drifts away from the cards on screen stays invisible
+             until it happens to cross zero and the empty state misfires. --%>
         <div
           id="documents"
+          data-documents-count={@documents_count}
           phx-update="stream"
           class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6"
         >

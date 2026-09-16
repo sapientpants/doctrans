@@ -62,7 +62,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp resume_failed_document(%{status: "error"} = document) do
     # Restore processing before queueing pages so retries can publish live progress.
     with {:ok, document} <- Documents.update_document_status(document, "processing") do
-      _ = Topics.broadcast_document_update(document)
+      _ = Topics.broadcast_document_updated(document)
       {:ok, document}
     end
   end
@@ -127,7 +127,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp set_total_pages(document, page_count) do
     case Documents.update_document(document, %{total_pages: page_count}) do
       {:ok, updated_document} ->
-        _ = Topics.broadcast_document_update(updated_document)
+        _ = Topics.broadcast_document_updated(updated_document)
         {:ok, updated_document}
 
       error ->
@@ -169,7 +169,7 @@ defmodule Doctrans.Processing.PdfProcessor do
       end)
 
     with {:ok, current} <- result do
-      _ = Topics.broadcast_document_update(current)
+      _ = Topics.broadcast_document_updated(current)
       # Guard completion separately, without publishing inside the extraction transaction.
       case DocumentOrchestrator.check_document_completion(current) do
         {:error, _} = error -> error
@@ -222,7 +222,7 @@ defmodule Doctrans.Processing.PdfProcessor do
     case Run.with_current(document, fn current -> save_page(current, page, attrs) end) do
       {:ok, saved} ->
         # Broadcast page creation for progressive UI updates
-        Topics.broadcast_page_update(saved)
+        Topics.broadcast_page_updated(saved)
         {:ok, saved}
 
       {:error, reason} ->

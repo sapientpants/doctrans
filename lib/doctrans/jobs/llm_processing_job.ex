@@ -92,7 +92,7 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
           Documents.update_document_status(document, "error", reason)
         end)
         |> case do
-          {:ok, document} -> Topics.broadcast_document_update(document)
+          {:ok, document} -> Topics.broadcast_document_updated(document)
           error -> error
         end
 

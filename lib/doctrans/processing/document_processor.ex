@@ -53,7 +53,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   defp prepare_document(document) do
     with {:ok, document} <- Documents.update_document_status(document, "extracting") do
-      _ = Topics.broadcast_document_update(document)
+      _ = Topics.broadcast_document_updated(document)
       {:ok, document}
     end
   end
@@ -109,7 +109,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
   defp publish_conversion_error(document, reason) do
     with %Documents.Document{} = document <- document,
          {:ok, document} <- Documents.update_document_status(document, "error", reason) do
-      _ = Topics.broadcast_document_update(document)
+      _ = Topics.broadcast_document_updated(document)
     end
   end
 

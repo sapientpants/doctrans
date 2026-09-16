@@ -131,7 +131,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     # No content to translate - mark as completed with empty translation
     Logger.warning("Page #{page.page_number} has no content to translate, marking as completed")
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "completed"})
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     :ok
   end
@@ -149,7 +149,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     :ok = DocumentOrchestrator.update_document_status_to_processing(page)
 
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "processing"})
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     image_path = Path.join(Documents.uploads_dir(), page.image_path)
     openai_opts = build_extraction_opts(opts)
@@ -163,7 +163,7 @@ defmodule Doctrans.Processing.LlmProcessor do
             extraction_status: "completed"
           })
 
-        Topics.broadcast_page_update(page)
+        Topics.broadcast_page_updated(page)
         queue_indexing(page)
         :ok
 
@@ -250,7 +250,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   defp mark_extraction_failed(page, reason) do
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     {:error, {:page_extraction_failed, [page_number: page.page_number, reason: reason]}}
   end
@@ -259,7 +259,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     Logger.info("Translating page #{page.page_number} of document #{page.document_id}")
 
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "processing"})
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     document = Documents.get_document!(page.document_id)
     openai_opts = build_translation_opts(opts)
@@ -280,7 +280,7 @@ defmodule Doctrans.Processing.LlmProcessor do
             translation_status: "completed"
           })
 
-        Topics.broadcast_page_update(page)
+        Topics.broadcast_page_updated(page)
 
         :ok
 
@@ -356,7 +356,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   defp mark_translation_failed(page, reason) do
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "error"})
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     {:error, {:page_translation_failed, [page_number: page.page_number, reason: reason]}}
   end

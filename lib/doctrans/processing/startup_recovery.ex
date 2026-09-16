@@ -94,7 +94,7 @@ defmodule Doctrans.Processing.StartupRecovery do
       end)
       |> unwrap!()
 
-    Enum.each(pages, &Topics.broadcast_page_update/1)
+    Enum.each(pages, &Topics.broadcast_page_updated/1)
     next_cursor(rows, :pages, {:embeddings, nil})
   end
 

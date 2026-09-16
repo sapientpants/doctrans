@@ -55,7 +55,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       {:ok, deleted} = Documents.delete_document(document)
       assert has_element?(view, "#document-not-found")
 
-      Topics.broadcast_document_update(deleted)
+      Topics.broadcast_document_updated(deleted)
 
       assert has_element?(view, "#document-not-found h1", "Document not found")
       assert Process.alive?(view.pid)
@@ -364,7 +364,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       # Update document and broadcast
       {:ok, updated_doc} = Documents.update_document(doc, %{title: "Updated Title"})
-      Topics.broadcast_document_update(updated_doc)
+      Topics.broadcast_document_updated(updated_doc)
 
       # Wait for the message to be processed
       assert render(view) =~ "Updated Title"
@@ -383,7 +383,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
           original_markdown: "# PubSub Updated Content"
         })
 
-      Topics.broadcast_page_update(updated_page)
+      Topics.broadcast_page_updated(updated_page)
 
       # Toggle to original to see the content
       view |> element("input[type='checkbox']") |> render_click()
