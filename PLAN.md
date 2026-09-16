@@ -1483,11 +1483,17 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   rather than the ARIA radiogroup pattern, which would promise arrow-key navigation and a roving
   `tabindex` that nothing here implements.
   The pressed state cannot be server-rendered: the choice lives in `localStorage` and the server is
-  never told it. A `ThemeToggle` hook in `app.js` writes it on mount, on `phx:set-theme`, on `storage`,
-  and on `updated` — the last because a patch re-rendering the group restores the server's placeholder,
-  which is a guess. It is not in `theme.js`, which runs render-blocking in `<head>` before these buttons
-  are parsed; `theme.js` sets the `data-theme` the hook reads, and both its listeners are bound before
-  the hook mounts, so the attribute is current whenever a handler here runs.
+  never told it. `theme.js` writes it, from `DOMContentLoaded` and from every `setTheme` — so it lands
+  before the first paint and on every click and cross-tab `storage` event, none of which involve a
+  socket. Gating it on the `ThemeToggle` hook instead, as the first cut did, left the buttons
+  announcing the server's "system" placeholder for the whole LiveView join, and permanently wherever
+  the socket never opens, while the pill drew the real choice. The hook is now only the patch path:
+  `mounted` and `updated` re-run the same sync, because a patch re-renders the group from a template
+  that does not know the theme. Both sides call `syncThemeToggles` from `assets/js/theme_sync.js`, a
+  dozen lines esbuild copies into each bundle, so the two cannot drift.
+  No `phx-update="ignore"` on the group, despite the hook writing into server-rendered DOM: ignoring
+  the subtree would also freeze the gettext'd `aria-label`s, so the toggle would keep whichever locale
+  it first rendered in.
   One new message, `Theme`, naming the group. `gettext.extract --merge` returned it non-fuzzy in all 11
   locales and all 11 translations are written out.
   Verified in Chromium against a running server, which is the only place any of this executes:
@@ -1495,7 +1501,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `aria-pressed` to the dark button; the choice survives a reload and a navigation to another route; a
   second tab follows the first within one `storage` event; returning to "system" removes both the
   attribute and the key. No console errors and no CSP violations on any route.
-  The cost the viewer pays for the third call site was measured rather than assumed, because U09 had
+  The cost the viewer pays on the Show route was measured rather than assumed, because U09 had
   just tuned that header: the toggle adds a wrapped row of 48px at 390px and at 768px, 2px at 430px,
   and **zero** at every width from 1024px up — which is exactly the `fitscreen` range
   (`min-width: 64rem and min-height: 40rem`) where the layout is fixed-height and header pixels come
@@ -1503,7 +1509,13 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   rather than a permanent deduction. That is why the toggle goes in the header rather than being
   hidden below `lg`: the only widths where it would have cost anything lasting are the ones where it
   costs nothing.
-  Evidence: `lib/doctrans_web/components/layouts.ex`, `assets/js/app.js` (`ThemeToggle`),
+  That measurement covered the Show header, which already wrapped. The dashboard's did not — its row
+  and its action group were both fixed `flex` — so the toggle went in beside a `w-48` search field, a
+  sort control and Upload with nothing able to reflow, and the excess became horizontal overflow
+  rather than a wrapped row. Both now carry `flex-wrap` with the same `gap-x-4 gap-y-3` the Show
+  header uses.
+  Evidence: `lib/doctrans_web/components/layouts.ex`, `assets/js/theme_sync.js`,
+  `assets/js/app.js` (`ThemeToggle`),
   `lib/doctrans_web/live/document_live/index.ex`, `lib/doctrans_web/live/search_live.ex`,
   `lib/doctrans_web/live/document_live/show.html.heex`,
   `test/doctrans_web/theme_script_test.exs`, `priv/gettext` (one new message across 11 locales).

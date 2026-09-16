@@ -103,19 +103,75 @@ defmodule DoctransWeb.LayoutsTest do
   end
 
   describe "theme_toggle/1" do
-    test "renders theme toggle buttons" do
+    test "renders one dispatching button per theme" do
+      buttons = LazyHTML.query(render_theme_toggle(), "#theme-toggle button")
+
+      assert LazyHTML.attribute(buttons, "data-phx-theme") == ~w(system light dark)
+      assert LazyHTML.attribute(buttons, "id") == ~w(
+               theme-toggle-system
+               theme-toggle-light
+               theme-toggle-dark
+             )
+
+      for dispatch <- LazyHTML.attribute(buttons, "phx-click") do
+        assert dispatch =~ "phx:set-theme"
+      end
+    end
+
+    test "names the group and states which option is selected" do
+      document = render_theme_toggle()
+      group = LazyHTML.query(document, "#theme-toggle")
+
+      # Without these the three unlabelled icon buttons are announced as a bare
+      # run of toggles, and the selected one is distinguishable only by the
+      # CSS-positioned pill, which assistive technology cannot see.
+      assert LazyHTML.attribute(group, "role") == ["group"]
+      assert [label] = LazyHTML.attribute(group, "aria-label")
+      assert label != ""
+
+      buttons = LazyHTML.query(document, "#theme-toggle button")
+
+      assert LazyHTML.attribute(buttons, "aria-pressed") == ~w(true false false)
+
+      for label <- LazyHTML.attribute(buttons, "aria-label") do
+        assert label != ""
+      end
+    end
+
+    test "hands the pressed state to the client, which is the only side that knows it" do
+      # The rendered values above are a placeholder: the choice lives in
+      # `localStorage` and never reaches the server. `theme.js` overwrites them
+      # before the first paint and the hook restores them after a patch.
+      group = LazyHTML.query(render_theme_toggle(), "#theme-toggle")
+
+      assert LazyHTML.attribute(group, "phx-hook") == ["ThemeToggle"]
+    end
+
+    test "takes an id, so a page may carry more than one" do
       assigns = %{}
 
-      html =
+      document =
         rendered_to_string(~H"""
-        <Layouts.theme_toggle />
+        <Layouts.theme_toggle id="sidebar-theme" />
         """)
+        |> LazyHTML.from_fragment()
 
-      assert html =~ "phx:set-theme"
-      assert html =~ "data-phx-theme=\"system\""
-      assert html =~ "data-phx-theme=\"light\""
-      assert html =~ "data-phx-theme=\"dark\""
+      assert LazyHTML.query(document, "#sidebar-theme") |> Enum.count() == 1
+      assert LazyHTML.attribute(LazyHTML.query(document, "#sidebar-theme button"), "id") == ~w(
+               sidebar-theme-system
+               sidebar-theme-light
+               sidebar-theme-dark
+             )
     end
+  end
+
+  defp render_theme_toggle do
+    assigns = %{}
+
+    rendered_to_string(~H"""
+    <Layouts.theme_toggle />
+    """)
+    |> LazyHTML.from_fragment()
   end
 
   # Renders the flash group with both flash kinds present, so all four notices --

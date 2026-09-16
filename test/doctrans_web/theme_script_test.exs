@@ -14,6 +14,8 @@ defmodule DoctransWeb.ThemeScriptTest do
   # still contains each of the three behaviors it took over.
 
   @theme_source Path.expand("../../assets/js/theme.js", __DIR__)
+  @sync_source Path.expand("../../assets/js/theme_sync.js", __DIR__)
+  @app_source Path.expand("../../assets/js/app.js", __DIR__)
 
   describe "the rendered page" do
     setup %{conn: conn} do
@@ -135,6 +137,14 @@ defmodule DoctransWeb.ThemeScriptTest do
       # freezing at the preference in force when the choice was made.
       assert code =~ "removeItem(STORAGE_KEY)"
       assert code =~ ~s|removeAttribute("data-theme")|
+
+      # And it is never written as a value. Asserting only that `removeItem`
+      # appears somewhere leaves it possible to store the string as well, or
+      # instead, with the removal stranded in a branch nothing reaches -- at
+      # which point "system" freezes at whatever the preference was that day
+      # and every assertion above still passes.
+      refute code =~ ~r/setItem\([^)]*SYSTEM/
+      refute code =~ ~r/setItem\(\s*STORAGE_KEY\s*,\s*["']system["']/
     end
 
     test "applies only the themes that exist, and survives storage it cannot use" do
@@ -146,8 +156,10 @@ defmodule DoctransWeb.ThemeScriptTest do
       # across reloads: it matches no theme, it suppresses
       # `prefers-color-scheme` because the attribute is present, and it leaves
       # every button unpressed. Dispatching on `window` threw outright.
-      assert code =~ "THEMES"
-      assert code =~ "THEMES.includes(theme)"
+      # Matched loosely: what has to hold is that an allow-list exists and is
+      # consulted, not that it is spelled with `includes`.
+      assert code =~ ~r/THEMES\s*=\s*\[/
+      assert code =~ ~r/THEMES\.(?:includes|indexOf)\(/
       assert code =~ "event.target?.dataset?.phxTheme"
 
       # Storage throws rather than returning null when a browser is set to deny
@@ -157,16 +169,29 @@ defmodule DoctransWeb.ThemeScriptTest do
       assert code =~ ~r/catch\s*\{/
     end
 
-    test "imports nothing, so it stays a small render-blocking request" do
-      refute theme_code() =~ ~r/\b(?:import|require)\b/
+    test "imports only the toggle sync, so it stays a small render-blocking request" do
+      imports =
+        Regex.scan(~r/^\s*import\s+.*?from\s+"([^"]+)"/m, theme_code(), capture: :all_but_first)
+
+      # esbuild copies an import into every entry point that pulls it in, so a
+      # dependency here is paid for twice and lands in front of the first
+      # paint. `theme_sync` is a dozen lines; anything else wants a reason.
+      assert List.flatten(imports) == ["./theme_sync"]
+      refute theme_code() =~ ~r/\brequire\(/
     end
 
     test "comments only whole lines, which is what lets the assertions above read code" do
-      # `theme_code/0` strips whole-line comments. A trailing one could satisfy
-      # every assertion above with prose while the code behind it was deleted,
-      # which is exactly how the first cut of this file passed against a bundle
-      # with its listeners removed.
-      refute theme_code() =~ "//"
+      # `theme_code/0` strips whole-line `//` comments and nothing else, so two
+      # kinds of comment could still satisfy every assertion above with prose
+      # while the code behind them was deleted -- which is exactly how the first
+      # cut of this file passed against a bundle with its listeners removed.
+
+      # A block comment evades the stripper entirely.
+      refute File.read!(@theme_source) =~ "/*"
+
+      # A trailing comment survives it. `://` is allowed through so a URL in a
+      # string literal does not read as one.
+      refute theme_code() =~ ~r{(?<!:)//}
     end
   end
 
@@ -211,12 +236,47 @@ defmodule DoctransWeb.ThemeScriptTest do
       assert LazyHTML.attribute(buttons, "aria-pressed") == ~w(true false false)
     end
 
-    test "the hook that writes the pressed state is in the app bundle" do
-      # theme.js cannot do this: it runs in <head>, before the buttons exist.
-      app = File.read!(Path.expand("../../assets/js/app.js", __DIR__))
+    test "the pressed state is written without waiting for a socket" do
+      # The placeholder above is corrected by `theme.js`, which has no
+      # dependency on LiveView. Leaving it to the hook instead would leave the
+      # buttons announcing "system" for the whole join -- and for good on a
+      # connection where the socket never opens -- while the pill drew the
+      # real choice.
+      theme = theme_code()
+
+      assert theme =~ "syncThemeToggles"
+      assert theme =~ ~s|addEventListener("DOMContentLoaded", syncThemeToggles)|
+
+      # And the writer itself does the writing.
+      assert File.read!(@sync_source) =~ ~s|setAttribute("aria-pressed"|
+    end
+
+    test "the hook restores the pressed state after a patch re-renders the group" do
+      # This is all the hook is for: a server patch rebuilds the buttons from a
+      # template that does not know the theme, so it restores the placeholder.
+      app = File.read!(@app_source)
 
       assert app =~ "ThemeToggle: {"
-      assert app =~ ~s|setAttribute("aria-pressed"|
+      assert app =~ ~r/updated\(\)\s*\{\s*syncThemeToggles\(\)/
+
+      # Shared with `theme.js` rather than reimplemented, so the two cannot
+      # disagree about what "pressed" means.
+      assert app =~ ~s|from "./theme_sync"|
+    end
+
+    test "a stored value naming no theme is corrected rather than ignored" do
+      # The version U10 replaced could write `data-theme="undefined"` and leave
+      # it in storage. Rejecting it on read is not enough on its own: an
+      # early return would keep the bad entry forever, healing only if the
+      # reader happened to click. Coercing it to "system" clears the key.
+      code = theme_code()
+
+      assert code =~ ~r/THEMES\.(?:includes|indexOf)\([^)]*\)\s*\?/
+
+      for call <- ["readTheme()", "event.newValue", "event.target?.dataset?.phxTheme"] do
+        assert code =~ "asTheme(#{call})",
+               "#{call} reaches setTheme without being coerced to a real theme"
+      end
     end
   end
 

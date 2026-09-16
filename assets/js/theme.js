@@ -16,9 +16,12 @@
 // paint follows the operating system -- and any reader whose stored choice
 // disagrees with it, in either direction, would watch the page flip.
 //
-// So: a separate bundle, loaded render-blocking from `<head>`. It imports
-// nothing, which is what keeps a second `--bundle` entry point cheap; a shared
-// import would be copied into both outputs.
+// So: a separate bundle, loaded render-blocking from `<head>`. Its only import
+// is `theme_sync.js`, a handful of lines that esbuild copies into both outputs
+// rather than a shared chunk, which is what keeps a second `--bundle` entry
+// point cheap.
+
+import {syncThemeToggles} from "./theme_sync"
 
 // The key `phx:theme` and the `phx:set-theme` event name are Phoenix
 // conventions, shared with `Layouts.theme_toggle/1`, which dispatches the
@@ -34,6 +37,13 @@ const SYSTEM = "system"
 // The only values `data-theme` may take. `light` and `dark` are the two daisyUI
 // themes declared in `app.css`.
 const THEMES = [SYSTEM, "light", "dark"]
+
+// Every value that reaches `setTheme` comes from outside this file -- storage
+// written by an older build, another tab, a hand-dispatched event -- so each
+// one is coerced to a theme that exists before it is applied. Anything else
+// means "system", which is also the state that clears the stored key, so a
+// stale value heals itself on the next load instead of being ignored forever.
+const asTheme = (value) => (THEMES.includes(value) ? value : SYSTEM)
 
 // Storage is not always writable -- Safari with cookies blocked, a browser set
 // to deny site data -- and there it throws rather than returning null. An
@@ -61,13 +71,13 @@ const writeTheme = (theme) => {
   }
 }
 
+// Callers pass a value through `asTheme` first. The guard stays because this is
+// the one place that writes the attribute, and `data-theme="undefined"` -- what
+// an event from a node with no `data-phx-theme` used to produce -- is worse
+// than it sounds: it matches no theme, it suppresses `prefers-color-scheme`
+// because the attribute is present, and it leaves every button unpressed, so
+// the page offers no clue about why it is stuck.
 const setTheme = (theme) => {
-  // Anything else is ignored rather than written through. An event dispatched
-  // from a node with no `data-phx-theme` used to arrive here as `undefined`
-  // and be stored verbatim, and `data-theme="undefined"` is worse than it
-  // sounds: it matches no theme, it suppresses `prefers-color-scheme` because
-  // the attribute is present, and it leaves every button unpressed, so the
-  // page offers no clue about why it is stuck. It also survived reloads.
   if (!THEMES.includes(theme)) {
     return
   }
@@ -79,21 +89,33 @@ const setTheme = (theme) => {
   } else {
     document.documentElement.setAttribute("data-theme", theme)
   }
+
+  // A no-op during head parse, when the boot call below runs and no buttons
+  // have been parsed yet -- `DOMContentLoaded` covers that first state. Every
+  // later change comes through here.
+  syncThemeToggles()
 }
 
 // Reload persistence. The guard matters for a server-rendered `data-theme`,
 // which nothing sets today; leaving it in keeps this file from overwriting one
 // if that changes.
 if (!document.documentElement.hasAttribute("data-theme")) {
-  setTheme(readTheme() || SYSTEM)
+  setTheme(asTheme(readTheme()))
 }
+
+// The pressed state for the first paint. It is set here and not left to the
+// `ThemeToggle` hook because the hook runs only once the LiveView socket has
+// joined: until then -- and for good on a connection where it never does -- the
+// buttons would still be announcing the server's "system" placeholder while the
+// pill drew the real choice.
+document.addEventListener("DOMContentLoaded", syncThemeToggles)
 
 // Cross-tab updates. `storage` fires in every tab except the one that wrote,
 // and a removed key arrives with a null `newValue` -- which is "system", the
 // branch above that removes the key.
 window.addEventListener("storage", (event) => {
   if (event.key === STORAGE_KEY) {
-    setTheme(event.newValue || SYSTEM)
+    setTheme(asTheme(event.newValue))
   }
 })
 
@@ -101,4 +123,6 @@ window.addEventListener("storage", (event) => {
 // `data-phx-theme` names the choice. The optional chaining is for a dispatch
 // on something that is not an element -- `window.dataset` is undefined, and
 // reading through it throws.
-window.addEventListener("phx:set-theme", (event) => setTheme(event.target?.dataset?.phxTheme))
+window.addEventListener("phx:set-theme", (event) =>
+  setTheme(asTheme(event.target?.dataset?.phxTheme))
+)
