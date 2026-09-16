@@ -1677,13 +1677,86 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   own inline `<script>` and `<style>`, `Plug.Swoosh.MailboxPreview` accepts its own
   `:csp_nonce_assign_key`, and nothing sets it, so that inline script is still refused — confirmed in
   the browser. It is dev-only and the page's static content renders. Fixing it would widen a second
-  route's policy, which this item's own acceptance criterion forbids; it belongs in an item of its own.
+  route's policy, which this item's own acceptance criterion forbids; filed and fixed as U14.
   Defect sites: `lib/doctrans_web/router.ex:14` (the pipeline's CSP literal) and `router.ex:50` (the
   route that named no assign key), against the markup they refused,
   `deps/phoenix_live_dashboard/lib/phoenix/live_dashboard/layouts/dash.html.heex:4`.
   Evidence: `lib/doctrans_web/content_security_policy.ex`, `lib/doctrans_web/plugs/dashboard_csp.ex`,
   `lib/doctrans_web/router.ex`, `config/test.exs`,
   `test/doctrans_web/dashboard_csp_test.exs`, `test/doctrans_web/content_security_policy_test.exs`.
+
+- [x] **U14 · P3 · Give the mailbox preview the CSP nonce it renders.**
+  `/dev/mailbox` carried the defect U13 fixed for the dashboard and deliberately left behind.
+  Swoosh's preview template emits one inline `<script nonce="<%= csp_nonce(@conn, :script) %>">`
+  unconditionally, `Plug.Swoosh.MailboxPreview` reads that nonce from `conn.assigns` under keys that
+  default to `:script_csp_nonce` and `:style_csp_nonce`, and nothing assigned either — so the
+  attribute rendered empty and `script-src 'self'` refused the script, taking the
+  preview's timestamps, its text-body toggle and its link handling with it, silently. Dev-only: the
+  route is behind `dev_routes`.
+  Acceptance: the preview's inline script runs in dev with the CSP unchanged for `/`, `/search` and
+  `/dev/dashboard`.
+  One added source, not three. The dashboard needed a nonce in `script-src`, a nonce in `style-src`
+  and `data:` in `font-src`; the mailbox needs the first alone. Swoosh's template has no `<style>`
+  block and no inline `style` attribute, and its stylesheet embeds no font — so the other two
+  relaxations are unearned here and `mailbox/1` does not carry them. The one place the template does
+  put a style nonce is its stylesheet `<link>`, a URL-sourced same-origin file `style-src 'self'`
+  already admits; that attribute is left empty on purpose, and a test says so by name, because the
+  next reader to grep for `nonce=""` will find it and needs to know it is not this defect.
+  A sibling, not a rename. `DashboardCsp` and `MailboxCsp` are two small plugs over one shared
+  `ContentSecurityPolicy.nonce/0`, rather than one plug parameterised by policy. The additions differ,
+  and the assign shapes differ too — `live_dashboard` takes a bare atom where Swoosh pipes the option
+  through `Enum.into/2` and raises on one — so a single plug would have been parameterised on two axes
+  to save three lines of body, at the cost of renaming a module verified in a browser one commit
+  earlier. Two instances is not yet a pattern; a third dev tool is when to extract one.
+  The scope is `/dev/mailbox`, matching what U13 established for the dashboard: each widened policy is
+  scoped to its own tool's path, so a dev route added later inherits neither. The compiled route table
+  is unchanged — `forward "/"` inside `scope "/dev/mailbox"` joins to exactly the path the bare
+  `forward "/mailbox"` produced.
+  The `every other route` guard in `dashboard_csp_test.exs` tolerated empty nonces on `/dev/mailbox`
+  and asserted it received `base/0`; both were pinning the broken state and are gone. What is left
+  there is the application's own HEEx routes, where a nil nonce is dropped rather than emptied, so the
+  assertion tightened from "no non-empty nonce" to "no nonce attribute at all".
+  Verified in Chromium against a running dev server, which is the only place a CSP is enforced. On
+  `/dev/mailbox` the inline `<script>` carries a non-empty nonce equal to the one in that response's
+  own header, and it runs: its top-level `const datetimes` is a live global binding, which it cannot
+  be if the script was refused. Zero console entries on load — no violations, no errors. That this is
+  the nonce doing the work and not a missing policy was checked by appending an un-nonced inline
+  script from the console: refused, with a violation logged. The stylesheet loads despite its
+  `nonce=""`, as designed. `/` and `/search` still carry `script-src 'self'` with no nonce, and
+  `/dev/dashboard/home` still carries its own three-source policy.
+  Not fixed, and deliberately: the HTML body pane is still blank — filed as U15.
+  Defect sites: `lib/doctrans_web/router.ex:70` (the forward that named no assign key), against
+  `deps/swoosh/lib/plug/templates/mailbox_viewer/index.html.eex:156`.
+  Evidence: `lib/doctrans_web/content_security_policy.ex`, `lib/doctrans_web/plugs/mailbox_csp.ex`,
+  `lib/doctrans_web/plugs/dashboard_csp.ex`, `lib/doctrans_web/router.ex`,
+  `test/doctrans_web/mailbox_csp_test.exs`, `test/doctrans_web/dashboard_csp_test.exs`,
+  `test/doctrans_web/content_security_policy_test.exs`.
+
+- [ ] **U15 · P3 · Let the mailbox preview frame the email body it renders.**
+  Found while fixing U14, and independent of it. The preview shows an email's HTML body in
+  `<iframe id="html-mail" src=".../<id>/html">`, and that document is served through `:browser`, so it
+  carries the base policy's `frame-ancestors 'none'` — which forbids *every* page from framing it, the
+  same-origin preview included. The HTML body pane is therefore blank in dev regardless of U14's
+  nonce, and Phoenix sets no `x-frame-options` of its own to say so.
+  Acceptance: selecting an email with an HTML body shows it, with `/`, `/search` and `/dev/dashboard`
+  unchanged.
+  This is a third exception and wants its own judgement, which is why it is not folded into U14. The
+  narrow fix is `frame-ancestors 'self'` on the `/dev/mailbox/:id/html` response alone. That response
+  is arbitrary email HTML, so it is the one route in the application rendering content the application
+  did not write, and the framing relaxation must not spread from it to the preview's chrome.
+  U14 already serves every path under the forward — that document included — the `mailbox/1` policy,
+  so what U15 has to preserve rather than establish is that the nonce each of those responses carries
+  is minted for that response alone: the email document never sees the chrome's value, and carries no
+  element bearing its own. Widening `frame-ancestors` for the whole forward would be the sloppy fix;
+  branching on `conn.path_info` keeps `'none'` on the chrome, which nothing needs to frame.
+  Out of scope for that item too, and worth stating so it is not re-found as a regression: real emails
+  are mostly inline `style` attributes and remote `<img>`, which `style-src 'self'` and
+  `img-src 'self' data: blob:` refuse. Making previews render faithfully means `style-src-attr
+  'unsafe-inline'` and a wider `img-src` on a document of untrusted HTML — a fidelity-for-safety trade
+  that should be decided deliberately, not inherited from a framing fix.
+  Defect site: `deps/swoosh/lib/plug/templates/mailbox_viewer/index.html.eex:119`, against
+  `lib/doctrans_web/content_security_policy.ex` (`frame-ancestors 'none'`) and
+  `deps/swoosh/lib/plug/mailbox_preview.ex:87-93` (the framed response).
 
 ## Phase 5 — Verification and maintenance
 
