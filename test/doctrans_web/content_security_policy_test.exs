@@ -12,8 +12,6 @@ defmodule DoctransWeb.ContentSecurityPolicyTest do
 
   @base "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 
-  @mailbox "default-src 'self'; script-src 'self' 'nonce-n0nce'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-
   @dashboard "default-src 'self'; script-src 'self' 'nonce-n0nce'; style-src 'self' 'nonce-n0nce'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 
   describe "base/0" do
@@ -88,60 +86,12 @@ defmodule DoctransWeb.ContentSecurityPolicyTest do
     end
   end
 
-  describe "mailbox/1" do
-    test "is the base policy plus exactly the one source the mailbox needs" do
-      assert ContentSecurityPolicy.mailbox("n0nce") == @mailbox
-    end
-
-    test "does not inherit either relaxation the dashboard earned" do
-      # U14's whole claim. The two exceptions sit in one module over one
-      # directive list, so the cheap mistake is to widen both when only one tool
-      # needs it. Swoosh's preview emits no `<style>` block and its stylesheet
-      # embeds no font, so a nonce in `style-src` or a `data:` in `font-src`
-      # here would be a relaxation nothing asked for.
-      policy = ContentSecurityPolicy.mailbox("n0nce")
-
-      assert policy =~ "style-src 'self';"
-      assert policy =~ "font-src 'self';"
-      refute policy =~ "font-src 'self' data:"
-    end
-
-    test "widens exactly one directive, and takes nothing away" do
-      base = directives(ContentSecurityPolicy.base())
-      mailbox = directives(ContentSecurityPolicy.mailbox("n0nce"))
-
-      assert Enum.map(base, &elem(&1, 0)) == Enum.map(mailbox, &elem(&1, 0))
-
-      added =
-        for {{name, before}, {_name, now}} <- Enum.zip(base, mailbox),
-            source <- now -- before,
-            do: {name, source}
-
-      assert added == [{"script-src", "'nonce-n0nce'"}]
-
-      for {{_, before}, {_, now}} <- Enum.zip(base, mailbox) do
-        assert before -- now == []
-      end
-    end
-
-    test "still admits no inline or evaluated code" do
-      policy = ContentSecurityPolicy.mailbox("n0nce")
-
-      refute policy =~ "unsafe-inline"
-      refute policy =~ "unsafe-eval"
-    end
-
-    test "renders a nonce containing base64 punctuation verbatim" do
-      assert ContentSecurityPolicy.mailbox("a+b/c=") =~ "script-src 'self' 'nonce-a+b/c='"
-    end
-  end
-
   describe "nonce/0" do
     test "mints a fresh, unguessable value on every call" do
-      # Stated here rather than in either plug's test, because both plugs call
-      # this and a weak nonce is a property of the minting, not of the route. A
-      # nonce reused across requests is worth no more than `'unsafe-inline'`:
-      # whoever reads one response can write markup the next one admits.
+      # Stated here as well as in the plug's own test, because a weak nonce is
+      # a property of the minting rather than of the route. A nonce reused
+      # across requests is worth no more than `'unsafe-inline'`: whoever reads
+      # one response can write markup the next one admits.
       nonces = for _ <- 1..20, do: ContentSecurityPolicy.nonce()
 
       assert nonces |> Enum.uniq() |> length() == 20

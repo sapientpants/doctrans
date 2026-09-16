@@ -32,7 +32,7 @@ defmodule DoctransWeb.Router do
   #   pipe_through :api
   # end
 
-  # Enable LiveDashboard and Swoosh mailbox preview in development
+  # Enable LiveDashboard in development
   if Application.compile_env(:doctrans, :dev_routes) do
     # If you want to use the LiveDashboard in production, you should put
     # it behind authentication and allow only admins to access it.
@@ -44,18 +44,12 @@ defmodule DoctransWeb.Router do
     # Aliased inside the block rather than at the top of the module: outside a
     # dev build this code does not exist, and the alias would be unused.
     alias DoctransWeb.Plugs.DashboardCsp
-    alias DoctransWeb.Plugs.MailboxCsp
 
-    # Each widened policy is scoped to its own tool's path rather than to
-    # `/dev`, so a dev route added later cannot inherit either one just by being
-    # written in the same block -- and so the two cannot inherit each other's.
-    # The mailbox's exception is one source where the dashboard's is three.
+    # The widened policy is scoped to the dashboard's own path rather than to
+    # `/dev`, so a dev route added later cannot inherit it just by being written
+    # in the same block.
     pipeline :dashboard_csp do
       plug DashboardCsp
-    end
-
-    pipeline :mailbox_csp do
-      plug MailboxCsp
     end
 
     scope "/dev/dashboard" do
@@ -68,16 +62,6 @@ defmodule DoctransWeb.Router do
       live_dashboard "/",
         metrics: DoctransWeb.Telemetry,
         csp_nonce_assign_key: DashboardCsp.assign_key()
-    end
-
-    scope "/dev/mailbox" do
-      pipe_through [:browser, :mailbox_csp]
-
-      # The keys are read from the plug for the same reason the dashboard's are:
-      # named in one place and assigned in another, they drift silently. Here
-      # the drift renders `nonce=""` rather than dropping the attribute, since
-      # Swoosh's template is EEx -- still refused, just greppable.
-      forward "/", Plug.Swoosh.MailboxPreview, csp_nonce_assign_key: MailboxCsp.assign_keys()
     end
   end
 end

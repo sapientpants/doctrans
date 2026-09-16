@@ -93,7 +93,6 @@ defmodule Doctrans.MixProject do
        app: false,
        compile: false,
        depth: 1},
-      {:swoosh, "~> 1.16"},
       {:req, "~> 0.6"},
       {:fuse, "~> 2.5"},
       {:telemetry_metrics, "~> 1.0"},
