@@ -10,7 +10,7 @@ defmodule Doctrans.Documents do
   import Ecto.Query
 
   alias Doctrans.Config.Uploads
-  alias Doctrans.Documents.{Chunk, Document, Page, Pages, Summary}
+  alias Doctrans.Documents.{Document, Page, Pages, Summary, Topics}
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
   alias Doctrans.Validation
@@ -179,12 +179,14 @@ defmodule Doctrans.Documents do
     chunks_embedded?(document_id) or pages_embedded?(document_id)
   end
 
+  # Reached through the page association rather than `Chunk` directly, so the
+  # context does not name a schema it otherwise never touches.
   defp chunks_embedded?(document_id) do
-    Chunk
-    |> join(:inner, [c], p in assoc(c, :page))
-    |> where([c, p], p.document_id == ^document_id)
-    |> where([c], c.embedding_status == "completed")
-    |> where([c], not is_nil(c.embedding))
+    Page
+    |> where([p], p.document_id == ^document_id)
+    |> join(:inner, [p], c in assoc(p, :chunks))
+    |> where([_p, c], c.embedding_status == "completed")
+    |> where([_p, c], not is_nil(c.embedding))
     |> Repo.exists?()
   end
 
@@ -240,11 +242,16 @@ defmodule Doctrans.Documents do
   """
   @spec create_document(map()) :: {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def create_document(attrs \\ %{}) do
-    with {:ok, validated_attrs} <- Validation.validate_document_attrs(attrs) do
-      %Document{}
-      |> Document.changeset(validated_attrs)
-      |> Repo.insert()
-      |> Doctrans.Errors.result()
+    with {:ok, validated_attrs} <- Validation.validate_document_attrs(attrs),
+         {:ok, document} <-
+           %Document{}
+           |> Document.changeset(validated_attrs)
+           |> Repo.insert()
+           |> Doctrans.Errors.result() do
+      # Announce the new document on the collection topic every open dashboard
+      # subscribes to, so an upload made in one tab appears in the others.
+      :ok = Topics.broadcast_document_created(document)
+      {:ok, document}
     end
   end
 
@@ -290,13 +297,22 @@ defmodule Doctrans.Documents do
   # the File calls themselves live in delete_locked_document/1.
   @spec delete_document(Document.t()) :: {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def delete_document(%Document{} = document) do
-    Repo.transaction(fn ->
-      _ = Run.lock(document.id)
-      delete_locked_document(document)
-    end)
-    |> case do
-      {:ok, result} -> result
-      error -> Doctrans.Errors.result(error)
+    result =
+      Repo.transaction(fn ->
+        _ = Run.lock(document.id)
+        delete_locked_document(document)
+      end)
+      |> case do
+        {:ok, result} -> result
+        error -> Doctrans.Errors.result(error)
+      end
+
+    with {:ok, deleted} <- result do
+      # Broadcast only after the transaction has committed: announcing from
+      # inside it would advertise a deletion a rollback could still undo, and
+      # would reach subscribers before the row was actually gone.
+      :ok = Topics.broadcast_document_deleted(deleted)
+      {:ok, deleted}
     end
   end
 

@@ -218,7 +218,6 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
 
   defp abandon(%Documents.Document{} = document, filename, formatted) do
     Logger.error("Upload of #{filename} failed: #{formatted}")
-    _ = Documents.Topics.unsubscribe_document(document.id)
     _ = safely(fn -> delete_document(document) end, document.id)
     {:error, filename, :upload_start_failed}
   end
@@ -240,8 +239,6 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   defp create_document(attrs, original_filename) do
     case Documents.create_document(attrs) do
       {:ok, document} ->
-        Logger.debug("Dashboard now tracking new document:#{document.id}")
-        _ = Documents.Topics.subscribe_document(document.id)
         {:ok, document}
 
       {:error, reason} ->
@@ -258,7 +255,6 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
 
       {:error, reason} ->
         Logger.error("Failed to queue #{original_filename} for processing: #{inspect(reason)}")
-        _ = Documents.Topics.unsubscribe_document(document.id)
         _ = delete_document(document)
         {:error, original_filename, reason}
     end

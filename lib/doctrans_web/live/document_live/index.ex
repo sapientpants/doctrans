@@ -3,6 +3,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   use DoctransWeb, :live_view
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
   alias Doctrans.Processing.Worker
   alias Doctrans.Validation
   alias DoctransWeb.DocumentLive.DocumentStream
@@ -44,9 +45,12 @@ defmodule DoctransWeb.DocumentLive.Index do
         max_file_size: UploadIntake.max_file_size()
       )
 
-    if connected?(socket) do
-      DocumentStream.subscribe(socket.assigns.document_topics)
-    end
+    _ =
+      if connected?(socket) do
+        _ = Topics.subscribe_documents()
+      else
+        :ok
+      end
 
     {:ok, DocumentStream.refresh(socket)}
   end
@@ -55,10 +59,10 @@ defmodule DoctransWeb.DocumentLive.Index do
   def handle_params(_params, _uri, socket), do: {:noreply, socket}
 
   @impl true
-  def terminate(_reason, socket) do
-    # Unsubscribe from the pubsub topics we registered for, so the client
+  def terminate(_reason, _socket) do
+    # Unsubscribe from the collection topic we registered for, so the client
     # process doesn't accumulate subscriptions across visits.
-    DocumentStream.unsubscribe(socket.assigns.document_topics)
+    Topics.unsubscribe_documents()
     :ok
   end
 
@@ -192,22 +196,24 @@ defmodule DoctransWeb.DocumentLive.Index do
           </div>
         </div>
 
+        <%!-- Sits outside the `phx-update="stream"` container on purpose: the client
+             refuses to discard an id-bearing child of a stream container, and a stream
+             reset only removes children carrying `data-phx-stream`. Moved back inside,
+             "No documents yet" would stay on screen underneath the first card that
+             arrives -- from this tab or another one. --%>
+        <div :if={@documents_count == 0} id="documents-empty" class="text-center py-16">
+          <.icon name="hero-document-text" class="w-16 h-16 mx-auto text-base-content/30" />
+          <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No documents yet")}</h3>
+          <p class="mt-2 text-base-content/70">
+            {PrivacyCopy.empty_state()}
+          </p>
+        </div>
+
         <div
           id="documents"
           phx-update="stream"
           class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6"
         >
-          <div
-            :if={@documents_count == 0}
-            id="documents-empty"
-            class="text-center py-16 col-span-full"
-          >
-            <.icon name="hero-document-text" class="w-16 h-16 mx-auto text-base-content/30" />
-            <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No documents yet")}</h3>
-            <p class="mt-2 text-base-content/70">
-              {PrivacyCopy.empty_state()}
-            </p>
-          </div>
           <div :for={{id, document} <- @streams.documents} id={id}>
             <.document_card summary={document} />
           </div>
@@ -438,6 +444,23 @@ defmodule DoctransWeb.DocumentLive.Index do
   def handle_info({:document_updated, document}, socket) do
     Logger.debug("Dashboard received document_updated for #{document.id}")
     {:noreply, DocumentStream.refresh_documents(socket, [document.id])}
+  end
+
+  # Another tab's upload. Refreshing this one id folds the new card into the stream
+  # in its sorted position; the tab that did the uploading has already refreshed and
+  # gets the same card back unchanged.
+  @impl true
+  def handle_info({:document_created, document}, socket) do
+    Logger.debug("Dashboard received document_created for #{document.id}")
+    {:noreply, DocumentStream.refresh_documents(socket, [document.id])}
+  end
+
+  # Likewise for a deletion: the deleting tab has already removed the card, and
+  # removing an id that is no longer tracked is a no-op.
+  @impl true
+  def handle_info({:document_deleted, document_id}, socket) do
+    Logger.debug("Dashboard received document_deleted for #{document_id}")
+    {:noreply, DocumentStream.remove(socket, document_id)}
   end
 
   @impl true

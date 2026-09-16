@@ -3,10 +3,11 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
   Socket state for the dashboard's ordered document stream.
 
   Owns the list half of `DoctransWeb.DocumentLive.Index`: querying documents with
-  their progress, keeping the `:documents` stream in the order PostgreSQL returned,
-  and holding the per-document PubSub subscriptions that feed it. The stream's order
-  is tracked separately from the stream itself, in `:document_order`, because a
-  LiveView stream is not enumerable and cannot be asked where an item currently sits.
+  their progress and keeping the `:documents` stream in the order PostgreSQL
+  returned. The stream's order is tracked separately from the stream itself, in
+  `:document_order`, because a LiveView stream is not enumerable and cannot be asked
+  where an item currently sits. The PubSub subscription that feeds it belongs to
+  `Index`, which holds a single one on the collection topic.
 
   Kept out of the LiveView module so that `Index` handles events and messages and does
   not also reach into the `Documents` context, in the same idiom as
@@ -16,24 +17,21 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
   import Phoenix.Component, only: [assign: 3]
 
   import Phoenix.LiveView,
-    only: [connected?: 1, stream: 3, stream: 4, stream_delete: 3, stream_insert: 4]
+    only: [stream: 3, stream: 4, stream_delete: 3, stream_insert: 4]
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
 
   @doc """
   Assigns the empty stream state. The list itself arrives from `refresh/1`.
   """
   def init(socket) do
     socket
-    |> assign(:document_topics, [])
     |> assign(:documents_count, 0)
     |> stream(:documents, [])
   end
 
   @doc """
-  Re-queries the document list, resets the stream, and reconciles the socket's
-  per-document subscriptions with the documents now on screen.
+  Re-queries the document list and resets the stream.
   """
   def refresh(socket) do
     documents =
@@ -42,15 +40,7 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
         sort_dir: socket.assigns.sort_dir
       )
 
-    topics = Enum.map(documents, & &1.id)
-
-    if connected?(socket) do
-      unsubscribe(socket.assigns.document_topics -- topics)
-      subscribe(topics -- socket.assigns.document_topics)
-    end
-
     socket
-    |> assign(:document_topics, topics)
     |> assign(:document_order, Enum.map(documents, &order_entry(&1, socket)))
     |> assign(:documents_count, length(documents))
     |> stream(:documents, documents, reset: true)
@@ -72,32 +62,16 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
   Drops one document from the stream, its order, and every list keyed by id.
   """
   def remove(socket, id) do
-    if connected?(socket), do: Topics.unsubscribe_document(id)
     order = Enum.reject(socket.assigns.document_order, &(elem(&1, 0) == id))
 
     socket
     |> assign(:document_order, order)
     |> assign(:documents_count, length(order))
-    |> assign(:document_topics, Enum.reject(socket.assigns.document_topics, &(&1 == id)))
     |> assign(
       :pending_document_ids,
       Enum.reject(socket.assigns.pending_document_ids, &(&1 == id))
     )
     |> stream_delete(:documents, %{id: id})
-  end
-
-  @doc """
-  Subscribes to each document's progress topic.
-  """
-  def subscribe(topics) do
-    Enum.each(topics, &Topics.subscribe_document/1)
-  end
-
-  @doc """
-  Unsubscribes from each document's progress topic.
-  """
-  def unsubscribe(topics) do
-    Enum.each(topics, &Topics.unsubscribe_document/1)
   end
 
   # Keys detect changes; PostgreSQL determines ordering, including title collation.
@@ -123,15 +97,9 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
   end
 
   defp track_documents(socket, order) do
-    topics = Enum.map(order, &elem(&1, 0))
-
-    if connected?(socket),
-      do: subscribe(topics -- socket.assigns.document_topics)
-
     socket
     |> assign(:document_order, order)
     |> assign(:documents_count, length(order))
-    |> assign(:document_topics, topics)
   end
 
   defp insert_in_order(socket, order, summaries_by_id) do

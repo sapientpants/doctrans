@@ -24,6 +24,43 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       assert_redirect(view, ~p"/")
     end
 
+    # U11 broadcasts deletions to the per-document topic this viewer subscribes to,
+    # so a document deleted from the dashboard while it is open must fall back to
+    # the not-found branch instead of rendering against a row that is gone.
+    test "a deletion while the viewer is open renders the not-found branch", %{conn: conn} do
+      document = document_with_pages_fixture(%{title: "Open Elsewhere"}, 1)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      refute has_element?(view, "#document-not-found")
+
+      {:ok, _} = Documents.delete_document(document)
+
+      assert has_element?(view, "#document-not-found h1", "Document not found")
+      assert has_element?(view, "#document-not-found-home[href='/']")
+      refute has_element?(view, "#page-selector")
+
+      # Still answering events rather than having crashed on the missing row.
+      render_click(view, "next_page")
+      assert has_element?(view, "#document-not-found")
+    end
+
+    # `Worker.cancel_document/1` does not stop an Oban job that is already
+    # executing, so a job working on the deleted document can still broadcast on
+    # `document:<id>` after `{:document_deleted, _}` has emptied the assign.
+    test "a document update arriving after the deletion leaves the viewer standing", %{conn: conn} do
+      document = document_with_pages_fixture(%{title: "Open Elsewhere"}, 1)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      # The nil state is reached the way it is in production: through the real
+      # deletion broadcast, not by assigning it here.
+      {:ok, deleted} = Documents.delete_document(document)
+      assert has_element?(view, "#document-not-found")
+
+      Topics.broadcast_document_update(deleted)
+
+      assert has_element?(view, "#document-not-found h1", "Document not found")
+      assert Process.alive?(view.pid)
+    end
+
     test "renders malformed and deleted document IDs safely", %{conn: conn} do
       document = document_fixture()
       {:ok, _} = Documents.delete_document(document)

@@ -45,22 +45,31 @@ defmodule DoctransWeb.DocumentLive.Show do
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     case Documents.get_document(id) do
-      nil -> {:ok, assign(socket, :document, nil)}
-      document -> mount_document(socket, document)
+      nil ->
+        # `terminate/2` reads this assign, so the not-found path has to set it too.
+        {:ok, socket |> assign(:document, nil) |> assign(:subscribed_document_id, nil)}
+
+      document ->
+        mount_document(socket, document)
     end
   end
 
   defp mount_document(socket, document) do
-    _ =
+    # Remembered separately from `:document`, which a deletion elsewhere clears
+    # out from under us: `terminate/2` has to unsubscribe from the topic this
+    # process actually subscribed to, whatever became of the row behind it.
+    subscribed_document_id =
       if connected?(socket) do
         _ = Topics.subscribe_document(document.id)
+        document.id
       else
-        :ok
+        nil
       end
 
     socket =
       socket
       |> assign(:document, document)
+      |> assign(:subscribed_document_id, subscribed_document_id)
       |> assign(:source_available, Run.source_available?(document))
       |> assign(:progress_refresh_pending, false)
       |> refresh_progress()
@@ -143,14 +152,21 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def terminate(_reason, socket) do
-    if connected?(socket) && socket.assigns.document do
-      Topics.unsubscribe_document(socket.assigns.document.id)
+    if connected?(socket) && socket.assigns.subscribed_document_id do
+      Topics.unsubscribe_document(socket.assigns.subscribed_document_id)
     end
 
     :ok
   end
 
+  # A document topic outlives its document: a job cancelled alongside a deletion
+  # is not stopped synchronously, so it can still broadcast an update after
+  # `{:document_deleted, _}` has emptied the assign. Nothing left to refresh.
   @impl true
+  def handle_info({:document_updated, _document}, %{assigns: %{document: nil}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_info({:document_updated, _document}, socket) do
     document = Documents.get_document(socket.assigns.document.id)
 
@@ -173,6 +189,14 @@ defmodule DoctransWeb.DocumentLive.Show do
     else
       {:noreply, assign(socket, :document, nil)}
     end
+  end
+
+  # A deletion from elsewhere reaches this viewer on its own document topic. The
+  # document is gone, so the assign says so and the template's not-found branch
+  # renders, exactly as when the clause above re-reads a document that has vanished.
+  @impl true
+  def handle_info({:document_deleted, _id}, socket) do
+    {:noreply, assign(socket, :document, nil)}
   end
 
   @impl true
