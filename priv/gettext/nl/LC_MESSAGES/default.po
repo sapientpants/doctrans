@@ -57,12 +57,12 @@ msgstr "Annuleren"
 msgid "Completed"
 msgstr "Voltooid"
 
-#: lib/doctrans_web/live/document_live/index.ex:72
+#: lib/doctrans_web/live/document_live/index.ex:75
 #, elixir-autogen, elixir-format
 msgid "Doctrans"
 msgstr "Doctrans"
 
-#: lib/doctrans_web/live/document_live/index.ex:301
+#: lib/doctrans_web/live/document_live/index.ex:304
 #, elixir-autogen, elixir-format
 msgid "Document deleted successfully"
 msgstr "Document succesvol verwijderd"
@@ -117,12 +117,12 @@ msgstr "Duits"
 msgid "Italian"
 msgstr "Italiaans"
 
-#: lib/doctrans_web/live/document_live/index.ex:161
+#: lib/doctrans_web/live/document_live/index.ex:164
 #, elixir-autogen, elixir-format
 msgid "Name (A-Z)"
 msgstr "Naam (A-Z)"
 
-#: lib/doctrans_web/live/document_live/index.ex:172
+#: lib/doctrans_web/live/document_live/index.ex:175
 #, elixir-autogen, elixir-format
 msgid "Name (Z-A)"
 msgstr "Naam (Z-A)"
@@ -132,7 +132,7 @@ msgstr "Naam (Z-A)"
 msgid "Newest"
 msgstr "Nieuwste"
 
-#: lib/doctrans_web/live/document_live/index.ex:139
+#: lib/doctrans_web/live/document_live/index.ex:142
 #, elixir-autogen, elixir-format
 msgid "Newest First"
 msgstr "Nieuwste eerst"
@@ -143,12 +143,12 @@ msgstr "Nieuwste eerst"
 msgid "Next"
 msgstr "Volgende"
 
-#: lib/doctrans_web/live/document_live/index.ex:203
+#: lib/doctrans_web/live/document_live/index.ex:206
 #, elixir-autogen, elixir-format
 msgid "No documents yet"
 msgstr "Nog geen documenten"
 
-#: lib/doctrans_web/live/document_live/index.ex:378
+#: lib/doctrans_web/live/document_live/index.ex:381
 #, elixir-autogen, elixir-format
 msgid "No files were uploaded"
 msgstr "Geen bestanden geüpload"
@@ -168,7 +168,7 @@ msgstr "Geen resultaten gevonden"
 msgid "Oldest"
 msgstr "Oudste"
 
-#: lib/doctrans_web/live/document_live/index.ex:150
+#: lib/doctrans_web/live/document_live/index.ex:153
 #, elixir-autogen, elixir-format
 msgid "Oldest First"
 msgstr "Oudste eerst"
@@ -232,14 +232,14 @@ msgstr "In wachtrij"
 msgid "Search"
 msgstr "Zoeken"
 
-#: lib/doctrans_web/live/document_live/index.ex:87
+#: lib/doctrans_web/live/document_live/index.ex:90
 #: lib/doctrans_web/live/search_live.ex:223
 #: lib/doctrans_web/live/search_live.ex:339
 #, elixir-autogen, elixir-format
 msgid "Search documents"
 msgstr "Documenten zoeken"
 
-#: lib/doctrans_web/live/document_live/index.ex:96
+#: lib/doctrans_web/live/document_live/index.ex:99
 #: lib/doctrans_web/live/search_live.ex:232
 #, elixir-autogen, elixir-format
 msgid "Search..."
@@ -300,7 +300,7 @@ msgstr "Probeer een andere zoekterm."
 msgid "Unknown"
 msgstr "Onbekend"
 
-#: lib/doctrans_web/live/document_live/index.ex:185
+#: lib/doctrans_web/live/document_live/index.ex:188
 #, elixir-autogen, elixir-format
 msgid "Upload"
 msgstr "Uploaden"
@@ -718,22 +718,22 @@ msgstr "%{file} verwijderen"
 msgid "Reprocess page"
 msgstr "Pagina opnieuw verwerken"
 
-#: lib/doctrans_web/live/document_live/index.ex:120
+#: lib/doctrans_web/live/document_live/index.ex:123
 #, elixir-autogen, elixir-format
 msgid "Sort documents"
 msgstr "Documenten sorteren"
 
-#: lib/doctrans_web/components/layouts.ex:160
+#: lib/doctrans_web/components/layouts.ex:178
 #, elixir-autogen, elixir-format
 msgid "Use dark theme"
 msgstr "Donker thema gebruiken"
 
-#: lib/doctrans_web/components/layouts.ex:149
+#: lib/doctrans_web/components/layouts.ex:166
 #, elixir-autogen, elixir-format
 msgid "Use light theme"
 msgstr "Licht thema gebruiken"
 
-#: lib/doctrans_web/components/layouts.ex:138
+#: lib/doctrans_web/components/layouts.ex:154
 #, elixir-autogen, elixir-format
 msgid "Use system theme"
 msgstr "Systeemthema gebruiken"
@@ -839,7 +839,7 @@ msgstr "Nieuwe berichten"
 msgid "Chat transcript"
 msgstr "Chattranscript"
 
-#: lib/doctrans_web/components/layouts.ex:131
+#: lib/doctrans_web/components/layouts.ex:146
 #, elixir-autogen, elixir-format
 msgid "Theme"
 msgstr "Thema"
