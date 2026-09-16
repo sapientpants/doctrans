@@ -1,0 +1,445 @@
+defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
+  @moduledoc """
+  The viewer below `lg` shows one panel at a time behind a tab switcher, and the
+  chat becomes a dismissable overlay instead of a third in-flow column.
+
+  Scope note: only the *server-rendered* half of that contract is testable here.
+  Which panel a browser actually paints is decided by Tailwind breakpoints, so
+  these tests assert the class tokens the markup ships (`hidden`/`flex`,
+  `lg:flex`, `lg:w-1/2`) rather than a computed layout. Likewise, the chat's
+  "keep following the answer only while the reader is already near the bottom"
+  behaviour lives entirely in the `ChatScroll` hook in `assets/js/app.js` and is
+  **not** exercised by this suite -- the tests below only pin that the hook is
+  wired up and that its affordance exists in the markup for it to toggle.
+  """
+
+  use DoctransWeb.ConnCase, async: true
+
+  import Doctrans.Fixtures
+
+  alias Doctrans.Documents
+
+  describe "panel switcher below lg" do
+    setup do
+      %{document: viewer_document()}
+    end
+
+    test "opens on the translated panel", %{conn: conn, document: document} do
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      assert has_element?(view, ~s{#view-tab-translated[aria-pressed="true"]})
+      assert has_element?(view, ~s{#view-tab-original[aria-pressed="false"]})
+
+      assert_selected(view, "#translated-panel")
+      assert_unselected(view, "#original-panel")
+    end
+
+    test "selecting a tab swaps which panel is shown, in both directions", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      view |> element("#view-tab-original") |> render_click()
+
+      assert has_element?(view, ~s{#view-tab-original[aria-pressed="true"]})
+      assert has_element?(view, ~s{#view-tab-translated[aria-pressed="false"]})
+      assert_selected(view, "#original-panel")
+      assert_unselected(view, "#translated-panel")
+
+      view |> element("#view-tab-translated") |> render_click()
+
+      assert has_element?(view, ~s{#view-tab-translated[aria-pressed="true"]})
+      assert has_element?(view, ~s{#view-tab-original[aria-pressed="false"]})
+      assert_selected(view, "#translated-panel")
+      assert_unselected(view, "#original-panel")
+    end
+
+    test "both panels keep lg:flex whichever tab is selected", %{
+      conn: conn,
+      document: document
+    } do
+      # The tab only decides what a narrow viewport shows. From `lg:` up both
+      # panels are visible side by side, which only holds while each panel keeps
+      # `lg:flex` to override its own `hidden`. Rendering just the selected panel
+      # -- the obvious "simplification" -- would pass every aria-pressed
+      # assertion above and silently delete the desktop split.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      for panel <- ~w(#original-panel #translated-panel) do
+        assert has_element?(view, ~s{#{panel}[class~="lg:flex"]})
+      end
+
+      view |> element("#view-tab-original") |> render_click()
+
+      for panel <- ~w(#original-panel #translated-panel) do
+        assert has_element?(view, ~s{#{panel}[class~="lg:flex"]})
+      end
+    end
+
+    test "the unselected panel stays in the DOM with its content", %{
+      conn: conn,
+      document: document
+    } do
+      # Hiding is a class, not a removal: the content of both panels stays on the
+      # page so switching tabs is free and nothing downstream (chat context, the
+      # page image, the zoom controls) depends on which tab is active.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      view |> element("#view-tab-original") |> render_click()
+
+      assert has_element?(view, "#original-panel")
+      assert has_element?(view, "#translated-panel")
+      assert has_element?(view, "#translated-panel .markdown")
+      assert has_element?(view, "#original-panel button[phx-click='zoom_in']")
+
+      view |> element("#view-tab-translated") |> render_click()
+
+      assert has_element?(view, "#original-panel")
+      assert has_element?(view, "#translated-panel")
+      assert has_element?(view, "#translated-panel .markdown")
+      assert has_element?(view, "#original-panel button[phx-click='zoom_in']")
+    end
+
+    test "a forged tab value is ignored instead of crashing the view", %{
+      conn: conn,
+      document: document
+    } do
+      # The tab name arrives from the client, so every value that is not one of
+      # the two known panels has to be dropped: the previous selection stands and
+      # the LiveView stays up.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      for params <- [%{"tab" => "nonsense"}, %{"tab" => ""}, %{}] do
+        render_click(view, "select_view_tab", params)
+
+        assert has_element?(view, ~s{#view-tab-translated[aria-pressed="true"]})
+        assert_selected(view, "#translated-panel")
+        assert_unselected(view, "#original-panel")
+      end
+
+      view |> element("#view-tab-original") |> render_click()
+
+      for params <- [%{"tab" => "nonsense"}, %{}] do
+        render_click(view, "select_view_tab", params)
+
+        assert has_element?(view, ~s{#view-tab-original[aria-pressed="true"]})
+        assert_selected(view, "#original-panel")
+        assert_unselected(view, "#translated-panel")
+      end
+    end
+
+    test "the switcher is a named group that hides itself at lg", %{
+      conn: conn,
+      document: document
+    } do
+      # At `lg:` the choice it offers no longer exists, so the group goes away
+      # rather than describing a switch that does nothing.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      assert has_element?(view, ~s{#viewer-tabs[role="group"]})
+      assert attribute(view, "#viewer-tabs", "aria-label") == "Document panels"
+      assert has_element?(view, ~s{#viewer-tabs[class~="lg:hidden"]})
+
+      # Each tab names the panel it governs, and that panel is on the page.
+      for tab <- ~w(#view-tab-original #view-tab-translated) do
+        assert has_element?(view, "##{attribute(view, tab, "aria-controls")}")
+      end
+    end
+
+    test "the translated tab is labelled like the panel it opens", %{
+      conn: conn,
+      document: document
+    } do
+      # With "Show Original" on, that panel shows the untranslated text, and a tab
+      # still reading "Translated Content" would name the wrong thing. Asserted as
+      # an equality between the two labels rather than against literal English,
+      # so rewording the msgid is not a test failure while desynchronising the
+      # two copies of it still is.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      assert labels_agree(view)
+      translated = text_of(view, "#view-tab-translated")
+
+      view |> element("#translated-panel input[phx-click='toggle_original']") |> render_click()
+
+      assert labels_agree(view)
+      original = text_of(view, "#view-tab-translated")
+      assert original != translated
+
+      view |> element("#translated-panel input[phx-click='toggle_original']") |> render_click()
+
+      assert labels_agree(view)
+      assert text_of(view, "#view-tab-translated") == translated
+    end
+
+    test "opening the chat narrows both panels and closing restores them", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      for panel <- ~w(#original-panel #translated-panel) do
+        assert has_element?(view, ~s{#{panel}[class~="lg:w-1/2"]})
+      end
+
+      view |> element("#toggle-chat") |> render_click()
+
+      for panel <- ~w(#original-panel #translated-panel) do
+        assert has_element?(view, ~s{#{panel}[class~="lg:w-2/5"]})
+        refute has_element?(view, ~s{#{panel}[class~="lg:w-1/2"]})
+      end
+
+      view |> element("#toggle-chat") |> render_click()
+
+      for panel <- ~w(#original-panel #translated-panel) do
+        assert has_element?(view, ~s{#{panel}[class~="lg:w-1/2"]})
+        refute has_element?(view, ~s{#{panel}[class~="lg:w-2/5"]})
+      end
+    end
+
+    test "the selected tab survives turning the page", %{conn: conn} do
+      # `:view_tab` and the page number are both PageViewer state, but only the
+      # page number is URL-driven. Moving the tab assign into `apply_params/2` --
+      # a plausible tidy-up, since that is where the other navigation state is
+      # handled -- would reset a reader to the translated panel on every page
+      # turn, below `lg`, and pass every other assertion in this file.
+      document = viewer_document(2)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      view |> element("#view-tab-original") |> render_click()
+      view |> element("#next-page") |> render_click()
+
+      assert has_element?(view, ~s{#view-tab-original[aria-pressed="true"]})
+      assert_selected(view, "#original-panel")
+
+      view |> element("#previous-page") |> render_click()
+
+      assert has_element?(view, ~s{#view-tab-original[aria-pressed="true"]})
+      assert_selected(view, "#original-panel")
+    end
+
+    test "the pager stays reachable once the page scrolls", %{conn: conn, document: document} do
+      # Below `lg` the viewer grows and the page scrolls, which puts the pager off
+      # the bottom unless it sticks. Its `z-10` is the floor the chat overlay's
+      # `z-30`/`z-40` is chosen against, so both halves are pinned here.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      assert has_element?(view, ~s{#page-navigation[class~="sticky"]})
+      assert has_element?(view, ~s{#page-navigation[class~="z-10"]})
+      assert has_element?(view, ~s{#page-navigation[class~="lg:static"]})
+    end
+
+    test "the page has exactly one main landmark", %{conn: conn, document: document} do
+      # The layout already renders the page's `<main>`; a second one nested inside
+      # it gives a screen reader two "main content" landmarks to choose between.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      assert main_count(view) == 1
+
+      view |> element("#toggle-chat") |> render_click()
+
+      assert main_count(view) == 1
+    end
+  end
+
+  describe "chat overlay below lg" do
+    setup do
+      %{document: completed_document_with_embedding_fixture()}
+    end
+
+    test "the open chat is a named aside that overlays narrow viewports and docks at lg", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      assert has_element?(view, "aside#chat-panel")
+      assert String.trim(attribute(view, "#chat-panel", "aria-label")) != ""
+
+      # Overlay half: pinned over the page on a narrow viewport.
+      assert has_element?(view, ~s{#chat-panel[class~="fixed"]})
+
+      # Sidebar half: back in flow as a fixed-width column from `lg:` up. Losing
+      # either half is a broken layout at one size while the other still looks fine.
+      assert has_element?(view, ~s{#chat-panel[class~="lg:static"]})
+      assert has_element?(view, ~s{#chat-panel[class~="lg:w-80"]})
+    end
+
+    test "the backdrop is present only while the chat is open and dismisses it", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      refute has_element?(view, "#chat-panel")
+      refute has_element?(view, "#chat-backdrop")
+
+      view |> element("#toggle-chat") |> render_click()
+
+      assert has_element?(view, "#chat-backdrop")
+      # The backdrop exists only for the overlay, so it disappears where the chat
+      # sits in flow and nothing is covered.
+      assert has_element?(view, ~s{#chat-backdrop[class~="lg:hidden"]})
+      assert has_element?(view, ~s{#chat-backdrop[aria-hidden="true"]})
+
+      view |> element("#chat-backdrop") |> render_click()
+
+      refute has_element?(view, "#chat-panel")
+      refute has_element?(view, "#chat-backdrop")
+      assert has_element?(view, ~s{#toggle-chat[aria-expanded="false"]})
+    end
+
+    test "the chat panel is not a modal dialog", %{conn: conn, document: document} do
+      # Deliberate, not an oversight: the `ChatInput` hook declines to take focus
+      # while a `role="dialog" aria-modal="true"` element is open, so promoting the
+      # overlay to a modal dialog would quietly stop the chat input from being
+      # refocused after every answer. It is a labelled `<aside>` landmark instead.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      assert has_element?(view, "aside#chat-panel")
+      refute has_element?(view, ~s{#chat-panel[role="dialog"]})
+      refute has_element?(view, "#chat-panel[aria-modal]")
+    end
+
+    test "the scroll container is wired to the ChatScroll hook and ships its jump affordance",
+         %{conn: conn, document: document} do
+      # Attribute-level only. Whether the view follows a streaming answer, and when
+      # it reveals the button below, is decided by the `ChatScroll` hook in the
+      # browser; this test cannot and does not verify that behaviour -- it pins the
+      # contract the hook depends on: the hook name, a wrapper LiveView will not
+      # patch (`phx-update="ignore"`, since visibility is pure client state), the
+      # `hidden` starting state, and the button the hook reveals.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      assert has_element?(view, ~s{#chat-scroll[phx-hook="ChatScroll"]})
+      assert has_element?(view, ~s{#chat-new-messages[phx-update="ignore"]})
+      assert has_element?(view, ~s{#chat-new-messages[class~="hidden"]})
+      assert has_element?(view, "#chat-new-messages button#chat-jump-to-latest")
+    end
+
+    test "every element the ChatScroll hook resolves is named and present", %{
+      conn: conn,
+      document: document
+    } do
+      # The hook looks these up by id and reports a miss to the console, which no
+      # CI run reads. Each data attribute is followed to the element it names, so
+      # renaming one without the other fails here instead of silently leaving a
+      # button that never binds.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      for attribute <- ~w(data-new-messages data-jump-to-latest data-live-region) do
+        assert has_element?(view, "##{attribute(view, "#chat-scroll", attribute)}")
+      end
+
+      # This one is a selector rather than an id, since it is matched against a
+      # submit event's target.
+      assert attribute(view, "#chat-scroll", "data-follow-on-submit") == "#chat-form"
+    end
+
+    test "the transcript is announced and reachable without a mouse", %{
+      conn: conn,
+      document: document
+    } do
+      # A scroll container only a pointer can reach makes "hold your reading
+      # position" unusable in Safari, and an affordance with no live region is
+      # invisible to a screen reader -- which is precisely the reader who cannot
+      # see that an answer landed off-screen.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      assert has_element?(view, ~s{#chat-scroll[tabindex="0"]})
+      assert has_element?(view, ~s{#chat-scroll[role="log"]})
+      assert attribute(view, "#chat-scroll", "aria-label") == "Chat transcript"
+
+      # Rendered at all times and never `hidden`: toggling `display` on a live
+      # region is not reliably announced, so the hook changes its text instead.
+      assert has_element?(view, ~s{#chat-new-messages-announcement[aria-live="polite"]})
+      assert has_element?(view, ~s{#chat-new-messages-announcement[phx-update="ignore"]})
+      refute has_element?(view, ~s{#chat-new-messages-announcement[class~="hidden"]})
+      assert attribute(view, "#chat-new-messages-announcement", "data-announce") != ""
+    end
+
+    test "the overlay carries the dialog affordances it deliberately is not getting for free", %{
+      conn: conn,
+      document: document
+    } do
+      # Consequence of the `aria-modal` decision above: Escape-to-close and focus
+      # returning to the trigger have to be wired by hand, and the overlay has to
+      # leave a strip of backdrop uncovered or tap-to-dismiss is unreachable on a
+      # phone narrower than the panel.
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      assert has_element?(view, ~s{#chat-panel[phx-hook="ChatDismiss"]})
+      assert attribute(view, "#chat-panel", "data-return-focus") == "#toggle-chat"
+      assert attribute(view, "#chat-panel", "data-overlay-media") == "(max-width: 1023px)"
+
+      refute has_element?(view, ~s{#chat-panel[class~="w-full"]})
+      assert has_element?(view, ~s{#chat-panel[class~="lg:w-80"]})
+    end
+  end
+
+  defp viewer_document(page_count \\ 1) do
+    document = document_fixture(%{status: "completed", total_pages: page_count})
+
+    for page_number <- 1..page_count do
+      completed_page_fixture(document, %{page_number: page_number})
+    end
+
+    Documents.get_document_with_pages!(document.id)
+  end
+
+  # A panel the narrow viewport shows: laid out (`flex`), not hidden.
+  defp assert_selected(view, panel) do
+    assert has_element?(view, ~s{#{panel}[class~="flex"]})
+    refute has_element?(view, ~s{#{panel}[class~="hidden"]})
+  end
+
+  # A panel the narrow viewport hides. It is still rendered -- only `hidden`.
+  defp assert_unselected(view, panel) do
+    assert has_element?(view, panel)
+    assert has_element?(view, ~s{#{panel}[class~="hidden"]})
+    refute has_element?(view, ~s{#{panel}[class~="flex"]})
+  end
+
+  # The tab and the panel header render the same label from one helper; this is
+  # what would catch them drifting apart.
+  defp labels_agree(view) do
+    text_of(view, "#view-tab-translated") == text_of(view, "#translated-panel > div > span")
+  end
+
+  defp main_count(view) do
+    view
+    |> render()
+    |> LazyHTML.from_document()
+    |> LazyHTML.query("main")
+    |> Enum.count()
+  end
+
+  defp text_of(view, selector) do
+    view
+    |> render()
+    |> LazyHTML.from_document()
+    |> LazyHTML.query(selector)
+    |> LazyHTML.text()
+    |> String.trim()
+  end
+
+  # Reads one attribute off a single matched element, so an assertion can follow
+  # an `aria-*` reference to the element it names instead of assuming its id.
+  defp attribute(view, selector, name) do
+    assert [value] =
+             view
+             |> render()
+             |> LazyHTML.from_document()
+             |> LazyHTML.query(selector)
+             |> LazyHTML.attribute(name)
+
+    value
+  end
+end

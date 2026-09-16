@@ -44,7 +44,7 @@
   #   fixture reloads the document with its pages on the next line. Fixable with a
   #   `_ =` binding; left alone here so this register — not a test-support edit — is
   #   what changes in G14.
-  {"test/support/fixtures.ex", :unmatched_return, {40, 11}},
+  {"test/support/fixtures.ex", :unmatched_return, {42, 11}},
 
   # owner: @sapientpants
   # expires: 2026-12-12

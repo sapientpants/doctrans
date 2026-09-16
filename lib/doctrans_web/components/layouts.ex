@@ -35,7 +35,11 @@ defmodule DoctransWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <main class="min-h-screen">
+    <%!-- `dvh`, not `vh`: the document viewer inside this slot is `min-h-dvh`, and
+         on a mobile browser where the toolbar makes the two differ, a `vh` main
+         around a `dvh` child leaves roughly a toolbar's height of dead scroll
+         below the page's own content. --%>
+    <main class="min-h-dvh">
       {render_slot(@inner_block)}
     </main>
 

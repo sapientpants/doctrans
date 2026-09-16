@@ -6,6 +6,19 @@
 @source "../js";
 @source "../../lib/doctrans_web";
 
+/* The viewer clips itself to the viewport only where there is actually room.
+   `lg:` alone was the wrong gate for that: the trap it guards against is a
+   *short* viewport rather than a narrow one, and short-but-wide is still `lg`
+   -- a 2560x800 display at 200% zoom computes to roughly 1280x400, keeps
+   `h-dvh overflow-hidden`, and puts the panel contents out of reach with no
+   page scroll to recover them. Width decides the side-by-side split; this
+   decides whether the page scrolls. */
+@custom-variant fitscreen {
+  @media (min-width: 64rem) and (min-height: 40rem) {
+    @slot;
+  }
+}
+
 /* A Tailwind plugin that makes "hero-#{ICON}" classes available.
    The heroicons installation itself is managed by your mix.exs */
 @plugin "../vendor/heroicons";
@@ -439,7 +452,22 @@
 .zoom-50 { transform: scale(0.5); transform-origin: top center; }
 .zoom-75 { transform: scale(0.75); transform-origin: top center; }
 .zoom-100 { transform: scale(1); transform-origin: top center; }
-.zoom-125 { transform: scale(1.25); transform-origin: top center; }
-.zoom-150 { transform: scale(1.5); transform-origin: top center; }
-.zoom-175 { transform: scale(1.75); transform-origin: top center; }
-.zoom-200 { transform: scale(2); transform-origin: top center; }
+.zoom-125 { transform: scale(1.25); transform-origin: top left; }
+.zoom-150 { transform: scale(1.5); transform-origin: top left; }
+.zoom-175 { transform: scale(1.75); transform-origin: top left; }
+.zoom-200 { transform: scale(2); transform-origin: top left; }
+
+/* Decorative motion only. The loading spinner is deliberately left alone: it is
+   the only signal that an answer is coming, and freezing it removes feedback
+   rather than reducing motion. */
+@media (prefers-reduced-motion: reduce) {
+  #chat-jump-to-latest,
+  #original-panel,
+  #translated-panel {
+    transition: none;
+  }
+
+  #chat-jump-to-latest:hover {
+    transform: none;
+  }
+}
