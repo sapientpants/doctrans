@@ -1388,11 +1388,74 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `test/doctrans_web/live/document_live/responsive_viewer_test.exs`,
   `priv/gettext` (two new messages across 11 locales).
 
-- [ ] **U10 · P3 · Move theme initialization into the supported JavaScript bundle.**
+- [x] **U10 · P3 · Move theme initialization into the supported JavaScript bundle.**
   The inline root script conflicts with the router's script-src self policy and project conventions.
   Acceptance: theme selection, reload persistence, and cross-tab updates work without inline scripts
   or weakening the Content Security Policy.
   Evidence: `lib/doctrans_web/components/layouts/root.html.heex:22`, `lib/doctrans_web/router.ex:14`.
+  Implemented as a new esbuild entry point, `assets/js/theme.js`, loaded render-blocking from `<head>`.
+  The conflict is stronger than "conventions": `script-src 'self'` carries no `'unsafe-inline'`, no
+  nonce, and no hash, so a conforming browser refused the block outright. Nothing applied the stored
+  choice on load and nothing answered `phx:set-theme`, which means this item was not a cleanup of
+  working code — theme selection had never worked in a browser enforcing the app's own header.
+  Why a second entry point rather than `app.js`, which the title and `AGENTS.md` both point at: this is
+  the one script in the application that must run before the first paint, and `app.js` is `defer`red,
+  so it executes after the document parses. Until `data-theme` is set the daisyUI themes resolve
+  through `prefers-color-scheme`, so folding the code into the deferred bundle would trade a script the
+  browser blocks for one that paints whatever the operating system prefers and then flips, for any
+  reader whose stored choice disagrees with it in either direction. The new file is a first-party entry in
+  the same `:doctrans` esbuild profile, not a vendored or external `src`, so the constraint `AGENTS.md`
+  is actually protecting — one build pipeline, nothing loaded from off-origin — still holds. It imports
+  nothing and builds to 754 bytes, which is what keeps a second `--bundle` entry honest: a shared
+  import would be copied into both outputs, and `app.js` is 311kb. It sits ahead of the stylesheet
+  `<link>`, because a blocking script placed after one waits for that stylesheet to finish loading
+  before it runs, which would put the attribute back on the far side of the paint it exists to precede.
+  The CSP is unchanged. A nonce or a `'sha256-...'` would also have satisfied the letter of the
+  acceptance criterion and was not used: both re-admit inline script to the policy, and a hash has to be
+  recomputed by hand every time the script is edited, so the gate it provides is one a future edit
+  silently breaks.
+  Hardened past the original in two places, both found by dispatching `phx:set-theme` by hand during
+  review. The value was applied and stored without being checked against the three themes that exist,
+  so an event from a node carrying no `data-phx-theme` arrived as `undefined` and was written through
+  verbatim — and `data-theme="undefined"` is worse than it sounds: it matches no theme, it suppresses
+  `prefers-color-scheme` *because the attribute is present*, it leaves every button unpressed, and it
+  survived reloads, so the page sat in the wrong theme with nothing on screen explaining why. The same
+  dispatch aimed at `window` threw outright, since `window.dataset` is undefined. Unknown values are now
+  ignored, which also self-heals a catalog of storage already holding one, and the read is
+  optional-chained. Separately, `localStorage` throws rather than returning null in a browser set to
+  deny site data; unhandled, that would have aborted the file before its listeners were registered,
+  which is the dead toggle this item exists to fix. Reads and writes are wrapped, so such a browser
+  loses persistence but keeps the control.
+  Behavior is otherwise carried over unchanged, including the contract that "system" is the *absence* of
+  a stored value — the key is removed and the attribute comes off, so the daisyUI themes resolve through
+  `prefers-color-scheme` rather than freezing at whatever the system preference was on the day it was
+  picked.
+  Known limitation, the same one U09 recorded: there is no JavaScript test harness in this repo, so the
+  behavior itself — `localStorage`, the `storage` event, paint timing — rests on browser verification,
+  which was done under U12 rather than left as an assertion. Paint timing specifically: with a theme
+  stored, `data-theme` is already on `<html>` at the first `readystatechange` (`interactive:dark`), so
+  the head script runs during parse, before the deferred bundle and before anything is drawn.
+  What the suite pins is the wiring that has to hold for any of it to be reachable: no `<script>` with a
+  `src` missing or a body present on either HTML route, the theme bundle loaded without `defer`/`async`
+  and ahead of both the stylesheet and the still-deferred app bundle, `script-src 'self'` still sent
+  with neither `unsafe-inline` nor a nonce, `js/theme.js` present in the esbuild args, and each of the
+  three behaviors present in the bundle's code.
+  The first cut of those tests was much weaker than it read, and review caught it: they grepped the
+  whole source of `theme.js`, whose own header comment names `phx:set-theme` and `phx:theme`, so
+  deleting the entire selection listener or the entire reload-persistence block left all seven passing,
+  as did replacing the file with a four-line comment. They now grep with whole-line comments stripped,
+  and a further test fails if a trailing comment is ever introduced, since that is the hole reopening.
+  Review also found the two load-order claims this change argues hardest for — theme before stylesheet,
+  app still deferred — asserted nowhere. Both are now pinned, and all four mutations that used to pass
+  fail.
+  Not closed: nothing verifies the bundle was ever *built*. Deleting `priv/static/assets/js/theme.js`
+  leaves the suite green, because `priv/static/assets` is gitignored and no CI job builds assets, so a
+  syntax error in this file cannot fail the gate. That was tolerable for a deferred bundle and is less
+  so for a render-blocking one, where a 404 stalls the parser. Filed as Q08.
+  Found while fixing: `Layouts.theme_toggle/1` was rendered by no page, so even with the listener
+  restored a reader had no control to reach it. Filed and fixed as U12.
+  Evidence added: `assets/js/theme.js`, `config/config.exs` (esbuild entry points),
+  `test/doctrans_web/theme_script_test.exs`.
 
 - [ ] **U11 · P3 · Refresh the dashboard across tabs.**
   The dashboard subscribes to known document IDs, so another tab's newly uploaded document is missed.
@@ -1400,6 +1463,73 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: upload, deletion, and status changes appear in another open dashboard without a reload;
   subscriptions remain bounded and document streams remain consistent.
   Evidence: `lib/doctrans_web/live/document_live/index.ex:471`, `lib/doctrans/documents/topics.ex`.
+
+- [x] **U12 · P3 · Render the theme toggle somewhere a reader can reach it.**
+  `Layouts.theme_toggle/1` was defined and unit-tested but called from no template, so the light/dark
+  choice was unreachable in the running application. Found while fixing U10, which restored the listener
+  the toggle dispatches to; the two halves of the feature were broken independently, and either one
+  alone left the feature dead.
+  Mounted in each of the three pages' own header action rows rather than in `Layouts.app/1`. The layout
+  is a bare `<main>` with no chrome, so putting it there meant either inventing a floating control —
+  which would have to be threaded through the z-index band U09 established for the chat overlay — or
+  introducing an application header that every page would then render its own header underneath. Three
+  call sites of one component is the smaller change, and it puts the control where each page already
+  keeps its actions. `SearchLive` had no action area and gets one: `ms-auto` on a trailing wrapper
+  rather than `justify-between` on the row, because the back link and the title are a unit and have to
+  stay adjacent.
+  The selected theme is now stated, not only drawn. It had been indicated by a CSS-positioned pill
+  alone, which assistive technology cannot see and which shows nothing distinguishable for "system".
+  The three buttons are `aria-pressed` in a named `role="group"`, following the panel switcher U09 added
+  rather than the ARIA radiogroup pattern, which would promise arrow-key navigation and a roving
+  `tabindex` that nothing here implements.
+  The pressed state cannot be server-rendered: the choice lives in `localStorage` and the server is
+  never told it. `theme.js` writes it, from `DOMContentLoaded` and from every `setTheme` — so it lands
+  before the first paint and on every click and cross-tab `storage` event, none of which involve a
+  socket. Gating it on the `ThemeToggle` hook instead, as the first cut did, left the buttons
+  announcing the server's "system" placeholder for the whole LiveView join, and permanently wherever
+  the socket never opens, while the pill drew the real choice. The hook is now only the patch path:
+  `mounted` and `updated` re-run the same sync, because a patch re-renders the group from a template
+  that does not know the theme. Both sides call `syncThemeToggles` from `assets/js/theme_sync.js`, a
+  dozen lines esbuild copies into each bundle, so the two cannot drift.
+  No `phx-update="ignore"` on the group, despite the hook writing into server-rendered DOM: ignoring
+  the subtree would also freeze the gettext'd `aria-label`s, so the toggle would keep whichever locale
+  it first rendered in.
+  One new message, `Theme`, naming the group. `gettext.extract --merge` returned it non-fuzzy in all 11
+  locales and all 11 translations are written out.
+  Verified in Chromium against a running server, which is the only place any of this executes:
+  the toggle renders on all three routes; clicking dark sets `data-theme` and `phx:theme` and moves
+  `aria-pressed` to the dark button; the choice survives a reload and a navigation to another route; a
+  second tab follows the first within one `storage` event; returning to "system" removes both the
+  attribute and the key. No console errors and no CSP violations on any route.
+  The cost the viewer pays on the Show route was measured rather than assumed, because U09 had
+  just tuned that header: the toggle adds a wrapped row of 48px at 390px and at 768px, 2px at 430px,
+  and **zero** at every width from 1024px up — which is exactly the `fitscreen` range
+  (`min-width: 64rem and min-height: 40rem`) where the layout is fixed-height and header pixels come
+  straight out of the reading area. Below it the page scrolls, so the extra row is scrollable chrome
+  rather than a permanent deduction. That is why the toggle goes in the header rather than being
+  hidden below `lg`: the only widths where it would have cost anything lasting are the ones where it
+  costs nothing.
+  That measurement covered the Show header, which already wrapped. The dashboard's did not — its row
+  and its action group were both fixed `flex` — so the toggle went in beside a `w-48` search field, a
+  sort control and Upload with nothing able to reflow, and the excess became horizontal overflow
+  rather than a wrapped row. Both now carry `flex-wrap` with the same `gap-x-4 gap-y-3` the Show
+  header uses.
+  Evidence: `lib/doctrans_web/components/layouts.ex`, `assets/js/theme_sync.js`,
+  `assets/js/app.js` (`ThemeToggle`),
+  `lib/doctrans_web/live/document_live/index.ex`, `lib/doctrans_web/live/search_live.ex`,
+  `lib/doctrans_web/live/document_live/show.html.heex`,
+  `test/doctrans_web/theme_script_test.exs`, `priv/gettext` (one new message across 11 locales).
+
+- [ ] **U13 · P3 · Give LiveDashboard the CSP nonce it renders.**
+  `live_dashboard "/dashboard"` is mounted through the `:browser` pipeline, so it receives the same
+  `script-src 'self'`, but its layout emits an inline `<script nonce={csp_nonce(@conn, :script)}>` and
+  the route sets no `:csp_nonce_assign_key`. The nonce renders empty and the browser refuses the
+  script — the identical defect U10 just fixed, in a dependency's template rather than ours. Dev-only:
+  the route is behind `dev_routes`. `live_dashboard` accepts `csp_nonce_assign_key`, so this is a
+  router option plus a plug that assigns the nonces, not a policy change.
+  Acceptance: the dashboard works in dev with the CSP unchanged for every other route.
+  Evidence: `lib/doctrans_web/router.ex:50`, `lib/doctrans_web/router.ex:14`,
+  `deps/phoenix_live_dashboard/lib/phoenix/live_dashboard/layouts/dash.html.heex:4`.
 
 ## Phase 5 — Verification and maintenance
 
@@ -1553,6 +1683,23 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Evidence: `lib/doctrans/processing/openai.ex:126,183-188`, `config/openai.ex:23`,
   `lib/doctrans_web/live/document_live/viewer_components.ex:101-103`,
   `lib/doctrans_web/live/document_live/chat_components.ex:170-172`.
+
+- [ ] **Q08 · P2 · Build the asset bundles somewhere a broken one fails.**
+  No CI job and no pre-commit hook runs `mix assets.build`, and `priv/static/assets/` is gitignored, so
+  the JavaScript and CSS this application serves are never compiled by the gate. A syntax error in
+  `assets/js/app.js` or `assets/js/theme.js` passes every check and is discovered by whoever next runs
+  `mix phx.server`. `Dockerfile.dev` does not build them either; the dev watchers produce them at
+  container run time.
+  U10 raised the cost of this: `theme.js` is loaded render-blocking, so a bundle that fails to build is
+  a 404 that stalls the parser rather than a deferred script that quietly does nothing. It is also the
+  reason `theme_script_test.exs` pins the esbuild *arguments* rather than the emitted file — the file
+  is never there in CI to assert on.
+  Weigh the cost before adopting: `mix assets.setup` downloads the esbuild and Tailwind binaries, which
+  adds a network dependency to a workflow that currently pins every action by SHA and has none.
+  Caching the two binaries by version is the obvious mitigation.
+  Acceptance: a deliberate syntax error in either entry point fails CI; the asset toolchain is fetched
+  reproducibly and cached; `priv/static/assets/` stays untracked.
+  Evidence: `.github/workflows/ci.yml:114`, `.pre-commit-config.yaml`, `mix.exs:135`, `.gitignore:29`.
 
 - [ ] **Q07 · P3 · Close the test-file warning blind spot, then reconsider mutation testing.**
   `mix compile` never loads `test/**/*.exs`, so Q01's corrected flag does not reach it. One warning lives

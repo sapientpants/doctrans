@@ -67,14 +67,17 @@ defmodule DoctransWeb.DocumentLive.Index do
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="w-full px-8 py-8">
-        <div class="flex justify-between items-center mb-6">
+        <%!-- Wraps like the Show header: this row carries the search field,
+             the sort control, Upload and the theme toggle, which together
+             overflow a fixed row well before the narrowest supported width. --%>
+        <div class="flex flex-wrap justify-between items-center gap-x-4 gap-y-3 mb-6">
           <div>
             <h1 class="text-3xl font-bold text-base-content">{gettext("Doctrans")}</h1>
             <p id="privacy-tagline" class="text-base-content/70 mt-1">
               {PrivacyCopy.tagline()}
             </p>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-3">
             <%!-- Inline search form --%>
             <form
               action="/search"
@@ -184,6 +187,8 @@ defmodule DoctransWeb.DocumentLive.Index do
             >
               <.icon name="hero-plus" class="w-4 h-4 mr-1" /> {gettext("Upload")}
             </button>
+
+            <Layouts.theme_toggle />
           </div>
         </div>
 
