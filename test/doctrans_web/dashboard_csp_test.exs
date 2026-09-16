@@ -202,11 +202,17 @@ defmodule DoctransWeb.DashboardCspTest do
 
     test "does not carry either dev tool's assign", %{conn: conn} do
       # The header is the enforcement, but the assign is what a template could
-      # pick up. Neither dev tool's nonce should exist outside its own scope.
-      conn = get(conn, ~p"/")
+      # pick up. Neither dev tool's nonce should exist outside its own scope,
+      # on any route the application serves itself.
+      for path <- [~p"/", ~p"/search"] do
+        conn = get(conn, path)
 
-      refute Map.has_key?(conn.assigns, DashboardCsp.assign_key())
-      refute Map.has_key?(conn.assigns, MailboxCsp.assign_keys().script)
+        refute Map.has_key?(conn.assigns, DashboardCsp.assign_key()),
+               "#{path} carries the dashboard's nonce assign"
+
+        refute Map.has_key?(conn.assigns, MailboxCsp.assign_keys().script),
+               "#{path} carries the mailbox's nonce assign"
+      end
     end
   end
 

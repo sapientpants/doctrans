@@ -25,10 +25,9 @@ defmodule DoctransWeb.Plugs.MailboxCsp do
 
   Only `:script` is named. Swoosh merges what it is given into its own defaults,
   so the absent `:style` keeps pointing at `:style_csp_nonce`, which nothing
-  assigns, and the preview's stylesheet `<link>` keeps an
-  empty nonce -- inert, because `style-src 'self'` admits that same-origin file
-  already. It is not this defect in miniature, and the policy is not widened to
-  cover it.
+  assigns, and the preview's stylesheet `<link>` keeps an empty nonce -- inert,
+  because `style-src 'self'` admits that same-origin file already. It is not
+  this defect in miniature, and the policy is not widened to cover it.
 
   The forward serves everything under `/dev/mailbox`, so the widened header
   reaches the framed email bodies at `/dev/mailbox/:id/html` too. A nonce
