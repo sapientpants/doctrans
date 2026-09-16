@@ -1400,9 +1400,10 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   working code — theme selection had never worked in a browser enforcing the app's own header.
   Why a second entry point rather than `app.js`, which the title and `AGENTS.md` both point at: this is
   the one script in the application that must run before the first paint, and `app.js` is `defer`red,
-  so it executes after the document parses. `light` is the daisyUI `default: true` theme, so folding
-  the code into the deferred bundle would trade a script the browser blocks for one that paints light
-  and then flips to dark in front of a reader who chose dark. The new file is a first-party entry in
+  so it executes after the document parses. Until `data-theme` is set the daisyUI themes resolve
+  through `prefers-color-scheme`, so folding the code into the deferred bundle would trade a script the
+  browser blocks for one that paints whatever the operating system prefers and then flips, for any
+  reader whose stored choice disagrees with it in either direction. The new file is a first-party entry in
   the same `:doctrans` esbuild profile, not a vendored or external `src`, so the constraint `AGENTS.md`
   is actually protecting — one build pipeline, nothing loaded from off-origin — still holds. It imports
   nothing and builds to 754 bytes, which is what keeps a second `--bundle` entry honest: a shared
@@ -1419,11 +1420,23 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   picked.
   Known limitation, the same one U09 recorded: there is no JavaScript test harness in this repo, so the
   behavior itself — `localStorage`, the `storage` event, paint timing — rests on browser verification.
-  What the suite pins is the wiring that has to hold for any of it to be reachable: no `<script>` on the
-  rendered page without a `src` and with a body, the theme bundle loaded without `defer`/`async` and
-  ahead of the app bundle, `script-src 'self'` still sent with neither `unsafe-inline` nor a nonce, and
-  `js/theme.js` present in the esbuild args so the URL the layout asks for is a file the build produces.
-  Three of the seven fail against the previous layout.
+  What the suite pins is the wiring that has to hold for any of it to be reachable: no `<script>` with a
+  `src` missing or a body present on either HTML route, the theme bundle loaded without `defer`/`async`
+  and ahead of both the stylesheet and the still-deferred app bundle, `script-src 'self'` still sent
+  with neither `unsafe-inline` nor a nonce, `js/theme.js` present in the esbuild args, and each of the
+  three behaviors present in the bundle's code.
+  The first cut of those tests was much weaker than it read, and review caught it: they grepped the
+  whole source of `theme.js`, whose own header comment names `phx:set-theme` and `phx:theme`, so
+  deleting the entire selection listener or the entire reload-persistence block left all seven passing,
+  as did replacing the file with a four-line comment. They now grep with whole-line comments stripped,
+  and a further test fails if a trailing comment is ever introduced, since that is the hole reopening.
+  Review also found the two load-order claims this change argues hardest for — theme before stylesheet,
+  app still deferred — asserted nowhere. Both are now pinned, and all four mutations that used to pass
+  fail.
+  Not closed: nothing verifies the bundle was ever *built*. Deleting `priv/static/assets/js/theme.js`
+  leaves the suite green, because `priv/static/assets` is gitignored and no CI job builds assets, so a
+  syntax error in this file cannot fail the gate. That was tolerable for a deferred bundle and is less
+  so for a render-blocking one, where a 404 stalls the parser. Filed as Q08.
   Found while fixing, not fixed here: `Layouts.theme_toggle/1` is not rendered by any page, so even with
   the listener restored a reader has no control to reach it. Filed as U12.
   Evidence added: `assets/js/theme.js`, `config/config.exs` (esbuild entry points),
@@ -1435,6 +1448,17 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: upload, deletion, and status changes appear in another open dashboard without a reload;
   subscriptions remain bounded and document streams remain consistent.
   Evidence: `lib/doctrans_web/live/document_live/index.ex:471`, `lib/doctrans/documents/topics.ex`.
+
+- [ ] **U13 · P3 · Give LiveDashboard the CSP nonce it renders.**
+  `live_dashboard "/dashboard"` is mounted through the `:browser` pipeline, so it receives the same
+  `script-src 'self'`, but its layout emits an inline `<script nonce={csp_nonce(@conn, :script)}>` and
+  the route sets no `:csp_nonce_assign_key`. The nonce renders empty and the browser refuses the
+  script — the identical defect U10 just fixed, in a dependency's template rather than ours. Dev-only:
+  the route is behind `dev_routes`. `live_dashboard` accepts `csp_nonce_assign_key`, so this is a
+  router option plus a plug that assigns the nonces, not a policy change.
+  Acceptance: the dashboard works in dev with the CSP unchanged for every other route.
+  Evidence: `lib/doctrans_web/router.ex:50`, `lib/doctrans_web/router.ex:14`,
+  `deps/phoenix_live_dashboard/lib/phoenix/live_dashboard/layouts/dash.html.heex:4`.
 
 - [ ] **U12 · P3 · Render the theme toggle somewhere a reader can reach it.**
   `Layouts.theme_toggle/1` is defined and unit-tested but called from no template, so the light/dark
@@ -1603,6 +1627,23 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Evidence: `lib/doctrans/processing/openai.ex:126,183-188`, `config/openai.ex:23`,
   `lib/doctrans_web/live/document_live/viewer_components.ex:101-103`,
   `lib/doctrans_web/live/document_live/chat_components.ex:170-172`.
+
+- [ ] **Q08 · P2 · Build the asset bundles somewhere a broken one fails.**
+  No CI job and no pre-commit hook runs `mix assets.build`, and `priv/static/assets/` is gitignored, so
+  the JavaScript and CSS this application serves are never compiled by the gate. A syntax error in
+  `assets/js/app.js` or `assets/js/theme.js` passes every check and is discovered by whoever next runs
+  `mix phx.server`. `Dockerfile.dev` does not build them either; the dev watchers produce them at
+  container run time.
+  U10 raised the cost of this: `theme.js` is loaded render-blocking, so a bundle that fails to build is
+  a 404 that stalls the parser rather than a deferred script that quietly does nothing. It is also the
+  reason `theme_script_test.exs` pins the esbuild *arguments* rather than the emitted file — the file
+  is never there in CI to assert on.
+  Weigh the cost before adopting: `mix assets.setup` downloads the esbuild and Tailwind binaries, which
+  adds a network dependency to a workflow that currently pins every action by SHA and has none.
+  Caching the two binaries by version is the obvious mitigation.
+  Acceptance: a deliberate syntax error in either entry point fails CI; the asset toolchain is fetched
+  reproducibly and cached; `priv/static/assets/` stays untracked.
+  Evidence: `.github/workflows/ci.yml:114`, `.pre-commit-config.yaml`, `mix.exs:135`, `.gitignore:29`.
 
 - [ ] **Q07 · P3 · Close the test-file warning blind spot, then reconsider mutation testing.**
   `mix compile` never loads `test/**/*.exs`, so Q01's corrected flag does not reach it. One warning lives

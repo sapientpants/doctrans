@@ -11,9 +11,10 @@
 //
 // And this is the one piece of the application's JavaScript that has to run
 // before the first paint. `app.js` is `defer`red, so it executes only after
-// the document is parsed, by which point the browser has painted `light` --
-// the daisyUI `default: true` theme (`assets/css/app.css`) -- and a reader who
-// chose dark would watch the page flip.
+// the document is parsed. Until `data-theme` is set, the daisyUI themes
+// resolve through `prefers-color-scheme` (`assets/css/app.css`), so the first
+// paint follows the operating system -- and any reader whose stored choice
+// disagrees with it, in either direction, would watch the page flip.
 //
 // So: a separate bundle, loaded render-blocking from `<head>`. It imports
 // nothing, which is what keeps a second `--bundle` entry point cheap; a shared
