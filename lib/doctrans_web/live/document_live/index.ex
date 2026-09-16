@@ -184,6 +184,8 @@ defmodule DoctransWeb.DocumentLive.Index do
             >
               <.icon name="hero-plus" class="w-4 h-4 mr-1" /> {gettext("Upload")}
             </button>
+
+            <Layouts.theme_toggle />
           </div>
         </div>
 

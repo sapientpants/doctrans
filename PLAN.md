@@ -1419,7 +1419,10 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `prefers-color-scheme` rather than freezing at whatever the system preference was on the day it was
   picked.
   Known limitation, the same one U09 recorded: there is no JavaScript test harness in this repo, so the
-  behavior itself — `localStorage`, the `storage` event, paint timing — rests on browser verification.
+  behavior itself — `localStorage`, the `storage` event, paint timing — rests on browser verification,
+  which was done under U12 rather than left as an assertion. Paint timing specifically: with a theme
+  stored, `data-theme` is already on `<html>` at the first `readystatechange` (`interactive:dark`), so
+  the head script runs during parse, before the deferred bundle and before anything is drawn.
   What the suite pins is the wiring that has to hold for any of it to be reachable: no `<script>` with a
   `src` missing or a body present on either HTML route, the theme bundle loaded without `defer`/`async`
   and ahead of both the stylesheet and the still-deferred app bundle, `script-src 'self'` still sent
@@ -1437,8 +1440,8 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   leaves the suite green, because `priv/static/assets` is gitignored and no CI job builds assets, so a
   syntax error in this file cannot fail the gate. That was tolerable for a deferred bundle and is less
   so for a render-blocking one, where a 404 stalls the parser. Filed as Q08.
-  Found while fixing, not fixed here: `Layouts.theme_toggle/1` is not rendered by any page, so even with
-  the listener restored a reader has no control to reach it. Filed as U12.
+  Found while fixing: `Layouts.theme_toggle/1` was rendered by no page, so even with the listener
+  restored a reader had no control to reach it. Filed and fixed as U12.
   Evidence added: `assets/js/theme.js`, `config/config.exs` (esbuild entry points),
   `test/doctrans_web/theme_script_test.exs`.
 
@@ -1448,6 +1451,50 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: upload, deletion, and status changes appear in another open dashboard without a reload;
   subscriptions remain bounded and document streams remain consistent.
   Evidence: `lib/doctrans_web/live/document_live/index.ex:471`, `lib/doctrans/documents/topics.ex`.
+
+- [x] **U12 · P3 · Render the theme toggle somewhere a reader can reach it.**
+  `Layouts.theme_toggle/1` was defined and unit-tested but called from no template, so the light/dark
+  choice was unreachable in the running application. Found while fixing U10, which restored the listener
+  the toggle dispatches to; the two halves of the feature were broken independently, and either one
+  alone left the feature dead.
+  Mounted in each of the three pages' own header action rows rather than in `Layouts.app/1`. The layout
+  is a bare `<main>` with no chrome, so putting it there meant either inventing a floating control —
+  which would have to be threaded through the z-index band U09 established for the chat overlay — or
+  introducing an application header that every page would then render its own header underneath. Three
+  call sites of one component is the smaller change, and it puts the control where each page already
+  keeps its actions. `SearchLive` had no action area and gets one: `ms-auto` on a trailing wrapper
+  rather than `justify-between` on the row, because the back link and the title are a unit and have to
+  stay adjacent.
+  The selected theme is now stated, not only drawn. It had been indicated by a CSS-positioned pill
+  alone, which assistive technology cannot see and which shows nothing distinguishable for "system".
+  The three buttons are `aria-pressed` in a named `role="group"`, following the panel switcher U09 added
+  rather than the ARIA radiogroup pattern, which would promise arrow-key navigation and a roving
+  `tabindex` that nothing here implements.
+  The pressed state cannot be server-rendered: the choice lives in `localStorage` and the server is
+  never told it. A `ThemeToggle` hook in `app.js` writes it on mount, on `phx:set-theme`, on `storage`,
+  and on `updated` — the last because a patch re-rendering the group restores the server's placeholder,
+  which is a guess. It is not in `theme.js`, which runs render-blocking in `<head>` before these buttons
+  are parsed; `theme.js` sets the `data-theme` the hook reads, and both its listeners are bound before
+  the hook mounts, so the attribute is current whenever a handler here runs.
+  One new message, `Theme`, naming the group. `gettext.extract --merge` returned it non-fuzzy in all 11
+  locales and all 11 translations are written out.
+  Verified in Chromium against a running server, which is the only place any of this executes:
+  the toggle renders on all three routes; clicking dark sets `data-theme` and `phx:theme` and moves
+  `aria-pressed` to the dark button; the choice survives a reload and a navigation to another route; a
+  second tab follows the first within one `storage` event; returning to "system" removes both the
+  attribute and the key. No console errors and no CSP violations on any route.
+  The cost the viewer pays for the third call site was measured rather than assumed, because U09 had
+  just tuned that header: the toggle adds a wrapped row of 48px at 390px and at 768px, 2px at 430px,
+  and **zero** at every width from 1024px up — which is exactly the `fitscreen` range
+  (`min-width: 64rem and min-height: 40rem`) where the layout is fixed-height and header pixels come
+  straight out of the reading area. Below it the page scrolls, so the extra row is scrollable chrome
+  rather than a permanent deduction. That is why the toggle goes in the header rather than being
+  hidden below `lg`: the only widths where it would have cost anything lasting are the ones where it
+  costs nothing.
+  Evidence: `lib/doctrans_web/components/layouts.ex`, `assets/js/app.js` (`ThemeToggle`),
+  `lib/doctrans_web/live/document_live/index.ex`, `lib/doctrans_web/live/search_live.ex`,
+  `lib/doctrans_web/live/document_live/show.html.heex`,
+  `test/doctrans_web/theme_script_test.exs`, `priv/gettext` (one new message across 11 locales).
 
 - [ ] **U13 · P3 · Give LiveDashboard the CSP nonce it renders.**
   `live_dashboard "/dashboard"` is mounted through the `:browser` pipeline, so it receives the same
@@ -1459,21 +1506,6 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: the dashboard works in dev with the CSP unchanged for every other route.
   Evidence: `lib/doctrans_web/router.ex:50`, `lib/doctrans_web/router.ex:14`,
   `deps/phoenix_live_dashboard/lib/phoenix/live_dashboard/layouts/dash.html.heex:4`.
-
-- [ ] **U12 · P3 · Render the theme toggle somewhere a reader can reach it.**
-  `Layouts.theme_toggle/1` is defined and unit-tested but called from no template, so the light/dark
-  choice is unreachable in the running application. Found while fixing U10, which restored the listener
-  the toggle dispatches to; the two halves of the feature were broken independently.
-  Placement is the open question, not the wiring: the dashboard has a header action row
-  (`index.ex:77`), while `SearchLive` and `DocumentLive.Show` render their own headers, so putting it on
-  one page only makes it disappear as the reader navigates. Decide whether it belongs in `Layouts.app/1`
-  — which today is a bare `<main>` with no chrome — or in each page header.
-  While there, the toggle marks no active option: the selected theme is shown only by a sliding pill
-  positioned from `[data-theme=...]`, which is invisible to a screen reader and absent entirely for
-  "system". `aria-pressed` on the three buttons would state it.
-  Acceptance: the toggle is reachable from every page, its current selection is exposed to assistive
-  technology, and a test pins both.
-  Evidence: `lib/doctrans_web/components/layouts.ex:117`, `lib/doctrans_web/live/document_live/index.ex:77`.
 
 ## Phase 5 — Verification and maintenance
 

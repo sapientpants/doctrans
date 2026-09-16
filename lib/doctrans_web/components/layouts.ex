@@ -112,11 +112,25 @@ defmodule DoctransWeb.Layouts do
   `root.html.heex`, is what listens for it, writes the choice to
   `localStorage`, and applies `data-theme` before the first paint.
 
-  Not currently rendered by any page. See U12 in PLAN.md.
+  Three `aria-pressed` buttons in a named `role="group"`, following the panel
+  switcher in `page_viewer.ex` rather than the ARIA radiogroup pattern, which
+  would promise arrow-key navigation and a roving `tabindex` that nothing here
+  implements. The pressed state is written by the `ThemeToggle` hook, not
+  rendered: the choice lives in `localStorage` and the server never learns it.
   """
+  attr :theme, :string,
+    default: "system",
+    doc: "the theme assumed before the ThemeToggle hook reports the stored one"
+
   def theme_toggle(assigns) do
     ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
+    <div
+      id="theme-toggle"
+      phx-hook="ThemeToggle"
+      role="group"
+      aria-label={gettext("Theme")}
+      class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full"
+    >
       <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 transition-[left]" />
 
       <button
@@ -125,6 +139,7 @@ defmodule DoctransWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="system"
+        aria-pressed={to_string(@theme == "system")}
       >
         <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
@@ -135,6 +150,7 @@ defmodule DoctransWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="light"
+        aria-pressed={to_string(@theme == "light")}
       >
         <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
@@ -145,6 +161,7 @@ defmodule DoctransWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="dark"
+        aria-pressed={to_string(@theme == "dark")}
       >
         <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>

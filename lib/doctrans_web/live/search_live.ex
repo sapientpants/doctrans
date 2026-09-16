@@ -210,6 +210,12 @@ defmodule DoctransWeb.SearchLive do
             </h1>
             <p class="text-base-content/70 text-sm">{gettext("Find content across all documents")}</p>
           </div>
+
+          <%!-- `ms-auto` rather than `justify-between` on the row: the back link
+               and the title are a unit and must stay adjacent. --%>
+          <div class="ms-auto">
+            <Layouts.theme_toggle />
+          </div>
         </div>
 
         <form phx-submit="search" class="mb-8" id="search-form" role="search">

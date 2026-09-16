@@ -1,6 +1,8 @@
 defmodule DoctransWeb.ThemeScriptTest do
   use DoctransWeb.ConnCase, async: true
 
+  import Doctrans.Fixtures
+
   # Regression guard for U10. Theme initialization used to be an inline
   # `<script>` in the root layout, which the router's own `script-src 'self'`
   # refuses, so nothing applied the saved theme and the toggle did nothing. The
@@ -145,6 +147,56 @@ defmodule DoctransWeb.ThemeScriptTest do
       # which is exactly how the first cut of this file passed against a bundle
       # with its listeners removed.
       refute theme_code() =~ "//"
+    end
+  end
+
+  describe "the theme toggle" do
+    test "is reachable from every page", %{conn: conn} do
+      # U12. The listener U10 restored is useless without a control that
+      # dispatches to it, and the toggle was rendered by no template at all.
+      document = document_fixture()
+
+      for path <- [~p"/", ~p"/search", ~p"/documents/#{document.id}"] do
+        group =
+          conn
+          |> get(path)
+          |> html_response(200)
+          |> LazyHTML.from_document()
+          |> LazyHTML.query("#theme-toggle")
+
+        assert LazyHTML.attribute(group, "phx-hook") == ["ThemeToggle"],
+               "no theme toggle on #{path}"
+
+        # Named, so the three unlabelled icon buttons are not announced as a
+        # bare group of toggles.
+        assert LazyHTML.attribute(group, "role") == ["group"]
+        assert [label] = LazyHTML.attribute(group, "aria-label")
+        assert label != ""
+      end
+    end
+
+    test "states which theme is selected, rather than only drawing it", %{conn: conn} do
+      # The selected option is otherwise shown only by a CSS-positioned pill,
+      # which assistive technology cannot see. The server renders the
+      # "system" default and the hook corrects it once a stored choice is
+      # known; what matters here is that the attribute exists to be corrected.
+      buttons =
+        conn
+        |> get(~p"/")
+        |> html_response(200)
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("#theme-toggle [data-phx-theme]")
+
+      assert LazyHTML.attribute(buttons, "data-phx-theme") == ~w(system light dark)
+      assert LazyHTML.attribute(buttons, "aria-pressed") == ~w(true false false)
+    end
+
+    test "the hook that writes the pressed state is in the app bundle" do
+      # theme.js cannot do this: it runs in <head>, before the buttons exist.
+      app = File.read!(Path.expand("../../assets/js/app.js", __DIR__))
+
+      assert app =~ "ThemeToggle: {"
+      assert app =~ ~s|setAttribute("aria-pressed"|
     end
   end
 

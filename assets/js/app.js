@@ -505,6 +505,42 @@ const Hooks = {
       this.root.removeEventListener("focusin", this.sync)
       this.root.removeEventListener("focusout", this.sync)
     }
+  },
+
+  // Mirrors the active theme onto the toggle's buttons as `aria-pressed`.
+  // Which one is selected is otherwise shown only by a CSS-positioned pill,
+  // which assistive technology cannot see, and the server cannot render the
+  // state because the choice lives in `localStorage` and is never sent to it.
+  //
+  // This is not in `theme.js` with the rest of the theme code: that file runs
+  // render-blocking in `<head>`, before these buttons are parsed. It applies
+  // the attribute this hook reads, and both of the events below are already
+  // bound there by the time this mounts, so the attribute is up to date when
+  // the handlers here run.
+  ThemeToggle: {
+    mounted() {
+      this.sync = () => {
+        const current = document.documentElement.getAttribute("data-theme") || "system"
+
+        for (const button of this.el.querySelectorAll("[data-phx-theme]")) {
+          button.setAttribute("aria-pressed", String(button.dataset.phxTheme === current))
+        }
+      }
+
+      this.sync()
+      // A click in this tab, and another tab's choice arriving via `storage`.
+      window.addEventListener("phx:set-theme", this.sync)
+      window.addEventListener("storage", this.sync)
+    },
+    // A patch that re-renders the group restores the server's placeholder
+    // attributes, which are a guess: the server does not know the theme.
+    updated() {
+      this.sync()
+    },
+    destroyed() {
+      window.removeEventListener("phx:set-theme", this.sync)
+      window.removeEventListener("storage", this.sync)
+    }
   }
 }
 
