@@ -107,7 +107,12 @@ defmodule DoctransWeb.Layouts do
   @doc """
   Provides dark vs light theme toggle based on themes defined in app.css.
 
-  See <head> in root.html.heex which applies the theme before page load.
+  Each button dispatches `phx:set-theme` carrying its `data-phx-theme`.
+  `assets/js/theme.js`, loaded render-blocking from `<head>` in
+  `root.html.heex`, is what listens for it, writes the choice to
+  `localStorage`, and applies `data-theme` before the first paint.
+
+  Not currently rendered by any page. See U12 in PLAN.md.
   """
   def theme_toggle(assigns) do
     ~H"""

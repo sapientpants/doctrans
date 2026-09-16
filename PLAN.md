@@ -1388,11 +1388,46 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `test/doctrans_web/live/document_live/responsive_viewer_test.exs`,
   `priv/gettext` (two new messages across 11 locales).
 
-- [ ] **U10 · P3 · Move theme initialization into the supported JavaScript bundle.**
+- [x] **U10 · P3 · Move theme initialization into the supported JavaScript bundle.**
   The inline root script conflicts with the router's script-src self policy and project conventions.
   Acceptance: theme selection, reload persistence, and cross-tab updates work without inline scripts
   or weakening the Content Security Policy.
   Evidence: `lib/doctrans_web/components/layouts/root.html.heex:22`, `lib/doctrans_web/router.ex:14`.
+  Implemented as a new esbuild entry point, `assets/js/theme.js`, loaded render-blocking from `<head>`.
+  The conflict is stronger than "conventions": `script-src 'self'` carries no `'unsafe-inline'`, no
+  nonce, and no hash, so a conforming browser refused the block outright. Nothing applied the stored
+  choice on load and nothing answered `phx:set-theme`, which means this item was not a cleanup of
+  working code — theme selection had never worked in a browser enforcing the app's own header.
+  Why a second entry point rather than `app.js`, which the title and `AGENTS.md` both point at: this is
+  the one script in the application that must run before the first paint, and `app.js` is `defer`red,
+  so it executes after the document parses. `light` is the daisyUI `default: true` theme, so folding
+  the code into the deferred bundle would trade a script the browser blocks for one that paints light
+  and then flips to dark in front of a reader who chose dark. The new file is a first-party entry in
+  the same `:doctrans` esbuild profile, not a vendored or external `src`, so the constraint `AGENTS.md`
+  is actually protecting — one build pipeline, nothing loaded from off-origin — still holds. It imports
+  nothing and builds to 754 bytes, which is what keeps a second `--bundle` entry honest: a shared
+  import would be copied into both outputs, and `app.js` is 311kb. It sits ahead of the stylesheet
+  `<link>`, because a blocking script placed after one waits for that stylesheet to finish loading
+  before it runs, which would put the attribute back on the far side of the paint it exists to precede.
+  The CSP is unchanged. A nonce or a `'sha256-...'` would also have satisfied the letter of the
+  acceptance criterion and was not used: both re-admit inline script to the policy, and a hash has to be
+  recomputed by hand every time the script is edited, so the gate it provides is one a future edit
+  silently breaks.
+  Behavior is carried over unchanged, including the contract that "system" is the *absence* of a stored
+  value — the key is removed and the attribute comes off, so the daisyUI themes resolve through
+  `prefers-color-scheme` rather than freezing at whatever the system preference was on the day it was
+  picked.
+  Known limitation, the same one U09 recorded: there is no JavaScript test harness in this repo, so the
+  behavior itself — `localStorage`, the `storage` event, paint timing — rests on browser verification.
+  What the suite pins is the wiring that has to hold for any of it to be reachable: no `<script>` on the
+  rendered page without a `src` and with a body, the theme bundle loaded without `defer`/`async` and
+  ahead of the app bundle, `script-src 'self'` still sent with neither `unsafe-inline` nor a nonce, and
+  `js/theme.js` present in the esbuild args so the URL the layout asks for is a file the build produces.
+  Three of the seven fail against the previous layout.
+  Found while fixing, not fixed here: `Layouts.theme_toggle/1` is not rendered by any page, so even with
+  the listener restored a reader has no control to reach it. Filed as U12.
+  Evidence added: `assets/js/theme.js`, `config/config.exs` (esbuild entry points),
+  `test/doctrans_web/theme_script_test.exs`.
 
 - [ ] **U11 · P3 · Refresh the dashboard across tabs.**
   The dashboard subscribes to known document IDs, so another tab's newly uploaded document is missed.
@@ -1400,6 +1435,21 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: upload, deletion, and status changes appear in another open dashboard without a reload;
   subscriptions remain bounded and document streams remain consistent.
   Evidence: `lib/doctrans_web/live/document_live/index.ex:471`, `lib/doctrans/documents/topics.ex`.
+
+- [ ] **U12 · P3 · Render the theme toggle somewhere a reader can reach it.**
+  `Layouts.theme_toggle/1` is defined and unit-tested but called from no template, so the light/dark
+  choice is unreachable in the running application. Found while fixing U10, which restored the listener
+  the toggle dispatches to; the two halves of the feature were broken independently.
+  Placement is the open question, not the wiring: the dashboard has a header action row
+  (`index.ex:77`), while `SearchLive` and `DocumentLive.Show` render their own headers, so putting it on
+  one page only makes it disappear as the reader navigates. Decide whether it belongs in `Layouts.app/1`
+  — which today is a bare `<main>` with no chrome — or in each page header.
+  While there, the toggle marks no active option: the selected theme is shown only by a sliding pill
+  positioned from `[data-theme=...]`, which is invisible to a screen reader and absent entirely for
+  "system". `aria-pressed` on the three buttons would state it.
+  Acceptance: the toggle is reachable from every page, its current selection is exposed to assistive
+  technology, and a test pins both.
+  Evidence: `lib/doctrans_web/components/layouts.ex:117`, `lib/doctrans_web/live/document_live/index.ex:77`.
 
 ## Phase 5 — Verification and maintenance
 

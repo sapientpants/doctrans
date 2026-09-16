@@ -16,27 +16,13 @@
     <.live_title default="Doctrans" suffix=" · Doctrans">
       {assigns[:page_title]}
     </.live_title>
+    <%!-- Render-blocking, and ahead of the stylesheet: this applies the reader's
+    saved theme to <html> before the first paint. `app.js` is deferred and runs
+    too late for that. See assets/js/theme.js. --%>
+    <script phx-track-static type="text/javascript" src={~p"/assets/js/theme.js"}>
+    </script>
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
-    </script>
-    <script>
-      (() => {
-        const setTheme = (theme) => {
-          if (theme === "system") {
-            localStorage.removeItem("phx:theme");
-            document.documentElement.removeAttribute("data-theme");
-          } else {
-            localStorage.setItem("phx:theme", theme);
-            document.documentElement.setAttribute("data-theme", theme);
-          }
-        };
-        if (!document.documentElement.hasAttribute("data-theme")) {
-          setTheme(localStorage.getItem("phx:theme") || "system");
-        }
-        window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
-
-        window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
-      })();
     </script>
   </head>
   <body>
