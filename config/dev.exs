@@ -68,7 +68,7 @@ config :doctrans, DoctransWeb.Endpoint,
     ]
   ]
 
-# Enable dev routes for dashboard and mailbox
+# Enable dev routes for the dashboard
 config :doctrans, dev_routes: true
 
 # Include timestamps and metadata in development logs for debugging
