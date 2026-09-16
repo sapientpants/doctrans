@@ -33,16 +33,35 @@ defmodule DoctransWeb.ContentSecurityPolicy do
     {"form-action", ["'self'"]}
   ]
 
+  @directive_names Enum.map(@directives, &elem(&1, 0))
+
+  # What `dashboard/1` adds, kept as its own list so the directive names can be
+  # checked against `@directives` here rather than only by a test asserting the
+  # rendered string. `:nonce` stands in for the per-request value.
+  @dashboard_additions [
+    {"script-src", :nonce},
+    {"style-src", :nonce},
+    {"font-src", ["data:"]}
+  ]
+
+  # A directive renamed in one list and not the other would drop its addition
+  # with no error at all, and a dropped nonce refuses the very markup it was
+  # minted for -- the one direction in which a policy must never fail quietly.
+  for {directive, _sources} <- @dashboard_additions, directive not in @directive_names do
+    raise "dashboard/1 widens #{directive}, which is not a directive in @directives"
+  end
+
   @doc """
   The response headers for `Plug.Conn.put_secure_browser_headers/2`.
   """
   def headers, do: %{"content-security-policy" => base()}
 
   @doc """
-  The policy every route is served.
+  The policy every route but the dashboard is served.
 
-  Public for the test that pins it byte for byte against the literal the
-  `:browser` pipeline carried before this module existed.
+  Public so tests can pin it byte for byte against the literal the `:browser`
+  pipeline carried before this module existed, and so they can assert that the
+  routes outside the dashboard's scope are still served exactly it.
   """
   def base, do: render(@directives)
 
@@ -50,16 +69,24 @@ defmodule DoctransWeb.ContentSecurityPolicy do
   The base policy plus exactly what LiveDashboard needs to render.
 
   `nonce` admits the dashboard's own inline script and style blocks, which carry
-  it as an attribute; `data:` in `font-src` admits its embedded icon font. A
-  nonce in `script-src` or `style-src` makes browsers ignore `'unsafe-inline'`
-  in that directive, so neither policy can be widened by adding one later.
+  it as an attribute; `data:` in `font-src` admits its embedded icon font.
+
+  Adding `'unsafe-inline'` to *this* policy would be dead text, because a nonce
+  in `script-src` or `style-src` makes browsers ignore it in that directive.
+  That argument stops here: `base/0` carries no nonce, so an `'unsafe-inline'`
+  added to `@directives` would take full effect on every other route, which is
+  what `base/0`'s own test refuses.
+
+  A nonce admits `<style>` elements, not `style` attributes. No page this
+  application mounts uses one; `live_layered_graph/1` on a custom page would,
+  and would need `style-src-attr` rather than another source here.
   """
   def dashboard(nonce) when is_binary(nonce) do
-    additions = %{
-      "script-src" => ["'nonce-#{nonce}'"],
-      "style-src" => ["'nonce-#{nonce}'"],
-      "font-src" => ["data:"]
-    }
+    additions =
+      Map.new(@dashboard_additions, fn
+        {directive, :nonce} -> {directive, ["'nonce-#{nonce}'"]}
+        {directive, sources} -> {directive, sources}
+      end)
 
     @directives
     |> Enum.map(fn {directive, sources} ->

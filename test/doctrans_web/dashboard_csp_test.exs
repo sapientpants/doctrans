@@ -34,12 +34,14 @@ defmodule DoctransWeb.DashboardCspTest do
     } do
       nonces = document |> LazyHTML.query("[nonce]") |> LazyHTML.attribute("nonce")
 
-      # More than nothing: an assign key the router never named renders the
-      # attribute empty rather than absent, which is exactly the broken state
-      # and looks like a nonced page from a distance.
+      # More than nothing, because nothing is the broken state: with an assign
+      # key the router never named, `csp_nonce/2` returns nil and HEEx drops
+      # every one of these attributes, so the page comes back with no `[nonce]`
+      # at all rather than with empty ones. Which element lost its nonce an
+      # aggregate assertion cannot say; the next test names them individually.
       assert nonces != []
-      refute "" in nonces
       assert [nonce] = Enum.uniq(nonces)
+      assert nonce != ""
 
       # One value per document, not one per element: the header can only name a
       # fixed set, and the plug mints exactly one.
@@ -107,6 +109,44 @@ defmodule DoctransWeb.DashboardCspTest do
     end
   end
 
+  describe "navigating between dashboard pages" do
+    test "keeps the nonce the original document's header admitted", %{conn: conn} do
+      # The header is sent once, with the dead render. Live navigation never
+      # sends another, so every page reached over the socket has to keep using
+      # the first one's nonce. Minting per mount instead -- an `on_mount` hook,
+      # say, which is where a refactor would naturally put this -- would leave
+      # every test above passing while the browser refused the inline `<style>`
+      # on the page navigated to.
+      #
+      # Entering on Processes and navigating to Home, rather than the reverse:
+      # the nonced `<style>` blocks are the Home page's usage bars, so this is
+      # the direction in which a lost nonce has something to refuse.
+      conn = get(conn, ~p"/dev/dashboard/processes")
+      assert [policy] = get_resp_header(conn, "content-security-policy")
+
+      {:ok, view, _html} = live(conn)
+
+      # `live_redirect/2` rather than a click on the link: it carries the
+      # session token signed at the dead render across to the next page, which
+      # is what the browser does and what keeps `csp_nonces` in the session.
+      {:ok, _view, html} = live_redirect(view, to: ~p"/dev/dashboard/home")
+
+      nonces =
+        html
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("[nonce]")
+        |> LazyHTML.attribute("nonce")
+        |> Enum.uniq()
+
+      assert nonces != []
+
+      for nonce <- nonces do
+        assert policy =~ "'nonce-#{nonce}'",
+               "a page reached by live navigation used a nonce no header admits"
+      end
+    end
+  end
+
   describe "a second request for the dashboard" do
     test "is served a different nonce, and a header that matches its own body", %{conn: conn} do
       # A nonce reused across requests is worth no more than `'unsafe-inline'`:
@@ -147,14 +187,17 @@ defmodule DoctransWeb.DashboardCspTest do
           |> LazyHTML.query("[nonce]")
           |> LazyHTML.attribute("nonce")
 
-        # Emptiness rather than absence: Swoosh's mailbox template nonces its
-        # own inline script and style unconditionally, so `/dev/mailbox` carries
-        # empty nonce attributes whether or not a key is configured -- and an
-        # empty one admits nothing, which is the point. On the application's own
-        # routes a non-empty value would mean the dashboard's plug had escaped
-        # its scope; on `/dev/mailbox` the header assertion above is what guards
-        # that, since Swoosh reads its own assign keys and would render empty
-        # nonces even if the plug did leak in.
+        # `/dev/mailbox` is known broken here, not correct: it has the same
+        # defect U13 fixed for the dashboard, and PLAN.md records why it is left
+        # for an item of its own -- closing it would widen a second route's
+        # policy, which this item's acceptance criterion forbids. Swoosh's
+        # template is EEx rather than HEEx and nonces its inline script and
+        # style unconditionally, so it renders `nonce=""` whether or not a key
+        # is configured, and an empty nonce admits nothing. That is why the
+        # assertion below tolerates empty values on this one path.
+        #
+        # On the application's own routes any nonce attribute at all would mean
+        # the dashboard's plug had escaped its scope.
         assert Enum.uniq(nonces) -- [""] == [],
                "#{path} renders a nonce its policy does not admit"
       end
@@ -172,8 +215,9 @@ defmodule DoctransWeb.DashboardCspTest do
   describe "DoctransWeb.Plugs.DashboardCsp" do
     test "publishes the nonce under the assign key it names" do
       # The key is the plug's only contract with LiveDashboard, which reads
-      # `conn.assigns[key]` and renders `nonce=""` if nothing is there -- a
-      # failure with no server-side symptom at all. The router reads the key
+      # `conn.assigns[key]` and, finding nothing, renders no nonce attribute at
+      # all -- HEEx drops a nil attribute, so the failure leaves neither a
+      # `nonce=""` to grep for nor any server-side symptom. The router reads the key
       # from `assign_key/0` rather than repeating it, so the pairing is checked
       # by the compiler; what is left to check here is that the plug actually
       # publishes under it.

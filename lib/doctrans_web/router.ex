@@ -45,19 +45,21 @@ defmodule DoctransWeb.Router do
     # dev build this code does not exist, and the alias would be unused.
     alias DoctransWeb.Plugs.DashboardCsp
 
-    # Only the dashboard is in scope for U13, so only the dashboard is served
-    # the widened policy; the mailbox preview below keeps the base one.
+    # The widened policy is scoped to the dashboard's own path rather than to
+    # `/dev`, so a dev route added later cannot inherit it just by being written
+    # in the same block. The mailbox preview below keeps the base policy.
     pipeline :dashboard_csp do
       plug DashboardCsp
     end
 
-    scope "/dev" do
+    scope "/dev/dashboard" do
       pipe_through [:browser, :dashboard_csp]
 
       # The key is read from the plug rather than repeated as a literal: the two
-      # have to agree exactly or LiveDashboard reads an assign nobody set and
-      # renders an empty nonce, which fails silently on the server.
-      live_dashboard "/dashboard",
+      # have to agree exactly, or LiveDashboard reads an assign nobody set, the
+      # nonce attributes drop out of the markup entirely, and the browser
+      # refuses the script with nothing logged on the server at all.
+      live_dashboard "/",
         metrics: DoctransWeb.Telemetry,
         csp_nonce_assign_key: DashboardCsp.assign_key()
     end

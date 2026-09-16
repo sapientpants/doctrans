@@ -4,9 +4,11 @@ defmodule DoctransWeb.Plugs.DashboardCsp do
 
   LiveDashboard's layout emits `<script nonce={csp_nonce(@conn, :script)}>` and
   its cards emit nonced `<style>` blocks, but it reads those nonces out of
-  `conn.assigns` under a key the route has to name. With no key named the
-  attributes render empty and the browser refuses the script, which is what the
-  `:browser` pipeline's `script-src 'self'` is supposed to do.
+  `conn.assigns` under a key the route has to name. With no key named that
+  expression is `nil`, HEEx drops a `nil` attribute rather than rendering it
+  empty, and the browser refuses the script -- which is what the `:browser`
+  pipeline's `script-src 'self'` is supposed to do. The broken page carries no
+  `nonce=""` to grep for: the attribute is simply absent.
 
   This plug mints one nonce per request, assigns it under `:csp_nonce`
   for `live_dashboard`'s `:csp_nonce_assign_key`, and replaces the response's
