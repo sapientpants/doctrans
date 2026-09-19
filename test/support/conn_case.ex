@@ -36,4 +36,14 @@ defmodule DoctransWeb.ConnCase do
     Doctrans.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Renders a single element, for assertions scoped to one claim on the page.
+
+  Named for what it returns -- markup, attributes included, not text -- because
+  a `refute` against an element's text would also be satisfied by a class name.
+  """
+  def element_html(view, selector) do
+    view |> Phoenix.LiveViewTest.element(selector) |> Phoenix.LiveViewTest.render()
+  end
 end

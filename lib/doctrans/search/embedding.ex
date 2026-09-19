@@ -19,6 +19,7 @@ defmodule Doctrans.Search.Embedding do
   Returns `{:ok, embedding}` on success or `{:error, reason}` on failure.
   Returns `{:ok, nil}` for nil or empty text.
   """
+  @impl true
   def generate(text, opts \\ [])
   def generate(nil, _opts), do: {:ok, nil}
   def generate("", _opts), do: {:ok, nil}

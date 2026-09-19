@@ -13,10 +13,10 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Processing.DocumentOrchestrator
   alias Doctrans.Processing.Run
   alias Doctrans.Resilience.{Backoff, ErrorClassifier}
-  alias Doctrans.Search.EmbeddingWorker
 
   @max_retries 3
 
@@ -45,6 +45,8 @@ defmodule Doctrans.Processing.LlmProcessor do
   - `:extraction_model` - Override the default extraction model
   - `:translation_model` - Override the default translation model
   """
+  @spec process_page(Ecto.UUID.t(), MapSet.t(Ecto.UUID.t()), keyword()) ::
+          :ok | {:error, Doctrans.Errors.reason()}
   def process_page(page_id, cancelled_documents, opts \\ []) do
     generation = Keyword.fetch(opts, :generation)
     opts = Map.to_list(Run.choices(opts))
@@ -72,9 +74,28 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   defp do_process_page(page, opts) do
     with :ok <- maybe_extract(page, opts),
-         page <- Documents.get_page!(page.id) do
-      maybe_translate(page, opts)
+         extracted <- Documents.get_page!(page.id),
+         :ok <- maybe_translate(extracted, opts) do
+      reconcile_document(extracted)
     end
+  end
+
+  # The final page write and the document's completion are separate
+  # transactions, so a crash between them leaves a processing document whose
+  # pages are all saved. A replay skips both stages and would return `:ok`
+  # without ever revisiting the document, which is why the check belongs to
+  # every successful run of this job rather than to the run that happened to
+  # save the last translation. Resolving it costs no model call.
+  #
+  # Hand over the page this run already read rather than a fresh copy. The
+  # orchestrator fences the check against that page's revision and generation,
+  # and a row re-read here would only ever be compared against itself. The
+  # translation writes in between cannot invalidate it: `content_revision`
+  # advances on an `original_markdown` change or an extraction leaving
+  # "completed", and `processing_generation` only on a reprocess.
+  defp reconcile_document(page) do
+    _ = DocumentOrchestrator.check_document_completion(page)
+    :ok
   end
 
   # A retried or rescued Oban job may have left a stage processing or errored.
@@ -110,10 +131,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     # No content to translate - mark as completed with empty translation
     Logger.warning("Page #{page.page_number} has no content to translate, marking as completed")
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "completed"})
-    Topics.broadcast_page_update(page)
-
-    # Check if all pages are complete and mark document as completed if so
-    _ = DocumentOrchestrator.check_document_completion(page)
+    Topics.broadcast_page_updated(page)
 
     :ok
   end
@@ -131,7 +149,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     :ok = DocumentOrchestrator.update_document_status_to_processing(page)
 
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "processing"})
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     image_path = Path.join(Documents.uploads_dir(), page.image_path)
     openai_opts = build_extraction_opts(opts)
@@ -145,12 +163,26 @@ defmodule Doctrans.Processing.LlmProcessor do
             extraction_status: "completed"
           })
 
-        Topics.broadcast_page_update(page)
-        EmbeddingWorker.generate_embedding(page.id)
+        Topics.broadcast_page_updated(page)
+        queue_indexing(page)
         :ok
 
       {:error, reason} ->
         handle_extraction_error(page, reason, retry_count, opts)
+    end
+  end
+
+  # The only other thing that queues indexing is startup recovery, which runs
+  # once per boot — so an enqueue lost here keeps the page out of search until
+  # the next restart. That is worth a line in the log rather than a dropped result.
+  defp queue_indexing(page) do
+    case EmbeddingJob.enqueue_page(page) do
+      {:ok, _job} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Could not queue indexing for page #{page.id}: #{inspect(reason)}")
+        :ok
     end
   end
 
@@ -218,7 +250,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   defp mark_extraction_failed(page, reason) do
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     {:error, {:page_extraction_failed, [page_number: page.page_number, reason: reason]}}
   end
@@ -227,7 +259,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     Logger.info("Translating page #{page.page_number} of document #{page.document_id}")
 
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "processing"})
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     document = Documents.get_document!(page.document_id)
     openai_opts = build_translation_opts(opts)
@@ -248,10 +280,7 @@ defmodule Doctrans.Processing.LlmProcessor do
             translation_status: "completed"
           })
 
-        Topics.broadcast_page_update(page)
-
-        # Check if all pages are complete and mark document as completed if so
-        _ = DocumentOrchestrator.check_document_completion(page)
+        Topics.broadcast_page_updated(page)
 
         :ok
 
@@ -327,7 +356,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   defp mark_translation_failed(page, reason) do
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "error"})
-    Topics.broadcast_page_update(page)
+    Topics.broadcast_page_updated(page)
 
     {:error, {:page_translation_failed, [page_number: page.page_number, reason: reason]}}
   end

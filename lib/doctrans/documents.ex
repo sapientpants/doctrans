@@ -10,7 +10,7 @@ defmodule Doctrans.Documents do
   import Ecto.Query
 
   alias Doctrans.Config.Uploads
-  alias Doctrans.Documents.{Document, Page, Pages, Summary}
+  alias Doctrans.Documents.{Document, Page, Pages, Summary, Topics}
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
   alias Doctrans.Validation
@@ -21,6 +21,7 @@ defmodule Doctrans.Documents do
   defdelegate get_page_by_number(document_id, page_number), to: Pages
   defdelegate get_page_by_number!(document_id, page_number), to: Pages
   defdelegate list_pages(document_id), to: Pages
+  defdelegate page_content_state(page_ids), to: Pages
   defdelegate create_page(document, attrs), to: Pages
   defdelegate create_pages(document, page_attrs_list), to: Pages
   defdelegate update_page(page, attrs), to: Pages
@@ -44,6 +45,7 @@ defmodule Doctrans.Documents do
   - `:sort_by` - Field to sort by: `:inserted_at` (default) or `:title`
   - `:sort_dir` - Sort direction: `:desc` (default) or `:asc`
   """
+  @spec list_documents(keyword()) :: [Document.t()]
   def list_documents(opts \\ []) do
     sort_by = Keyword.get(opts, :sort_by, :inserted_at)
     sort_dir = Keyword.get(opts, :sort_dir, :desc)
@@ -68,56 +70,61 @@ defmodule Doctrans.Documents do
   affected cards. Optional `:limit` and `:offset` bound the document query
   and its associated page query for paginated callers.
   """
+  @spec list_documents_with_progress(keyword()) :: [Summary.t()]
   def list_documents_with_progress(opts \\ []) do
-    query = ordered_documents(Document, opts)
+    documents =
+      Document
+      |> ordered_documents(opts)
+      |> filter_document_ids(opts)
+      |> limit_documents(opts)
+      |> offset(^Keyword.get(opts, :offset, 0))
+      |> Repo.all()
 
-    query =
-      case Keyword.fetch(opts, :document_ids) do
-        {:ok, ids} -> where(query, [d], d.id in ^ids)
-        :error -> query
-      end
-
-    query =
-      case Keyword.fetch(opts, :limit) do
-        {:ok, count} -> limit(query, ^count)
-        :error -> query
-      end
-
-    offset = Keyword.get(opts, :offset, 0)
-    documents = query |> offset(^offset) |> Repo.all()
-
-    document_ids = Enum.map(documents, & &1.id)
-
-    # Load only the page fields needed for progress, in a single query,
-    # instead of preloading every page's full markdown content.
-    pages =
-      if document_ids == [] do
-        []
-      else
-        query =
-          from(p in Page,
-            where: p.document_id in ^document_ids,
-            # Only the fields needed for progress + the first-page thumbnail;
-            # the heavy markdown fields are not selected
-            select: %{
-              id: p.id,
-              document_id: p.document_id,
-              page_number: p.page_number,
-              extraction_status: p.extraction_status,
-              translation_status: p.translation_status,
-              image_path: p.image_path
-            },
-            order_by: [p.document_id, p.page_number]
-          )
-
-        Repo.all(query)
-      end
-
-    pages_by_document = Enum.group_by(pages, & &1.document_id)
+    pages_by_document =
+      documents
+      |> Enum.map(& &1.id)
+      |> progress_pages()
+      |> Enum.group_by(& &1.document_id)
 
     Enum.map(documents, fn document ->
       Summary.new(document, Map.get(pages_by_document, document.id, []))
     end)
+  end
+
+  defp filter_document_ids(query, opts) do
+    case Keyword.fetch(opts, :document_ids) do
+      {:ok, ids} -> where(query, [d], d.id in ^ids)
+      :error -> query
+    end
+  end
+
+  defp limit_documents(query, opts) do
+    case Keyword.fetch(opts, :limit) do
+      {:ok, count} -> limit(query, ^count)
+      :error -> query
+    end
+  end
+
+  # Load only the page fields needed for progress, in a single query,
+  # instead of preloading every page's full markdown content.
+  defp progress_pages([]), do: []
+
+  defp progress_pages(document_ids) do
+    from(p in Page,
+      where: p.document_id in ^document_ids,
+      # Only the fields needed for progress + the first-page thumbnail;
+      # the heavy markdown fields are not selected
+      select: %{
+        id: p.id,
+        document_id: p.document_id,
+        page_number: p.page_number,
+        extraction_status: p.extraction_status,
+        translation_status: p.translation_status,
+        image_path: p.image_path
+      },
+      order_by: [p.document_id, p.page_number]
+    )
+    |> Repo.all()
   end
 
   @doc """
@@ -127,6 +134,7 @@ defmodule Doctrans.Documents do
   only the supplied snapshot so unrelated, unhandled changes cannot reorder
   dashboard cards. No document rows or pages are loaded.
   """
+  @spec sort_document_order([{Ecto.UUID.t(), term()}], keyword()) :: [{Ecto.UUID.t(), term()}]
   def sort_document_order(entries, opts \\ [])
   def sort_document_order([], _opts), do: []
 
@@ -150,6 +158,7 @@ defmodule Doctrans.Documents do
   Lists documents that need processing (status is "processing" or "queued").
   Used by Worker for startup recovery.
   """
+  @spec list_incomplete_documents() :: [Document.t()]
   def list_incomplete_documents do
     Document
     |> where([d], d.status in ["processing", "queued"])
@@ -158,15 +167,54 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
+  Returns true when the document has embeddings ready to answer questions.
+
+  Prefers chunk-level embeddings and falls back to page-level ones, which is the
+  granularity documents indexed before chunking still carry.
+  """
+  @spec embeddings_ready?(Document.t() | Ecto.UUID.t()) :: boolean()
+  def embeddings_ready?(%Document{id: document_id}), do: embeddings_ready?(document_id)
+
+  def embeddings_ready?(document_id) do
+    chunks_embedded?(document_id) or pages_embedded?(document_id)
+  end
+
+  # Reached through the page association rather than by naming `Chunk`, which this
+  # module can no longer afford to alias: Credo's `ModuleDependencies` check caps a
+  # module at `max_deps: 10` first-party dependencies (`.credo.exs`), and aliasing
+  # `Topics` for the U11 broadcasts put `Documents` exactly at the ceiling. Going
+  # through `Page has_many :chunks` is equivalent -- same inner join, same three
+  # predicates, same `exists?` -- so re-adding the alias would fail the build for
+  # nothing.
+  defp chunks_embedded?(document_id) do
+    Page
+    |> where([p], p.document_id == ^document_id)
+    |> join(:inner, [p], c in assoc(p, :chunks))
+    |> where([_p, c], c.embedding_status == "completed")
+    |> where([_p, c], not is_nil(c.embedding))
+    |> Repo.exists?()
+  end
+
+  defp pages_embedded?(document_id) do
+    Page
+    |> where([p], p.document_id == ^document_id)
+    |> where([p], p.embedding_status == "completed")
+    |> where([p], not is_nil(p.embedding))
+    |> Repo.exists?()
+  end
+
+  @doc """
   Gets a single document by ID.
 
   Raises `Ecto.NoResultsError` if the Document does not exist.
   """
+  @spec get_document!(Ecto.UUID.t()) :: Document.t()
   def get_document!(id), do: Repo.get!(Document, id)
 
   @doc """
   Gets a single document by ID, returns nil if not found or the ID is invalid.
   """
+  @spec get_document(String.t()) :: Document.t() | nil
   def get_document(id) do
     case Ecto.UUID.cast(id) do
       {:ok, id} -> Repo.get(Document, id)
@@ -177,6 +225,7 @@ defmodule Doctrans.Documents do
   @doc """
   Gets a document with ordered pages, or nil for a missing or invalid ID.
   """
+  @spec get_document_with_pages(String.t()) :: Document.t() | nil
   def get_document_with_pages(id) do
     id
     |> get_document()
@@ -186,6 +235,7 @@ defmodule Doctrans.Documents do
   @doc """
   Gets a document with its pages preloaded.
   """
+  @spec get_document_with_pages!(Ecto.UUID.t()) :: Document.t()
   def get_document_with_pages!(id) do
     Document
     |> Repo.get!(id)
@@ -195,18 +245,26 @@ defmodule Doctrans.Documents do
   @doc """
   Creates a document with validation.
   """
+  @spec create_document(map()) :: {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def create_document(attrs \\ %{}) do
-    with {:ok, validated_attrs} <- Validation.validate_document_attrs(attrs) do
-      %Document{}
-      |> Document.changeset(validated_attrs)
-      |> Repo.insert()
-      |> Doctrans.Errors.result()
+    with {:ok, validated_attrs} <- Validation.validate_document_attrs(attrs),
+         {:ok, document} <-
+           %Document{}
+           |> Document.changeset(validated_attrs)
+           |> Repo.insert()
+           |> Doctrans.Errors.result() do
+      # Announce the new document on the collection topic every open dashboard
+      # subscribes to, so an upload made in one tab appears in the others.
+      _ = Topics.broadcast_document_created(document)
+      {:ok, document}
     end
   end
 
   @doc """
   Updates a document.
   """
+  @spec update_document(Document.t(), map()) ::
+          {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def update_document(%Document{} = document, attrs) do
     Run.with_current(document, fn current ->
       current
@@ -219,6 +277,8 @@ defmodule Doctrans.Documents do
   @doc """
   Updates a document's status.
   """
+  @spec update_document_status(Document.t(), String.t(), term()) ::
+          {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def update_document_status(%Document{} = document, status, error_message \\ nil) do
     Run.with_current(document, fn current ->
       current
@@ -238,16 +298,30 @@ defmodule Doctrans.Documents do
   2. Delete all page records (via cascade)
   3. Delete the document record
   """
-  # The directory comes from the persisted document UUID and configured upload root.
-  # sobelow_skip ["Traversal.FileModule"]
+  # The directory comes from the persisted document UUID and configured upload root;
+  # the File calls themselves live in delete_locked_document/1.
+  @spec delete_document(Document.t()) :: {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def delete_document(%Document{} = document) do
-    Repo.transaction(fn ->
-      _ = Run.lock(document.id)
-      delete_locked_document(document)
-    end)
-    |> case do
-      {:ok, result} -> result
-      error -> Doctrans.Errors.result(error)
+    result =
+      Repo.transaction(fn ->
+        _ = Run.lock(document.id)
+        delete_locked_document(document)
+      end)
+      |> case do
+        {:ok, result} -> result
+        error -> Doctrans.Errors.result(error)
+      end
+
+    # Broadcast only after the transaction has committed: announcing from inside
+    # it would advertise a deletion a rollback could still undo, and would reach
+    # subscribers before the row was actually gone.
+    case result do
+      {:ok, deleted} ->
+        _ = Topics.broadcast_document_deleted(deleted)
+        {:ok, deleted}
+
+      error ->
+        error
     end
   end
 
@@ -279,6 +353,7 @@ defmodule Doctrans.Documents do
   @doc """
   Returns the upload directory for a document.
   """
+  @spec document_upload_dir(Ecto.UUID.t()) :: String.t()
   def document_upload_dir(document_id) do
     Path.join([uploads_dir(), "documents", to_string(document_id)])
   end
@@ -286,6 +361,7 @@ defmodule Doctrans.Documents do
   @doc """
   Returns the pages directory for a document.
   """
+  @spec document_pages_dir(Ecto.UUID.t()) :: String.t()
   def document_pages_dir(document_id) do
     Path.join([document_upload_dir(document_id), "pages"])
   end
@@ -293,8 +369,38 @@ defmodule Doctrans.Documents do
   @doc """
   Returns the base uploads directory.
   """
+  @spec uploads_dir() :: String.t()
   def uploads_dir do
     Uploads.upload_dir()
+  end
+
+  @doc """
+  Ensures the configured storage root exists.
+
+  A nondefault `DOCTRANS_DATA_DIR` normally points at an empty volume, so the
+  root is created at startup: uploads create their own subdirectories, but the
+  filesystem health check probes the root itself and would otherwise report a
+  missing directory until the first document arrived.
+
+  Failure names the setting to correct: this runs from `Doctrans.Application`
+  before the supervision tree starts, where a bare filesystem error would reach
+  the operator as an unexplained boot crash.
+  """
+  # The path is the configured storage root; no request value contributes to it.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec ensure_uploads_dir!() :: String.t()
+  def ensure_uploads_dir! do
+    dir = uploads_dir()
+
+    case File.mkdir_p(dir) do
+      :ok ->
+        dir
+
+      {:error, reason} ->
+        raise "could not create the storage root #{dir}: #{:file.format_error(reason)}. " <>
+                "Set DOCTRANS_DATA_DIR to a directory the application can write, " <>
+                "or unset it to use the default inside the application directory."
+    end
   end
 
   @doc """
@@ -302,6 +408,7 @@ defmodule Doctrans.Documents do
   """
   # Callers supply generated or persisted document UUIDs; the only suffix is pages.
   # sobelow_skip ["Traversal.FileModule"]
+  @spec ensure_document_dirs!(Ecto.UUID.t()) :: String.t()
   def ensure_document_dirs!(document_id) do
     pages_dir = document_pages_dir(document_id)
     File.mkdir_p!(pages_dir)

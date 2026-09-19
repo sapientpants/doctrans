@@ -4,7 +4,9 @@ defmodule Doctrans.Fixtures do
   """
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Page
   alias Doctrans.Documents.Pages
+  alias Doctrans.Repo
 
   @doc """
   Creates a document with valid attributes.
@@ -56,6 +58,39 @@ defmodule Doctrans.Fixtures do
       )
 
     page
+  end
+
+  @doc """
+  Creates a completed, single-page document whose page carries an embedding, so
+  the chat opens with a usable context.
+
+  The embedding is inserted through `Repo` rather than the `Pages` API to pin a
+  deterministic vector of the configured dimension.
+  """
+  def completed_document_with_embedding_fixture(attrs \\ %{}) do
+    document =
+      document_fixture(
+        Enum.into(attrs, %{
+          target_language: "de",
+          status: "completed",
+          total_pages: 1
+        })
+      )
+
+    Repo.insert!(%Page{
+      id: Ecto.UUID.generate(),
+      document_id: document.id,
+      page_number: 1,
+      image_path: "documents/#{document.id}/pages/page_1.png",
+      original_markdown: "Test content for chat",
+      translated_markdown: "Testinhalt für Chat",
+      extraction_status: "completed",
+      translation_status: "completed",
+      embedding_status: "completed",
+      embedding: Pgvector.new(List.duplicate(0.1, 1024))
+    })
+
+    document
   end
 
   @doc """

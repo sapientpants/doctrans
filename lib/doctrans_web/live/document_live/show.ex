@@ -2,8 +2,6 @@ defmodule DoctransWeb.DocumentLive.Show do
   @moduledoc "Document Viewer LiveView with split-screen layout."
   use DoctransWeb, :live_view
 
-  alias Doctrans.Chat
-  alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Processing.Run
@@ -14,54 +12,92 @@ defmodule DoctransWeb.DocumentLive.Show do
     only: [status_color: 1, status_text: 1, language_name: 1, processing_progress: 1]
 
   import DoctransWeb.DocumentLive.ViewerComponents
-  import DoctransWeb.DocumentLive.PageViewer, only: [zoom_controls: 1, navigation: 1]
+
+  import DoctransWeb.DocumentLive.PageViewer,
+    only: [zoom_controls: 1, navigation: 1, view_tabs: 1, content_panel_label: 1]
+
   import DoctransWeb.DocumentLive.ReprocessModal, only: [reprocess_modal: 1, can_reprocess?: 1]
   import DoctransWeb.DocumentLive.ChatComponents
 
+  # Every event `ReprocessModal` owns. The modal is a function component, so the
+  # events it declares arrive here and are forwarded verbatim.
+  @reprocess_events ~w(
+    show_reprocess_modal
+    show_document_reprocess_modal
+    hide_reprocess_modal
+    update_reprocess_models
+    retry_reprocess_models
+    reprocess_page
+    reprocess_document
+  )
+
+  # Every event `PageViewer` owns, forwarded the same way.
+  @page_viewer_events ~w(
+    prev_page
+    next_page
+    goto_page
+    toggle_original
+    zoom_in
+    zoom_out
+    select_view_tab
+  )
+
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Documents.get_document(id) do
+    # Subscribe before reading, and record the id in one place for both outcomes.
+    #
+    # Before, because a deletion committing between the read and the subscribe
+    # would broadcast to nobody and leave this viewer rendering a document that
+    # no longer exists, with nothing left to tell it otherwise. Subscribing first
+    # makes the worst case a redundant `{:document_deleted, _}` for a row already
+    # gone, which the handler below ignores.
+    #
+    # In one place, because `terminate/2` has to unsubscribe from the topic this
+    # process actually took out -- and it cannot read the id back off `:document`,
+    # which a deletion elsewhere clears out from under it. Assigning it here,
+    # ahead of the branch, is what stops a mount path from forgetting to.
+    #
+    # Canonicalised first. `Ecto.UUID.cast/1` accepts an uppercase UUID and
+    # downcases it, so `/documents/ABC...` loads the document fine while the raw
+    # param would name a topic -- `document:ABC...` -- that no broadcast, which
+    # always uses the stored id, ever reaches. Anything that is not a UUID at all
+    # subscribes to nothing rather than turning a URL into a topic name.
+    document_id = canonical_id(id)
+
+    subscribed_document_id =
+      if document_id && connected?(socket) do
+        _ = Topics.subscribe_document(document_id)
+        document_id
+      end
+
+    socket = assign(socket, :subscribed_document_id, subscribed_document_id)
+
+    case document_id && Documents.get_document(document_id) do
       nil -> {:ok, assign(socket, :document, nil)}
       document -> mount_document(socket, document)
     end
   end
 
+  defp canonical_id(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, canonical} -> canonical
+      :error -> nil
+    end
+  end
+
   defp mount_document(socket, document) do
-    _ =
-      if connected?(socket) do
-        _ = Topics.subscribe_document(document.id)
-      else
-        :ok
-      end
-
-    conversation = Conversations.load(document.id)
-
     socket =
       socket
       |> assign(:document, document)
       |> assign(:source_available, Run.source_available?(document))
       |> assign(:progress_refresh_pending, false)
-      |> assign(:chat_task_pid, nil)
-      |> assign(:chat_token, nil)
       |> refresh_progress()
       |> PageViewer.init()
       |> assign(:from, nil)
       |> assign(:search_query, nil)
       |> assign(:search_page, nil)
       |> ReprocessModal.init()
-      # Chat state
-      |> assign(:chat_open, false)
-      |> assign(:chat_loading, false)
-      |> assign(:chat_history, conversation.history)
-      |> assign(:chat_task_ref, nil)
-      |> assign(:chat_last_question, nil)
-      |> assign(:chat_stage, nil)
-      |> assign(:chat_streaming_content, "")
-      |> assign(:chat_retrieved_context, conversation.context)
-      |> assign(:chat_interrupted, conversation.interrupted?)
-      |> assign(:chat_question, nil)
-      |> assign(:embeddings_ready, Chat.embeddings_ready?(document))
-      |> stream(:chat_messages, conversation.messages)
+      |> ChatSession.init(document)
 
     {:ok, socket}
   end
@@ -106,13 +142,11 @@ defmodule DoctransWeb.DocumentLive.Show do
     {:noreply, socket}
   end
 
-  def handle_event(event, params, socket)
-      when event in ~w(prev_page next_page goto_page toggle_original zoom_in zoom_out) do
+  def handle_event(event, params, socket) when event in @page_viewer_events do
     PageViewer.handle_event(event, params, socket)
   end
 
-  def handle_event(event, params, socket)
-      when event in ~w(show_reprocess_modal show_document_reprocess_modal hide_reprocess_modal update_reprocess_models reprocess_page reprocess_document) do
+  def handle_event(event, params, socket) when event in @reprocess_events do
     ReprocessModal.handle_event(event, params, socket)
   end
 
@@ -120,117 +154,40 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   @impl true
   def handle_event("toggle_chat", _params, socket) do
-    socket =
-      socket
-      |> assign(:chat_open, !socket.assigns.chat_open)
-      # Refresh embeddings status when opening chat
-      |> maybe_refresh_embeddings_status()
-      |> restore_chat_messages()
-
-    {:noreply, socket}
+    {:noreply, ChatSession.toggle_open(socket)}
   end
 
   @impl true
   def handle_event("send_chat_message", %{"message" => message}, socket) do
-    trimmed_message = String.trim(message || "")
-
-    # Guard against empty messages and double submits
-    if trimmed_message == "" or socket.assigns.chat_loading do
-      {:noreply, socket}
-    else
-      document = socket.assigns.document
-
-      # Add user message to stream
-      user_msg = Conversations.start_question(document.id, trimmed_message)
-
-      socket =
-        socket
-        |> stream_insert(:chat_messages, user_msg)
-        |> assign(:chat_question, user_msg)
-        |> assign(:chat_interrupted, false)
-        |> assign(:chat_loading, true)
-        |> assign(:chat_stage, :understanding)
-        |> assign(:chat_streaming_content, "")
-
-      # Get existing chat history and accumulated retrieval context
-      chat_history = socket.assigns.chat_history
-      retrieved_context = socket.assigns.chat_retrieved_context
-
-      # Spawn async task running the agentic pipeline. Stage/token events are
-      # sent back to this LiveView process via the on_event callback; the task's
-      # return value carries the final answer + updated context for history and
-      # accumulation.
-      lv = self()
-      chat_token = make_ref()
-
-      task =
-        Task.Supervisor.async_nolink(
-          Doctrans.TaskSupervisor,
-          fn ->
-            Chat.Agent.run(
-              document,
-              trimmed_message,
-              chat_history,
-              [retrieved_context: retrieved_context],
-              fn event -> send(lv, {:chat_event, chat_token, event}) end
-            )
-          end
-        )
-
-      socket =
-        socket
-        |> assign(:chat_token, chat_token)
-        |> assign(:chat_task_ref, task.ref)
-        |> assign(:chat_task_pid, task.pid)
-        |> assign(:chat_last_question, trimmed_message)
-
-      {:noreply, socket}
-    end
+    {:noreply, ChatSession.ask(socket, message)}
   end
 
-  defp restore_chat_messages(%{assigns: %{chat_open: true}} = socket) do
-    conversation = Conversations.load(socket.assigns.document.id)
-
-    socket =
-      if socket.assigns.chat_loading do
-        socket
-      else
-        socket
-        |> assign(:chat_history, conversation.history)
-        |> assign(:chat_retrieved_context, conversation.context)
-        |> assign(:chat_interrupted, conversation.interrupted?)
-      end
-
-    stream(socket, :chat_messages, conversation.messages, reset: true)
-  end
-
-  defp restore_chat_messages(socket), do: socket
-
-  defp maybe_refresh_embeddings_status(socket) do
-    if socket.assigns.chat_open do
-      assign(socket, :embeddings_ready, Chat.embeddings_ready?(socket.assigns.document))
-    else
-      socket
-    end
+  @impl true
+  def handle_async(:fetch_models, result, socket) do
+    ReprocessModal.handle_async(:fetch_models, result, socket)
   end
 
   # PubSub Handlers
 
   @impl true
   def terminate(_reason, socket) do
-    if connected?(socket) && socket.assigns.document do
-      Topics.unsubscribe_document(socket.assigns.document.id)
+    # No `connected?/1` check: `terminate/2` only runs for a connected LiveView,
+    # and a disconnected mount leaves this assign nil, so the id alone decides.
+    if socket.assigns.subscribed_document_id do
+      Topics.unsubscribe_document(socket.assigns.subscribed_document_id)
     end
 
     :ok
   end
 
+  # A document topic outlives its document: a job cancelled alongside a deletion
+  # is not stopped synchronously, so it can still broadcast an update after
+  # `{:document_deleted, _}` has emptied the assign. Nothing left to refresh.
   @impl true
-  def handle_info(:fetch_available_models, socket) do
-    ReprocessModal.fetch_available_models(socket)
+  def handle_info({:document_updated, _document}, %{assigns: %{document: nil}} = socket) do
+    {:noreply, socket}
   end
 
-  @impl true
   def handle_info({:document_updated, _document}, socket) do
     document = Documents.get_document(socket.assigns.document.id)
 
@@ -251,8 +208,24 @@ defmodule DoctransWeb.DocumentLive.Show do
        |> PageViewer.apply_params(%{"page" => to_string(max(1, number))})
        |> refresh_progress()}
     else
-      {:noreply, assign(socket, :document, nil)}
+      {:noreply, document_vanished(socket)}
     end
+  end
+
+  # Already showing not-found. Nothing to clear, and this socket may never have
+  # mounted a document at all -- `mount/3` subscribes before it reads -- so it has
+  # no chat assigns for `document_vanished/1` to reach for.
+  @impl true
+  def handle_info({:document_deleted, _id}, %{assigns: %{document: nil}} = socket) do
+    {:noreply, socket}
+  end
+
+  # A deletion from elsewhere reaches this viewer on its own document topic. The
+  # document is gone, so the assign says so and the template's not-found branch
+  # renders -- the same landing as a `{:document_updated, _}` that re-reads a row
+  # already deleted.
+  def handle_info({:document_deleted, _id}, socket) do
+    {:noreply, document_vanished(socket)}
   end
 
   @impl true
@@ -276,7 +249,8 @@ defmodule DoctransWeb.DocumentLive.Show do
           assign(socket, :progress_refresh_pending, true)
         end
 
-      {:noreply, socket |> prune_chat_context(page) |> maybe_refresh_embeddings_status()}
+      {:noreply,
+       socket |> ChatSession.prune_context(page) |> ChatSession.refresh_embeddings_status()}
     else
       {:noreply, socket}
     end
@@ -325,7 +299,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   @impl true
   def handle_info({ref, {:error, reason}}, socket) when socket.assigns.chat_task_ref == ref do
     Process.demonitor(ref, [:flush])
-    {:noreply, ChatSession.put_error(socket, ErrorMessages.message(reason))}
+    {:noreply, ChatSession.put_failure(socket, reason)}
   end
 
   @impl true
@@ -334,7 +308,7 @@ defmodule DoctransWeb.DocumentLive.Show do
     # :normal = success (result already handled); only error on crashes
     if reason == :normal,
       do: {:noreply, socket},
-      else: {:noreply, ChatSession.put_error(socket, ErrorMessages.message(:unknown))}
+      else: {:noreply, ChatSession.put_failure(socket, :unknown)}
   end
 
   # Catch-all handlers for stale task refs
@@ -360,15 +334,24 @@ defmodule DoctransWeb.DocumentLive.Show do
     end
   end
 
-  # Another tab may have reprocessed this page, and its translation may have
-  # landed after context was retrieved from the untranslated page. The
-  # accumulated context lives in this socket, so a content change has to evict
-  # it here too; the next answer would otherwise still be grounded in the text
-  # that was just replaced.
-  defp prune_chat_context(socket, page) do
-    context = Enum.reject(socket.assigns.chat_retrieved_context, &Chat.superseded_by?(&1, page))
-
-    assign(socket, :chat_retrieved_context, context)
+  # The document this viewer is on has gone: deleted in another tab, or already
+  # gone by the time a `{:document_updated, _}` made us re-read it.
+  #
+  # A turn in flight has to be stopped here rather than when its result lands.
+  # `Worker.cancel_document/1` cancels Oban jobs and never reaches a task this
+  # LiveView spawned, and the task is `async_nolink`, so nothing else will: left
+  # alone it runs the whole agent pipeline -- several LLM calls, up to a 300s
+  # receive timeout each -- to produce an answer with nowhere to go. Every landing
+  # a turn has writes through `Doctrans.Chat.Conversations`, whose chat session
+  # cascaded away with the document, so the answer could not be saved in any case.
+  # It also survives the user navigating away, being unlinked from this process.
+  #
+  # Killing the task and clearing the ref here is also what lets the stale-ref
+  # catch-alls at the bottom of this module handle a result that was already in
+  # flight: `chat_task_ref` is nil by the time it arrives, so it matches nothing
+  # else and is dropped -- identified by its ref, not by when it turned up.
+  defp document_vanished(socket) do
+    socket |> interrupt_chat() |> assign(:document, nil)
   end
 
   defp interrupt_chat(socket) do
@@ -383,5 +366,15 @@ defmodule DoctransWeb.DocumentLive.Show do
     |> assign(:chat_streaming_content, "")
     |> assign(:chat_retrieved_context, [])
     |> assign(:embeddings_ready, false)
+  end
+
+  # Names the reprocess-document button and fills its tooltip. The two must say
+  # the same thing: `aria-label` overrides `title` for the accessible name, so a
+  # tooltip-only explanation of why the button is disabled never reaches a
+  # screen reader.
+  defp reprocess_document_hint(true), do: gettext("Reprocess document")
+
+  defp reprocess_document_hint(false) do
+    gettext("Original upload unavailable. Re-upload this document to process it again.")
   end
 end

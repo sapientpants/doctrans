@@ -90,6 +90,68 @@ defmodule DoctransWeb.ErrorMessagesTest do
     end
   end
 
+  describe "extraction limit errors" do
+    test "state the value, the limit, and what to do about it" do
+      Gettext.with_locale(DoctransWeb.Gettext, "de", fn ->
+        assert ErrorMessages.message({:pdf_too_many_pages, [pages: 4200, limit: 1000]}) =~
+                 "4200"
+
+        assert ErrorMessages.message({:pdf_too_many_pages, [pages: 4200, limit: 1000]}) =~ "1000"
+
+        assert ErrorMessages.message(
+                 {:page_image_too_large, [page_number: 3, size: 40_000_000, limit: 20_000_000]}
+               ) =~ "40000000"
+
+        assert ErrorMessages.message({:poppler_not_found, [command: "pdftoppm"]}) =~ "pdftoppm"
+      end)
+    end
+
+    test "every extraction bound is translated in every locale" do
+      reasons = [
+        :pdf_command_timeout,
+        :pdfinfo_timeout,
+        :pdf_extraction_deadline_exceeded,
+        {:pdf_too_many_pages, [pages: 4200, limit: 1000]},
+        {:page_image_too_large, [page_number: 3, size: 40_000_000, limit: 20_000_000]},
+        {:pdf_page_too_large,
+         [width: 41_666, height: 41_666, pixels: 1_736_055_556, limit: 40_000_000, dpi: 150]},
+        {:poppler_not_found, [command: "pdftoppm"]}
+      ]
+
+      assert_translated_everywhere(reasons)
+    end
+
+    test "every retrieval outage is translated in every locale" do
+      # Both spellings: `Doctrans.Chat.retrieve/4` returns the tagged tuple, and
+      # the bare atom is what the tuple clause delegates to. Without a clause of
+      # its own the tuple would fall through to the generic message and nothing
+      # else in the suite would notice.
+      assert_translated_everywhere([
+        :retrieval_unavailable,
+        {:retrieval_unavailable, [reason: :circuit_open]},
+        {:retrieval_unavailable, [reason: :database_error]}
+      ])
+    end
+
+    test "an outage does not read the same as a search that ran and failed" do
+      Gettext.with_locale(DoctransWeb.Gettext, "en", fn ->
+        # Different surfaces, different scope: global search failing outright
+        # versus this document's retrieval being unreachable.
+        refute ErrorMessages.message(:retrieval_unavailable) ==
+                 ErrorMessages.message(:search_failed)
+      end)
+    end
+
+    test "a renderer timeout and a reader timeout do not give the same advice" do
+      Gettext.with_locale(DoctransWeb.Gettext, "en", fn ->
+        # Nothing was rendered when pdfinfo hangs, so "lower the resolution"
+        # would be advice the user cannot act on.
+        refute ErrorMessages.message(:pdfinfo_timeout) ==
+                 ErrorMessages.message(:pdf_command_timeout)
+      end)
+    end
+  end
+
   describe "file errors" do
     @tag :tmp_dir
     test "translates file validation failures", %{tmp_dir: dir} do
@@ -109,6 +171,26 @@ defmodule DoctransWeb.ErrorMessagesTest do
 
         assert {:error, "Dateipfad und Dateiendung müssen Zeichenketten sein"} =
                  translated(Validation.validate_file_content(nil, ".pdf"))
+      end)
+    end
+  end
+
+  # Looping the known locales rather than a hand-picked subset: a msgid left
+  # untranslated, or a typo'd placeholder, only shows up in the locale that has
+  # it.
+  defp assert_translated_everywhere(reasons) do
+    generic = ErrorMessages.message(:unknown)
+
+    for locale <- Gettext.known_locales(DoctransWeb.Gettext), reason <- reasons do
+      Gettext.with_locale(DoctransWeb.Gettext, locale, fn ->
+        message = ErrorMessages.message(reason)
+
+        assert message != generic,
+               "#{inspect(reason)} falls back to the generic message in #{locale}"
+
+        assert message != ""
+        # An unresolved placeholder means the translation misspelled a binding.
+        refute message =~ "%{", "#{inspect(reason)} has an unresolved binding in #{locale}"
       end)
     end
   end

@@ -25,7 +25,10 @@ defmodule Doctrans.Documents.Chunk do
     timestamps()
   end
 
+  @type t :: %__MODULE__{}
+
   @doc false
+  @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(chunk, attrs) do
     chunk
     |> cast(attrs, [
@@ -42,6 +45,7 @@ defmodule Doctrans.Documents.Chunk do
   @doc """
   Changeset for updating embedding results.
   """
+  @spec embedding_changeset(t(), map()) :: Ecto.Changeset.t()
   def embedding_changeset(chunk, attrs) do
     chunk
     |> cast(attrs, [:embedding, :embedding_status])

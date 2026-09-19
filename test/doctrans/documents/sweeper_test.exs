@@ -1,22 +1,23 @@
 defmodule Doctrans.Documents.SweeperTest do
   use Doctrans.DataCase, async: false
 
-  alias Doctrans.Documents
   alias Doctrans.Documents.Sweeper
 
   import Doctrans.Fixtures
 
   setup do
-    # Create the documents directory for testing
-    uploads_dir = Documents.uploads_dir()
+    # Sweep tests delete every directory the root contains, so give them a root
+    # of their own rather than emptying the one the rest of the suite shares.
+    previous = Application.fetch_env!(:doctrans, :uploads)
+    uploads_dir = Path.join(System.tmp_dir!(), "doctrans-sweeper-#{Uniq.UUID.uuid7()}")
+    Application.put_env(:doctrans, :uploads, Keyword.put(previous, :upload_dir, uploads_dir))
+
     documents_dir = Path.join(uploads_dir, "documents")
-    # Clean up any leftover directories from previous runs to ensure isolation
-    File.rm_rf!(documents_dir)
     File.mkdir_p!(documents_dir)
 
     on_exit(fn ->
-      # Clean up any test directories we created
-      File.rm_rf(documents_dir)
+      Application.put_env(:doctrans, :uploads, previous)
+      File.rm_rf!(uploads_dir)
     end)
 
     %{documents_dir: documents_dir}

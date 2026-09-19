@@ -11,6 +11,7 @@ defmodule Doctrans.EnvLoader do
 
   # The path is operator configuration (DOCTRANS_ENV_FILE), never an upload or request value.
   # sobelow_skip ["Traversal.FileModule"]
+  @spec load(String.t()) :: :ok
   def load(path \\ System.get_env("DOCTRANS_ENV_FILE", ".env")) do
     case File.read(path) do
       {:ok, contents} ->

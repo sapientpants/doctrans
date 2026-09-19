@@ -36,6 +36,7 @@ defmodule Doctrans.Documents.Document do
   @type t :: %__MODULE__{}
 
   @doc false
+  @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(document, attrs) do
     document
     |> cast(attrs, [
@@ -57,6 +58,7 @@ defmodule Doctrans.Documents.Document do
   @doc """
   Changeset for updating document status.
   """
+  @spec status_changeset(t(), String.t(), String.t() | nil) :: Ecto.Changeset.t()
   def status_changeset(document, status, error_message \\ nil) do
     document
     |> cast(%{status: status, error_message: error_message}, [:status, :error_message])

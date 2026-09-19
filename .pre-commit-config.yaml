@@ -103,13 +103,15 @@ repos:
         types: [elixir]
         pass_filenames: false
 
-      # 3. Translation completeness check (fast)
+      # 3. Translation completeness, and no fuzzy entries (fast). Gettext renders
+      # fuzzy translations, so one is not a placeholder -- it is wrong text already
+      # shipping, auto-filled from a different msgid the merge found similar.
       - id: check-translations
-        name: Check translation completeness
-        entry: elixir scripts/check_translations.exs
+        name: Check translations (complete, none fuzzy)
+        entry: mix run --no-start scripts/check_translations.exs
         language: system
         pass_filenames: false
-        files: ^priv/gettext/.*\.po[t]?$
+        files: ^(priv/gettext/.*\.pot?|scripts/check_translations\.exs)$
 
       # 4. Compilation with warnings as errors (medium speed)
       - id: mix-compile
@@ -127,13 +129,59 @@ repos:
         pass_filenames: false
         files: ^(mix\.exs|mix\.lock)$
 
-      # 3.6. Module size check (600 lines max)
-      - id: check-module-size
-        name: Check module size limits
-        entry: elixir scripts/check_module_size.exs --max-lines 600
+      # 3.55. Toolchain pin agreement. mise.toml is authoritative; CI reads it
+      # directly via erlef/setup-beam's `version-file`, but a Docker `FROM` line
+      # cannot, so this keeps Dockerfile.dev's restated version honest — and keeps
+      # its base image pinned by digest, since only the digest is immutable.
+      - id: check-toolchain-pins
+        name: Check toolchain pins match mise.toml
+        entry: elixir scripts/check_toolchain_pins.exs
         language: system
         pass_filenames: false
-        files: ^lib/.*\.ex$
+        files: ^(mise\.toml|Dockerfile\.dev|scripts/check_toolchain_pins\.exs)$
+
+      # 3.57. GitHub Actions pin register. Every `uses:` must name an immutable
+      # commit SHA with a version comment, and every checkout must set
+      # `persist-credentials: false`. Every action README shows a floating tag, so
+      # the regression is a copy-paste away; Dependabot's github-actions ecosystem
+      # is what keeps the pins from going stale.
+      - id: check-action-pins
+        name: Check GitHub Actions are SHA-pinned
+        entry: elixir scripts/check_action_pins.exs
+        language: system
+        pass_filenames: false
+        files: ^(\.github/workflows/.*\.ya?ml|scripts/check_action_pins\.exs)$
+
+      # 3.6. Module size limit. This line is the only place the number is stated:
+      # the script requires --max-lines and has no default, so a caller cannot
+      # disagree with a default it cannot see. 500 is the value the script documented
+      # from the start; the 600 override was added inside a feature PR to let that
+      # feature land, which is how the rule came to have two numbers. Line count is a
+      # weak proxy for complexity — Credo measures that directly at its own defaults
+      # (G11) — but it is the only check that sees a module accumulating several
+      # simple responsibilities, so it stays blocking.
+      - id: check-module-size
+        name: Check module size limits (500 lines)
+        entry: elixir scripts/check_module_size.exs --max-lines 500
+        language: system
+        pass_filenames: false
+        files: ^(lib/.*\.ex|scripts/check_module_size\.exs)$
+
+      # 3.7. Compile-time dependency cycles. Architectural enforcement was assessed
+      # and Boundary rejected (PLAN.md G16): the violations it would catch do not
+      # exist here, and it is an unmaintained compiler-tracer dependency with no
+      # upper version bound. `mix xref` ships with Elixir, so it adds no
+      # compatibility surface. A compile-connected cycle means a change to any
+      # module in it recompiles all of them, and it is how one accidental
+      # compile-time call spreads -- a module attribute reading another module's
+      # function is enough. The baseline is zero and must stay zero.
+      - id: xref-cycles
+        name: Check for compile-time dependency cycles
+        entry: mix xref graph --format cycles --label compile-connected --fail-above 0
+        language: system
+        pass_filenames: false
+        # test/support is on elixirc_paths under MIX_ENV=test, so it feeds the graph too.
+        files: ^(lib/|test/support/|mix\.exs$)
 
       # 4. Static code analysis with Credo (medium speed)
       - id: credo
@@ -143,13 +191,37 @@ repos:
         pass_filenames: false
         files: ^(lib/|test/).*\.ex$
 
-      # 5. Security-focused static analysis (medium speed)
+      # 5. Security-focused static analysis (medium speed).
+      # .sobelow-conf sets exit: "low", so every confidence level blocks. Known-good
+      # sites carry a `# sobelow_skip` annotation and a justification on the function
+      # that owns the call; a new finding fails here instead of printing as noise.
       - id: sobelow
         name: Sobelow security analysis
         entry: mix sobelow --config
         language: system
         pass_filenames: false
         files: ^(lib/|config/)
+
+      # 5.2. raw/1 call-site register. .sobelow-conf ignores Config.CSP because the app
+      # is loopback-bound, which leaves the HTML sanitizer as the only layer in front of
+      # LLM-extracted upload content. This pins the two sites that depend on it.
+      - id: check-raw-call-sites
+        name: Check raw/1 call sites
+        entry: elixir scripts/check_raw_call_sites.exs
+        language: system
+        pass_filenames: false
+        files: ^(lib/.*\.(ex|exs|heex)|scripts/check_raw_call_sites\.exs)$
+
+      # 5.45. Dialyzer suppression register. Narrow `{file, class, line}` keys, an
+      # owner, an expiry, an upstream link, and a rationale per entry, capped at 8.
+      # `always_run` because the expiry is a date, not a file change: a register nobody
+      # touches is exactly the one that goes stale.
+      - id: check-dialyzer-filters
+        name: Check Dialyzer suppression register
+        entry: elixir scripts/check_dialyzer_filters.exs
+        language: system
+        pass_filenames: false
+        always_run: true
 
       # 5.5. Static type analysis. --list-unused-filters makes a stale entry in
       # .dialyzer_ignore.exs fail the gate instead of lingering unnoticed.

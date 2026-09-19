@@ -51,8 +51,9 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   retains its full translation. Expansion/contraction regression tests cover both indexing paths,
   passage preservation, vector retrieval, and legacy chat context. Existing vectors need no rebuild;
   README documents optional rechunking to remove stored legacy pairings.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:215,262`, `lib/doctrans/chat.ex:141`,
-  `lib/mix/tasks/rechunk_documents.ex`. Reproduced with a chunking probe.
+  Evidence: `lib/doctrans/search/indexer.ex` (`create_chunks/2`, `chunks_match_page_content?/2`),
+  `lib/doctrans/chat.ex:141`, `lib/mix/tasks/rechunk_documents.ex`. Reproduced with a chunking probe.
+  R01 moved this code out of the deleted `EmbeddingWorker`; the chunking decision is unchanged.
 
 - [x] **C02 · P1 · Reject incomplete or reasoning-only document output.**
   The shared API response parser ignores `finish_reason` and substitutes reasoning when final content is missing.
@@ -146,7 +147,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   copy from an open socket's accumulated context too; it returns false for a chunk read from another page,
   so callers pass their whole accumulated context without pre-filtering. `content_revision` was not reused
   to carry translation freshness: it fences in-flight embedding and page writes
-  (`EmbeddingWorker.with_current_revision/2`, `Run.with_page/2`), and advancing it on translation would
+  (`Indexer.with_current_revision/2`, `Run.with_page/2`), and advancing it on translation would
   discard the embeddings generated for that page. A separate `translation_revision` column would be inert
   with respect to both fences and remains open as a cheaper invariant if the text comparison ever costs
   too much; the content check was chosen because it needs no migration and also catches a translation
@@ -157,104 +158,543 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
 
 ## Phase 2 — Recoverable processing and indexing
 
-- [ ] **R01 · P2 · Move indexing to durable, bounded jobs.**
+- [x] **R01 · P2 · Move indexing to durable, bounded jobs.**
   Embedding requests and pending work exist only in a GenServer and supervised tasks.
   Startup recovery does not recover indexing for fully translated pages. Restart, task failure, or exhausted
   retries can leave completed documents unavailable to semantic search/chat until manually reprocessed.
   Use Oban with page-generation-aware uniqueness, bounded concurrency, and pending/error reconciliation.
   Acceptance: restart during indexing eventually restores search/chat; transient failure retries persist;
   duplicate requests do not create duplicate work; obsolete generations cannot overwrite current vectors.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:37,46`,
-  `lib/doctrans/processing/startup_recovery.ex:67`. Code-based finding.
+  Implemented: an indexing request is now a row. `Doctrans.Jobs.EmbeddingJob` runs on a new
+  `embedding_generation` queue at concurrency 2 — bounded, where the GenServer started one supervised task
+  per page with no ceiling — and `Doctrans.Search.Indexer` holds the chunking and embedding that used to
+  live in `EmbeddingWorker`, which is gone along with its coalescing state and its supervision-tree entry.
+  The page generation the job is keyed on is `content_revision`, the column the database trigger already
+  advances whenever a page's source text changes; `processing_generation` fences a *processing* run and
+  says nothing about whether the text changed, so it is the wrong fence for vectors. Uniqueness over
+  `[page_id, revision]` across all active states makes a repeated request for a revision already queued
+  or running a no-op, while a re-extraction queues a genuinely distinct unit of work. The superseded job
+  cannot win if the two overlap: every write the indexer makes still passes `with_current_revision/2`,
+  and a run whose fence fails now reports `{:cancel, :stale_page}` rather than the `:ok` it used to
+  report after writing nothing. The final "completed" write was fenced before this change too, so the
+  row state was never wrong; what changed is that the run no longer reports success for work it skipped.
+  Retries moved out of the process and into the schedule: the in-task `Process.sleep` loop over
+  `@max_retries` is gone and a transient chunk failure is returned as `{:error, reason}` for Oban to
+  retry across restarts. A page is cancelled only when *every* failure on it fails
+  `ErrorClassifier.retryable?/1`; classifying the page on whichever chunk happened to fail first would
+  let one oversized chunk strand the chunks that failed transiently beside it. A retry only re-embeds
+  chunks that still have no vector. The OpenAI client underneath still replays transient failures within
+  a single call, which is why the indexer passes `melt: false` rather than melting a fuse the client
+  already melts — see R06.
+  Startup recovery gained a third phase, `{:embeddings, cursor}`, running after documents and pages with
+  the same batch size and cursor. It queues every page whose extraction completed and whose
+  `embedding_status` is not `completed` — pending, errored, or left `processing` by a restart — and it
+  reads the revision under a row lock so a page rewritten since selection is queued at the revision it
+  now holds. Unlike the page phase it does not filter on document status, which is what left fully
+  translated pages of completed documents unrecovered.
+  That phase matches existing jobs on the page **and** the revision, unlike the page-keyed filter the
+  other phases use. A page-keyed filter is wrong for a revision-keyed worker: a job holding a superseded
+  revision cancels without indexing anything, so treating it as the page's owner skipped the revision
+  that replaced it and left the page unindexed until some later restart. Jobs that already settled the
+  current revision by being `cancelled` do suppress recovery, so a permanent failure is not re-queued and
+  re-charged to the API on every boot; `discarded` does not, because exhausted retries were retryable
+  failures and a restart is a fair new attempt. Retaining that evidence is why `Oban.Plugins.Pruner` now
+  keeps history for a week instead of its 60-second default, and each page is queued in its own
+  transaction so one unqueueable row costs that page rather than the batch.
+  `doctrans.embedding.crashed.count` was dropped from telemetry: the GenServer `:DOWN` handler that
+  emitted it no longer exists. Nothing in the app subscribed to Oban's events, so two replacements were
+  added rather than assumed. `EmbeddingJob.perform/1` emits `[:doctrans, :retry, :attempt]` and
+  `[:doctrans, :retry, :exhausted]` tagged `type: :embedding` — the series `DoctransWeb.Telemetry`
+  already declares alongside `:extraction` and `:translation`, and which would otherwise have gone
+  silently dead — and `job_metrics/0` adds `[:oban, :job, :stop]` and `[:oban, :job, :exception]` counters
+  by queue, which is how a crashed or cancelled job in any queue now surfaces. `Oban.Lifeline` drops from
+  a one-hour rescue window to fifteen minutes: an orphaned `executing` job blocks both recovery and
+  re-enqueue for the page it holds, and an hour is far longer than any real indexing run.
+  Evidence: `lib/doctrans/jobs/embedding_job.ex`, `lib/doctrans/search/indexer.ex`,
+  `lib/doctrans/processing/startup_recovery.ex:99`, `config/config.exs:121`. Reproduced in database tests:
+  a job carrying a superseded revision cancels and leaves the current vectors untouched, a transient
+  failure is reported for retry and succeeds on the next attempt, recovery queues indexing for a
+  completed document the page phase never looks at, and recovery still queues the current revision while
+  a superseded job for the same page is active — which fails against a page-keyed filter.
 
-- [ ] **R02 · P2 · Track failed page embeddings accurately.**
+- [x] **R02 · P2 · Track failed page embeddings accurately.**
   Successful chunk embeddings are followed by a page embedding call whose failure is only logged;
   the page is then marked indexed. Global search relies on page embeddings and silently loses semantic coverage.
   Track/retry page indexing separately, or standardize global search on chunk retrieval.
   Acceptance: chunk success plus page embedding failure cannot report complete global indexing;
   retry restores semantic search without rerunning OCR/translation.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:151,320`. Implement with R01.
+  Implemented: the page-level call's result is no longer discarded. A page whose chunks embedded but
+  whose page vector did not is reported as `{:error, reason}` or `{:cancel, reason}` like any other
+  failure and left at `embedding_status: "error"`, so Oban retries it and startup recovery — which keys
+  on that status — can still see it. Marking it `completed` was the trap: global search requires
+  `p.embedding IS NOT NULL`, so the page was absent from search with nothing left to notice it, and
+  R01's new recovery query would have made that permanent rather than merely long-lived. The chunk
+  vectors are kept, so the retry owes only the page-level call.
+  Evidence: `lib/doctrans/search/indexer.ex` (`finish_page_level_embedding/3`), `lib/doctrans/search.ex:336`.
+  Reproduced in a database test that fails only the call carrying the whole page's text.
 
-- [ ] **R03 · P2 · Reconcile document completion on replay and restart.**
+- [x] **R03 · P2 · Reconcile document completion on replay and restart.**
   The last translation is saved before document completion is updated. A crash between those writes leaves
   a processing document whose resumed job skips completed stages and whose pages startup recovery excludes.
   Recheck completion on every successful replay and reconcile eligible documents during startup.
   Acceptance: a processing document with all final pages saved reaches the correct terminal state after
   job replay or startup, without making another model request. Cover failed pages using C03's status semantics.
-  Evidence: `lib/doctrans/processing/llm_processor.ex:121,245,257`,
-  `lib/doctrans/processing/startup_recovery.ex:26,68`. Reproduced in a rolled-back database test.
+  Implemented: the completion check moved out of the two branches that happened to write the last
+  translation and into `do_process_page/2`, so it runs once on every successful page job — including the
+  replay that skips both stages because they are already saved. That replay used to return `:ok` without
+  ever looking at the document again, which is what made the crash window permanent rather than
+  self-healing; resolving it costs no extra query and no model call, because the check reuses the page
+  the run already read and so keeps the orchestrator's revision fence meaningful.
+  Startup recovery gained a fourth phase, `{:completion, cursor}`, batched and cursored like the others.
+  It selects `processing` documents with a known page count and no unsettled page, and hands each to
+  `DocumentOrchestrator.check_document_completion/1`, so C03's rules — success only when every expected
+  page succeeded, `{:pages_failed, ...}` when they all settled with a failure, and no change while a
+  failed page's retry is still pending — decide the outcome. The phase queues nothing. Per-row database
+  failures are contained and logged, as in the embedding phase, so one bad row cannot abandon the cursor
+  mid-batch or restart the whole pass.
+  It runs last on purpose. The page phase resets a failed page to `pending` and queues a retry, which
+  unsettles the document again; settling failures before that ran would record an error for a page that
+  recovery is about to reprocess. Documents already in `error` are deliberately left out: only a
+  `processing` document is mid-run, and reconciling an `error` document would resurrect one an operator
+  or a document-level failure deliberately stopped.
+  "Settled" is now a query-land predicate, `Page.settled?/1`, which delegates to the existing `failed?/1`
+  rather than restating it, so the recovery filter and `Pages.completion_state/1` cannot drift apart.
+  Evidence: `lib/doctrans/processing/llm_processor.ex` (`do_process_page/2`),
+  `lib/doctrans/processing/startup_recovery.ex` (`run_batch({:completion, _})`),
+  `lib/doctrans/documents/page.ex` (`settled?/1`). Reproduced in database tests: a replay of a fully
+  saved page completes its document against an OpenAI stub that raises on any call, the same replay
+  settles a document whose other page failed, one replay drives the Oban job itself rather than the
+  processor, and the startup phase completes, settles, or leaves each document alone according to C03's
+  states — including leaving an already-failed document untouched.
   Dependency: C03.
 
-- [ ] **R04 · P2 · Bound PDF subprocess execution and resources.**
+- [x] **R04 · P2 · Bound PDF subprocess execution and resources.**
   `pdfinfo` and `pdftoppm` run through unbounded `System.cmd`; the extraction job has no deadline,
   and extraction concurrency is one. A hung renderer can occupy the only slot indefinitely.
   Reuse the monitored LibreOffice subprocess approach with deadlines, bounded diagnostics, child cleanup,
   and configurable page/image resource limits.
   Acceptance: a fake hung renderer times out and is reaped; subsequent extraction can run;
   excessive diagnostic output is bounded; legitimate larger documents have actionable limit errors.
-  Evidence: `lib/doctrans/processing/pdf_extractor.ex:94,117`, `config/config.exs:104`.
-  Code-based finding; no deliberate renderer hang was run during review.
+  Implemented: the converter's port machinery moved into `Processing.Subprocess` — a deadline that output
+  cannot reset, a 64 KiB tail of diagnostics, a SIGKILL of the child's process group on every exit path,
+  and a monitored owner that reaps the child when the caller dies mid-run. Extracting it rather than
+  copying it is the point: the renderer and the converter now fail the same way, and a fix to one is a
+  fix to both. `DocumentConverter` kept only what is LibreOffice's — profile creation, argument
+  assembly, and its own error vocabulary — and its existing tests, including the launcher-child and
+  caller-kill cases, pass against the shared module unchanged.
+  Both poppler commands now run through it with separate deadlines, because the two calls are not
+  comparable: `pdfinfo` reads a header (15 s) while `pdftoppm` rasterizes a page (120 s). A hung
+  `pdfinfo` reports as its own reason rather than as a rendering timeout, since advice to lower the
+  resolution is unusable when nothing was rendered. Executables resolve through
+  `Processing.Executable`, shared with the converter — a configured path, then `$PATH`, then the known
+  install directories for a daemon started with a slim environment — which is what let the hang, the
+  flood, and the limits be tested against fake renderers instead of a real one.
+  The child environment is an allowlist, not a denylist: `System.cmd`'s `env:` option merges into the
+  inherited environment rather than replacing it, so the previous `env: [{"PATH", ...}]` passed every
+  credential the VM held straight to poppler. Naming the variables a converter may keep means a secret
+  added later is excluded by default instead of needing to be remembered.
+  Four limits bound one document's demand, all under `:pdf_extraction` and read through
+  `Config.PdfExtraction`. `:max_pages` and `:max_page_pixels` are checked in `get_page_count/1`, the
+  single call that decides how much extraction follows, so an oversized document is rejected before a
+  page is rendered. The pixel bound is the one that has to come first: a maximal PDF media box
+  rasterizes to gigabytes of memory and disk well inside any sane deadline, so a byte check afterwards
+  is too late to prevent it. `:max_image_bytes` still rejects a rendered page and deletes it — every
+  oversized render, not just the first, because leaving one behind would make a lower `:dpi` take no
+  effect, as extraction treats a stored image as a finished page. Each error reports the value and the
+  limit, so the answer is a smaller document or a lower resolution.
+  The job's own deadline is `DocumentExtractionJob.timeout/1`, and `PdfProcessor` turns it into a
+  document budget that each page render is clamped against. Without that clamp the per-page ceiling
+  times the page limit is 33 hours against a one-hour job, so past roughly thirty slow pages the
+  subprocess deadline never binds and Oban's `TimeoutError` is what ends the job. A timeout costs
+  little either way: rendered pages stay on disk and in the database, and `ensure_page/4` makes the
+  retry resume rather than restart. Failures that cannot come out differently — a page count over the
+  limit, a missing poppler — are cancelled rather than retried, so they neither burn the document's
+  remaining attempts nor re-occupy the single slot to reach the same answer.
+  Evidence: `lib/doctrans/processing/subprocess.ex`, `lib/doctrans/processing/executable.ex`,
+  `lib/doctrans/processing/pdf_extractor.ex`, `lib/doctrans/config/pdf_extraction.ex`,
+  `lib/doctrans/jobs/document_extraction_job.ex` (`timeout/1`), `config/config.exs` (`:pdf_extraction`).
+  Reproduced against fake poppler executables: a hung renderer times out, its process group is reaped
+  along with its grandchildren, and the next extraction in the same slot succeeds; a renderer printing
+  continuously still dies at its deadline; a render is clamped to the caller's remaining budget and an
+  exhausted budget starts no renderer at all; 280 KB of error output arrives as 64 KiB and stays valid
+  to encode; and the page, pixel, and image limits report their numbers in every locale.
 
-- [ ] **R05 · P2 · Use one runtime storage root for writing and serving images.**
+- [x] **R05 · P2 · Use one runtime storage root for writing and serving images.**
   Writers use `Config.Uploads.upload_dir/0`, but the endpoint always serves `priv/static/uploads`.
   Custom storage can successfully process documents while returning broken page-image URLs.
   The default root is also expanded during build configuration, which complicates portable releases.
   Resolve the runtime data directory consistently and retain the generated-image-only serving restrictions.
   Acceptance: upload, view, reprocess, restart, and delete work with a nondefault data root;
   originals and converted PDFs remain inaccessible through HTTP; image responses retain no-store headers.
-  Evidence: `lib/doctrans_web/endpoint.ex:46`, `config/config.exs:47`.
+  Implemented: the page-image plug now takes `from: {Doctrans.Config.Uploads, :upload_dir, []}`, the MFA
+  form `Plug.Static` resolves per request, so serving reads the one setting every writer already used.
+  The build-time `Path.expand/2` in `config/config.exs` is gone: the key is simply absent, and
+  `Config.Uploads.upload_dir/0` falls back to `priv/static/uploads` of the running application — the
+  same absent-means-default idiom the sibling accessors use. A configured root is expanded there, so
+  every caller can rely on an absolute path; page paths are persisted relative to the root, and a
+  relative root would resolve them against the working directory. A nondefault root normally points at
+  an empty volume, so the application creates the root at startup: uploads make their own
+  subdirectories, but the filesystem health check probes the root itself and would otherwise report a
+  missing directory until the first document arrived. Failure to create it names `DOCTRANS_DATA_DIR`
+  rather than surfacing a bare filesystem error from inside `start/2`. The serving restrictions are
+  untouched — the allow-list plug still admits only `page-<digits>.png` under a document's `pages` or
+  `runs/<uuid>/pages` directory, and the no-store headers stay on both ordinary and versioned requests.
 
-- [ ] **R06 · P2 · Give retries and circuit breakers clear ownership.**
-  EmbeddingWorker melts the breaker around a client that already classifies and melts failures.
+  `DOCTRANS_DATA_DIR` is validated rather than trusted. An empty value is rejected instead of silently
+  meaning the working directory (`""` is truthy, and `Path.expand("")` is the cwd, so a blanked `.env`
+  line would have scattered private documents into the repository, which `.gitignore` does not cover).
+  A relative value is rejected instead of resolving against whatever directory the release started in.
+  A root inside the statically served `priv/static` is rejected at startup by
+  `Config.Uploads.validate_root!/0`: the endpoint serves `DoctransWeb.static_paths/0` at `/` ahead of
+  the allow-list, so a root under, say, `priv/static/images` would have handed out retained sources as
+  ordinary static assets with `cache-control: public`. Both names of the development `priv` symlink are
+  checked, and the default root under `priv/static/uploads` stays allowed.
+
+  The variable is deliberately ignored in `:test`. `config/runtime.exs` is evaluated after
+  `config/test.exs` in every environment, so an operator who set it in `.env` would have had `mix test`
+  repoint the suite at their real storage root — where the sweeper tests delete every directory they
+  find. `test/test_helper.exs` refuses to start against any root other than the configured
+  `tmp/uploads_test`, as a tripwire for any future path that repoints it, and the sweeper tests now take
+  a temporary root of their own instead of emptying the shared one.
+  Evidence: `lib/doctrans_web/endpoint.ex` (`UploadImages` plug), `lib/doctrans/config/uploads.ex`,
+  `config/runtime.exs`, `lib/doctrans/application.ex`, `test/test_helper.exs`. The test environment
+  stores outside the application directory (`tmp/uploads_test`), so the whole suite runs against a
+  nondefault root; the endpoint tests build their paths from it. A dedicated test repoints the root
+  after boot and shows the fresh directory being created and reported healthy, its images served with
+  `private, no-store`, its retained sources 404, and images under a root the application has moved on
+  from no longer served. Reverting the plug alone fails five of them. `Doctrans.RuntimeConfigTest` reads
+  `config/runtime.exs` through `Config.Reader` to cover the variable itself, which `mix test` never
+  evaluates otherwise, including that `:test` ignores it.
+
+- [x] **R06 · P2 · Give retries and circuit breakers clear ownership.**
+  Indexing melted the breaker around a client that already classifies and melts failures.
   Transient errors can count twice, and permanent errors can count through the outer wrapper.
   Remove duplicate accounting and reconcile Req, processor, and Oban retry policies into documented bounds.
   Acceptance: one transient operation failure counts once; permanent API errors do not open the circuit;
   permanent failures do not receive ordinary transient job retries; cancellation does not wait through
   unnecessary nested sleeps. Preserve existing error-code conventions.
-  Evidence: `lib/doctrans/search/embedding_worker.ex:282`, `lib/doctrans/processing/openai.ex:480`.
-  Coordinate with R01.
+  Implemented: both embedding calls in `Search.Indexer` now pass `melt: false`, matching the chat paths.
+  `OpenAI.embed/2` classifies its own failures and melts `:embedding_api` only for retryable ones, so the
+  outer wrapper was counting transient failures twice and melting on the 401s and 400s the client
+  deliberately ignores — blowing the fuse at roughly half its configured tolerance, on errors that a
+  fuse cannot help with. Retry ownership itself was settled by R01: Oban holds the schedule, the indexer
+  holds no loop, and Req still replays transient failures within one call.
+  Evidence: `lib/doctrans/search/indexer.ex` (`embed/1`), `lib/doctrans/processing/openai.ex:455-465`.
 
 ## Phase 3 — Search relevance and responsiveness
 
-- [ ] **S01 · P2 · Share query embeddings and run search asynchronously.**
+- [x] **S01 · P2 · Share query embeddings and run search asynchronously.**
   Search synchronously generates separate embeddings for count and results. Direct disconnected/connected
   mounts repeat the work, producing four inference calls on the successful initial-load path.
   The loading state cannot render while the callback blocks.
   Use one combined asynchronous operation on the connected mount, reuse its vector, and discard stale results.
   Acceptance: one query embedding per submitted query; loading is visible while inference waits;
   navigation remains responsive; older responses cannot replace newer results; count and results agree.
-  Evidence: `lib/doctrans_web/live/search_live.ex:32`, `lib/doctrans/search.ex:66,247`.
+  Implemented: `Search.search_with_count/2` embeds the query once and returns both the total and the
+  page of results from a *single* statement — the count is a `COUNT(*) OVER ()` window over the same
+  filtered rows the page is drawn from. That replaced the `count_results/2` + `search/2` pair at the
+  LiveView's call site, and `count_results/2` and its 56-line duplicate of the ranking CTE were deleted
+  with it: they had no production caller left, and two independently editable definitions of "matched"
+  were the remaining way for the count and the results to disagree. `search/2` now shares the statement
+  too, so option parsing lives in one place. Both the double ranking pass (`semantic_ranked` ranks every
+  embedded page, and used to do it twice per search) and the count/search race window are gone rather
+  than documented. `SearchLive` runs it through `start_async/3` on `Doctrans.TaskSupervisor`, so the
+  callback no longer blocks: the spinner renders while inference waits, and the disconnected mount
+  renders that spinner and does no work at all. A successful initial load went from four inference calls
+  to one, and from two full ranking passes to one.
+  Tradeoff accepted: the first paint of a query-bearing URL no longer contains results, so a client that
+  never establishes the websocket — JS disabled, or a crawler — sees the spinner and nothing else. For a
+  local single-user app that is the right trade for a responsive view; it is a real behaviour change all
+  the same.
+  Tradeoff accepted: the total is a window over the returned rows, so an `:offset` past the last match
+  returns no rows and reports a total of 0 rather than the true total. A caller paginating past the end
+  renders an empty result set, which is what it should render anyway.
+  A superseding query cancels the search it replaces rather than letting it finish, and LiveView drops
+  the result of a task a later `start_async` has re-keyed, so a newer response always wins. The payload
+  also names the query and page it was started for, because cancellation alone is not enough: a
+  rejected query cancels without starting a replacement, and `cancel_async/2` neither clears the stored
+  ref nor kills synchronously, so a task reporting in the moment before its exit signal landed would
+  otherwise have rendered the previous query's results under the rejected one. Cancelling a search that
+  already reached SQL discards its pooled connection — the accepted price of abandoning a superseded
+  inference call rather than paying for an answer nobody will see.
+  Evidence: `lib/doctrans/search.ex` (`search_with_count/2`), `lib/doctrans_web/live/search_live.ex`
+  (`run_search/3`, `handle_async/3`). `SearchLiveAsyncTest` parks the embedding stub mid-inference to
+  show the spinner rendering, the view staying navigable, and the superseded task exiting with
+  `{:shutdown, :cancel}` — an assertion that goes red when the cancellation is removed, where the
+  outcome assertions around it do not. The stale-payload guard is driven through `handle_async/3`
+  directly, since no timing-based test can reliably open that window. A probe counts one embedding per
+  submitted query where the old path made four. `SearchWithCountTest` takes seven matches against a
+  limit of five, on both the full and the tail page, so a total that merely described the page it
+  shipped with would fail. The three failure clauses of `handle_async/3` — a cancellation the view
+  asked for, a task that died, and a search that returned an error — are each driven directly, because
+  none of them has a timing-based route and deleting any one of them was previously invisible to the
+  whole suite: dropping the `{:shutdown, :cancel}` clause made an invalid query render "Search
+  unavailable" with every test still green.
+  Bounds: `search_with_count/2` rejects a `:limit`, `:offset` or `:rrf_k` outside the range Postgres can
+  encode, because Postgrex *raises* on those rather than returning an error, which would escape the
+  module's `{:ok, _} | {:error, _}` contract and kill the caller. `SearchLive` clamps `?page=` as well,
+  so an over-large page renders as the empty page it is instead of a failed search. The final `ORDER BY`
+  gained a `page_id` tiebreaker, without which tied RRF scores could put one row on two pages and drop
+  another.
+  Deleting the duplicate count query took `lib/doctrans/search.ex` from exactly the 500-line module cap
+  to 476; the seam for the next change to it is the document-scoped chat retrieval path
+  (`search_in_document/3`, `search_by_embedding/3` and their helpers), which shares no RRF or full-text
+  machinery with the global hybrid search this task changed.
 
-- [ ] **S02 · P2 · Distinguish retrieval outages from no matches.**
+- [x] **S02 · P2 · Distinguish retrieval outages from no matches.**
   MultiSearch discards failed requests and returns success with no results even when every query fails.
   Global keyword search also depends on successful embedding generation.
   Return an error when no query succeeds, retain partial successes, and support keyword-only global search
   while inference is unavailable. Present the degraded mode and errors accurately.
   Acceptance: all-query failure is an outage, successful empty retrieval is no matches, partial success
   remains useful, and known keyword results are available without an embedding server.
-  Evidence: `lib/doctrans/chat/multi_search.ex:53`, `lib/doctrans/search.ex:66`.
-  An all-`:circuit_open` probe returned `{:ok, []}`.
+  Implemented: the two retrieval paths now report *why* they returned nothing, because "no matches" and
+  "retrieval is down" are the same empty list to a reader and opposite answers to the question asked.
+  `MultiSearch.search_with_queries/3` turns each query's task result into an outcome and splits them:
+  any success still fuses with RRF exactly as before -- a partially available retrieval answers with what
+  it found -- but an all-failure run returns `{:error, first}` instead of `{:ok, []}`. The `Logger.info`
+  summary states successes against failures, so the outage is visible in logs rather than inferred from an
+  empty result.
+  `Chat.retrieve/4` is what tags an outage, wrapping *all three* of its branches as
+  `{:retrieval_unavailable, [reason: tag]}`. Tagging inside `MultiSearch` would have covered only the
+  multi-query branch, and that is the branch an outage is least likely to reach: `QueryExpander.expand/3`
+  falls back to `[question]` when the planner call fails, and the planner and the embedder are the same
+  server -- so an inference outage usually collapses the query list to one and lands on the single-query
+  branch, which reported a bare `:circuit_open` and rendered as the generic "I encountered an error".
+  `Chat.Agent` needed no change; `DocumentLive.ChatSession.put_failure/2` renders the reason through
+  `ErrorMessages.message/1`, where the refine loop still keeps the context it has.
+  Every failure path hands back the tag alone. An exit reason can carry a stacktrace holding the query text
+  and its 1024-float embedding, and a `{:database_error, [reason: %Postgrex.Error{}]}` binding carries the
+  whole SQL statement; both stay in the log, bounded, and out of a reason the web layer renders.
+  The per-query stream is supervised and *nolink* (`Task.Supervisor.async_stream_nolink/4` on
+  `Doctrans.TaskSupervisor`). `Task.async_stream/3` links each task to the caller, so one crashed query
+  took the whole chat request down with it and the `{:exit, _}` outcome could never actually be observed --
+  partial availability is the point of this module, and a crash is one more way for a query to be
+  unavailable.
+  Global search degrades instead of failing. `search_with_count/2` no longer aborts when the query cannot
+  be embedded: it passes a NULL vector into the same statement, whose `semantic_ranked` CTE gained a
+  `$1::vector IS NOT NULL` guard and so contributes no rows, leaving the full-text half to rank alone.
+  One statement serves both modes -- duplicating it is what S01 removed -- and the result map gained
+  `:retrieval` (`:hybrid` or `:keyword_only`) so the caller can say which it got. `SearchLive` carries that
+  into a `#search-degraded` notice rendered above both outcomes, including the empty one: a keyword-only
+  search that matched nothing is precisely the case a reader would otherwise read as "nothing in my
+  library matches". The notice is assigned with the result and reset by every new search, failure, and
+  query-less URL, so it cannot outlive the query that produced it.
+  Tradeoff accepted: a degraded search is a success, so an unreachable embedding server no longer raises
+  the error panel on the global search page. That is the point -- keyword results are still true results --
+  but it does mean the outage is reported as reduced recall rather than as a failure, and only the notice
+  and the log line distinguish the two.
+  The fused-score floor applies to hybrid ranking only. Keyword-only fuses one rank, so the score collapses
+  to `1/(rrf_k + fts_rank)`, which crosses under `@min_score_threshold` at rank 41 for the default k=60 --
+  the floor would have silently dropped every match past the 40th *and* shrunk the `COUNT(*) OVER ()` total
+  to agree, reporting "40 results" for a term matching five hundred pages. The floor exists to cut the
+  semantic half's noise (that half has no similarity threshold; see S03), and keyword-only has no such
+  half: every row it ranks already cleared a tsquery match. So `min_score(:keyword_only)` is 0.
+  `{:ok, nil}` is a legal embedding result and is treated as the degraded mode rather than as a ranking
+  that ran -- reporting `:hybrid` for it would claim a semantic half that sat out, and in chat it would
+  turn a query that never ran into "nothing matched".
+  Fitting the degraded path into `lib/doctrans/search.ex` put it at 515 lines, over the 500-line module cap,
+  so the hybrid statement and its execution moved to `Doctrans.Search.HybridQuery` (the module now owns how
+  a result is *found*; `Doctrans.Search` still owns what one looks like). The public API is unchanged --
+  `SearchLive` and `MultiSearch` needed no edit -- and `search.ex` came down to 395 lines. `run/3` takes its
+  knobs as options: `:limit` and `:offset` are adjacent, identically typed, and were silently transposable
+  across two differently-ordered six-argument hops.
+  Evidence: `lib/doctrans/chat/multi_search.ex` (`resolve/3`, `outcome/1`), `lib/doctrans/search.ex`
+  (`query_embedding/1`), `lib/doctrans/search/hybrid_query.ex`, `lib/doctrans_web/live/search_live.ex`.
+  `MultiSearchTest` drives the exact probe this finding recorded: an all-`:circuit_open` run, which
+  returned `{:ok, []}` against the old code and now returns the outage, with partial-success and
+  searched-but-empty tests either side of it to pin the three cases apart. `SearchWithCountTest` takes a
+  real full-text hit with the embedding client failing, alongside an embedded page the query never
+  mentions, so a semantic ranking leaking back in fails the test -- deleting the NULL guard was confirmed
+  to do exactly that. `SearchLiveAsyncTest` covers the notice with results, with zero results, absent
+  while loading, absent on the error panel, gone again after a healthy search replaces it, and not raised
+  by a superseded degraded result arriving under a newer query. `RetrieveTest` pins the outage on each of
+  the three branches and keeps a searched-but-empty retrieval as `{:ok, []}`. The floor fix is pinned by a
+  45-match degraded search asserting both the full count and the tail past offset 40; restoring the hybrid
+  floor fails both. `ErrorMessagesTest` walks the outage msgids through every known locale, since a missing
+  clause would otherwise fall through to the generic message unnoticed.
 
-- [ ] **S03 · P2 · Filter semantic relevance before rank fusion.**
+- [x] **S03 · P2 · Filter semantic relevance before rank fusion.**
   Global semantic retrieval has no similarity floor. With reciprocal-rank constant 60 and score floor .01,
   the top 40 semantic-only pages qualify regardless of actual similarity.
   Calibrate a similarity threshold before combining ranks, using known-answer and unrelated-query examples.
   Acceptance: unrelated queries can return no results; known keyword and semantic matches retain recall;
   pagination/count use the same filtering. Measure query plans on a representative larger library before
   deciding whether bounded candidate retrieval or index changes are needed.
-  Evidence: `lib/doctrans/search.ex:57,313`.
+  Implemented: the semantic half now has to earn its rows. `HybridQuery.run/3`'s `semantic_ranked` CTE gained
+  `(1 - (p.embedding <=> $1::vector)) >= $4`, and it sits inside the CTE rather than after the fusion for two
+  reasons: `ROW_NUMBER()` is then computed over the surviving rows, so RRF denominators stay dense and start
+  at 1, and `COUNT(*) OVER ()` already totals the same filtered set the page is drawn from -- pagination and
+  count use the same filtering without a second predicate that could drift from the first. Filtering after
+  the `FULL OUTER JOIN` would also have dropped keyword-only rows, whose `semantic_score` COALESCEs to 0.
+  The threshold is 0.55, calibrated against the real embedder rather than chosen. Twelve known-answer and
+  twelve unrelated queries were embedded with the configured model and ranked against the 912-page reference
+  library: the best match a known-answer query finds scores 0.603 to 0.772, and the best match an unrelated
+  query can find scores 0.446 to 0.591. The two bands do not overlap, and 0.55 sits between them. The chat
+  path's 0.30 is far below this corpus's noise floor -- at 0.30 an unrelated query still admits 18 to 186
+  pages -- which is why global search takes its own constant rather than sharing that one.
+  What an unrelated query surfaces above 0.50 is content-free boilerplate: a bare `© Campus Verlag GmbH`
+  line, an empty image page, a dot-leader contents page. Fourteen of the 912 pages carry under 120 characters
+  of text, and their embeddings sit near the corpus centroid, so they are mildly similar to every query ever
+  asked. Raising the floor to 0.60 empties all twelve unrelated queries completely, but it also cuts the
+  single most relevant page for a known-answer query -- a section headed "Liquiditätssicherung", at 0.597 --
+  and dropping a true match to silence boilerplate is the wrong trade for a personal library. Embedding
+  pages that hold no retrievable content is the actual defect behind that residue, and it is not this item's.
+  The floor on the *fused* score is gone rather than retuned. A fused score is a function of rank, not of
+  relevance: `1/(rrf_k + rank)` tells a row that is the library's only match apart from a row 500 matches
+  deep and nothing else, so any floor there is a cap on how many matches a library is permitted to have.
+  S02 had already found that edge for keyword-only ranking, where the score crossed 0.01 at rank 41 and took
+  the `COUNT(*) OVER ()` total down with it, and set `min_score(:keyword_only)` to 0; adding a similarity
+  floor without removing the rest of it would have reproduced exactly that truncation on the semantic half.
+  So `@min_score_threshold` and `min_score/1` are deleted and the mode split with them -- one threshold now
+  serves both retrieval modes, because in keyword-only mode the semantic half is empty and a NULL vector
+  clears no floor at all. Relevance is decided where it is still measurable instead of after it has been
+  flattened into a rank.
+  Query plans were measured on replicated-but-distinct corpora of 50,160 and 200,640 pages, since the
+  reference library is too small to say anything: at 912 pages the statement takes 2.1 ms and Postgres does
+  not touch `pages_embedding_idx` for any variant. The floor does not change that: a similarity threshold is
+  a range predicate, and HNSW only accelerates `ORDER BY <=>` under a `LIMIT`, so the CTE stays a sequential
+  scan and every embedded page is still compared. It costs nothing -- 512 ms drops to 465 ms at
+  200k pages, because the smaller surviving set no longer spills its sort to disk -- but it buys relevance,
+  not speed, and must not be argued for as a performance fix.
+  Bounded candidate retrieval is therefore deferred rather than adopted. Cost is linear and predictable at
+  2.3 ms per thousand pages, which puts a 200 ms statement at roughly 86,000 pages against a reference
+  library of 912. A `LIMIT 500` candidate CTE does use the index and runs in 2.0 ms at 200,640 pages, around
+  250 times faster, and the existing join does not block it -- but it caps the semantic half at K rows where the
+  current statement ranks every page above the floor, and it silently under-delivers unless `hnsw.ef_search`
+  is raised to at least K in the same transaction. With `hnsw.iterative_scan` off, which is the default and
+  is set nowhere in this project, an HNSW scan returns at most `ef_search` rows: a `LIMIT 500` written today
+  would return 40. Both of those are changes to make deliberately, when a library approaches the size that
+  needs them, not ahead of one.
+  Tradeoff accepted: an absolute cosine floor is a property of the embedding model and the corpus, not a
+  universal constant. Swapping the embedding model, or changing the Matryoshka truncation width, moves the
+  bands it separates and invalidates the number. It is a single documented module attribute for that reason,
+  and the calibration it came from is reproducible against any library the app holds.
+  Tradeoff accepted: recall is now genuinely narrower for a paraphrase. A query whose wording shares no
+  lexeme with the page it wants gets only the pages the embedder scores above 0.55, and the full-text half
+  cannot cover for it because `plainto_tsquery` ANDs every term of a sentence-length query. That is the
+  intended shape of the fix -- the alternative is the top 40 pages of the corpus regardless of the question --
+  but it is a real loss on the long tail, and it lands on exactly the abstract queries the chat threshold's
+  0.30 was chosen to protect.
+  Evidence: `lib/doctrans/search/hybrid_query.ex` (`semantic_ranked`), `lib/doctrans/search.ex`
+  (`@semantic_similarity_threshold`, `search_with_count/2`). `SemanticRelevanceTest` builds page vectors at
+  exact cosine similarities against the stub's query vector -- `k` components of `+0.1` against the rest at
+  `-0.1` gives `(2k - 1024)/1024` -- so a page can be placed a chosen distance either side of the floor
+  rather than inheriting whatever an opaque fixture produced. It pins an unrelated query returning nothing,
+  a semantic match above the floor surviving without any keyword match, a keyword match below the floor
+  being returned anyway, and a total that counts the filtered set across two pages of results; zeroing the
+  threshold fails those three and correctly leaves the two recall tests passing. The deleted fused-score
+  floor is pinned by a 45-page semantic match set asserting the full count and the tail past offset 40 --
+  restoring the floor fails it, alongside the two keyword-only tests S02 left behind for the same edge.
 
-- [ ] **S04 · P2 · Split oversized paragraphs consistently.**
+- [x] **S04 · P2 · Split oversized paragraphs consistently.**
   A long paragraph is split only when no preceding text is accumulated; after an introduction it becomes
   an oversized chunk. A probe yielded `[2, 2000]` words despite the 300-word target.
   Flush prior text, split the oversized paragraph, and provide a hard fallback for very long sentences.
   Acceptance: long paragraphs after introductions, sentence-free text, and multilingual fixtures stay
   within explicit limits without losing content or breaking source offsets.
-  Evidence: `lib/doctrans/search/chunker.ex:132`. Reproduced. Coordinate with C01 before rebuilding indexes.
+  Implemented: the `current == []` guard is gone from the first clause of `accumulate_paragraph/2`, so a
+  paragraph over the target is split whether or not anything precedes it, and whatever is accumulated is
+  flushed first rather than joined to it. The plan's probe -- a two-word intro then 2,000 words -- returned
+  `[2, 2000]` and now returns nine chunks whose largest is 300 words.
+  Splitting is a ladder, because each rung can fail to apply. A paragraph over the target is cut at sentence
+  boundaries; a sentence still over the hard limit is cut at word boundaries; a "word" still over it -- a run
+  of CJK with no spaces anywhere in it -- is cut at grapheme boundaries. The last rung always applies, which
+  is what makes the limits guarantees rather than targets. Before it, a 2,000-word paragraph with no
+  terminator anywhere was one chunk even with nothing preceding it, and so was a single 2,000-word sentence:
+  the old "split alone" path called a sentence splitter that found no sentences and returned the text whole.
+  Cutting by grapheme rather than by byte is what keeps a chunk from ending inside a multi-byte character.
+  The sentence pattern was `(?<=[.!?])\s+(?=[A-Z])`, which requires an ASCII capital next and therefore
+  split English and almost nothing else. A German passage of 400 sentences each opening on "Über" was one
+  3,200-word chunk; so was anything Russian, anything beginning lowercase, and all CJK, which has no ASCII
+  capitals at all. The replacement takes Latin terminators followed by whitespace -- so `3.14` and
+  `example.com` stay intact -- and full-width and Indic terminators with or without it, since those scripts
+  do not put a space after one. German now splits into 11 chunks at its sentence ends, Japanese into three
+  at `。`.
+  Word counts stop measuring anything for scripts that do not separate words with spaces: `word_count/1`
+  returns 1 for a Japanese page of any length, so every word budget was blind to it and the page was never
+  chunked at all. A grapheme budget is the limit that still means something there. It rarely binds on
+  space-separated prose, though the first draft of this entry claimed it never does, which is wrong: 300
+  words of Latin text runs about 1,900 graphemes and 400 about 2,500, so against a 2,400 target the
+  grapheme budget is what binds first at roughly 380 words of ordinary English, and it binds in this
+  change's own fixtures at 266 to 277 words.
+  A grapheme is bounded in characters but not in bytes, and bytes are what the embedding server is handed:
+  3,200 family emoji, each one grapheme built from four joined codepoints, are 80,000 bytes and passed
+  every limit above. A byte budget of 9,600 to fill and 12,800 to bound closes that at four bytes per
+  grapheme -- the most a single codepoint takes in UTF-8 -- so it binds on no ordinary text in any script.
+  The explicit limits are therefore 300 words, 2,400 graphemes or 9,600 bytes to fill a chunk, and 400
+  words, 3,200 graphemes or 12,800 bytes that no chunk may pass. A single grapheme cluster larger than the
+  ceiling is the one thing that can still pass it, because there is no rung below a character that does not
+  produce mojibake. The three ceilings are checked against their targets at compile time rather than
+  asserted in a comment.
+  Offsets in the rewritten path now locate their chunk. Splitting works in byte spans into the source and a
+  chunk is always one contiguous span, so `binary_part(text, start_offset, end_offset - start_offset)`
+  returns its content exactly; the separators between segments sit inside the span and nothing is
+  reconstructed. The previous code rejoined sentences with a single space and advanced the offset by the
+  length of that join, so every chunk after the first pointed at the wrong bytes -- a probe over this
+  change's own split-paragraph fixture went from 0/6 and 1/6 faithful, depending on the separator, to 6/6.
+  (An earlier draft of this entry reported 0/11 and 1/11 to 11/11; that ratio came from a probe twice the
+  size of the fixture actually committed.) Offsets are also relative to the original text again rather than
+  to `String.trim/1`'s result: leading whitespace shifted every offset in the page, and the test that was
+  meant to pin the round-trip asserted against the trimmed string, which concealed it.
+  This is the first of the two causes Q04 names; the second, `finalize_paras/1` joining paragraphs on a
+  literal `"\n\n"` when the source has more, is untouched. Q04 keeps it along with the property test, and
+  `ChunkerTest` now carries a skipped test that fails the day it is fixed.
+  Found in review, after the first implementation: `content_for_embedding/2` bounded its overlap with
+  `tail_words/2` alone, which is the same word count the rest of this change exists to stop trusting. It
+  was unreachable for CJK before -- a Japanese page was a single chunk with no previous chunk to overlap --
+  and splitting made it reachable, so every chunk after the first was embedded with the whole of its
+  predecessor prepended: a 2,394-grapheme chunk went to the embedding server as 4,794, twice the ceiling
+  this change advertises. The overlap is now bounded in graphemes and bytes as well as words.
+  Also found in review: measuring the growing span once per segment made chunking up to 96x slower per
+  byte than before the change, and the cost landed on ordinary documents rather than adversarial ones --
+  1MB of short English sentences went from 638ms to 19.2s, ordinary Japanese prose to 4.2s, and Devanagari
+  worst of all at 69s, against an embedding queue that runs two workers. The packer now carries running
+  counts instead, which needs one correction: graphemes and bytes are additive across a join but words are
+  not, because a zero-width sentence boundary leaves two segments meeting inside one word. The same
+  document is now 1.5s, ordinary paragraphs are faster than before the change at 0.6x, and the worst
+  remaining case is 2.5x.
+  Also found in review: `Regex.scan/3` on a Unicode pattern raises on invalid UTF-8, and the widened
+  splitting path made that reachable for any oversized paragraph rather than only a leading one. No caller
+  can currently supply such bytes -- Postgres rejects them in a text column -- but the raise was taken by
+  an Oban job that retries deterministically, so the page would have been left reading "processing"
+  permanently and re-enqueued by `StartupRecovery` on every boot. `Chunker` sanitizes the input, and
+  `Indexer` now marks a page errored before re-raising anything unexpected, which closes the same leak for
+  every other raise below the status write.
+  `Chunker` passed the repo's 500-line module limit once the above landed, and was split along the seam it
+  already had: `Doctrans.Search.Chunker.Segments` owns the budgets and the splitting of one oversized
+  paragraph, `Chunker` keeps paragraph grouping, offsets and the embedding overlap.
+  Tradeoff accepted: chunk content changes for any page holding an oversized paragraph, so
+  `chunks_match_page_content?/2` will recreate those rows and re-embed them the next time the page is
+  indexed. Nothing rewrites them before that -- a library chunked under the old rules keeps its oversized
+  chunks until a page is reprocessed or `mix rechunk_documents` is run, which the README now says.
+  Tradeoff accepted: sentence detection has no abbreviation list, so "Dr. Smith" is two sentences. It was
+  two before as well, and the consequence is only where a chunk boundary falls, never whether content
+  survives -- but it does mean a chunk can open mid-sentence in prose full of abbreviations.
+  Tradeoff accepted: a grapheme budget is a crude stand-in for word segmentation in Chinese, Japanese and
+  Thai. It bounds a chunk, which is what was missing, but it does not make the boundaries linguistic; only
+  the sentence terminators do that, and a passage without them is cut at a character count.
+  Evidence: `lib/doctrans/search/chunker.ex` (`accumulate_paragraph/2`, `chunk/1`, `overlap_tail/1`) and
+  `lib/doctrans/search/chunker/segments.ex` (`split/2`, `bound/3`, `pack_segment/3`, `@sentence_boundary`).
+  `ChunkerTest` runs 38 tests and one skipped. Every claim above is pinned by a mutation that fails a test,
+  measured rather than asserted: restoring the `current == []` guard fails 5, deleting the fallback ladder
+  fails 9, removing the grapheme budget fails 6, removing the byte budget fails 1, restoring the ASCII-only
+  sentence pattern fails 4, dropping the leading-whitespace offset base fails 2, unbounding the embedding
+  overlap fails 1, dropping the joined-word correction fails 1, and dropping the invalid-UTF-8 guard fails
+  1. Setting a ceiling at or below its target does not compile.
+  Two tests from the first implementation pinned less than this entry claimed, and both are fixed. The
+  fixture for "emits current chunk when long paragraph follows accumulated content" was a 350-word
+  paragraph, which the packer is entitled to emit whole because it sits under the 400-word ceiling, so the
+  test passed unchanged against the defect it was written for; it is now 800 words. "Chunk indexes stay
+  contiguous and offsets non-decreasing across a split" passed against the pre-fix chunker outright, since
+  it never asserted a split had happened. The counts this entry states -- nine chunks for the probe, 11 for
+  German, three for Japanese -- are now asserted exactly rather than as `length(chunks) > 1`, and the
+  ceilings, the seven sentence terminators that no test exercised, the byte bound, invalid UTF-8, and the
+  offset round-trip across eight sources and scripts have tests of their own.
 
 ## Phase 4 — Viewer, uploads, and local-use experience
 
-- [ ] **U01 · P2 · Render Markdown tables and document typography correctly.**
+- [x] **U01 · P2 · Render Markdown tables and document typography correctly.**
   MDEx's table extension is not enabled. A valid Markdown table rendered as a pipe-delimited paragraph,
   despite OCR prompts requesting preserved tables.
   Enable tables and verify sanitized table cells, headings, lists, and overflow styles.
@@ -262,86 +702,1048 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   long tables remain readable; existing sanitization checks pass.
   Evidence: `lib/doctrans_web/live/document_live/markdown_helpers.ex:40`, `assets/css/app.css`.
   Runtime reproduction confirmed the missing table.
+  Implemented: `extension: [table: true]` on both render paths, so the viewer and chat render GFM tables
+  as table elements. The plan names one cause; probing found three, all required for a table to reach the
+  page intact. The second is the sanitizer: `HtmlSanitizeEx.basic_html/1` allows the six table tags with
+  an empty attribute list each, so all 16 `align` attributes comrak emitted for the probe table were
+  stripped and every numeric column lost its alignment. `DoctransWeb.DocumentLive.MarkdownScrubber`
+  extends `:basic_html` -- rather than restating it, so the allowed set cannot drift -- and adds `align`
+  on `th`/`td` restricted to the three literal values a delimiter row can produce. Extending alone is not
+  enough: without re-declaring both tags locally the generated fallback resolves their attributes against
+  `BasicHTML`'s rules and drops `align` silently. The third is CSS. The Tailwind typography plugin is not
+  installed, so `.prose` was only the rules in `assets/css/app.css`, and headings, lists, blockquotes,
+  code, rules and images had no styling at all under Preflight -- the document-typography half of this
+  item. The block is now a self-contained sheet whose type sizes and spacing are in `em` (hairlines and
+  radii stay in px/rem, which should not scale) with colours mixed from `--color-base-content`, so it
+  reads on `base-100` panes and `base-200` chat bubbles in both themes, and the compact modifier -- asked
+  for by all three call sites and previously matching nothing -- tightens the heading scale and the
+  vertical rhythm without changing body size.
+  Renamed in review from `.prose`/`.prose-sm` to `.markdown`/`.markdown-sm`. `.prose` is the Tailwind
+  Typography plugin's class, and daisyUI -- which *is* installed -- already ships `.prose` rules of its
+  own (`:root .prose` typography variables, and a live `.prose &` rule on `.btn`). Sharing the name meant
+  a future `@plugin "@tailwindcss/typography"` would silently collide 300 lines of these rules with
+  generated ones of comparable specificity. The call sites also dropped `max-w-none`, which existed only
+  to undo a `max-width` the plugin sets and this sheet never did.
+  This is a regression, not an omission. `f70f1ee` added the `.prose table` rules for Earmark, which
+  renders GFM tables by default; `18b5ecc` swapped Earmark for MDEx as an unrelated dependency change,
+  and comrak's extensions are all off by default. Those table rules had been dead since 10 July 2026, and
+  were written blind: the header tint equalled the odd-row tint and both even and odd rows were striped,
+  so neither the stripe nor the head/body split existed. Fixed along with the alignment selectors, which
+  are needed because an author `text-align` beats the browser's presentational hint for `align`.
+  The viewer degraded worse than this entry stated. Its newlines are CommonMark soft breaks inside one
+  paragraph, so the browser collapsed the probe's five rows into a single 276-character line with no
+  recoverable row or column boundary; chat's `hardbreaks: true` emitted `<br>` between rows, which kept
+  them legible as pipe-delimited text and is likely why only the viewer was reported.
+  Tradeoff accepted: a wide table is its own scroll container (`display: block; width: max-content;
+  max-width: 100%; overflow-x: auto`), which keeps a wide table from widening the pane -- the viewer's
+  only horizontal affordance was the whole content pane, and the chat column has none at all -- at the
+  cost of a table being shrink-to-fit rather than full-width, with its scrollbar reachable only over
+  itself. Cells are `white-space: nowrap`, because capping the table at 100% otherwise lets auto layout
+  crush every column to min-content and break short values like "INV-2024-1001" across three lines; the
+  cost is that a cell holding a sentence makes the table wide and scrolled rather than tall.
+  Scope note: tables are the only GFM construct that is both necessary here and survivable through the
+  existing sanitizer, so no other extension was enabled. Probed: strikethrough and autolinks would
+  survive, but task lists lose their `<input>` and render checked and unchecked identically, footnote
+  anchors lose the `id` they point at, and superscript is unwrapped so `x^2^` becomes `x2` -- each a net
+  regression without sanitizer work of its own.
+  Found in review: the new edge-margin rules use the child combinator
+  (`.markdown > :first-child`), but `markdown_content/1` wrapped the rendered HTML in a bare `<div>`, so
+  they matched the wrapper and the first and last block kept their margins -- measured at 12px of dead
+  space at the top and bottom of every viewer page and chat bubble, 28.8px when the page opens on a
+  heading, and worse than the rules they replaced, which were descendant selectors. The wrapper is gone
+  from both components; a LiveView test in each path asserts the rendered blocks are direct children of
+  `.markdown`, so the contract the CSS depends on is pinned rather than assumed.
+  Found in review and recorded rather than fixed: a GFM table runs to the next blank line, so a sentence
+  written on the line straight after the last row becomes another row. It is what every GFM renderer
+  does, and chat is where it shows, since an answer may close its table without a blank line. A test
+  pins it.
+  Tradeoff accepted: rendering is synchronous in the LiveView process and the extension makes a wide
+  table much more expensive to render. Measured: a realistic 100KB table page goes 25ms to 82ms, but an
+  adversarial 1,000-column by 200-row page goes 23ms to 3.6s, and 1MB of table to 3.1s, with output
+  growing 3.6x across the LiveView diff. Cost is linear in cell count, not super-linear, and no model
+  produces such a page in practice, so no size cap was added here; U03 is where viewer work moves off
+  the LiveView process.
+  Found in review and fixed: `mix.exs` required `{:html_sanitize_ex, "~> 1.4"}`, but `use HtmlSanitizeEx,
+  extend: :basic_html` and the module-level `sanitize/1` it generates arrived in 1.5.0, so the requirement
+  admitted a version that cannot compile the scrubber. `mix.lock` pins 1.5.5, so this never failed here;
+  the constraint is now `~> 1.5`.
+  Found in review and fixed: `.prose a` used `--color-primary`, which is the same lightness in both
+  themes and measures 2.8:1 on the light surface -- below AA for body-sized text, and this is the first
+  body-sized text in the app to use it. Links now mix it 70% toward `--color-base-content`, which darkens
+  on light and lightens on dark, measuring 4.8:1 and 6.4:1 with no per-theme override.
+  Found in review and fixed: the table block hand-rolled four `color-mix` percentages inline (cell
+  border, header underline, header fill, zebra) immediately after the sheet introduced `--md-rule`/
+  `--md-muted`/`--md-fill` for exactly that purpose, so a grep for the tokens would not have found them.
+  All four are tokens now. The compact modifier scaled only `--md-block-gap` while paragraph and list
+  margins were hard-coded literals, so paragraph rhythm -- the dominant spacing on an OCR'd page -- was
+  identical at both scales despite the comment claiming otherwise; a second `--md-tight-gap` token now
+  carries the intra-list spacing and every margin derives from one of the two.
+  Found in review and recorded rather than fixed: `display: block` on a table drops its table semantics
+  for assistive tech in WebKit, so the head/row relationship is not announced there. The usual mitigation
+  is `role="table"`, which is unavailable -- the scrubber allows no `role`, and there is no wrapper to
+  hang it on by design. Accepted, because the alternative is a table that either widens the pane or is
+  crushed to min-content, and recorded in the CSS comment beside the layout tradeoffs it sits with.
+  Evidence: `lib/doctrans_web/live/document_live/markdown_helpers.ex` (`mdex_options/1`,
+  `sanitize_html/1`), `lib/doctrans_web/live/document_live/markdown_scrubber.ex`,
+  `lib/doctrans_web/live/document_live/viewer_components.ex` and `chat_components.ex`
+  (`markdown_content/1`), `assets/css/app.css` (`.markdown`). 23 unit tests in `MarkdownHelpersTest` and 10
+  LiveView tests across `document_live_show_test.exs` and `show_chat_test.exs`, every claim pinned by a
+  mutation that fails a test, measured rather than asserted: of the 85 tests, dropping the extension from
+  the viewer branch fails 11, from the chat branch 8, from both 19, reverting the scrubber to
+  `basic_html/1` fails 9, removing the `th`/`td` re-registration fails 9, widening the `align` whitelist
+  to any value fails 2, and restoring the wrapper element fails 2. No existing assertion changed: HEAD's
+  four Markdown-touching test files were run against the fix unmodified.
+  Nothing in the repo depended on the broken rendering -- the only pipe tables under `test/`, `priv/` and
+  `README.md` are developer documentation that never reaches `render_markdown/2`.
+  The scrubber was reviewed adversarially: 246 curated hostile inputs and 30,000 generated malformed
+  documents were diffed against `HtmlSanitizeEx.basic_html/1`, and every divergence in every case was
+  `align` on a `th` or `td` carrying one of the three permitted values. The value is what is matched, not
+  the spelling -- the parser lowercases attribute names and decodes entities first, so `ALIGN="right"`
+  survives as `align="right"`, which carries no payload and is also pinned by a test.
+  CSS was verified by rendering the real sanitized pipeline output against the compiled `app.css` in
+  headless Chromium at viewer and chat-panel widths, light and dark, including an 8-column 34-row table,
+  and by measuring that neither pane nor page scrolls horizontally; the running app was not driven in a
+  browser.
 
-- [ ] **U02 · P2 · Preserve the resolved browser locale through LiveView.**
+- [x] **U02 · P2 · Preserve the resolved browser locale through LiveView.**
   The HTTP plug detects Accept-Language but deletes the session locale; LiveView then defaults to English.
   Persist the resolved locale, retain explicit choices appropriately, and update the root HTML language.
   Acceptance: browser-language detection and explicit language choices survive mounting, navigation,
   and reload; unsupported locales fall back predictably.
-  Evidence: `lib/doctrans_web/plugs/set_locale.ex:39`, `lib/doctrans_web/live/hooks/set_locale.ex:21`,
-  `lib/doctrans_web/components/layouts/root.html.heex:2`. German-to-English reset reproduced.
+  Implemented: `delete_session/2` is gone and the resolved locale is persisted, so it reaches the
+  on_mount hook instead of being discarded. Precedence is supported `lang` parameter, then a choice
+  already stored, then Accept-Language, then the default. The choice is stored as a locale under its own
+  session key rather than as a flag beside the resolved locale, so detection can never overwrite it: a
+  choice whose locale is temporarily unsupported is remembered and honoured again if that locale
+  returns, instead of being silently and permanently downgraded to detection. `?lang=auto` clears the
+  choice and hands the language back to the browser, which is the only way back out of one. An
+  unsupported `lang` value is ignored rather than honoured or stored, so a bad link can neither reset a
+  deliberate choice nor block detection. `lang` values are normalised exactly like header tags, so
+  `de-DE` and `DE` resolve the same way in the URL as in the header, and a repeated or bracketed
+  parameter is treated as no choice at all. `nb` and `nn` resolve to the `no` translations, which no
+  browser asks for by that name. Session keys are written only when their value changes, so a steady
+  browsing session no longer re-encrypts and re-sends the session cookie on every response. The plug
+  assigns the resolved locale to the connection and the root layout renders it as `<html lang>`.
+  New `DoctransWeb.Locale` holds the supported list, default, and session keys, which were previously
+  duplicated across the plug and the hook.
+  Tradeoff accepted: a merely detected locale is recomputed from Accept-Language on every request rather
+  than pinned, so the language follows the browser rather than the session until the user chooses one.
+  Found in review and fixed: the new module's docstring claimed the supported list came from Gettext and
+  so could not drift from the translations. Gettext ignores the `:locales` key and derives its known
+  locales from `priv/gettext` instead, so the two lists are independent; the claim is corrected and a
+  test now asserts they stay equal, since a config-only locale would render untranslated English under
+  its own `<html lang>` and a `priv/`-only locale would be unreachable.
+  Found in team review and fixed: a stored explicit choice was demoted to a detected one whenever its
+  locale was momentarily unsupported, because the fallback path overwrote the `locale_explicit` flag.
+  Removing and restoring a locale therefore destroyed the user's choice for good. The flag is now a
+  stored locale that detection never writes, which also removed the boolean parameter that made the
+  write path hard to read at the call site.
+  Found in team review and fixed: the plug wrote the session on every request that fell through to
+  detection, so `Plug.Session` re-encrypted and re-sent the cookie on every response for any user who
+  had not chosen a language. Writes are now conditional on the value actually changing.
+  Found in team review and fixed: `DoctransWeb.Locale` claimed to be the single source of truth while
+  two more copies of the same eleven codes sat in `document_live/components.ex` and one in
+  `Doctrans.Validation`. Those are the *translation target* list, not the interface locale list, so they
+  are unified behind a new core `Doctrans.Languages` rather than pointed at a web module; `Locale`'s
+  docstring now says which of the two it is. `language_options/1` derives its codes from
+  `Doctrans.Languages` and its names from `language_name/1`, so neither is spelled out twice.
+  Found in team review and fixed: the on_mount hook assigned `:locale` to the socket, which no template
+  read, while a test asserted on it as though it were the contract. The assign is gone and the hook's
+  docstring says why the process dictionary is the actual mechanism.
+  Found in team review and fixed: `lib/doctrans_web/endpoint.ex` set the session cookie's `secure` flag
+  from `compile_env(:doctrans, :env) == :prod`, but `:env` is configured nowhere, so it always evaluated
+  to `false`. An earlier note in this entry claiming prod cookies were `Secure` and broke the mount was
+  wrong on both counts, and is withdrawn. The flag is now an explicit `false` with the reason recorded:
+  the app is served over plain HTTP on loopback or a LAN address, where a `Secure` cookie would simply
+  not be stored.
+  Found in team review and recorded rather than fixed: a `lang` parameter carried by a live navigation
+  never reaches the plug, because the plug runs only on HTTP requests. Nothing in the app generates such
+  a URL today -- there is still no language-switcher UI -- but a switcher built with `<.link navigate=>`
+  would silently do nothing until reload, so the constraint is recorded in the plug's moduledoc.
+  Still open: there is no language-switcher UI. `?lang=` and `?lang=auto` are the whole interface, so
+  changing language means editing the URL. Building the switcher is a separate item, not a fix.
+  Found in team review and recorded rather than fixed: Accept-Language `q` weights are not compared; the
+  first supported tag in header order wins. This is pre-existing and browsers send tags in preference
+  order, so it was left alone, documented, and now pinned by a test so a well-meant reordering fails
+  loudly rather than silently.
+  Evidence: `lib/doctrans_web/locale.ex`, `lib/doctrans/languages.ex`,
+  `lib/doctrans_web/plugs/set_locale.ex`, `lib/doctrans_web/live/hooks/set_locale.ex`,
+  `lib/doctrans_web/components/layouts/root.html.heex:2`, `lib/doctrans_web/endpoint.ex`.
+  53 tests across `plugs/set_locale_test.exs`, `live/locale_test.exs`, `live/hooks/set_locale_test.exs`,
+  and `gettext_test.exs`, measured rather than asserted: dropping the session write fails 32, dropping
+  the hook's session read fails 13, re-hard-coding `lang="en"` fails 9, honouring an unsupported `lang`
+  fails 5, removing region stripping fails 4, dropping the `?lang=auto` reset fails 3, writing the
+  session unconditionally fails 3, removing the `nb`/`nn` aliases fails 2, and discarding a stale stored
+  choice rather than remembering it fails 1. A German browser was traced end to end -- dead render,
+  connected mount, `live_redirect` between `/` and `/search`, and a reload over the recycled cookie --
+  and an explicit `?lang=fr` survives all four, including over a cookie carrying no Accept-Language
+  header at all. The German-to-English reset no longer reproduces; the running app was not driven in a
+  browser.
 
-- [ ] **U03 · P2 · Fetch model choices without blocking the viewer.**
+- [x] **U03 · P2 · Fetch model choices without blocking the viewer.**
   Sending a message to the same LiveView does not make its subsequent model-list HTTP request asynchronous.
   Move it into supervised LiveView async work with cancellation and stale-result handling.
   Acceptance: a slow/unavailable server does not block modal closing, page navigation, progress, or chat;
   late results cannot populate an obsolete modal; errors permit retry.
-  Evidence: `lib/doctrans_web/live/document_live/reprocess_modal.ex:37,118`.
+  Implemented: opening the modal now runs `OpenAI.list_models/0` under `start_async/4` on
+  `Doctrans.TaskSupervisor` instead of `send(self(), :fetch_available_models)`, which only deferred the
+  blocking call by one message. The LiveView keeps serving navigation, progress broadcasts and chat while
+  the request is outstanding, and the modal closes on demand rather than when the server answers.
+  Closing the modal -- Cancel, Escape, backdrop, or either submit path -- cancels the fetch, and starting
+  a fetch cancels the one it replaces, so a modal reopened over a stalled request does not accumulate
+  tasks or pay for an answer nobody will see. The error alert gained a Retry control, which is the only
+  way back from a failed fetch without closing the modal: the alert previously left the modal unusable
+  until it was dismissed and reopened, since both selects reset to no selection and the submit button
+  stays disabled until a model list arrives.
+  Tradeoff accepted: a failed fetch still clears the current selections, so a successful retry means
+  picking the models again. That is the pre-existing `available_selection/2` behaviour for an empty list
+  and preserving selections across a failure is a separate behaviour change, not part of this fix.
+  Found in team review and fixed: the change made `document_live_reprocessing_test.exs:34` race and fail
+  on a full-suite run. Under the old self-send the fetch always completed before the next external
+  message, so the test could open the modal and submit the form in consecutive lines; with a real async
+  fetch the selects carry `disabled={@models_loading}` until the result lands on wall-clock time. The
+  test awaits the async work now, as do the other model-touching sites. Sites that never interact with a
+  disabled select were deliberately left alone: that file is `async: true` with no Bypass, so an await
+  there would point at the real default endpoint and trade a fixed race for an environment-dependent one.
+  Found in team review and fixed: a Retry click that raced the modal closing refetched unconditionally,
+  putting a real request on a server already known to be slow, discarding its own answer, and stranding
+  `models_loading` on a closed modal. Retry is now a no-op unless the modal is open.
+  Found in team review and removed: a `:models_request_id` counter rode along with each result so a
+  stale one could be recognised. Read against the installed LiveView it could never fire.
+  `prune_current_async/3` drops the result of any task a later `start_async` superseded before the
+  callback runs, and the id changes only inside the same pipeline that installs the new ref, so the two
+  can never disagree. The decisive evidence is internal: the `{:exit, _}` clause carries no id and is
+  protected by the open-modal check alone. AGENTS.md asks for results to be identified by payload, and
+  here the payload that does the work is the open-modal check -- keeping an inert counter beside it
+  documented a guarantee the code did not have. The assign, the tuple wrapper and the guard are gone.
+  Found in team review and fixed: `list_models/0` is the one OpenAI call not wrapped in
+  `CircuitBreaker.call/3`, but its failure path still melted the shared `:openai_api` fuse. Retry made
+  that reachable by held click: six clicks against a 5xx or unreachable server blew a breaker shared with
+  extraction, translation, chat and background jobs for 30 seconds. It now reports through
+  `handle_api_error/3` with `melt: false`, and Retry is refused server-side while a fetch is in flight,
+  since the event can be pushed whether or not the button is rendered.
+  Found in team review and fixed: the fetch had no `receive_timeout`, so with `retry: :safe_transient`
+  an unreachable server could hold the modal at "Loading models..." for about a minute with no in-modal
+  escape -- Retry only renders once an error is set. Capped at 5s per attempt.
+  Found in team review and fixed: clicking Retry cleared `:model_fetch_error`, which unmounted the alert
+  containing the just-clicked button and dropped focus to the body outside the dialog. The alert now
+  stays mounted and reads "Retrying..." until the result replaces or clears it; the error is cleared on
+  open instead. The alert also gained `role="alert"`, matching the flash in `core_components.ex`, and its
+  hover swapped `bg-base-100/20` for `bg-current/10` -- the only theme-dependent token on a surface whose
+  `--color-error` is identical in both themes.
+  Found in team review and fixed: the ordinary failure path, `{:error, reason}`, was the one that logged
+  nothing, while the rare task crash logged. Both log now, under distinct messages.
+  Found in team review and fixed: mutation testing measured four claims as unpinned -- removing either
+  `cancel_async/2` call, dropping the open-modal guard, or deleting the `{:shutdown, :cancel}` clause all
+  failed zero tests. A probe explained why the stale-result test did not cover them: the held request is
+  still blocked in the plug when cancellation kills the task, and Ranch kills that plug process with the
+  socket, so no late result is ever produced. Two trailing refutes rested on that and could not fail
+  under any implementation; they are deleted rather than left reading as coverage. The uncovered
+  behaviour is pinned directly instead: unit tests of `handle_async/3` against a constructed socket for
+  the open-modal guard and both `{:exit, _}` clauses, task-pid monitoring through
+  `Phoenix.LiveView.Channel.async_pids/1` for both cancellation sites and for the in-flight retry guard,
+  and `capture_log` assertions for the `{:shutdown, :cancel}` clause and for the bound that keeps an API
+  key out of a crash log.
+  Incidental to the above: `openai.ex` was at 495 of its 500-line budget, so the `melt:` option tipped
+  it over. Rather than raise the limit, the failure path it shares across every call it makes --
+  completions, streaming, model listing and embedding, against two fuses -- moved to
+  `Doctrans.Processing.ApiFailure`, leaving `openai.ex` at 472.
+  Evidence: `lib/doctrans_web/live/document_live/reprocess_modal.ex` (`fetch_models/1`,
+  `start_models_fetch/1`, `handle_async/3`, `close_reprocess_modal/1`),
+  `lib/doctrans_web/live/document_live/show.ex`, `lib/doctrans/processing/openai.ex`
+  (`list_models/0`, `handle_api_error/3`).
+  22 tests in `reprocess_modal_test.exs`, plus one in `openai_request_test.exs` pinning `melt: false`
+  through the `[:doctrans, :circuit_breaker, :failure]` telemetry event, which also asserts that the same
+  failure through `chat/2` still melts, so the claim is about the option and not a dead fuse. The four
+  behaviours added here were measured rather than asserted: removing `melt: false`, the `models_loading`
+  half of the retry guard, the `models_loading` reset on close, or the retry path that preserves the
+  error alert each fails exactly one test. A held request was used to show the LiveView still answers page
+  navigation, `{:document_updated, _}` and `{:page_updated, _}` progress broadcasts, the chat toggle, and
+  modal close while the fetch is outstanding. The running app was not driven in a browser.
 
-- [ ] **U04 · P2 · Report per-file upload outcomes accurately.**
+- [x] **U04 · P2 · Report per-file upload outcomes accurately.**
   Mixed validation failures use a warning flash that the layout never renders. Accepted files are counted
   before document creation/enqueue outcomes are known, and enqueue results are discarded.
   Return per-file outcomes, count successful starts, and show entry-specific upload errors.
   Acceptance: mixed success/failure identifies each failed file; failed creation/enqueue never appears
   successful; rejected files have visible explanations and correct cleanup.
-  Evidence: `lib/doctrans_web/live/document_live/index.ex:350,365,401`,
-  `lib/doctrans_web/components/layouts.ex:58`.
+  Implemented: `create_and_process/2` returns `{:ok, document_id}` or `{:error, filename, reason}`, and
+  the former only once `Worker.process_document/2` has actually queued the extraction job, so the number
+  reported is the number of documents processing will pick up rather than the number of files that
+  survived magic-byte validation. The dashboard walks `@uploads.document.entries` once, in pick order,
+  and gives every entry one of three outcomes -- started, failed, or still uploading -- so the report
+  reads in the same order as the list above it and no entry can fall out of it. Failures are listed by
+  name with their own reason through `ErrorMessages.message/1`; the modal stays open to carry the list,
+  since that is where the retry happens and a flash dismisses itself after five seconds. The unrendered
+  `:warning` flash is gone -- it was the only `put_flash` using a kind `Layouts.flash_group/1` does not
+  render, so mixed submissions had been reporting their rejections into nothing.
+  Cleanup follows the outcome: a record that cannot be created takes its upload directory with it, and a
+  document whose job could not be queued is unsubscribed and deleted rather than left in `uploading`
+  forever with no job that would ever move it. `store/2` and `create_and_process/2` are both non-raising
+  (`rescue` and `catch`, since a pool timeout exits rather than raises), because a raise inside the loop
+  would take the dashboard down with the outcome of every other file in the same submission -- the exact
+  reporting failure this item exists to fix.
+  Decided rather than assumed: the started count renders inside the modal as well as in the flash.
+  daisyUI puts `.modal` at `z-index: 999` and the flash toast is `z-50`, so while the modal is open a
+  flash renders under its backdrop and the 5.3s AutoDismiss timer runs out unseen. Both render
+  `Components.upload_started_message/1` so they cannot drift. For the same reason there is no flash at
+  all for the nothing-started case: it only arises alongside failures, which hold the modal open.
+  Rejected: giving `{:operation_failed, _}` its own message in `ErrorMessages`. A test pins it to the
+  same generic string as `:unknown` so a dependency's response body can never reach a user.
+  `{:validation_failed, _}` did get one, and drops the changeset for the same reason.
+  Found in team review and fixed: the browser's own rejections were explained nowhere. Without
+  `auto_upload`, `phx-submit` runs the `allow_upload` preflight first, one entry in error fails it for
+  the whole config, and `handleFailedEntryPreflight` then cancels *every* entry -- so an oversized file
+  discarded the good files beside it and the server heard about none of them. `upload_errors/1` returns
+  only config-level errors, so the entry's own reason was never rendered either. Per-entry errors now
+  render on the entry itself as soon as it is picked, and the submit button is disabled while any entry
+  is in error or the config is, so the destructive preflight is never reached. `:too_many_files` is
+  covered by the same guard: it sits on the config with every entry still `valid?`, so nothing was
+  cancelled or named and each retry repeated the same message forever.
+  Found in team review and fixed: a valid entry still uploading was neither started nor reported, and
+  when the finished files all succeeded the modal closed over it. It is reported as its own outcome now.
+  Found in team review and fixed: cleanup on the raise path deleted whatever row sat at the document id.
+  Past the insert the row is the call's own and may be deleted; before it, only the directory is, so a
+  caller that passed a persisted id no longer loses that document. The contract is on the `@doc`.
+  Found in team review and fixed: the `rescue` clause reported and logged the *unsanitized* filename. A
+  rebinding inside a `try` body is not visible to its `rescue`, which sees the function head instead, so
+  a name carrying newlines reached `Logger.error` as forged log lines. Sanitizing happens in the head of
+  the function that carries the rescue.
+  Found in team review and fixed: `{:file_too_large, _}` truncated its megabytes with `div/2`, so a
+  100.4MB file was rejected with "max 100MB"; both figures round up now. `:not_accepted` on a file with
+  no extension rendered a dangling colon. The 100MB and 10-file limits were hardcoded in
+  `error_to_string/1` while the real limits came from config; both derive from `UploadIntake` now, and
+  that function no longer `inspect/1`s a LiveView internal into a user-facing string.
+  Found in team review and fixed: unknown reasons fell through to `ErrorMessages`' generic clause, which
+  is the chat assistant's first person ("Sorry, I encountered an error") and reads as a non-sequitur
+  beside a filename. The upload path has its own `:upload_failed` fallback.
+  Found in team review and fixed: `validate_upload` is the form's `phx-change` and so fires for the
+  target-language select too, clearing the failure list out from under a user who was still reading it.
+  It clears only when `_target` is the file input.
+  Evidence: `lib/doctrans_web/live/document_live/upload_intake.ex` (`consume_entry/2`, `store/2`,
+  `create_and_process/2`, `start_upload/4`, `start_processing/3`, `entry_reason/2`),
+  `lib/doctrans_web/live/document_live/index.ex` (`process_entry/4`, `handle_upload_results/2`,
+  `report_started/2`, `report_outcomes/4`),
+  `lib/doctrans_web/live/document_live/components.ex` (`upload_modal/1`, `upload_outcomes/1`,
+  `upload_entries_list/1`, `submit_blocked?/1`), `lib/doctrans_web/error_messages.ex`.
 
-- [ ] **U05 · P2 · Make upload and dialogs keyboard accessible.**
+- [x] **U05 · P2 · Make upload and dialogs keyboard accessible.**
   The file input is display-none and its browse labels are not focusable.
   Provide a keyboard-operable chooser, labeled shared inputs, dialog naming, focus management,
   Escape handling, and accessible names for icon-only controls.
   Acceptance: complete upload and reprocessing using only a keyboard; focus returns to the trigger;
   screen-reader names identify controls. Verify in a real browser.
-  Evidence: `lib/doctrans_web/live/document_live/components.ex:155,201`.
+  Implemented: the file input is `sr-only` instead of `hidden`, so it is focusable and its own
+  activation opens the chooser; the drop zone is its peer and draws the focus ring for it. The two
+  `browse` labels stay as click targets, and `aria-labelledby` names the input from the `Documents`
+  label alone so their `for` references do not concatenate into the name. The upload dialog gained
+  the semantics the reprocess dialog already had -- `role="dialog"`, `aria-modal`, `aria-labelledby`,
+  Escape via `phx-window-keydown`, and focus management. Both dialogs now render through one
+  `<.dialog>` component in `core_components.ex` that owns the container semantics, the named close
+  button, the backdrop and the focus contract, so the two cannot drift apart; each caller passes only
+  its layout classes and the selector of the trigger it belongs to, which the dialogs no longer
+  hard-code for templates they do not own. A `DialogFocus` hook keeps Tab inside either dialog; it
+  re-reads the focusable set on every keypress because LiveView repatches the dialog while it is
+  open, and it listens on the document because focus can still be outside the dialog when it opens.
+  Accessible
+  names were added to every icon-only control (delete, both dialog closes, per-entry remove naming
+  its file, zoom, chat close/send, the card link), labels were associated with the target-language,
+  page, search and chat inputs, the shared `<.input>` labels gained `for` plus `aria-invalid` and a
+  deterministic error target (all four `input/1` clauses share one error container component rather
+  than four copies of it), `icon/1` is `aria-hidden` -- documented there as the invariant it creates,
+  that an icon-only control must carry its own name -- and the sort trigger is no longer a bare
+  `<label tabindex="0">` but a real button that claims only what it delivers: a disclosure with
+  `aria-expanded` mirrored from focus by `DropdownExpanded`, not an `aria-haspopup="menu"` promising
+  arrow-key navigation nothing implements. The upload modal moved to its own module. Gettext's fuzzy
+  matcher auto-filled four new msgids from unrelated strings -- `Sort documents` shipped as
+  "Search documents" in English until those `en` entries were blanked; verified against the served
+  page. The same pass fixed three older fuzzy entries the dialogs render: `Drag and drop documents
+  here, or` still said "PDF files" in all eleven locales, `Failed to fetch models from OpenAI` said
+  "from Ollama" in all eleven, and `Danish` read "Spanisch"/"Espagnol" in `de`/`fr`.
+  Found in the browser pass and fixed: `JS.push_focus/0` pushes the element the command is attached
+  to -- the dialog -- not what was focused before it opened, so `pop_focus` focused a node being
+  removed and focus fell to the body. The reprocess dialog had shipped that since it was written.
+  The trigger is named by `data-return-focus` instead, which also survives a browser that does not
+  focus a button on click. Also found there: `button:not([disabled])` matched the backdrop, whose
+  `tabindex="-1"` keeps it out of the real tab order, so the trap mistook it for the last element
+  and Tab walked out of the dialog; the filter is `tabIndex >= 0` now. And daisyUI opens the upload
+  dialog through an `allow-discrete` `visibility` transition that computes as `hidden` for the whole
+  first frame, so the initial focus call was a no-op -- it retries across nested frames, guarded so
+  it cannot yank focus back once it has landed. Focus management is one mechanism in the hook now
+  rather than split between the hook and JS commands that did not do what they read as.
+  Found in review and fixed: returning focus to the trigger only worked on the cancel paths. On
+  confirm, the patch that closes the dialog is the same one that rewrites the trigger -- reprocessing
+  a page resets it to `pending`, which drops `#show-reprocess` from the DOM, and reprocessing a
+  document sets `queued`, which disables `#show-document-reprocess` a patch later -- and `focus()` on
+  a removed or disabled element silently does nothing, so focus fell to the body exactly as before.
+  The trigger is re-resolved at close time and checked for `disabled`, rechecked across the next few
+  frames because the disabling patch arrives after the closing one, and falls back to `<main>` when
+  it is genuinely gone. Three further fixes: `ChatInput` re-focused itself whenever an answer
+  finished streaming, dragging focus out of an open dialog, so it now yields while one is up; the Tab
+  trap releases when the socket is down, since every way out of the dialog is a server round-trip
+  that cannot complete and holding Tab would leave no exit at all; and Escape inside a `<select>`
+  stays with the select, which is what macOS does natively and what Chromium elsewhere did not,
+  where it tore down the dialog and discarded the chosen files.
+  Verified in Chrome via Puppeteer: an upload completed with Tab/Enter alone from the top of the
+  page through to a queued document; Tab and Shift+Tab stay inside both dialogs; Escape closes both
+  and focus returns to the trigger that opened them; the accessibility tree reports no unnamed
+  button, link, combobox or textbox, and the file input is named exactly `Documents`.
+  Evidence: `lib/doctrans_web/live/document_live/upload_components.ex` (`upload_modal/1`,
+  `upload_entries_list/1`), `lib/doctrans_web/live/document_live/components.ex` (`document_card/1`,
+  `document_thumbnail/1`), `lib/doctrans_web/live/document_live/index.ex`,
+  `lib/doctrans_web/live/document_live/reprocess_modal.ex`,
+  `lib/doctrans_web/components/form_components.ex`,
+  `lib/doctrans_web/components/core_components.ex` (`dialog/1`), `assets/js/app.js` (`DialogFocus`),
+  `test/doctrans_web/live/document_live/keyboard_accessibility_test.exs`.
 
-- [ ] **U06 · P2 · Keep connectivity notices mounted.**
+- [x] **U06 · P2 · Keep connectivity notices mounted.**
   AutoDismiss removes all flash nodes after about 5.3 seconds, including initially hidden client/server
   connection-error banners. Later disconnect handlers target missing nodes.
   Limit timed dismissal to transient notifications and update LiveView flash state instead of removing
   LiveView-owned DOM. Keep connectivity notices until connection state resolves.
   Acceptance: disconnecting after a minute still displays a reconnect notice, which clears on reconnect;
   manually dismissed flashes do not reappear from stale server state.
-  Evidence: `lib/doctrans_web/components/core_components.ex:36`,
-  `lib/doctrans_web/components/layouts.ex:62`, `assets/js/app.js:30`.
+  Implemented: `flash/1` gained a `:transient` attribute that decides whether a notice is a one-off
+  message or a piece of connection state. Only transient notices get `phx-hook="AutoDismiss"`, so the
+  `#client-error` and `#server-error` banners -- which render `hidden` on first paint and are found by
+  id when the socket drops -- are no longer deleted 5.3 seconds into a healthy session. Their
+  `phx-disconnected`/`phx-connected` handlers now always have a node to target, however long the page
+  has been open. The distinction is one attribute rather than an id allowlist in the hook, because the
+  hook cannot know which notices a future caller will want to keep mounted; `flash/1` documents the
+  invariant at the attribute itself. Both banners now render through a private `connectivity_notice/1`
+  in `flash_group/1`, so `transient={false}` and the handler pair are stated once.
+  Timed dismissal also stopped tearing out DOM that LiveView owns. Rather than reimplement dismissal in
+  JavaScript, the hook now runs the `phx-click` command the server already rendered
+  (`this.js().exec(...)`, LiveView 1.1.33). One definition therefore drives both paths: a flash-backed
+  notice pushes `lv:clear-flash` and hides, so a dismissed message cannot return on the next render;
+  anything else just hides. This removed the hand-rolled fade, the `data-flash-key` attribute, the
+  `dismissing` flag and the `pushEvent(...).catch(...)` fallback. It also removed the invisible-overlay
+  hazard those parts existed to manage: `hide/1` ends at `display: none`, where the old fade left the
+  notice at `opacity: 0` -- fully hit-testable, `position: fixed`, `z-50` -- until the server replied,
+  which on a socket that dropped after the push meant up to the 30s `PUSH_TIMEOUT`. Auto-dismiss and
+  click-dismiss also no longer animate differently.
+  Only a notice whose text *came from* the flash map may clear it, and that is now keyed on the inner
+  block being empty rather than on the flash entry merely existing. A caller passing both a slot and a
+  flash of the same kind previously rendered the slot text while carrying the clear: dismissing it
+  discarded an unrelated message the user never saw, and because `:if` stayed truthy from the slot,
+  LiveView never removed the node -- it parked invisible and click-blocking for the rest of the session.
+  No caller did this, but nothing stopped the next one. `core_components_test.exs` now pins it.
+  The countdown restarts on the notice's text rather than on the patch that delivered it -- a replaced
+  message is readable for its full five seconds, while a LiveView that repatches every hundred
+  milliseconds cannot hold one on screen forever. A patch carrying a replacement message also clears
+  the inline `display` left by a dismissal already under way, so the replacement is not patched into a
+  hidden node. The timer is cancelled in `destroyed`.
+  Known limitation: re-flashing a message whose text is *identical* to the one on screen does not
+  restart the countdown, so the second message can be visible only for the remainder of the first
+  one's five seconds. There is no signal to key on -- the flash map, the server's render and the DOM
+  are all byte-identical -- so distinguishing the two needs a change token threaded through every
+  `put_flash/3` call site. This behaviour predates U06; the branch neither introduced nor fixed it.
+  Verified against the served page: `#client-error` and `#server-error` render with no `phx-hook`, no
+  `lv:clear-flash` in their click handler, and with `hidden` and both connection handlers intact. The
+  timing behaviour itself is not covered by tests -- the repo has no JavaScript test runner -- so the
+  hook's five-second path was not exercised automatically.
+  Evidence: `lib/doctrans_web/components/core_components.ex` (`flash/1`, the `:transient` attribute),
+  `lib/doctrans_web/components/layouts.ex` (`flash_group/1`), `assets/js/app.js` (`AutoDismiss`).
 
-- [ ] **U07 · P2 · Make privacy claims match configured inference.**
+- [x] **U07 · P2 · Make privacy claims match configured inference.**
   Upload text and metadata promise that documents never leave the device even when a remote endpoint is used.
   Match README's conditional wording and identify the processing destination without revealing credentials.
   Acceptance: remote configuration makes the destination clear; local mode accurately describes local
   processing; neither logs nor UI expose API keys. The existing CSP blocks external Markdown images;
   the review did not identify an automatic external-image leak.
-  Evidence: `lib/doctrans_web/live/document_live/components.ex:210`,
-  `lib/doctrans_web/components/layouts/root.html.heex:9`.
+  Implemented: the interface no longer promises what only the configuration can deliver.
+  `Doctrans.Config.Inference` is the single source of truth for where inference runs, and it
+  answers for *both* paths: `Config.OpenAI.base_url/0` carries chat, vision and translation,
+  while `Config.Embedding.base_url/0` carries embeddings and falls back to the chat host only
+  when unset. The two are independently retargetable, and an embedding request carries the chunk
+  text it is embedding, so a remote embedding host is document egress even when chat stays local;
+  `local?/0` is therefore true only when every path is local.
+  Locality is decided from the URL host. `host.docker.internal` and `172.17.0.1` count as local:
+  they are the user's own machine reached from inside a container, and `host.docker.internal:8000`
+  is this project's shipped compose default -- a loopback-only test would have labelled the
+  standard setup "remote" and made the UI lie in the other direction. A host that cannot be read
+  at all (a scheme-less `"llm:8000"`) is `:unknown` and counts as not local: an unreadable
+  endpoint must never buy a privacy guarantee.
+  `DoctransWeb.PrivacyCopy` holds each claim next to its replacement, so it is hard to soften one
+  and leave its twin overclaiming. The local strings are reused verbatim, which kept all ten
+  non-English translations valid -- rewording those msgids would have marked every one fuzzy and
+  failed the translation gate. Three new msgids cover the remote case, each naming the
+  destination through a single `%{host}` binding fed by `destination_label/0`, which always has
+  something to show: a readable host, or the configured URL when there is none. The padlock icon
+  beside the upload notice is a guarantee, so it appears only with the local promise; remote
+  processing gets an outbound arrow.
+  The `<head>` meta tags and the `mix.exs` package description are not gettext-backed. Both are
+  crawler-facing text that should stay stable rather than track a setting, so they were reworded
+  to the README's conditional form rather than made dynamic -- `root.html.heex` renders per
+  request and could have read `local?/0`, so this is a choice, not a constraint. README needed no
+  change -- it was already the honest version this task points to.
+  On credentials: the acceptance criterion already held. An upstream failure is normalized by
+  `Processing.ApiFailure.handle/3` before it is logged, `ErrorMessages.binding/2` interpolates
+  only binaries and numbers so an opaque reason cannot surface, Req 0.7.4 redacts `authorization`
+  unconditionally, and nothing in `doctrans_web` reads a key. Two gaps were closed anyway: the raw
+  base URL was interpolated into two `Logger.debug` lines before Req ever saw it, so an
+  `OPENAI_HOST` carrying userinfo leaked verbatim in dev, now stripped by `redact_url/1`; and the
+  DOM half of the criterion had no regression guard, which `privacy_notice_test.exs` now supplies
+  to match the log half already pinned in `reprocess_modal_test.exs`.
+  Review follow-ups, all found by review of the first cut of this item and fixed on the same
+  branch:
+  - Redaction by nulling `URI.userinfo` was a no-op on exactly the URLs that needed it.
+    `URI.parse/1` fills `:userinfo` only when it finds a host, and `URI.to_string/1` re-emits the
+    untouched `:authority` when it does not, so `"user:secret@llm:8000"` and
+    `"http://user:secret@/v1"` survived it intact -- and those are the `:unknown` values, which
+    is exactly when `destination_label/0` falls back to rendering the URL. The password was
+    therefore rendered on the dashboard and logged. `Inference.redact_url/1` now strips
+    credentials from the string, covering the query string too (a gateway endpoint carries its
+    key there), and `Processing.OpenAI` delegates to it so one rule lives in one place.
+  - Two LiveView assertions were vacuously true: the upload notice lives inside a modal no test
+    opened, and the tagline had no DOM id, so the empty state satisfied the assertion meant for
+    it. Reverting either call site to its hardcoded string left the suite green. Both elements
+    now carry ids and the tests select through them.
+  - Hosts were folded with full Unicode `String.downcase/1`, which maps U+212A KELVIN SIGN onto
+    `k`, so `host.docKer.internal` was granted the on-device promise. Now folded ASCII-only.
+  - Req follows redirects by default and a 307/308 replays the POST body, so a redirecting
+    endpoint could send document text to a host `Inference` never classified. The three
+    document-bearing calls now pass `redirect: false`.
+  - The translation gate checked completeness and fuzzy but not interpolation. Gettext's default
+    `handle_missing_bindings/2` logs and renders rather than raising, so a msgstr dropping
+    `%{host}` would ship this very disclosure with the destination silently gone, in one
+    language, with everything green. The gate now compares bindings per plural form.
+  Not addressed: LiveDashboard renders `:application.get_all_env(:doctrans)`, including `api_key`,
+  at `/dev/dashboard`. It is compiled out of prod by `:dev_routes`, so it is a dev-only exposure
+  and out of scope here, but it is the one place a key is rendered at all.
+  Evidence: `lib/doctrans/config/inference.ex`, `lib/doctrans_web/privacy_copy.ex`,
+  `lib/doctrans_web/live/document_live/index.ex`, `.../upload_components.ex`,
+  `lib/doctrans_web/components/layouts/root.html.heex`, `lib/doctrans/processing/openai.ex`
+  (`redact_url/1`), `mix.exs`, `scripts/check_translations.exs`,
+  `test/doctrans/config/inference_test.exs`, `test/doctrans_web/privacy_copy_test.exs`,
+  `test/doctrans_web/live/document_live/privacy_notice_test.exs`,
+  `test/doctrans/processing/openai_request_test.exs`, `test/scripts/check_translations_test.exs`.
 
-- [ ] **U08 · P3 · Display recorded model provenance.**
+- [x] **U08 · P3 · Display recorded model provenance.**
   The page-processing-models paragraph is empty and hidden with the progress section at 100% completion.
   Render extraction/translation identifiers and Unknown fallbacks outside the progress-only section.
   Acceptance: processing, completed, and legacy pages display appropriate provenance, including model aliases
   without claiming they identify immutable weights.
-  Evidence: `lib/doctrans_web/live/document_live/show.html.heex:82`.
+  Implemented: provenance is now a `page_provenance/1` component rendered in the translated-content panel,
+  above the page body, so it no longer shares the `:if={@processing_progress < 100}` section that commit
+  `6953656` made progress-only. The empty paragraph that section still carried is gone; the section keeps
+  only the progress bar and the missing-original notice, which are genuinely progress-scoped.
+  The line reports what the page columns actually hold, and separates the cases the previous
+  single `|| Unknown` fallback collapsed into one. Anything recorded is the string, verbatim.
+  A null column is then read against the stage's status rather than guessed at: a stage still
+  `pending` or `processing` has nothing recorded yet and says so; a stage that `error`ed ran and
+  failed, and reads "run failed"; a translation left `pending` on a page whose extraction errored
+  never started and never will, and reads "did not run" rather than implying a record is still on
+  its way; a translation `completed` with no extracted text ran no model at all — `LlmProcessor`
+  short-circuits an empty page (`llm_processor.ex`, the second `maybe_translate/2` clause) — so its
+  null column is an accurate record, not a gap, and reads "no content to translate"; only a stage
+  that completed with content and still has no identifier — a page processed before
+  `20260910190000_add_processing_runs` added the columns — reads unknown. The distinction is real,
+  not cosmetic: `LlmProcessor` writes `extraction_model`/`translation_model` only on success
+  (`llm_processor.ex`, `process_page_extraction/3` and `process_page_translation/3`), and
+  `Pages.reset_page_for_reprocessing/1` nulls them again at the start of a rerun, so a blank column
+  during a rerun means "in flight", not "unknown forever".
+  Each state is a complete translatable message ("Extraction: not recorded yet"), not a fragment
+  substituted into "Extraction: %{model}". Fragments are what the first cut shipped, and translators
+  seeing a bare "not recorded yet" had to guess its referent's gender: Swedish picked a common-gender
+  adjective and Polish an impersonal clause that read as a stray sentence where a value belongs.
+  Whole messages let each language control agreement and word order, and keep the fallbacks off the
+  `"Unknown"` msgid that `status_text/1` uses for an unrelated document-status badge.
+  The recorded value is never substituted from today's configuration. `Run.choices/1` fills the
+  configured defaults into the job options, so a stage that succeeds always records the identifier it
+  actually ran with — but reading `Config.OpenAI.vision_model/0` at render time for a page that has no
+  column value would attribute the *current* setting to a *past* run, which is precisely the false
+  provenance `document_reprocessing_test.exs:419` pins at the storage layer. `requested_*_model` is not
+  displayed either: it records what was asked for at enqueue time, which a failed run never delivered.
+  A caveat line states that these names are aliases reported during processing and may not identify the
+  exact weights used. An endpoint alias such as `gpt-4o` names a route, not a fixed set of weights, and
+  it can be repointed server-side between two runs that record the same string, so the line stops short
+  of a reproducibility claim the application cannot substantiate. It renders only when at least one
+  identifier is actually on screen: on a page where both stages read a fallback there is no alias to
+  qualify, and the caveat would be permanent chrome saying nothing. The block is a labelled `<section>`,
+  matching the sibling progress region, so it is skippable rather than read out ahead of the content on
+  every page change.
+  Known limitation: provenance is per page and only for the page in view; a document whose pages ran
+  under different models (possible via per-page reprocessing) has no aggregate display. The document-level
+  "Run models" line removed in `6953656` was not restored — the document columns describe the latest run
+  configuration, not what produced any particular page, and the two disagree exactly when per-page
+  reprocessing has happened.
+  Evidence: `lib/doctrans_web/live/document_live/viewer_components.ex` (`page_provenance/1`,
+  `extraction_state/1`, `translation_state/1`), `lib/doctrans_web/live/document_live/show.html.heex`,
+  `priv/gettext` (eleven new messages across 11 locales),
+  `test/doctrans_web/live/document_live/model_provenance_test.exs`,
+  `test/doctrans_web/live/document_live_reprocessing_test.exs`, `test/support/conn_case.ex`
+  (`element_html/2`, lifted out of two test files that had copied it).
 
-- [ ] **U09 · P3 · Make the viewer responsive and preserve chat reading position.**
+- [x] **U09 · P3 · Make the viewer responsive and preserve chat reading position.**
   Two horizontal document panels plus a fixed-width chat panel are unsuitable for narrow screens.
   Use mobile tabs/stacking and an overlay chat panel; follow streaming output only when the reader is already
   near the bottom, with a new-message affordance otherwise.
   Acceptance: narrow and desktop layouts remain usable at zoom; streaming does not pull a reader away
   from earlier messages. Verify representative viewports in a browser.
-  Evidence: `lib/doctrans_web/live/document_live/show.html.heex:90`,
-  `lib/doctrans_web/live/document_live/chat_components.ex:16`, `assets/js/app.js:41`.
+  Implemented: below `lg` the two document panels stack into one switchable panel and the chat becomes a
+  right-edge overlay with a dismissing backdrop; from `lg:` up the three-column split is byte-for-byte the
+  layout that shipped before. Both panels stay in the DOM in both states and carry `lg:flex`, so the switch
+  is a display decision at one breakpoint rather than two rendering paths — a test pins that, because
+  "simplifying" the switch to render only the selected panel passes every other assertion while quietly
+  deleting the desktop split.
+  The height trap mattered as much as the width. The page was `h-screen` with `overflow-hidden` on the
+  content region, which does not clip at a *narrow* viewport so much as at a *short* one: at 200% browser
+  zoom a 1280×800 desktop has a 640×400 CSS viewport, and the panels' contents were unreachable with no
+  page scroll to recover them. The wrapper is now `min-h-dvh` and the fixed-viewport behavior is restored
+  by the `fitscreen` variant — `@media (min-width: 64rem) and (min-height: 40rem)` — rather than by `lg:`.
+  Gating on width alone was the first cut and it was wrong for the bug it was written against: short-but-wide
+  is still `lg`, so a 2560×800 display at 200% zoom (~1280×400) kept `h-dvh overflow-hidden` and reproduced
+  the trap the change was supposed to close. Width decides the side-by-side split; height decides whether
+  the page scrolls. Panel bodies scroll internally only where a height constrains them; below that they grow
+  and the page scrolls, and the pager is `sticky bottom-0 … lg:static` so it stays reachable once it does.
+  The page-image pane keeps `overflow-auto` at *every* width, which the first cut dropped below `lg`: the
+  `.zoom-*` classes are transforms, and a transform overflows its box without widening it, so with no scroll
+  container on the pane a zoomed page pushed the whole document sideways. For the same reason `.zoom-125`
+  and up now use `transform-origin: top left`; at `top center` the image grew in both directions and the
+  left half could not be scrolled back into reach at any pane width.
+  Measured in Chromium at 375×667, 768×1024, 1280×800, and 640×400 (the 200% zoom case): no horizontal
+  overflow at zoom 100% in any of them with the chat both open and closed, tabs present only below `lg`, and
+  `#chat-panel` computed `position: fixed` below `lg` and `static` at `1280`. Those measurements predate the
+  `fitscreen` variant, the pane-level `overflow-auto`, and the `transform-origin` change; the short-and-wide
+  case (~1280×400) and the zoomed-page cases have **not** been re-measured in a browser. The suite covers
+  the class tokens, not the computed layout, so re-measuring those three is outstanding.
+  The reading-position fix replaces `ScrollToBottom`, which set `scrollTop = scrollHeight` on every mutation
+  and every patch. While an answer streamed there was no way to hold a position at all: each token undid the
+  scroll. `ChatScroll` follows only while the reader is within 64px of the bottom, and otherwise reveals
+  `#chat-jump-to-latest` and leaves the scroll exactly where they put it. Scrolling up alone never reveals
+  the affordance — it announces content that arrived unseen, not content already read — and returning to the
+  bottom dismisses it. Submitting a question re-pins: that is the reader's own move and should land on their
+  message. Verified in the browser, not only asserted: with the transcript scrolled up, appending content
+  left `scrollTop` at 0 and showed the affordance; pinned at the bottom, the same append was followed and
+  the affordance stayed hidden.
+  A `MutationObserver` is still what notices content. `updated()` cannot replace it: the finalized messages
+  live in a `phx-update="stream"` container that is a *child* of the hook element, so an append patches the
+  child without calling `updated()` there, and a streamed delta only rewrites text inside `#chat-streaming`
+  — hence `characterData` as well. The affordance sits outside the scroll container under
+  `phx-update="ignore"`, because whether it is visible is client state no assign knows about; without that,
+  the next unrelated patch would restore the rendered `hidden` and drop the notice mid-answer.
+  Two things a mutation observer cannot see are now handled alongside it. A *resize* produces no mutation,
+  and a container that gets shorter produces no scroll event either — `scrollTop` stays legal when the
+  maximum offset grows — so browser zoom, a window resize, crossing `lg` where the panel flips from viewport
+  height to column height, and the soft keyboard all dropped a pinned reader off the bottom with no
+  affordance to recover, since `pinned` was still true. A `ResizeObserver` re-pins. And `pinned` itself is
+  refreshed from the `scroll` event, which the browser dispatches on the next frame, while the observer
+  callback is a microtask running at the end of every task and each streamed delta arrives as its own task:
+  a delta landing in that gap read the stale `true` and yanked the reader down, the exact failure the hook
+  exists to prevent. `scrollToBottom` now records the offset it sets, and an offset below it is taken as the
+  reader's own move. Appending leaves `scrollTop` untouched while `scrollHeight` grows, so nothing else
+  trips it.
+  The affordance is also cleared when content *shrinks* past it: interrupting an answer drops the streaming
+  block, and a shrink to shorter than the container fires no scroll event, which left the notice standing
+  over an answer that had been discarded.
+  Every element the hook reaches for is named by a `data-` attribute on `#chat-scroll` rather than hardcoded,
+  and an unresolved one is reported to the console. All four failures are otherwise silent — the affordance
+  never appears, the button never binds, submitting stops re-pinning — and a test follows each attribute to
+  the element it names, so a rename that lands in only one place fails in CI rather than in a browser.
+  The overlay is deliberately not `role="dialog" aria-modal="true"`. `ChatInput` declines focus while such a
+  dialog is open — it has to, or an answer finishing behind the reprocess dialog drags focus out of it — so
+  a modal chat panel would silently stop refocusing the input after every answer. It is a named `<aside>`
+  instead, at `z-40` over a `z-30` backdrop: the only band that clears the now-sticky pager (`z-10`) while
+  staying under the reprocess dialog and flash toasts (`z-50`) and the upload modal (`z-999`), so an open
+  dialog still renders above the chat.
+  What that decision does not excuse is shipping an overlay with none of the behavior a dialog would have
+  brought. The `ChatDismiss` hook adds the two that matter: Escape closes the panel, and focus returns to
+  `#toggle-chat` when it goes — but only while it *is* an overlay (`data-overlay-media`), since Escape
+  closing a docked `lg:` sidebar would be a surprise, and only when the closing panel took focus down with
+  it. An open `aria-modal` dialog keeps Escape, so dismissing the reprocess dialog no longer also closes the
+  chat behind it. The panel is `w-[calc(100%-3rem)]` rather than `w-full`: at full width it covered the
+  backdrop completely on any phone narrower than `max-w-sm`, which is exactly the viewport where
+  tap-to-dismiss is the affordance being relied on.
+  The transcript is a `role="log"` region with `tabindex="0"`. Chrome and Firefox now make scroll containers
+  focusable themselves and Safari does not, and a transcript only a pointer can scroll makes "hold your
+  reading position" unusable there. The jump button announces through a permanently rendered `sr-only`
+  `role="status"` region whose *text* the hook writes, not by unhiding one — toggling `display` on a live
+  region is not reliably announced — and that region sits outside `#chat-scroll`, or writing to it would
+  retrigger the MutationObserver that wrote it. It is `btn-sm` below `lg` (`lg:btn-xs`), since a 24px target
+  on the layout the button exists for is at the WCAG 2.5.8 floor.
+  The panel switcher is two `aria-pressed` toggle buttons in a named `role="group"`, not `role="tablist"`.
+  The ARIA tabs pattern moves between tabs with the arrow keys and takes unselected tabs out of the Tab
+  order via a roving `tabindex`; declaring the roles without that behavior tells a screen reader user to
+  press keys that do nothing. The first cut of this change did declare them, and dropping the roles was the
+  correction. Both new messages came back from `gettext.extract --merge` flagged fuzzy in all 11 locales,
+  auto-filled from unrelated msgids — "Document panels" from `Documents`, so the switcher would have been
+  named "Documents" in every language, and "New messages" from `Send message`, arriving in `en` as fuzzy
+  with an *empty* msgstr, which `en` is exempt from the completeness check for. The fuzzy gate added in
+  `2450c8a` was the only thing between that and a blank button; all 22 translations are written out.
+  The panel bodies' labels are `hidden lg:inline`, where the selected tab already names them — the first cut
+  claimed this and did not do it, so below `lg` a tab reading "Original Page" sat directly above a header
+  repeating it, and with Show Original on, two differently scoped controls both read "Original". The tab and
+  the content panel's header now render from one `content_panel_label/1`; they were two copies of the same
+  `if`/`gettext` pair in two modules, kept in sync by nothing but a test.
+  Known limitations: the near-bottom logic still has no CI coverage — this repo has no JavaScript test
+  harness, so the suite pins the wiring (`phx-hook`, the ignored containers, every `data-` attribute followed
+  to the element it names) and the behavior itself rests on browser measurement. That is now the largest gap
+  in this change, and the three layout cases listed above are un-remeasured. `prefers-reduced-motion` is
+  honored for the decorative transitions only; the loading spinner is left animating on purpose, because it
+  is the sole signal that an answer is coming and freezing it removes feedback rather than motion.
+  Evidence: `lib/doctrans_web/live/document_live/show.html.heex`,
+  `lib/doctrans_web/live/document_live/page_viewer.ex` (`view_tabs/1`, `select_view_tab`, `:view_tab`),
+  `lib/doctrans_web/live/document_live/chat_components.ex`, `assets/js/app.js` (`ChatScroll`),
+  `test/doctrans_web/live/document_live/responsive_viewer_test.exs`,
+  `priv/gettext` (two new messages across 11 locales).
 
-- [ ] **U10 · P3 · Move theme initialization into the supported JavaScript bundle.**
+- [x] **U10 · P3 · Move theme initialization into the supported JavaScript bundle.**
   The inline root script conflicts with the router's script-src self policy and project conventions.
   Acceptance: theme selection, reload persistence, and cross-tab updates work without inline scripts
   or weakening the Content Security Policy.
   Evidence: `lib/doctrans_web/components/layouts/root.html.heex:22`, `lib/doctrans_web/router.ex:14`.
+  Implemented as a new esbuild entry point, `assets/js/theme.js`, loaded render-blocking from `<head>`.
+  The conflict is stronger than "conventions": `script-src 'self'` carries no `'unsafe-inline'`, no
+  nonce, and no hash, so a conforming browser refused the block outright. Nothing applied the stored
+  choice on load and nothing answered `phx:set-theme`, which means this item was not a cleanup of
+  working code — theme selection had never worked in a browser enforcing the app's own header.
+  Why a second entry point rather than `app.js`, which the title and `AGENTS.md` both point at: this is
+  the one script in the application that must run before the first paint, and `app.js` is `defer`red,
+  so it executes after the document parses. Until `data-theme` is set the daisyUI themes resolve
+  through `prefers-color-scheme`, so folding the code into the deferred bundle would trade a script the
+  browser blocks for one that paints whatever the operating system prefers and then flips, for any
+  reader whose stored choice disagrees with it in either direction. The new file is a first-party entry in
+  the same `:doctrans` esbuild profile, not a vendored or external `src`, so the constraint `AGENTS.md`
+  is actually protecting — one build pipeline, nothing loaded from off-origin — still holds. It imports
+  nothing and builds to 754 bytes, which is what keeps a second `--bundle` entry honest: a shared
+  import would be copied into both outputs, and `app.js` is 311kb. It sits ahead of the stylesheet
+  `<link>`, because a blocking script placed after one waits for that stylesheet to finish loading
+  before it runs, which would put the attribute back on the far side of the paint it exists to precede.
+  The CSP is unchanged. A nonce or a `'sha256-...'` would also have satisfied the letter of the
+  acceptance criterion and was not used: both re-admit inline script to the policy, and a hash has to be
+  recomputed by hand every time the script is edited, so the gate it provides is one a future edit
+  silently breaks.
+  Hardened past the original in two places, both found by dispatching `phx:set-theme` by hand during
+  review. The value was applied and stored without being checked against the three themes that exist,
+  so an event from a node carrying no `data-phx-theme` arrived as `undefined` and was written through
+  verbatim — and `data-theme="undefined"` is worse than it sounds: it matches no theme, it suppresses
+  `prefers-color-scheme` *because the attribute is present*, it leaves every button unpressed, and it
+  survived reloads, so the page sat in the wrong theme with nothing on screen explaining why. The same
+  dispatch aimed at `window` threw outright, since `window.dataset` is undefined. Unknown values are now
+  ignored, which also self-heals a catalog of storage already holding one, and the read is
+  optional-chained. Separately, `localStorage` throws rather than returning null in a browser set to
+  deny site data; unhandled, that would have aborted the file before its listeners were registered,
+  which is the dead toggle this item exists to fix. Reads and writes are wrapped, so such a browser
+  loses persistence but keeps the control.
+  Behavior is otherwise carried over unchanged, including the contract that "system" is the *absence* of
+  a stored value — the key is removed and the attribute comes off, so the daisyUI themes resolve through
+  `prefers-color-scheme` rather than freezing at whatever the system preference was on the day it was
+  picked.
+  Known limitation, the same one U09 recorded: there is no JavaScript test harness in this repo, so the
+  behavior itself — `localStorage`, the `storage` event, paint timing — rests on browser verification,
+  which was done under U12 rather than left as an assertion. Paint timing specifically: with a theme
+  stored, `data-theme` is already on `<html>` at the first `readystatechange` (`interactive:dark`), so
+  the head script runs during parse, before the deferred bundle and before anything is drawn.
+  What the suite pins is the wiring that has to hold for any of it to be reachable: no `<script>` with a
+  `src` missing or a body present on either HTML route, the theme bundle loaded without `defer`/`async`
+  and ahead of both the stylesheet and the still-deferred app bundle, `script-src 'self'` still sent
+  with neither `unsafe-inline` nor a nonce, `js/theme.js` present in the esbuild args, and each of the
+  three behaviors present in the bundle's code.
+  The first cut of those tests was much weaker than it read, and review caught it: they grepped the
+  whole source of `theme.js`, whose own header comment names `phx:set-theme` and `phx:theme`, so
+  deleting the entire selection listener or the entire reload-persistence block left all seven passing,
+  as did replacing the file with a four-line comment. They now grep with whole-line comments stripped,
+  and a further test fails if a trailing comment is ever introduced, since that is the hole reopening.
+  Review also found the two load-order claims this change argues hardest for — theme before stylesheet,
+  app still deferred — asserted nowhere. Both are now pinned, and all four mutations that used to pass
+  fail.
+  Not closed: nothing verifies the bundle was ever *built*. Deleting `priv/static/assets/js/theme.js`
+  leaves the suite green, because `priv/static/assets` is gitignored and no CI job builds assets, so a
+  syntax error in this file cannot fail the gate. That was tolerable for a deferred bundle and is less
+  so for a render-blocking one, where a 404 stalls the parser. Filed as Q08.
+  Found while fixing: `Layouts.theme_toggle/1` was rendered by no page, so even with the listener
+  restored a reader had no control to reach it. Filed and fixed as U12.
+  Evidence added: `assets/js/theme.js`, `config/config.exs` (esbuild entry points),
+  `test/doctrans_web/theme_script_test.exs`.
 
-- [ ] **U11 · P3 · Refresh the dashboard across tabs.**
+- [x] **U11 · P3 · Refresh the dashboard across tabs.**
   The dashboard subscribes to known document IDs, so another tab's newly uploaded document is missed.
   Subscribe to collection notifications and broadcast creation/deletion consistently.
   Acceptance: upload, deletion, and status changes appear in another open dashboard without a reload;
   subscriptions remain bounded and document streams remain consistent.
   Evidence: `lib/doctrans_web/live/document_live/index.ex:471`, `lib/doctrans/documents/topics.ex`.
+  The dashboard now holds exactly one subscription, to the `"documents"` collection topic, and
+  `Doctrans.Documents` announces creation and deletion the way it already announced updates.
+  Two independent halves were broken. `Topics.subscribe_documents/0` existed and was called from
+  nowhere, so the collection topic had no subscriber at all; and nothing ever broadcast a creation or
+  a deletion, so even a subscriber would have heard neither. The dashboard instead subscribed to one
+  `"document:<id>"` topic per card on screen, reconciled on every refresh — which can only carry news
+  about documents it already knows about, and a document uploaded in another tab is by definition not
+  one of those.
+  The per-document subscriptions are gone rather than supplemented. `broadcast_document_update/1` and
+  `broadcast_page_update/1` already fanned out to `"documents"` as well as to the per-document topic,
+  so one collection subscription delivers a strict superset of what the old set did; keeping both would
+  have handed the same LiveView every update twice. That is also what makes the bound real: one
+  subscription regardless of how many documents exist, where it used to grow with the list.
+  `DocumentStream` loses `:document_topics` and its `subscribe/1`/`unsubscribe/1` entirely, and
+  `UploadIntake` loses the three calls that existed only to make the uploading tab track its own new row.
+  The broadcasts live in `create_document/1` and `delete_document/1` rather than at their call sites,
+  which is what "consistently" required: documents are deleted from the dashboard's own event handler
+  and from two of `UploadIntake`'s cleanup paths, and an announcement wired into each would be one
+  `rescue` away from being skipped. `delete_document/1` broadcasts strictly **after** the transaction
+  commits — from inside, a rollback could unsay a deletion that subscribers had already acted on, and
+  the message would reach them before the row was actually gone. The payload is the bare id, not the
+  struct, because the row no longer exists and a struct would only be a stale copy of it.
+  `Show` needed three changes, two of which were latent crashes this item made reachable rather than
+  introduced. It has no catch-all `handle_info/2`, so the new `{:document_deleted, _}` arriving on its
+  own document topic would have killed it; it now assigns `:document` to `nil`, which is the exact state
+  the `{:document_updated, _}` clause already produced when it re-read a vanished document, and which
+  `show.html.heex` already renders a not-found branch for. That clause in turn read
+  `socket.assigns.document.id` with no nil guard, which every other nil-sensitive path in the module has
+  — harmless while `nil` was a race, routine once a deletion announces itself. Oban cancellation is not
+  synchronous, so an already-executing job can broadcast an update on the same topic *after* the
+  deletion lands. And `terminate/2` unsubscribed via `socket.assigns.document.id`, so once that assign
+  was cleared it skipped the unsubscribe and leaked the registration into the next LiveView, since live
+  navigation reuses the channel process. The subscribed id is now remembered in its own assign at mount.
+  Found while fixing, and fixed here because it defeats this item's own acceptance criterion: the
+  dashboard's empty state never disappeared. `#documents-empty` was an id-bearing child *inside* the
+  `phx-update="stream"` container, and LiveView's client refuses to discard exactly that, while a stream
+  `reset` only removes children carrying `data-phx-stream`. So a dashboard that mounted empty kept "No
+  documents yet" on screen underneath the first card that arrived — through `stream_insert` and through
+  a full reset alike. It predates this change and was near-unreachable before it, because a dashboard
+  that mounted empty had nothing to subscribe to and so learned about nothing. It is now a sibling above
+  the container, keeping its server-driven `:if={@documents_count == 0}`. `AGENTS.md`'s `hidden
+  only:block` idiom would also have worked and was not used: it leaves the element permanently in the
+  DOM, which makes "empty" and "not empty" indistinguishable to `has_element?/2`, so the bug could
+  return unnoticed by the suite that exists to catch it.
+  One unrelated function moved to pay for the change. Credo's `max_deps: 10` had `Doctrans.Documents`
+  sitting at exactly 10, and aliasing `Topics` made it 11, so `chunks_embedded?/1` now reaches chunks
+  through the existing `Page has_many :chunks` association instead of naming `Chunk` directly. It is the
+  same inner join over the same pairs with the same predicates under `Repo.exists?`, verified rather
+  than assumed. Raising the ceiling would have been the more honest lever; removing a dependency rather
+  than loosening the gate was preferred, and it is recorded here because a query rewrite inside a
+  subscription change is exactly the kind of thing that looks unmotivated later.
+  The test suite needed a structural concession, which is the part of this change most likely to bite
+  someone later. `Doctrans.PubSub` is process-global and the Ecto sandbox does not isolate it, so once
+  the dashboard listens to a topic every `document_fixture/1` in the suite publishes to, an `async: true`
+  neighbour's broadcast reaches a dashboard mounted by an unrelated file. It produced a real
+  intermittent failure: a stray `{:page_updated, _}` from a concurrently running processing test flipped
+  `Index`'s `refresh_scheduled?`, so a test's own page update was swallowed into the 1.5s coalescing
+  window and the assertion ran before the progress bar moved — timing-dependent, not seed-dependent, and
+  invisible when the file ran alone. `document_live_cross_tab_test.exs` and `document_live_index_test.exs`
+  are therefore `async: false`, each with a comment saying why, so nobody optimises it back. That is not
+  the blunt instrument it looks like: every other file that mounts the dashboard was already sync, these
+  two were the last async holdouts, and the suite is ~1.2s async against ~110s sync, so the measured cost
+  is inside run-to-run noise. ExUnit runs sync modules only after every async module has finished and
+  then one at a time, which was verified against the runner's source rather than assumed, as was the
+  absence of any background process that could broadcast on its own (Oban is inline, the health-check
+  worker is disabled, the sweeper touches files and never rows, and startup recovery dies on the sandbox
+  before it broadcasts).
+  A first attempt had instead skipped foreign queries with a helper, which silently downgraded
+  `refute_receive {:dashboard_query, _}` from "no further queries" to "no further queries about my own
+  documents"; serializing let the strict form come back. That detour did find one thing worth keeping:
+  the pre-existing `refute untouched.id in List.flatten(metadata.params)` was **vacuous**, because
+  `params` carries UUIDs already dumped to 16-byte binaries and a string id can never appear there. It
+  matches `cast_params` now, and both halves of that claim were shown by mutation — the new form fails
+  when pointed at an id the dashboard does re-query, the old form passes.
+  Verified through the real mechanism, not by hand-delivering messages: every cross-tab test drives
+  `Documents.create_document/1` or `delete_document/1` and lets the broadcast travel, because a message
+  sent straight to `view.pid` proves a handler exists while still passing against the bug this item
+  fixes. Two dashboards mounted from one connection see each other's creations, in sorted position, and
+  each other's deletions; status changes still arrive now that the per-document subscriptions are gone;
+  a create and a delete leave the card set, order and `:documents_count` agreeing, including when the
+  acting tab receives the echo of its own broadcast. The bound is pinned by observation rather than
+  argument — `Registry.keys(Doctrans.PubSub, pid)` returns `["documents"]` for a dashboard with four
+  cards on screen, after a fifth arrives and after a delete, with a guard test confirming the check
+  would actually see a second registration — and `terminate/2` is checked to release it, for the viewer
+  as well as the dashboard. Each new test was confirmed to fail without its fix.
+  Not closed: the acting tab still handles the echo of its own broadcast, so a ten-file upload does one
+  full refresh and then ten single-id refreshes. They are idempotent and the extra queries are cheap;
+  avoiding them means `broadcast_from/4` and threading the caller's pid through the context, which buys
+  less than it costs. And the deeper test-isolation issue is worked around, not solved: any future test
+  that mounts a dashboard and counts queries, asserts timing, or refutes a message must be sync, and
+  nothing enforces that beyond the two comments.
+  Evidence added: `lib/doctrans/documents/topics.ex` (`broadcast_document_created/1`,
+  `broadcast_document_deleted/1`, `unsubscribe_documents/0`), `lib/doctrans/documents.ex`,
+  `lib/doctrans_web/live/document_live/document_stream.ex`,
+  `lib/doctrans_web/live/document_live/index.ex`, `lib/doctrans_web/live/document_live/show.ex`,
+  `lib/doctrans_web/live/document_live/upload_intake.ex`,
+  `test/doctrans_web/live/document_live_cross_tab_test.exs`,
+  `test/doctrans/documents/topics_test.exs`, `test/doctrans_web/live/document_live_index_test.exs`,
+  `test/doctrans_web/live/document_live_show_test.exs`.
+
+- [x] **U12 · P3 · Render the theme toggle somewhere a reader can reach it.**
+  `Layouts.theme_toggle/1` was defined and unit-tested but called from no template, so the light/dark
+  choice was unreachable in the running application. Found while fixing U10, which restored the listener
+  the toggle dispatches to; the two halves of the feature were broken independently, and either one
+  alone left the feature dead.
+  Mounted in each of the three pages' own header action rows rather than in `Layouts.app/1`. The layout
+  is a bare `<main>` with no chrome, so putting it there meant either inventing a floating control —
+  which would have to be threaded through the z-index band U09 established for the chat overlay — or
+  introducing an application header that every page would then render its own header underneath. Three
+  call sites of one component is the smaller change, and it puts the control where each page already
+  keeps its actions. `SearchLive` had no action area and gets one: `ms-auto` on a trailing wrapper
+  rather than `justify-between` on the row, because the back link and the title are a unit and have to
+  stay adjacent.
+  The selected theme is now stated, not only drawn. It had been indicated by a CSS-positioned pill
+  alone, which assistive technology cannot see and which shows nothing distinguishable for "system".
+  The three buttons are `aria-pressed` in a named `role="group"`, following the panel switcher U09 added
+  rather than the ARIA radiogroup pattern, which would promise arrow-key navigation and a roving
+  `tabindex` that nothing here implements.
+  The pressed state cannot be server-rendered: the choice lives in `localStorage` and the server is
+  never told it. `theme.js` writes it, from `DOMContentLoaded` and from every `setTheme` — so it lands
+  before the first paint and on every click and cross-tab `storage` event, none of which involve a
+  socket. Gating it on the `ThemeToggle` hook instead, as the first cut did, left the buttons
+  announcing the server's "system" placeholder for the whole LiveView join, and permanently wherever
+  the socket never opens, while the pill drew the real choice. The hook is now only the patch path:
+  `mounted` and `updated` re-run the same sync, because a patch re-renders the group from a template
+  that does not know the theme. Both sides call `syncThemeToggles` from `assets/js/theme_sync.js`, a
+  dozen lines esbuild copies into each bundle, so the two cannot drift.
+  No `phx-update="ignore"` on the group, despite the hook writing into server-rendered DOM: ignoring
+  the subtree would also freeze the gettext'd `aria-label`s, so the toggle would keep whichever locale
+  it first rendered in.
+  One new message, `Theme`, naming the group. `gettext.extract --merge` returned it non-fuzzy in all 11
+  locales and all 11 translations are written out.
+  Verified in Chromium against a running server, which is the only place any of this executes:
+  the toggle renders on all three routes; clicking dark sets `data-theme` and `phx:theme` and moves
+  `aria-pressed` to the dark button; the choice survives a reload and a navigation to another route; a
+  second tab follows the first within one `storage` event; returning to "system" removes both the
+  attribute and the key. No console errors and no CSP violations on any route.
+  The cost the viewer pays on the Show route was measured rather than assumed, because U09 had
+  just tuned that header: the toggle adds a wrapped row of 48px at 390px and at 768px, 2px at 430px,
+  and **zero** at every width from 1024px up — which is exactly the `fitscreen` range
+  (`min-width: 64rem and min-height: 40rem`) where the layout is fixed-height and header pixels come
+  straight out of the reading area. Below it the page scrolls, so the extra row is scrollable chrome
+  rather than a permanent deduction. That is why the toggle goes in the header rather than being
+  hidden below `lg`: the only widths where it would have cost anything lasting are the ones where it
+  costs nothing.
+  That measurement covered the Show header, which already wrapped. The dashboard's did not — its row
+  and its action group were both fixed `flex` — so the toggle went in beside a `w-48` search field, a
+  sort control and Upload with nothing able to reflow, and the excess became horizontal overflow
+  rather than a wrapped row. Both now carry `flex-wrap` with the same `gap-x-4 gap-y-3` the Show
+  header uses.
+  Evidence: `lib/doctrans_web/components/layouts.ex`, `assets/js/theme_sync.js`,
+  `assets/js/app.js` (`ThemeToggle`),
+  `lib/doctrans_web/live/document_live/index.ex`, `lib/doctrans_web/live/search_live.ex`,
+  `lib/doctrans_web/live/document_live/show.html.heex`,
+  `test/doctrans_web/theme_script_test.exs`, `priv/gettext` (one new message across 11 locales).
+
+- [x] **U13 · P3 · Give LiveDashboard the CSP nonce it renders.**
+  `live_dashboard "/dashboard"` is mounted through the `:browser` pipeline, so it receives the same
+  `script-src 'self'`, but its layout emits an inline `<script nonce={csp_nonce(@conn, :script)}>` and
+  the route sets no `:csp_nonce_assign_key`. `csp_nonce/2` returns `nil`, HEEx drops a `nil`
+  attribute rather than rendering it empty, so the markup carries no nonce at all and the browser
+  refuses the script — the identical defect U10 just fixed, in a dependency's template rather than
+  ours. Dev-only:
+  the route is behind `dev_routes`. `live_dashboard` accepts `csp_nonce_assign_key`, so this is a
+  router option plus a plug that assigns the nonces, not a policy change.
+  Acceptance: the dashboard works in dev with the CSP unchanged for every other route.
+  The nonce is minted per request by `DoctransWeb.Plugs.DashboardCsp`, which assigns it and replaces
+  the response policy in the same `call/2`. Both halves have to come from one request: LiveDashboard
+  copies the assign into the LiveView session at dead render, so the socket keeps rendering the nonce
+  the document's own header admitted, and a nonce minted again for the connect would be refused
+  against a header that is never sent a second time.
+  A scope, not a pipeline change. `/dev` held both the dashboard and the Swoosh mailbox preview; the
+  dashboard moved into `scope "/dev/dashboard"` and the mailbox kept a `scope "/dev"` piping through
+  `:browser` alone, so the widened policy reaches exactly one route. Scoping it to the dashboard's own
+  path rather than to `/dev` is what keeps that true: a dev route added later cannot inherit the
+  relaxation merely by being written next to the dashboard. `/`, `/search` and `/dev/mailbox` are each asserted to receive
+  `ContentSecurityPolicy.base()` byte for byte.
+  Three sources are added and no more: the nonce in `script-src` and in `style-src`, and `data:` in
+  `font-src`. The third was not in the finding and is load-bearing — the dashboard's stylesheet embeds
+  its icon font as a `data:` URI, which `font-src 'self'` refuses, and that failure shows up as empty
+  boxes rather than as an error. `style-src 'unsafe-inline'` is **not** needed: every inline `<style>`
+  LiveDashboard renders is nonced, and the single inline `style` attribute in the dependency, which no
+  nonce can cover, is reachable only through `live_layered_graph/1` on a custom page — none of which
+  this application mounts. Adding `'unsafe-inline'` would in any case be dead code next to a nonce,
+  which browsers let override it.
+  The `:browser` pipeline's literal moved into `DoctransWeb.ContentSecurityPolicy` so the exception is
+  rendered from the same directive list as the base rather than being a second literal free to drift.
+  The rendered base is byte-identical to the string it replaced, checked against `HEAD` independently
+  of the module and then pinned by a test carrying the pre-U13 literal. The directives the exception
+  widens are a second list, checked against the first at compile time, so a directive renamed in one
+  and not the other fails the build rather than silently dropping a nonce.
+  The router reads the assign key from `DashboardCsp.assign_key()` instead of repeating `:csp_nonce`.
+  The first cut repeated it, on the belief that a macro option cannot call a function; `live_dashboard`
+  binds its options as values, so it can. What that removes is a drift that fails silently on the
+  server: a key the router names but nothing assigns leaves `conn.assigns[key]` nil, so the nonce
+  attributes drop out of the markup entirely — indistinguishable from the original defect, and with
+  no `nonce=""` left behind to grep for. It was reproduced by accident during verification, when the two spellings
+  disagreed for about two seconds — the browser refused the script and logged `Cannot read properties
+  of undefined (reading 'customHooks')`, with nothing at all on the server side.
+  `config/test.exs` now sets `dev_routes: true`, which is the only reason any of this is testable at
+  all: the route is compiled behind `Application.compile_env(:doctrans, :dev_routes)` and did not exist
+  in the test environment. Nothing else in the tree reads that flag.
+  Verified in Chromium against a running dev server, which is the only place a CSP is enforced:
+  `/dev/dashboard/home` renders eleven nonce attributes, all non-empty and all equal to the value in
+  that response's own header; `typeof window.LiveDashboard` is `"object"`, which is the direct evidence
+  that the refused inline script now runs; the socket connects; all ten reachable tabs render,
+  including the Home usage bars and Metrics' live charts, both of which come from nonced inline
+  `<style>`; and `document.fonts.check('12px LiveDashboardFont')` is true. Sixty-six console entries
+  across a full walk, every one of them LiveView debug output — no violations, no errors, no 4xx or
+  5xx. `/` and `/search` are unchanged, theme toggle included.
+  Not fixed, and deliberately: `/dev/mailbox` has the same defect. Swoosh's preview template nonces its
+  own inline `<script>` and `<style>`, `Plug.Swoosh.MailboxPreview` accepts its own
+  `:csp_nonce_assign_key`, and nothing sets it, so that inline script is still refused — confirmed in
+  the browser. It is dev-only and the page's static content renders. Fixing it would widen a second
+  route's policy, which this item's own acceptance criterion forbids; filed as U14, which was
+  implemented and then reverted together with the preview itself.
+  Defect sites: `lib/doctrans_web/router.ex:14` (the pipeline's CSP literal) and `router.ex:50` (the
+  route that named no assign key), against the markup they refused,
+  `deps/phoenix_live_dashboard/lib/phoenix/live_dashboard/layouts/dash.html.heex:4`.
+  Evidence: `lib/doctrans_web/content_security_policy.ex`, `lib/doctrans_web/plugs/dashboard_csp.ex`,
+  `lib/doctrans_web/router.ex`, `config/test.exs`,
+  `test/doctrans_web/dashboard_csp_test.exs`, `test/doctrans_web/content_security_policy_test.exs`.
+
+- [x] **U14 · P3 · Give the mailbox preview the CSP nonce it renders — implemented, then reverted with the feature.**
+  `/dev/mailbox` carried the defect U13 fixed for the dashboard and deliberately left behind.
+  Swoosh's preview template emits one inline `<script nonce="<%= csp_nonce(@conn, :script) %>">`
+  unconditionally, `Plug.Swoosh.MailboxPreview` reads that nonce from `conn.assigns` under keys that
+  default to `:script_csp_nonce` and `:style_csp_nonce`, and nothing assigned either — so the
+  attribute rendered empty and `script-src 'self'` refused the script, taking the preview's
+  timestamps, its text-body toggle and its link handling with it, silently.
+  The fix was built and verified in Chromium: a `MailboxCsp` plug, a `mailbox/1` policy adding the one
+  source the preview earns, a `/dev/mailbox` scope of its own, and a test file pinning all of it.
+  Reverted, and the feature with it. A review of the finished branch asked the question the item never
+  had: who sends the mail. Nobody does. `Doctrans.Mailer` was the untouched `phx.new` stub with zero
+  callers in `lib/` or `test/`, so the preview previewed an empty mailbox that nothing could ever fill,
+  and this item had spent a plug, a policy, a scope and ~200 lines of test on making its inline script
+  run. The cheaper answer to "the preview's script is refused" is that the application does not need
+  the preview. Removed: the forward and its scope, `MailboxCsp`, `mailbox/1` and
+  `@mailbox_additions`, `Doctrans.Mailer`, `test/doctrans_web/mailbox_csp_test.exs`, the mailer and
+  `:swoosh` configuration in all four config files and the commented adapter block in
+  `config/runtime.exs`, and the `:swoosh` dependency itself.
+  Kept from the reverted work, because both earned their place independently of the mailbox:
+  `ContentSecurityPolicy.nonce/0`, which hosts the minting next to the `'nonce-'` interpolation it has
+  to agree with and is pinned by its own test, and the private `widen/2` that `dashboard/1` renders
+  through. The compile-time directive-name guard went back to its single-list form.
+  Repaired while reverting: U14 had moved the dashboard's nonce-strength assertion out of
+  `dashboard_csp_test.exs` and into a test of `nonce/0` alone, on the reasoning that both plugs called
+  it. Nothing then asserted that the *plug* called it, and uniqueness over twenty calls is satisfied by
+  a counter — so a plug rewritten to mint a weak value would have passed the whole file. The
+  `Base.decode64/1` and `byte_size/1 >= 16` assertions are back on the value the plug actually
+  assigned, and stated in both places on purpose.
+  Also closed while reverting: the `every other route` guard checked `/` and `/search` but never
+  `/documents/:id`, the one application route needing a row to exist and so the one easiest to omit
+  from a hand-written list. It is in both tests now, behind a `document_fixture/0` in the describe's
+  setup.
+  Verification after the revert: `mix compile --warnings-as-errors` clean in `test`,
+  `mix format --check-formatted` clean, `mix test` 1322 passed / 1 skipped / 0 failures, and no
+  `swoosh`, `Swoosh`, `Mailer` or `mailbox` reference remains in `lib/`, `test/`, `config/` or
+  `mix.exs`.
+  Evidence: `lib/doctrans_web/content_security_policy.ex`, `lib/doctrans_web/plugs/dashboard_csp.ex`,
+  `lib/doctrans_web/router.ex`, `test/doctrans_web/dashboard_csp_test.exs`,
+  `test/doctrans_web/content_security_policy_test.exs`, `mix.exs`, `config/*.exs`.
+
+- [x] **U15 · P3 · Let the mailbox preview frame the email body it renders — closed as won't-fix.**
+  The finding stands and was never in doubt: the preview frames `.../<id>/html`, that document is
+  served the base policy's `frame-ancestors 'none'`, and `'none'` forbids *every* page from framing
+  it, the same-origin preview included — so the HTML body pane was blank in dev regardless of U14's
+  nonce. It predates U14 and was not a regression from it; on `main` the forward already sat under
+  `pipe_through :browser` and carried the same base policy.
+  Closed because the route it describes no longer exists. U14's revert removed the mailbox preview
+  outright, so there is no iframe to unblock and no third exception to weigh.
+  Worth keeping on the record, because the reasoning is what closed it rather than the deletion alone:
+  the fix would have been `frame-ancestors 'self'` on the one route in the application that renders
+  content the application did not write, to make a preview of mail the application never sends
+  legible. That is the wrong direction of spend even where the route is dev-only, and noticing it is
+  part of what argued for removing the feature instead. If a mailer is ever added, this is re-found
+  from scratch alongside the fidelity trade the old entry flagged — real emails are mostly inline
+  `style` attributes and remote `<img>`, which `style-src 'self'` and `img-src 'self' data: blob:`
+  refuse, so faithful previews mean `style-src-attr 'unsafe-inline'` and a wider `img-src` on a
+  document of untrusted HTML. That trade should be decided deliberately, not inherited from a framing
+  fix.
 
 ## Phase 5 — Verification and maintenance
 
@@ -360,7 +1762,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `mix compile` never sees `test/**/*.exs` and exactly one warning hides in that blind spot.
 
 - [ ] **Q02 · P2 · Include critical workers in meaningful coverage.**
-  The reported percentage excludes Worker, LlmProcessor, EmbeddingWorker, and health/sweeper workers.
+  The reported percentage excludes Worker, LlmProcessor, and the health/sweeper workers.
   Gradually remove production exclusions while adding behavior-focused tests; keep the 80% requirement.
   Remove obsolete Ollama exclusions, clarify the active coverage configuration, and correct the ignore rule
   that labels tracked coveralls.json as an artifact.
@@ -376,11 +1778,14 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Per-file reality: `health_check_worker.ex` 37.2%, `embedding_worker.ex` 59.1%, `llm_processor.ex` 67.5%,
   `sweeper_worker.ex` 70.0%, `health_check.ex` 78.2%, `worker.ex` 95.9%. Two entries
   (`processing/ollama.ex`, `test/support/ollama_stub.ex`) named files that no longer exist and were
-  removed in G07.
+  removed in G07. Superseded in part by R01: `embedding_worker.ex` was deleted and its exclusion with it,
+  so its successors `search/indexer.ex` and `jobs/embedding_job.ex` are measured. Five production
+  exclusions remain; the measurement above predates that change.
   What the exclusion hides is exactly the reliability logic this plan prioritizes, all of it unexecuted:
   both retry-with-backoff and permanent-failure arms in `llm_processor.ex:183-215,292-324`; the whole of
-  `handle_chunk_error/5` and the `Ecto.StaleEntryError` rescue in `embedding_worker.ex:286-345`;
-  `chunks_match_page_content?/2` at `embedding_worker.ex:185-206`, which is the C01 alignment decision;
+  `handle_chunk_error/5` and the `Ecto.StaleEntryError` rescue, and `chunks_match_page_content?/2` (the
+  C01 alignment decision) — all three formerly in `embedding_worker.ex` and now measured in
+  `search/indexer.ex`;
   and the entire check cycle in `health_check_worker.ex:98-180`, which never runs because
   `config/test.exs:60` disables the worker. The retry paths are cheap to cover — `config/test.exs:52-55`
   already sets `max_attempts: 2, base_delay_ms: 10`, so a retry test costs about 20 ms.
@@ -404,8 +1809,9 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   1 s later with no sandbox owner, so the GenServer crashes and the supervisor restarts it mid-suite.
   `test/doctrans/processing/worker_test.exs:9-30` already compensates with a `Process.sleep(50)` and an
   `ensure_worker_responsive/1` helper that retries on `:exit` — the suite is working around a bug it causes.
-  Second, `EmbeddingWorker` tasks spawned under `Doctrans.TaskSupervisor` inherit no ownership
-  (`embedding_worker.ex:104,129,146,153,156,254,343`).
+  The second source named in this diagnosis — `EmbeddingWorker` tasks spawned under
+  `Doctrans.TaskSupervisor` — no longer exists: R01 deleted the module, and indexing now runs inside an
+  Oban job. Re-measure before acting; only the `Processing.Worker` source above is known to remain.
   The fix already exists and is dead code: `test/support/worker_helpers.ex:20` calls
   `Ecto.Adapters.SQL.Sandbox.allow/3` correctly, but `grep -rn "WorkerHelpers\|setup_worker_sandbox"`
   matches only its own definition. That single call site is the only `Sandbox.allow/3` in the tree.
@@ -413,8 +1819,8 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   GenServers. Fixing this also removes the 0.3% run-to-run coverage jitter that would eventually make a
   threshold gate fail spuriously.
   Related cleanup in the same pass — tests that cannot fail:
-  `test/doctrans/search/embedding_worker_test.exs` is 26 lines covering a 361-line module and asserts that
-  `GenServer.cast` returns `:ok` and that the compiler compiled;
+  `test/doctrans/search/embedding_worker_test.exs` was 26 lines covering a 361-line module, asserting that
+  `GenServer.cast` returns `:ok` and that the compiler compiled — deleted in R01 along with its subject;
   `test/doctrans/resilience/health_check_worker_test.exs` is 7 `Map.has_key?` assertions on a static struct
   plus `interval_ms == 60_000`; `test/doctrans/processing/pdf_extractor_test.exs:65-108` wraps three error
   tests in `rescue ErlangError -> :ok`, so any unexpected crash is rescued into a pass;
@@ -459,7 +1865,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   prefix is a suffix of the previous chunk — this is the embedded-versus-stored divergence surface from C01,
   and `tail_words/2` (`chunker.ex:166-169`) re-joins on `" "`, the same bug class as Q04.
   Explicitly not worth it: revision monotonicity (the failure mode is concurrency, already modelled by
-  `document_reprocessing_race_test.exs` and `embedding_worker_race_test.exs`, and a property would assert
+  `document_reprocessing_race_test.exs` and `indexer_race_test.exs`, and a property would assert
   `n + 1 > n`), changeset validation, and LiveView rendering — all small enumerable spaces better served by
   table-driven examples.
   Acceptance: each property fails when its invariant is deliberately broken; run counts and collection
@@ -478,8 +1884,8 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   There is also no response size bound — `grep max_response_size lib/` returns nothing, so a body is read
   fully into memory. Add a total deadline and a size cap, each with a Bypass test.
   SSRF needs no test: `base_url` resolves only from `Config.fetch!(:openai, :base_url)` and no request path
-  can set it. Command injection is not possible in the PDF path either, since `System.cmd/3` takes an
-  argument list — the gap there is the missing timeout, which is R04.
+  can set it. Command injection is not possible in the PDF path either, since the extractor passes an
+  argument list — the gap there was the missing timeout, closed by R04.
   Model output reaching `raw/1` is correct by construction and well tested at the unit level
   (`markdown_helpers_test.exs:7-31` uses LazyHTML and covers `<script>`, nested `<iframe srcdoc>`,
   `onerror`, `onclick`, and `javascript:` hrefs). Add one end-to-end test driving a document whose
@@ -491,6 +1897,23 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Evidence: `lib/doctrans/processing/openai.ex:126,183-188`, `config/openai.ex:23`,
   `lib/doctrans_web/live/document_live/viewer_components.ex:101-103`,
   `lib/doctrans_web/live/document_live/chat_components.ex:170-172`.
+
+- [ ] **Q08 · P2 · Build the asset bundles somewhere a broken one fails.**
+  No CI job and no pre-commit hook runs `mix assets.build`, and `priv/static/assets/` is gitignored, so
+  the JavaScript and CSS this application serves are never compiled by the gate. A syntax error in
+  `assets/js/app.js` or `assets/js/theme.js` passes every check and is discovered by whoever next runs
+  `mix phx.server`. `Dockerfile.dev` does not build them either; the dev watchers produce them at
+  container run time.
+  U10 raised the cost of this: `theme.js` is loaded render-blocking, so a bundle that fails to build is
+  a 404 that stalls the parser rather than a deferred script that quietly does nothing. It is also the
+  reason `theme_script_test.exs` pins the esbuild *arguments* rather than the emitted file — the file
+  is never there in CI to assert on.
+  Weigh the cost before adopting: `mix assets.setup` downloads the esbuild and Tailwind binaries, which
+  adds a network dependency to a workflow that currently pins every action by SHA and has none.
+  Caching the two binaries by version is the obvious mitigation.
+  Acceptance: a deliberate syntax error in either entry point fails CI; the asset toolchain is fetched
+  reproducibly and cached; `priv/static/assets/` stays untracked.
+  Evidence: `.github/workflows/ci.yml:114`, `.pre-commit-config.yaml`, `mix.exs:135`, `.gitignore:29`.
 
 - [ ] **Q07 · P3 · Close the test-file warning blind spot, then reconsider mutation testing.**
   `mix compile` never loads `test/**/*.exs`, so Q01's corrected flag does not reach it. One warning lives
@@ -513,7 +1936,7 @@ was verified against this repository rather than adopted from the report; where 
 this project, that is recorded with the item.
 
 The governing finding: **six gates reported success while verifying nothing.** A gate that cannot fail is
-worse than an absent one, because it is counted as evidence. Items G01–G08 are implemented; G09–G18 remain.
+worse than an absent one, because it is counted as evidence. Items G01–G19 are all resolved.
 
 - [x] **G01 · P1 · Make the dependency advisory gate real.**
   The `hex-audit` pre-commit hook had `entry: "true"` — the Unix `true` command, displayed as a passing
@@ -551,8 +1974,8 @@ worse than an absent one, because it is counted as evidence. Items G01–G08 are
   warning classes had to be muted for that one file.
   `document_orchestrator.ex` had six specs referencing `Doctrans.Documents.t()`, a type that does not
   exist — `Doctrans.Documents` is a context module with no `@type t`, and the schema is
-  `Doctrans.Documents.Document` in `documents/book.ex:36`. Dialyzer resolved it to `any()` and checked
-  nothing, while an `:unknown_type` filter hid that fact.
+  `Doctrans.Documents.Document` in `documents/document.ex:19` (named `documents/book.ex` until G16).
+  Dialyzer resolved it to `any()` and checked nothing, while an `:unknown_type` filter hid that fact.
   Implemented: the error branch now logs and returns `""`; the bogus option is removed; the six specs point
   at `Documents.Document.t()` and `Documents.Page` gained `@type t`. The five suppressions covering those
   three bugs are deleted, and fixing the specs made a sixth filter provably dead, which
@@ -615,76 +2038,165 @@ worse than an absent one, because it is counted as evidence. Items G01–G08 are
 
 - [x] **G08 · P1 · Correct the compiler flag.** See Q01.
 
-- [ ] **G09 · P1 · Require status checks before merge.**
-  Ruleset 10866831 on `main` enforces deletion, non-fast-forward, linear history, signatures, and a pull
-  request — but contains **no `required_status_checks` rule**, and `branches/main/protection` returns
-  404. A pull request with a red CI run is mergeable today, which means every other item in this phase is
-  advisory until this lands. This is the highest-value change in the phase and the only one requiring
-  repository settings rather than a code change.
-  It has a prerequisite: the check is currently named `Run Pre-commit Checks (1.20.3, 29.0.5)` because the
-  single-entry `strategy.matrix` interpolates versions into the job name. Requiring that name means the gate
-  silently stops matching — and therefore stops applying — the day the toolchain is bumped. Drop the matrix
-  (it has one entry and serves no purpose) or add a small `gate` job that `needs:` the others and require
-  only its stable name.
+- [x] **G09 · P1 · Require status checks before merge.**
+  Ruleset 10866831 on `main` enforced deletion, non-fast-forward, linear history, signatures, and a pull
+  request — but contained **no `required_status_checks` rule**, and `branches/main/protection` returned
+  404. A pull request with a red CI run was mergeable, which made every other item in this phase advisory
+  until this landed. This is the highest-value change in the phase and the only one requiring repository
+  settings rather than a code change.
+  Its prerequisite was the check name: `Run Pre-commit Checks (1.20.3, 29.0.5)`, because the single-entry
+  `strategy.matrix` interpolated versions into the job name. Requiring that name would mean the gate
+  silently stops matching — and therefore stops applying — the day the toolchain is bumped.
+  Implemented: both halves of the prerequisite, because either alone leaves a way to detach the
+  requirement. The single-entry matrix is gone, its two versions moved to job-level `env` (`ELIXIR_VERSION`,
+  `OTP_VERSION`), which the cache keys and `setup-beam` read — so a toolchain bump no longer touches the
+  job name, and G10 has one fewer copy to reconcile. A `gate` job named **`Quality Gate`** was added; it
+  `needs: [verify, docker]` and is the only required check, so adding or renaming a job changes nothing in
+  repository settings. It carries `if: always()` — without it the job would be *skipped* when a dependency
+  fails, and a skipped required check is treated as pending, not failed, which would block merges forever
+  instead of reporting the failure. The step reads `toJSON(needs)` and fails unless every dependency
+  reports `success`, so `failure`, `cancelled`, and `skipped` all fail the gate.
+  The `required_status_checks` rule was then added to ruleset 10866831 with `Quality Gate` bound to the
+  GitHub Actions app (integration 15368), so a status of that name cannot be forged by another source.
+  `strict_required_status_checks_policy` is left `false`: the ruleset already requires linear history and
+  squash merges, and forcing every branch to re-sync before merge costs a full CI run per intervening
+  commit for no additional signal on a single-maintainer repository.
   Acceptance: a pull request whose CI fails cannot be merged, and a toolchain bump does not detach the
-  requirement.
+  requirement. Verified: `gh api repos/sapientpants/doctrans/rulesets/10866831` lists the rule, and the
+  pull request implementing this item reports `Quality Gate` as a required check.
 
-- [ ] **G10 · P1 · Bump the toolchain and pin it in one place.**
-  The pins are Elixir 1.20.3 and OTP 29.0.5. **Elixir 1.20.4 is a security release (CVE-2026-75758,
-  recursion in `List.to_string/1` and `to_charlist/1`) and OTP 29.0.6 carries CVE-2026-75538.** Both should
-  be adopted. This was deliberately excluded from the current change because a toolchain bump cannot be
-  verified locally without installing it, and it deserves its own CI run.
-  The version is currently stated in five places: `mise.toml:2-3`, the CI matrix, `Dockerfile.dev:2`,
-  `mix.exs:10` (a `~> 1.20` range, intentionally), and `README.md:30` prose. `erlef/setup-beam` accepts
-  `version-file: mise.toml` with `version-type: strict`, which deletes the CI copy and, as a side effect,
-  removes the job-name instability blocking G09.
+- [x] **G10 · P1 · Bump the toolchain and pin it in one place.**
+  The pins were Elixir 1.20.3 and OTP 29.0.5. **Elixir 1.20.4 is a security release (CVE-2026-75758,
+  recursion in `List.to_string/1` and `to_charlist/1`) and OTP 29.0.6 carries CVE-2026-75538.** Both are now
+  adopted. The version was stated in five places: `mise.toml:2-3`, the CI job's `env` block, `Dockerfile.dev:2`,
+  `mix.exs:10` (a `~> 1.20` range, intentionally), and `README.md:30` prose.
+  Implemented: `mise.toml` is the single source of truth at `elixir = "1.20.4-otp-29"` / `erlang = "29.0.6"`.
+  The CI copy is deleted — the `Set up Elixir` step reads `version-file: mise.toml` with
+  `version-type: strict`, and the dependency and PLT cache keys, which previously interpolated the `env`
+  pins, now interpolate `steps.beam.outputs.otp-version` / `elixir-version`, so the keys still segment by
+  toolchain without restating it. The `README.md` copy is deleted too: the prerequisite now points at
+  `mise.toml` and `mise install` rather than naming versions. `mix.exs` keeps its `~> 1.20` range, which is
+  a compatibility floor rather than a pin and is deliberately not single-sourced.
+  That leaves one unavoidable copy. A Docker `FROM` line cannot read a version file, and parameterising it
+  with a build `ARG` would only move the literal into the default value while letting
+  `docker compose up` drift silently. Instead the copy is made load-bearing: a new
+  `check-toolchain-pins` pre-commit hook runs `scripts/check_toolchain_pins.exs`, which treats `mise.toml`
+  as authoritative and fails when `Dockerfile.dev`'s tag disagrees. It compares the Elixir version exactly
+  and OTP on its major only, since the Docker tag can express no more than `-otp-29`.
   Acceptance: one authoritative version file; CI, Docker, and local tooling agree without hand-copying.
+  Verified: both versions exist as `erlef/setup-beam` builds for `ubuntu-24.04` (`OTP-29.0.6`,
+  `v1.20.4-otp-29`) and as the `elixir:1.20.4-otp-29` Docker tag; `mise install` resolves to Elixir 1.20.4
+  on erts-17.0.6; `mix precommit` passes on the new toolchain; and reverting the `Dockerfile.dev` tag alone
+  fails the new hook.
 
-- [ ] **G11 · P2 · Tighten the subjective Credo checks to honest thresholds.**
-  Four checks are labelled "strict" in `.credo.exs` while being configured **looser than Credo's own
+- [x] **G11 · P2 · Tighten the subjective Credo checks to honest thresholds.**
+  Four checks were labelled "strict" in `.credo.exs` while being configured **looser than Credo's own
   defaults**: `Refactor.Nesting` 3 (default 2), `CyclomaticComplexity` 10 (default 9), `ABCSize` 50
-  (default 30), `ModuleDependencies` 20 (default 10). They pass unconditionally and teach nothing.
-  `Design.DuplicatedCode` is the clearest case: 0 issues at `mass_threshold: 30`, **146 at 12** — a cliff
-  that shows the number was fitted to the codebase rather than chosen.
+  (default 30), `ModuleDependencies` 20 (default 10). They passed unconditionally and taught nothing.
   Decision taken 12 September 2026: keep these blocking and move them to Credo's defaults, accepting the
-  backlog rather than demoting them to advisory. Measured cost at default thresholds: **16** cyclomatic
-  complexity, **9** nesting, **31** ABC size, **17** module-dependency findings, plus whatever
-  `DuplicatedCode` surfaces below 30. Stage it — one threshold per change, each with its refactor — rather
-  than tightening all five at once; and treat the module-size cap (G15) as part of the same conversation,
-  since `index.ex` is at 96% of it and is also the file carrying the most real defects.
-  Acceptance: every threshold is at or below Credo's default, no threshold is loosened to make a change pass,
-  and `mix credo --strict` is clean at the new values.
+  backlog rather than demoting them to advisory.
+  Implemented in four staged commits, one threshold per commit with its refactor. Measured before each
+  stage and cleared within it: **9** nesting sites, **1** cyclomatic-complexity site, **17** ABC-size
+  sites, **2** module-dependency sites. Every fix is an extraction along an existing seam — the anonymous
+  function inside a pipeline becomes a named private one, the branch of a `case` becomes the function it
+  was already describing. No behaviour changed and no test was rewritten; the suite stayed at 846 passing.
+  The largest change is structural rather than cosmetic: `DocumentLive.Show` reached ten first-party
+  dependencies only by moving the chat panel's remaining state transitions into
+  `DocumentLive.ChatSession`, which already owned the rest of them. `Show` no longer calls `Doctrans.Chat`,
+  `Chat.Agent` or `Chat.Conversations` at all.
+  Two corrections to the entry as originally written. `Design.DuplicatedCode` is **not** a case of a
+  fitted threshold: Credo's default `mass_threshold` is 40, so the configured 30 was already stricter than
+  the default and stays as it is. And `ModuleDependencies` counts every module name appearing in a module
+  body, standard library and framework macros included, so at `max_deps: 10` it measures verbosity rather
+  than coupling — `DocumentConverter` scored 15 with a single first-party dependency, `Endpoint` 19 with
+  three, the other sixteen being the `Plug`/`Phoenix` entries its plug pipeline is made of. The check is
+  therefore configured with `dependency_namespaces: ["Doctrans"]`, which is what makes the default
+  threshold meaningful here; this narrows what is counted, it does not raise the ceiling. 23 of the 25
+  findings at `max_deps: 10` were framework and stdlib noise of exactly this kind.
+  `Doctrans.Application` carries a named `excluded_namespaces` exemption: a supervision tree has to name
+  its children, and three of its eleven entries (`Doctrans.PubSub`, `Doctrans.TaskSupervisor`,
+  `Doctrans.Supervisor`) are registered process names rather than modules. Restructuring the tree to
+  satisfy a lint count would be the metric damaging the code.
+  Acceptance met: every threshold is at or below Credo's default, none was loosened to make a change pass,
+  and `mix credo --strict` is clean at the new values. Verified: adding an eleventh first-party alias to
+  `DocumentLive.Show` fails the dependency gate, so it is not passing vacuously.
+  G15 is now more pressing, not less: `index.ex` sits at **580/600** lines after this work.
 
-- [ ] **G12 · P2 · Make Sobelow findings explicit rather than tolerated.**
+- [x] **G12 · P2 · Make Sobelow findings explicit rather than tolerated.**
   `exit: "high"` means four Low-Confidence `SQL.Query` findings in `lib/doctrans/search.ex:167,196,301,414`
   print on every run and never block. All four were read and are genuine false positives — heredocs with
   `$1..$4` placeholders passed to `Repo.query/2` with no interpolation, flagged only because the query is
   bound to a variable named `sql`. The problem is the disposal method: a fifth low-confidence finding, real
   this time, would join the noise unnoticed.
-  Annotate the four sites with `# sobelow_skip ["SQL.Query"]` and a justification, then set `exit: "low"`
-  so any *new* low-confidence finding fails the build.
-  Separately, the 18 existing `# sobelow_skip` annotations suppress nothing — toggling `skip` on and off
-  yields the same four findings, because eight sit on `defp` (excluded entirely by `private: false`) and the
-  other ten suppress a `Traversal.FileModule` check that never fires in a LiveView app with no
-  `conn`-derived paths. Their prose justifications are genuinely good and should be kept; either drop the
-  inert `sobelow_skip` markers or set `private: true` so the annotations become load-bearing. Prefer the
-  latter, and triage the resulting findings once.
-  Keep `Config.CSP` and `Config.HTTPS` ignored — they are correct for a loopback-bound single-user app — but
-  record why, and what would invalidate it. The app does render LLM-extracted content from arbitrary uploads
-  through `raw/1` at exactly two sites, both routed through one `HtmlSanitizeEx.basic_html/1` helper; CSP is
-  the defense-in-depth for a sanitizer bug, and there is no second layer. A pre-commit grep for any *third*
-  `raw(` call site guards that invariant more cheaply than adopting CSP.
+  Implemented: the four sites carry `# sobelow_skip ["SQL.Query"]` with a per-site justification naming
+  which parameters are bound, and `exit: "low"` now makes every confidence level block.
+  Acceptance: deleting one of the four annotations fails the gate with exit 1 on a single low-confidence
+  finding, so it is not passing vacuously.
 
-- [ ] **G13 · P2 · Pin actions by SHA and stop persisting credentials.**
+  **The plan's second paragraph was wrong and is corrected here.** It claimed the 18 existing
+  `# sobelow_skip` annotations suppress nothing, that eight are excluded by `private: false`, and that the
+  ten `Traversal.FileModule` ones cover a check that never fires. Measured against this repository on
+  Sobelow 0.15.0: toggling `skip` yields **23 findings off, 4 on** — the annotations were already
+  load-bearing and suppressed 19 findings, all of them `Traversal.FileModule`, which fires freely.
+  `private` is not a private-function switch at all: its only effect (`sobelow.ex:691`) is to suppress the
+  version-check phone-home and the write to `~/.sobelow`. Setting `private: true` changes the finding count
+  by zero — verified at all four combinations of `private` × `skip`. It is set anyway, on its own merit: a
+  quality gate should not reach the network to run.
+  The real defect in that register was smaller and different. Removing each of the 19 annotations one at a
+  time and re-scanning shows **four suppress nothing**: `documents.ex:246` (`delete_document`),
+  `document_processor.ex:72` (`extract_convertible_document`), `pdf_processor.ex:32` (`extract_document`),
+  and `run_cleanup_job.ex:31` (`stale_run_dirs`). The first three delegate and contain no `File` call; the
+  fourth calls `File.ls`, which is absent from `Traversal.FileModule`'s `@file_funcs`. Those four markers are
+  deleted and their justification prose kept as plain comments, per the plan's instruction. All 19 remaining
+  annotations are confirmed live, each mapping to at least one finding.
+
+  `Config.CSP` and `Config.HTTPS` stay ignored — correct for a loopback-bound single-user app — with the
+  rationale and its invalidating conditions now recorded in `.sobelow-conf`. The app renders LLM-extracted
+  content from arbitrary uploads through `raw/1` at exactly two sites, both routed through
+  `MarkdownHelpers.sanitize_html/1`; CSP would be the defence-in-depth for a sanitizer bug and there is no
+  second layer. `scripts/check_raw_call_sites.exs` pins that invariant as a register of file → call-site
+  count, wired into pre-commit. Verified it fails on all three divergence modes: a `raw(` site in an
+  unregistered file, a second site in a registered file, and a stale register entry whose site was removed.
+  Verified overall: `mix sobelow --config` reports zero findings and exits 0.
+
+- [x] **G13 · P2 · Pin actions by SHA and stop persisting credentials.**
   Every `uses:` in `ci.yml` floats on a mutable major tag, `erlef/setup-beam@v1` most notably. Neither
   checkout sets `persist-credentials: false`, so a `GITHUB_TOKEN` is written into `.git/config` for the whole
   job — and that job downloads and executes hook code from five external repositories. The token is
   `contents: read`, which caps the blast radius, hence P2 rather than P1.
-  Pin every action to a full commit SHA with a version comment and add `persist-credentials: false`. Land
-  this together with G03's `github-actions` Dependabot ecosystem — pinning without it merely trades a
-  supply-chain risk for a staleness risk.
+  Implemented: all eleven `uses:` references pinned to a full commit SHA with a `# vX.Y.Z` comment, and
+  `persist-credentials: false` on both checkouts. Each is pinned at the current latest major rather than at
+  the tip of the major it was floating on: `actions/checkout` v7.0.1, `erlef/setup-beam` v1.24.1,
+  `actions/setup-python` v7.0.0, `actions/cache` v6.1.0 (shared by the bare, `/restore`, and `/save` entry
+  points, which are one repository), `docker/setup-buildx-action` v4.3.0, `docker/build-push-action` v7.3.0.
+  Pinning a stale major would have been the smaller change but the worse resting state: a SHA does not
+  expire on its own, so whatever it names is what runs until someone acts, and three of the six were several
+  majors behind.
+  The upgrade was checked against release notes rather than assumed. The majors crossed are almost entirely
+  Node 20 → Node 24 runtime bumps plus an ESM migration, requiring Actions Runner ≥ 2.327.1, which
+  `ubuntu-latest` satisfies; there are no self-hosted runners. The removals in those notes are all of inputs
+  this workflow does not set — `setup-python`'s `pip-install`, `setup-buildx-action`'s deprecated
+  inputs/outputs, `build-push-action`'s `DOCKER_BUILD_NO_SUMMARY` and `DOCKER_BUILD_EXPORT_RETENTION_DAYS`.
+  `checkout` v7 blocks fork-PR checkout under `pull_request_target` and `workflow_run`, neither of which
+  this workflow triggers on. `persist-credentials` is still an input on v7 and still defaults to `true`,
+  and `actions/cache` v6 still ships the `restore` and `save` sub-actions — both verified at the pinned SHA
+  rather than taken from the README.
+  One correction the upgrade forced: `checkout` v6 moved the persisted token out of `.git/config` and into a
+  credentials file under `RUNNER_TEMP` that `.git/config` includes. It is out of the repository but still
+  readable by any step in the same job, so the item's premise holds and the mitigation is unchanged — but
+  the comment justifying it would have been false as written, which is the failure mode G02 and G18 are
+  about. It now describes v7's actual mechanism.
+  Freshness from here is G03's `github-actions` Dependabot ecosystem, already landed. The version comment is
+  load-bearing for that: Dependabot reads it to know what a SHA-pinned action currently is, and rewrites
+  both halves together.
+  Neither rule survives on care alone — every action's README documents the floating-tag form, so the
+  regression is one paste away — so `scripts/check_action_pins.exs` pins both invariants and runs in
+  pre-commit, in the same idiom as `check_toolchain_pins.exs` and `check_raw_call_sites.exs`.
+  Acceptance: verified the check fails on each divergence mode — a floating tag, a SHA with no version
+  comment, a checkout missing `persist-credentials: false` — in both the `- name:`/`uses:` and bare
+  `- uses:` step forms, and that it reports zero with the workflow as committed.
 
-- [ ] **G14 · P2 · Give suppressions an owner and an expiry.**
+- [x] **G14 · P2 · Give suppressions an owner and an expiry.**
   Every remaining `.dialyzer_ignore.exs` entry is `{file, warning_class}`, the broadest granularity dialyxir
   offers, with no owner, date, upstream link, or expiry. The file header recommends auditing with
   `--list-unused-filters`, but that command cannot detect an over-broad filter — only a completely dead one.
@@ -696,21 +2208,91 @@ worse than an absent one, because it is counted as evidence. Items G01–G08 are
   Also drop `:underspecs` from the Dialyzer flags: it is the sole source of the remaining
   `contract_supertype` findings, so removing one flag removes several file-level mutes. Prefer one explicit
   decision over three suppressions.
-  Acceptance: no file-level class mute remains without a dated justification; an expired entry fails the gate.
+  Implemented: `:underspecs` is gone, and with it all five `contract_supertype` findings and both resilience
+  file mutes — one flag decision for two suppressions, as predicted. The register is now six
+  `{file, warning_class, line}` entries, each preceded by `owner`, `expires`, `upstream`, and `rationale`
+  comments, enforced by `scripts/check_dialyzer_filters.exs` in the same idiom as `check_action_pins.exs`.
+  The cap is 8: the ninth entry has to raise it on purpose.
+  Narrowing the keys surfaced a detail the dialyxir README does not state: the filter's third element is
+  compared verbatim against the warning's location term, and a warning that carries a column reports
+  `{line, column}`, not `line`. An integer-line filter for those warnings matches nothing and is silently
+  useless — confirmed by running both forms side by side, where `{"lib/doctrans/validation.ex",
+  :pattern_match_cov, 224}` was reported under "Unused filters" while the `{224, 8}` form matched.
+  `upstream` is `none` on all six entries, which is the honest value: five are first-party, and for the
+  `Gettext.Plural.plural/3` opaque call — generated code, reported at line 1 of `gettext.ex`, once per
+  plural form in `priv/gettext` — no upstream issue was found. Inventing a plausible link would be the
+  exact G02 failure mode this item exists to prevent, so the rationale says to recheck after the next
+  gettext/expo bump instead.
+  Two entries (`fixtures.ex:40`, `worker_helpers.ex:16`) are one `_ =` binding away from deletion. They are
+  documented rather than fixed, so that this item changes the gate and not the test-support code; their
+  expiry is when that trade gets re-decided. All six expire 2026-12-12, matching G01's acknowledgement
+  cadence.
+  The hook is `always_run: true`, unlike its siblings: an expiry is a date, not a file change, and a register
+  nobody touches is exactly the one that goes stale. `--list-unused-filters` stays alongside it — it
+  retires a filter whose code moved, which the register check cannot see, and the register check reads the
+  justification, which `--list-unused-filters` cannot.
+  Acceptance: verified `MIX_ENV=test mix dialyzer --list-unused-filters` reports 0 warnings and 0 unused
+  filters with the register as committed, and that the check fails on each divergence mode — an expired
+  entry (`--today 2027-01-01`), a missing `# owner:`, a non-ISO expiry, a `{file, class}` two-tuple, a bare
+  string filter, a regex filter, a filter naming a file that no longer exists, and a ninth entry over the cap.
 
-- [ ] **G15 · P2 · State the module-size limit once, and decide what it is for.**
-  Three limits exist for one rule: `scripts/check_module_size.exs` defaults to 500, pre-commit passes
-  `--max-lines 600`, and the Mix alias did not run it at all before G04. The script also miscounts by one
-  (`String.split("\n")` on a trailing-newline file) and skips `.exs` undocumented.
-  More importantly the gate fires on line count, which is uncorrelated with the property of interest, and
-  fires hardest on the worst file: `index.ex` is at 576/600 — 96% — and is the same file that carried three
-  Dialyzer suppressions and a real bug. The next feature touching it hits the wall at the moment careful
-  attention is least available.
-  Make `--max-lines` required with no default, or hoist the number into one config read by both callers.
-  Then decide deliberately whether this stays blocking under G11's honest-thresholds policy or becomes the
-  one advisory metric.
+- [x] **G15 · P2 · State the module-size limit once, and decide what it is for.**
+  Three limits existed for one rule: `scripts/check_module_size.exs` defaulted to 500, pre-commit passed
+  `--max-lines 600`, and the Mix alias did not run it at all before G04.
+  **The 600 was never a considered limit.** `git log -S` puts its arrival in `590b8d4` (#17,
+  9 December 2025), a feature PR whose own changelog line reads "Increase module size limit from 500 to
+  600 lines" between an Ollama timeout bump and a coverage exclusion. The number moved so the feature
+  could land — which is precisely the failure mode the limit exists to catch, performed on the limit
+  itself.
+  Implemented: `--max-lines` is **required with no default**, so a caller cannot disagree with a default it
+  cannot see, and the number is stated exactly once, in `.pre-commit-config.yaml`. The plan's alternative —
+  "hoist the number into one config read by both callers" — was dropped because G04 left only one caller:
+  `mix precommit` delegates to `pre-commit run --all-files`, so a config file would be a second place to
+  look for a number with a single reader.
+  The off-by-one is fixed: `String.split("\n") |> length()` counted the empty string after the terminating
+  newline, so every file measured one line longer than `wc -l` and than an editor shows, and every reported
+  overage was wrong by one with it. `index.ex` read 581 for a 580-line file. Only the single terminating
+  newline is now discarded, so trailing blank lines still count.
+  The `.ex`-only scope is documented on the script and in its `--help`, with the reason (`.exs` files are
+  read top to bottom rather than navigated, so length is not the same signal), and an explicitly named
+  non-`.ex` file now aborts instead of being dropped silently — `check_module_size.exs mix.exs` used to
+  report a pass it had not performed.
+  A fourth vacuous-pass mode was found while fixing the third and is also closed: a path matching no `.ex`
+  files printed "All modules are within the limit" and exited 0. Renaming `lib/` would have retired the
+  gate silently. It now aborts.
 
-- [ ] **G16 · P2 · Gate compile-time cycles with `mix xref`; do not adopt Boundary.**
+  **Decision: it stays blocking, and the threshold returns to 500.** Advisory was rejected on this
+  repository's own governing finding. `pre-commit` renders a hook that cannot fail as "Passed", so an
+  advisory metric left in the gate list would be counted as evidence — G01's defect exactly, where
+  `entry: "true"` displayed as a passing security audit. Moved out of the gate list to escape that, it
+  would be run by nobody and rot, which is the same outcome as deletion with extra steps.
+  The plan's premise that line count is "uncorrelated with the property of interest" is half right, and the
+  half that is wrong decides the item. Credo measures complexity and coupling directly, at its own defaults
+  since G11 — and `index.ex` passed `Refactor.Nesting` 2, `CyclomaticComplexity` 9, `ABCSize` 30 and
+  `ModuleDependencies` 10 while holding a 127-line template, a five-stage upload pipeline and a
+  stream-ordering subsystem in one module. Line count is the only check that sees a module accumulating
+  several *simple* responsibilities, because every individual function in such a module is shallow, short
+  and cheap. That is now written on the script as the one property it is for.
+  So the fix for "the gate fires hardest on the worst file" is to fix the file, not to keep the number that
+  was fitted to it. 500 is the value the script documented from the day it was written, and `index.ex` is
+  split to meet it, along two seams the code already had, in the `DocumentLive.ChatSession` idiom G11
+  established: `DocumentLive.UploadIntake` (the on-disk size re-check, magic-byte validation, move-into-place
+  and record creation — no socket, which is worth the separation on its own: those checks are the only thing
+  between an arbitrary browser upload and the filesystem) and `DocumentLive.DocumentStream` (the ordered
+  `:documents` stream and its per-document subscriptions). `index.ex` goes 580 → 360, and sits at 72% of the
+  limit rather than 97%. The extractions are moves: no behaviour changed, no test was rewritten, and the
+  suite stayed at 846 passing.
+  `openai.ex` is now the largest module at 489, which is 98% of the limit. That is recorded rather than
+  pre-emptively refactored — it is one module with one responsibility, and splitting it to buy headroom
+  would be the metric damaging the code. If it crosses, it gets split; the limit does not move again
+  without an entry here saying so.
+  Acceptance: full `mix precommit` green with the limit at 500. Verified the gate is not passing vacuously
+  by padding `openai.ex` to 501 lines, which fails with a one-line overage — so the count and the boundary
+  are both exact. Verified the script aborts on each divergence mode: a missing `--max-lines`, a
+  non-positive `--max-lines`, an unrecognised option, an explicitly named `.exs`, a path that does not
+  exist, and a directory holding no `.ex` files.
+
+- [x] **G16 · P2 · Gate compile-time cycles with `mix xref`; do not adopt Boundary.**
   Architectural enforcement was assessed and **Boundary is rejected** on evidence. The violations it would
   catch do not exist: `lib/doctrans/` references `DoctransWeb` in exactly three places, all correct
   (PubSub/Endpoint broadcasts); `Doctrans.Repo` is never called from web code; no schema module is used
@@ -723,43 +2305,134 @@ worse than an absent one, because it is counted as evidence. Items G01–G08 are
   Adopt the native gate instead: `mix xref graph --format cycles --label compile-connected --fail-above 0`
   as a pre-commit hook. It ships with Elixir, so it has no compatibility surface of its own. Confirm the
   baseline is zero before enabling.
-  Alongside it, take the small structural fixes the review surfaced: the unsupervised reschedule in
-  `worker.ex:17-18`, three queries in `chat.ex:322,376,388` that belong behind the `Documents` API, and
-  `git mv lib/doctrans/documents/book.ex lib/doctrans/documents/document.ex` so the filename matches
-  `Doctrans.Documents.Document` — a naming mismatch that already contributed to G02's broken specs.
+  Implemented. The baseline was **not** zero: one cycle of eleven modules spanning `documents.ex`,
+  both job modules and the whole of `processing/`, held together by a single compile edge —
+  `worker.ex:17-18`, where `@document_id_key DocumentExtractionJob.document_id_key()` and its page
+  counterpart read a constant from the job module at compile time. (The item described those two lines as
+  an "unsupervised reschedule"; that is a mis-transcription. The reschedule at `worker.ex:211-218` is a
+  real but separate defect, owned by Q03, and is untouched here.) One compile-time call to a job module
+  made every module that job reaches at runtime recompile together. The fix states the keys once in a
+  dependency-free `Doctrans.Jobs.Keys` — the same centralisation the accessors were added for (#55),
+  without the compile edge that attempt introduced. Every producer and consumer of those two Oban
+  argument keys now reads them from `Keys`, since a register with copies elsewhere is not one: both job
+  modules, `worker.ex`, `startup_recovery.ex` (two `fragment/1` templates and one job-args map),
+  `run.ex` (three `fragment/1` templates and `args/1`, the producer feeding
+  `DocumentExtractionJob.new/1`), and `run_cleanup_job.ex`'s `perform/1` pattern match. The two sites
+  that built `LlmProcessingJob`'s argument map by hand — `document_reprocessing.ex:106` and
+  `startup_recovery.ex:134` — now call `LlmProcessingJob.page_args/3`, so the job states the shape of
+  its own arguments once and the enqueue sites cannot drift from the consumer. The `"page_id"` at `document_reprocessing.ex:121`
+  is deliberately **not** folded in: it keys a chat-session `retrieved_context` entry, a different
+  register that happens to share a name, as are the raw-SQL result columns in `search.ex`.
+  The three `chat.ex` queries moved behind the context: page revision lookup is
+  `Documents.page_content_state/1` and `embeddings_ready?/1` now lives in `Doctrans.Documents`, where its
+  two counting queries became `Repo.exists?`. `Doctrans.Chat` retains both public functions and no longer
+  imports `Ecto.Query` or names `Doctrans.Repo` at all. `book.ex` is renamed to `document.ex`.
+  Acceptance: full `mix precommit` green with the hook enabled. Verified the gate is not passing vacuously
+  by adding one compile-time call to `LlmProcessingJob` back into `worker.ex`, which reproduces the same
+  eleven-module cycle and fails the hook.
 
-- [ ] **G17 · P3 · Prefer the settings toggle over a new secret-scanning tool.**
+- [x] **G17 · P3 · Prefer the settings toggle over a new secret-scanning tool.**
   The reference report's gitleaks recommendation is largely redundant here and partly outdated. GitHub
   secret scanning **and push protection** are already enabled on this repository, which blocks a
   provider-pattern secret before it reaches the remote — strictly stronger than a post-hoc CI job — and
-  pre-commit already runs `detect-private-key`. Gitleaks upstream now declares itself feature-complete,
-  security-patches-only, with development moved to a successor project, so adopting it would add a frozen
-  dependency.
-  The actual residual gap is `secret_scanning_non_provider_patterns`, currently disabled, which is what would
-  cover a custom `OPENAI_API_KEY`-style token. Enable that toggle and re-evaluate only if it proves
-  insufficient. Expect some false positives on fixtures; that is still cheaper than owning a scanner config.
+  pre-commit already runs `detect-private-key` (`.pre-commit-config.yaml:26`). Gitleaks upstream now
+  declares itself feature-complete, security-patches-only, with development moved to a successor project,
+  so adopting it would add a frozen dependency.
+  The stated remedy — enable `secret_scanning_non_provider_patterns` — **turned out not to be available on
+  this repository**, so the item's premise was wrong and nothing was enabled. `PATCH /repos/{owner}/{repo}`
+  returns `200 OK` and leaves the field `disabled`, across three attempts (the single field, the field with
+  its `secret_scanning` siblings restated, and a form-encoded variant); the token carries `repo` scope and
+  no code-security configuration is attached. The setting is also absent from the UI: Settings → Advanced
+  Security → Secret Protection offers only Secret Protection and Push protection, with no "Generic
+  patterns" row. GitHub documents generic-pattern scanning for organization-owned repositories on GitHub
+  Team with Secret Protection enabled, and this is a public repository on a personal account. A silent
+  `200` on an unavailable field is the same class of hazard the phase is about: had the toggle been
+  recorded as enabled from the API response alone, this register would have carried a gate that does not
+  exist.
+  The residual exposure is narrower than the item assumed. `openai_api_key` is a supported provider
+  pattern **with** push protection, so this project's actual credential is covered; what remains uncovered
+  is a self-invented token format, a connection string, or a bare HTTP authentication header. That gap is
+  accepted rather than filled with a scanner, for the reasons above and because a generic scanner is
+  weakest on exactly those shapes. `secret_scanning_validity_checks` remains disabled and is out of scope:
+  it tests whether a found credential is live, which changes nothing about detection, and GitHub does not
+  support it for generic patterns anyway.
+  Implemented: the finding, the three settings the gate rests on, the unavailable one, its re-check
+  command, and the fixture-false-positive procedure are recorded in `docs/CONTRIBUTING.md` under "Secret
+  scanning". No scanner and no configuration were added.
+  Acceptance: no secret-scanning tool is owned by this repository, and the platform gate's real coverage
+  and its one hole are written down rather than assumed. Verified: `gh api repos/sapientpants/doctrans
+  --jq '.security_and_analysis'` reports `secret_scanning` and `secret_scanning_push_protection` enabled,
+  `secret_scanning_non_provider_patterns` disabled and unsettable. Re-open only if the repository moves to
+  an organization, where the toggle becomes available.
 
-- [ ] **G18 · P3 · Reconcile the spec policy with reality.**
-  `.credo.exs` disables `Readability.Specs` with the comment "Specs are enforced by Dialyzer, not Credo".
+- [x] **G18 · P3 · Reconcile the spec policy with reality.**
+  `.credo.exs` disabled `Readability.Specs` with the comment "Specs are enforced by Dialyzer, not Credo".
   That is false: Dialyzer never requires a spec to exist — it infers success typings and checks only the
   specs present. Measured: 78 `@spec` against 499 public `def` in `lib/`, roughly 30% coverage even crediting
-  all 73 `@impl` callbacks. `Doctrans.Documents` has 18 public functions and zero specs, which is the same
+  all 73 `@impl` callbacks. `Doctrans.Documents` had 18 public functions and zero specs, which is the same
   context whose nonexistent `.t()` type G02 found in six orchestrator specs.
-  Either enable the check scoped to `lib/doctrans/` (excluding `lib/doctrans_web/`, where 36 HEEx function
-  components would generate low-value specs) and accept the backlog, or keep it disabled and correct the
-  comment to say specs are optional by choice. Do not leave a false justification in place — that is the
-  same failure mode G02 found in the Dialyzer ignore file.
+  Implemented: the check is enabled, scoped to `lib/doctrans/`, and the backlog it reported is gone.
+  `lib/doctrans_web/` stays out: its 36 HEEx function components would take low-value specs on assigns maps.
+  The comment now states the actual division of labour rather than a justification for the mute.
+  The backlog was 140 findings across 32 files. 133 are answered by a written `@spec`; the other seven are
+  behaviour callbacks (`PdfExtractor`'s six, `Embedding.generate/2`) that were missing `@impl true`, so the
+  contract already existed in the behaviour and the compiler now checks the implementation against it.
+  Eight types were added or named where the specs needed them to say anything: `Chat.message/0`,
+  `Chat.Grader.grade/0`, `Chat.Agent.event/0`, `Search.Chunker.chunk/0`, `Processing.SSECollector.t/0`,
+  `Processing.StartupRecovery.cursor/0`, `Resilience.HealthCheck.results/0`, and `@type t` on the `Chunk`
+  and `Message` schemas.
+  Writing the specs is what made Dialyzer check these functions at all, and it immediately found six defects
+  the inferred typings had hidden. Five are discarded error results — `report_missing_source/1`,
+  `document_orchestrator.ex:281` and `:308`, `document_processor.ex:104`, `pdf_processor.ex:56` all threw
+  away an `update_document_status/3` result that can be `{:error, _}`; each is now an explicit `_ =`.
+  The sixth is a pre-existing false spec of exactly this item's kind: three `pages.ex` specs said
+  `Uniq.UUID.t()`, which is `<<_::128>>` — the raw 128-bit UUID — while every caller passes the 36-character
+  string form. Dialyzer had no reason to object until `Run.retry_pending?/1` gained a spec and inherited the
+  raw-binary typing through `failed_pages_query/1`. All three now say `Ecto.UUID.t()`.
+  Acceptance: `mix credo --strict` reports no issues with the check enabled, so a new public function in
+  `lib/doctrans/` fails the gate until it is specified; `mix dialyzer --list-unused-filters` passes with the
+  register unchanged at 26 skips and 0 unused filters, which is what validates the 133 new specs;
+  `mix test` is green at 846 tests.
 
-- [ ] **G19 · P3 · Minor CI and container hygiene.**
+- [x] **G19 · P3 · Minor CI and container hygiene.**
   Add a `concurrency` group with `cancel-in-progress` so superseded pushes stop burning a full run. Change
   the dependency cache's `actions/cache/save` from `if: always()` to `if: success()` so a half-compiled
-  `_build` is not cached. Pin `Dockerfile.dev:2` (`FROM elixir:1.20.3-otp-29`) by digest and add
+  `_build` is not cached. Pin `Dockerfile.dev:2` (`FROM elixir:1.20.4-otp-29`) by digest and add
   `--check-locked` to its `mix deps.get`, since `Dockerfile.dev` is what `docker compose up` actually runs
   and is therefore the shipped artifact. Remove `/coveralls.json` from `.gitignore`, where it contradicts the
   tracked file.
   Container CVE scanning was considered and **rejected**: nothing is released — there is no production
   Dockerfile, no `rel/`, no registry push — so image scanning would surface base-image noise that cannot be
   actioned for a loopback-only app.
+  Implemented, with one addition and one correction to the item as written. The concurrency group is
+  `${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}`, not workflow-and-ref: a schedule run
+  and a push to `main` report the same `github.ref`, so a ref-only group would let the weekly advisory
+  re-audit cancel — or be cancelled by — an unrelated push, which is precisely the run that must not be
+  silently dropped. Only the dependency cache's save moves to `if: success()`; the PLT cache keeps
+  `if: always()` deliberately, because it is written by its own `mix dialyzer --plt` step that either
+  succeeds before any check runs or fails the job, so there is no partial state for a later run to restore.
+  The addition is a `docker` ecosystem entry in `.github/dependabot.yml`: a digest pin nothing bumps only
+  trades a mutable tag for a frozen, ageing base image, and the same reasoning already justifies the
+  `github-actions` entry that keeps G13's SHA pins current. Dependabot's docker file fetcher matches any
+  filename containing "dockerfile" (`DOCKER_REGEXP = /dockerfile|containerfile/i`), so `Dockerfile.dev` is
+  in scope and the tag and digest are rewritten together — the tag stays in the reference for readability
+  and must remain in step with `mise.toml`.
+  The `.gitignore` entry was not merely redundant: `coveralls.json` is excoveralls' **configuration** file
+  — it carries the 80% `minimum_coverage` gate and the `skip_files` register — not an artifact, so the
+  "Excoveralls artifacts" rule described it wrongly and would have hidden an edit to the coverage gate from
+  anyone who cloned and re-added it.
+  The digest also had to be taught to `scripts/check_toolchain_pins.exs`, which compared the whole `FROM`
+  reference against `mise.toml` and so failed on the pin it was meant to protect. It now splits the
+  reference, compares the tag exactly as before, and additionally **requires** a well-formed
+  `@sha256:<64 hex>` digest — a bump that silently drops the pin is now a failure rather than a pass. What
+  the digest names cannot be checked without a registry, and this hook stays offline.
+  Acceptance: full `mix precommit` green. Both workflow files parse; the pinned digest `sha256:321ba132…`
+  is the multi-architecture index, so it resolves on `ubuntu-latest` and Apple silicon alike, verified by
+  running `mix deps.get --check-locked` inside a container started from that digest, which exits 0 against
+  the current lockfile. The extended pin hook was verified non-vacuous against three mutations — tag
+  without digest, malformed digest, and a wrong Elixir version carrying a valid digest — each of which
+  exits 1 with its own message. The `Verify Docker Build` job builds `Dockerfile.dev` on every run, so the
+  digest and the new flag are gated by CI rather than by assertion.
 
 ## Optional product backlog — design after the defect fixes
 

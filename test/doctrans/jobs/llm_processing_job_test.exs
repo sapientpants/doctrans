@@ -149,7 +149,7 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
       )
       |> Repo.update!()
 
-      assert :done = StartupRecovery.run_batch({:pages, nil})
+      assert {:embeddings, nil} = StartupRecovery.run_batch({:pages, nil})
 
       assert {:ok, [%{id: rescued_id}]} =
                Basic.rescue_jobs(Oban.config(), Oban.Job, rescue_after: 3_600_000)
@@ -159,7 +159,13 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
       saved = Documents.get_page!(page.id)
       assert saved.extraction_status == "completed"
       assert saved.translation_status == "completed"
-      assert Repo.aggregate(Oban.Job, :count) == 1
+
+      # The rescue reused the orphan rather than queueing a second page job; the
+      # extra job is this page's indexing request, on its own queue.
+      assert Repo.aggregate(from(j in Oban.Job, where: j.queue == "llm_processing"), :count) == 1
+
+      assert Repo.aggregate(from(j in Oban.Job, where: j.queue == "embedding_generation"), :count) ==
+               1
     end)
   end
 

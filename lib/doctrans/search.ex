@@ -17,6 +17,12 @@ defmodule Doctrans.Search do
           snippet: String.t() | nil
         }
 
+  @type search_page :: %{
+          results: [hybrid_result()],
+          total_count: non_neg_integer(),
+          retrieval: :hybrid | :keyword_only
+        }
+
   @type document_result :: %{
           :page_id => Ecto.UUID.t() | nil,
           :page_number => pos_integer(),
@@ -25,10 +31,15 @@ defmodule Doctrans.Search do
           :similarity => float(),
           :content_revision => integer() | nil,
           optional(:chunk_id) => Ecto.UUID.t() | nil,
-          optional(:chunk_index) => non_neg_integer()
+          optional(:chunk_index) => non_neg_integer(),
+          # Present only on results fused by `Doctrans.Chat.MultiSearch`.
+          optional(:rrf_score) => float()
         }
 
   alias Doctrans.Repo
+  alias Doctrans.Search.HybridQuery
+
+  require Logger
 
   # Allow embedding module to be configured for testing
   defp embedding_module do
@@ -41,10 +52,21 @@ defmodule Doctrans.Search do
   Returns a list of search results sorted by RRF score (combination of
   semantic similarity and full-text search ranking).
 
+  Use `search_with_count/2` when the total number of matches is wanted too --
+  it is the same statement, the total comes back for free, and it reports
+  whether the ranking was hybrid or degraded to keyword-only. This function
+  degrades the same way; it just does not say so, which is why nothing in
+  `lib/` calls it.
+
   ## Options
 
   - `:limit` - Maximum number of results (default: 20)
+  - `:offset` - Matches to skip before the first result (default: 0)
   - `:rrf_k` - RRF smoothing constant (default: 60, higher = smoother ranking)
+
+  The semantic similarity floor is not an option: it is calibrated against the
+  embedding model rather than chosen per call, and a caller that could lower it
+  would be asking for a ranking of the corpus rather than a set of matches.
   """
   @spec search(String.t() | nil, keyword()) ::
           {:ok, [hybrid_result()]} | {:error, Doctrans.Errors.reason()}
@@ -55,19 +77,137 @@ defmodule Doctrans.Search do
   # RRF constant k - higher values give smoother ranking
   @default_rrf_k 60
 
-  # Minimum RRF score threshold to filter out irrelevant results
-  # With k=60, a single match at rank 1 gives score ~0.0164 (1/61)
-  @min_score_threshold 0.01
+  # Minimum cosine similarity a page must reach before the semantic half will
+  # rank it at all. Calibrated on the reference library (912 embedded pages,
+  # qwen3-embedding truncated to 1024 dimensions) against 12 known-answer and
+  # 12 unrelated queries: the best match for a known-answer query scored
+  # 0.603-0.772, while the best match an unrelated query could find scored
+  # 0.446-0.591. Everything an unrelated query surfaces above 0.50 is
+  # content-free boilerplate -- copyright lines, an empty image page -- whose
+  # embeddings sit near the corpus centroid and are therefore mildly similar to
+  # any query at all.
+  #
+  # 0.55 is the value that leaves those two bands apart. Raising it to 0.60
+  # would empty every unrelated query completely, but it also cuts the single
+  # most relevant page for a known-answer query (a section titled
+  # "Liquiditatssicherung", 0.597), and dropping a true match to silence
+  # boilerplate is the wrong trade for a personal library.
+  @semantic_similarity_threshold 0.55
+
+  @default_limit 20
 
   def search(query, opts) when is_binary(query) do
-    limit = Keyword.get(opts, :limit, 20)
+    with {:ok, %{results: results}} <- search_with_count(query, opts) do
+      {:ok, results}
+    end
+  end
+
+  @doc """
+  Performs hybrid search and counts every match, from one query embedding and
+  one statement.
+
+  The page of results and the total come back from a single SELECT: the count is
+  a window over the same filtered rows the page is drawn from. So a query costs
+  one inference call, one ranking pass, and leaves no window in which indexing
+  can land between a count and a search and move the total.
+
+  Takes `search/2`'s options. The total describes the whole match set rather
+  than the page returned -- except past the end of it: an `:offset` beyond the
+  last match returns no rows, and with no rows there is no window to count, so
+  `:total_count` is 0. A caller paginating past the end therefore sees an empty
+  result set, which is what it should render anyway.
+
+  `:retrieval` names the ranking that produced the page: `:hybrid` when the
+  query was embedded, `:keyword_only` when it could not be and the full-text
+  half answered alone. A caller has to be able to tell a degraded search apart
+  from a search that found nothing, so this reports the mode rather than
+  failing.
+
+  A `:hybrid` search can still be empty. The semantic half only ranks pages that
+  clear a cosine similarity floor, so a query about something the library does
+  not cover has nothing to fuse and nothing to return -- which is the honest
+  answer, and the one an unfiltered ranking of the whole corpus cannot give.
+  """
+  @spec search_with_count(String.t() | nil, keyword()) ::
+          {:ok, search_page()} | {:error, Doctrans.Errors.reason()}
+  def search_with_count(query, opts \\ [])
+  def search_with_count("", _opts), do: {:ok, empty_page()}
+  def search_with_count(nil, _opts), do: {:ok, empty_page()}
+
+  def search_with_count(query, opts) when is_binary(query) do
+    with {:ok, {limit, offset, rrf_k}} <- query_bounds(opts) do
+      {embedding, retrieval} = query_embedding(query)
+
+      execute_hybrid_search(query, embedding, retrieval,
+        rrf_k: rrf_k,
+        min_similarity: @semantic_similarity_threshold,
+        limit: limit,
+        offset: offset
+      )
+    end
+  end
+
+  # Nothing was asked, so nothing was retrieved -- and no ranking was skipped,
+  # which is why the mode is the healthy one rather than a degraded one.
+  defp empty_page, do: %{results: [], total_count: 0, retrieval: :hybrid}
+
+  # The threshold does not vary by retrieval mode. It governs which pages the
+  # semantic half is allowed to rank, and in keyword-only mode that half is
+  # already empty -- a NULL vector clears no floor at all. Its predecessor, a
+  # floor on the *fused* score, did have to vary: a fused score is a function of
+  # rank, so a single-ranking keyword-only search crossed it at rank 41 and lost
+  # every deeper match along with the count that agreed with them. Filtering
+  # where relevance is actually measurable rather than where it has already been
+  # flattened into a rank is what lets one number serve both modes.
+
+  # An embedding server outage must not read as "nothing matched": rank on the
+  # full-text half alone rather than failing a search the keyword index can
+  # still answer, and hand back the mode so the caller can say which it got.
+  # `{:ok, nil}` is a legal embedding result (`EmbeddingBehaviour`) and is the
+  # same situation -- reporting `:hybrid` for it would claim a ranking that did
+  # not run. Either way `nil` reaches the statement as a NULL vector, which
+  # `HybridQuery.run/3` turns into an empty semantic ranking.
+  defp query_embedding(query) do
+    case embedding_module().generate(query, []) do
+      {:ok, nil} ->
+        Logger.warning("Search embedding returned no vector, keyword-only")
+        {nil, :keyword_only}
+
+      {:ok, embedding} ->
+        {embedding, :hybrid}
+
+      {:error, reason} ->
+        Logger.warning(
+          "Search embedding failed, keyword-only: #{inspect(reason, limit: 5, printable_limit: 256)}"
+        )
+
+        {nil, :keyword_only}
+    end
+  end
+
+  # Postgres takes LIMIT/OFFSET as bigint and the RRF constant as int4. Handing
+  # Postgrex a value outside those ranges -- an unclamped `?page=` reaching
+  # `:offset`, say -- makes it *raise* rather than return an error, which would
+  # escape the `{:ok, _} | {:error, _}` contract above and take the calling
+  # process down with it. Reject out-of-range bounds here so the contract holds
+  # for every caller, however it was reached.
+  @max_bigint 9_223_372_036_854_775_807
+  @max_int4 2_147_483_647
+
+  defp query_bounds(opts) do
+    limit = Keyword.get(opts, :limit, @default_limit)
     offset = Keyword.get(opts, :offset, 0)
     rrf_k = Keyword.get(opts, :rrf_k, @default_rrf_k)
 
-    with {:ok, query_embedding} <- embedding_module().generate(query, []) do
-      execute_hybrid_search(query, query_embedding, rrf_k, limit, offset)
+    cond do
+      not bounded?(limit, @max_bigint) -> {:error, {:invalid_search_bounds, [limit: limit]}}
+      not bounded?(offset, @max_bigint) -> {:error, {:invalid_search_bounds, [offset: offset]}}
+      not bounded?(rrf_k, @max_int4) -> {:error, {:invalid_search_bounds, [rrf_k: rrf_k]}}
+      true -> {:ok, {limit, offset, rrf_k}}
     end
   end
+
+  defp bounded?(value, max), do: is_integer(value) and value >= 0 and value <= max
 
   # Minimum cosine similarity threshold for chat context
   # Pages below this threshold are considered irrelevant
@@ -143,6 +283,9 @@ defmodule Doctrans.Search do
     end
   end
 
+  # Static heredoc; every value reaches Postgres as a bound parameter ($1..$4) via
+  # Repo.query/2. Flagged only because the query is bound to a variable named `sql`.
+  # sobelow_skip ["SQL.Query"]
   defp execute_chunk_search(document_id, query_embedding, limit, min_similarity) do
     sql = """
     SELECT
@@ -169,12 +312,16 @@ defmodule Doctrans.Search do
         {:ok, Enum.map(rows, &format_chunk_search_row(&1, columns))}
 
       {:error, error} ->
-        require Logger
-        Logger.error("Chunk search query failed: #{inspect(error)}")
+        Logger.error(
+          "Chunk search query failed: #{inspect(error, limit: 5, printable_limit: 256)}"
+        )
+
         {:error, {:database_error, [reason: error]}}
     end
   end
 
+  # Static heredoc; $1..$4 are bound parameters, nothing is interpolated into the SQL.
+  # sobelow_skip ["SQL.Query"]
   defp execute_page_search(document_id, query_embedding, limit, min_similarity) do
     sql = """
     SELECT
@@ -198,8 +345,10 @@ defmodule Doctrans.Search do
         {:ok, Enum.map(rows, &format_page_search_row(&1, columns))}
 
       {:error, error} ->
-        require Logger
-        Logger.error("Page search query failed: #{inspect(error)}")
+        Logger.error(
+          "Page search query failed: #{inspect(error, limit: 5, printable_limit: 256)}"
+        )
+
         {:error, {:database_error, [reason: error]}}
     end
   end
@@ -232,194 +381,28 @@ defmodule Doctrans.Search do
     }
   end
 
-  @doc """
-  Counts total matching results for a query.
-
-  Used for pagination to determine total pages.
-
-  ## Options
-
-  - `:rrf_k` - RRF smoothing constant (default: 60)
-  """
-  @spec count_results(String.t() | nil, keyword()) ::
-          {:ok, non_neg_integer()} | {:error, Doctrans.Errors.reason()}
-  def count_results(query, opts \\ [])
-  def count_results("", _opts), do: {:ok, 0}
-  def count_results(nil, _opts), do: {:ok, 0}
-
-  def count_results(query, opts) when is_binary(query) do
-    rrf_k = Keyword.get(opts, :rrf_k, @default_rrf_k)
-
-    with {:ok, query_embedding} <- embedding_module().generate(query, []) do
-      execute_count_query(query, query_embedding, rrf_k)
+  defp execute_hybrid_search(query, query_embedding, retrieval, query_opts) do
+    with {:ok, %{rows: rows, columns: columns}} <-
+           HybridQuery.run(query, query_embedding, query_opts) do
+      {:ok,
+       %{
+         results: Enum.map(rows, &format_row(&1, columns)),
+         total_count: total_count(rows, columns),
+         retrieval: retrieval
+       }}
     end
   end
 
-  defp execute_count_query(query, query_embedding, rrf_k) do
-    sql = """
-    WITH semantic_ranked AS (
-      SELECT
-        p.id,
-        ROW_NUMBER() OVER (ORDER BY p.embedding <=> $1::vector ASC) as semantic_rank
-      FROM pages p
-      JOIN documents d ON p.document_id = d.id
-      WHERE d.status = 'completed'
-        AND p.extraction_status = 'completed'
-        AND p.embedding IS NOT NULL
-    ),
-    fts_ranked AS (
-      SELECT
-        p.id,
-        ROW_NUMBER() OVER (
-          ORDER BY (
-            COALESCE(ts_rank_cd(p.original_searchable, plainto_tsquery('simple', $2)), 0) +
-            COALESCE(ts_rank_cd(p.translated_searchable, plainto_tsquery(get_fts_config(d.target_language), $2)), 0)
-          ) DESC
-        ) as fts_rank
-      FROM pages p
-      JOIN documents d ON p.document_id = d.id
-      WHERE d.status = 'completed'
-        AND p.extraction_status = 'completed'
-        AND (
-          p.original_searchable @@ plainto_tsquery('simple', $2)
-          OR p.translated_searchable @@ plainto_tsquery(get_fts_config(d.target_language), $2)
-        )
-    ),
-    combined AS (
-      SELECT
-        COALESCE(s.id, f.id) as page_id,
-        COALESCE(1.0 / ($3 + s.semantic_rank), 0) +
-        COALESCE(1.0 / ($3 + f.fts_rank), 0) as rrf_score
-      FROM semantic_ranked s
-      FULL OUTER JOIN fts_ranked f ON s.id = f.id
-    )
-    SELECT COUNT(*) as total
-    FROM combined
-    WHERE rrf_score >= $4
-    """
+  # Every row carries the same window total, so the first one answers for all of
+  # them. No rows means this page of the match set is empty and the window has
+  # nothing to report -- see `search_with_count/2` on paginating past the end.
+  defp total_count([], _columns), do: 0
 
-    case Repo.query(sql, [query_embedding, query, rrf_k, @min_score_threshold]) do
-      {:ok, %{rows: [[count]]}} ->
-        {:ok, count}
-
-      {:error, error} ->
-        require Logger
-        Logger.error("Count query failed: #{inspect(error)}")
-        {:error, {:database_error, [reason: error]}}
-    end
-  end
-
-  defp execute_hybrid_search(query, query_embedding, rrf_k, limit, offset) do
-    # Use CTE-based query for efficient RRF calculation
-    # - semantic_ranked: pages ranked by embedding similarity (IDs and ranks only)
-    # - fts_ranked: pages ranked by full-text search score (IDs and ranks only)
-    # - combined: FULL OUTER JOIN with RRF score calculation
-    # - Final SELECT joins back to pages for snippets using ts_headline()
-    sql = """
-    WITH semantic_ranked AS (
-      SELECT
-        p.id,
-        p.document_id,
-        1 - (p.embedding <=> $1::vector) as semantic_score,
-        ROW_NUMBER() OVER (ORDER BY p.embedding <=> $1::vector ASC) as semantic_rank
-      FROM pages p
-      JOIN documents d ON p.document_id = d.id
-      WHERE d.status = 'completed'
-        AND p.extraction_status = 'completed'
-        AND p.embedding IS NOT NULL
-    ),
-    fts_ranked AS (
-      SELECT
-        p.id,
-        p.document_id,
-        d.target_language,
-        (
-          COALESCE(ts_rank_cd(p.original_searchable, plainto_tsquery('simple', $2)), 0) +
-          COALESCE(ts_rank_cd(p.translated_searchable, plainto_tsquery(get_fts_config(d.target_language), $2)), 0)
-        ) as fts_score,
-        ROW_NUMBER() OVER (
-          ORDER BY (
-            COALESCE(ts_rank_cd(p.original_searchable, plainto_tsquery('simple', $2)), 0) +
-            COALESCE(ts_rank_cd(p.translated_searchable, plainto_tsquery(get_fts_config(d.target_language), $2)), 0)
-          ) DESC
-        ) as fts_rank
-      FROM pages p
-      JOIN documents d ON p.document_id = d.id
-      WHERE d.status = 'completed'
-        AND p.extraction_status = 'completed'
-        AND (
-          p.original_searchable @@ plainto_tsquery('simple', $2)
-          OR p.translated_searchable @@ plainto_tsquery(get_fts_config(d.target_language), $2)
-        )
-    ),
-    combined AS (
-      SELECT
-        COALESCE(s.id, f.id) as page_id,
-        COALESCE(s.document_id, f.document_id) as document_id,
-        COALESCE(s.semantic_score, 0) as semantic_score,
-        COALESCE(f.fts_score, 0) as fts_score,
-        f.target_language,
-        s.semantic_rank,
-        f.fts_rank,
-        -- RRF score: sum of reciprocal ranks
-        COALESCE(1.0 / ($3 + s.semantic_rank), 0) +
-        COALESCE(1.0 / ($3 + f.fts_rank), 0) as rrf_score
-      FROM semantic_ranked s
-      FULL OUTER JOIN fts_ranked f ON s.id = f.id
-    )
-    SELECT
-      c.page_id,
-      c.document_id,
-      d.title as document_title,
-      p.page_number,
-      p.image_path,
-      c.rrf_score,
-      -- Use ts_headline for FTS matches (shows context around match)
-      -- Fall back to substring for semantic-only matches
-      CASE
-        WHEN c.fts_score > 0 AND p.translated_markdown IS NOT NULL THEN
-          ts_headline(
-            get_fts_config(COALESCE(c.target_language, 'en')),
-            p.translated_markdown,
-            plainto_tsquery(get_fts_config(COALESCE(c.target_language, 'en')), $2),
-            'MaxWords=35, MinWords=15, MaxFragments=1'
-          )
-        WHEN c.fts_score > 0 AND p.original_markdown IS NOT NULL THEN
-          ts_headline(
-            'simple',
-            p.original_markdown,
-            plainto_tsquery('simple', $2),
-            'MaxWords=35, MinWords=15, MaxFragments=1'
-          )
-        WHEN p.translated_markdown IS NOT NULL THEN
-          CASE
-            WHEN LENGTH(p.translated_markdown) > 200 THEN LEFT(p.translated_markdown, 200) || '...'
-            ELSE p.translated_markdown
-          END
-        ELSE
-          CASE
-            WHEN LENGTH(p.original_markdown) > 200 THEN LEFT(p.original_markdown, 200) || '...'
-            ELSE p.original_markdown
-          END
-      END as snippet
-    FROM combined c
-    JOIN pages p ON c.page_id = p.id
-    JOIN documents d ON c.document_id = d.id
-    WHERE c.rrf_score >= $4
-    ORDER BY c.rrf_score DESC
-    LIMIT $5
-    OFFSET $6
-    """
-
-    case Repo.query(sql, [query_embedding, query, rrf_k, @min_score_threshold, limit, offset]) do
-      {:ok, %{rows: rows, columns: columns}} ->
-        {:ok, Enum.map(rows, &format_row(&1, columns))}
-
-      {:error, error} ->
-        require Logger
-        Logger.error("Hybrid search query failed: #{inspect(error)}")
-        {:error, {:database_error, [reason: error]}}
-    end
+  defp total_count([row | _rest], columns) do
+    columns
+    |> Enum.zip(row)
+    |> Map.new()
+    |> Map.fetch!("total_count")
   end
 
   defp format_row(row, columns) do

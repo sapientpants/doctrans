@@ -6,10 +6,10 @@ defmodule Doctrans.Processing.OpenAI do
   model listing against OpenAI-compatible API endpoints.
   """
 
-  alias Doctrans.Config.{Embedding, OpenAI}
+  alias Doctrans.Config.{Embedding, Inference, OpenAI}
+  alias Doctrans.Processing.ApiFailure
   alias Doctrans.Processing.SSECollector
   alias Doctrans.Resilience.CircuitBreaker
-  alias Doctrans.Resilience.ErrorClassifier
 
   require Logger
 
@@ -45,16 +45,16 @@ defmodule Doctrans.Processing.OpenAI do
   defp resolve_extract_response({:ok, %Req.Response{status: 200, body: body}}, fuse) do
     case parse_chat_response(body) do
       {:ok, _} = result -> result
-      {:error, _} = error -> handle_api_error(fuse, error)
+      {:error, _} = error -> ApiFailure.handle(fuse, error)
     end
   end
 
   defp resolve_extract_response({:ok, %Req.Response{status: status} = resp}, fuse) do
-    handle_api_error(fuse, {:http_status, status, resp})
+    ApiFailure.handle(fuse, {:http_status, status, resp})
   end
 
   defp resolve_extract_response({:error, reason}, fuse) do
-    handle_api_error(fuse, reason)
+    ApiFailure.handle(fuse, reason)
   end
 
   defp build_multimodal_content(image_path, image_data, opts) do
@@ -93,7 +93,7 @@ defmodule Doctrans.Processing.OpenAI do
     key = api_key()
 
     Logger.debug(
-      "OpenAI request: url=#{url}, auth=#{if key, do: "<set>", else: "<none>"}, body_keys=#{inspect(Map.keys(request_body))}"
+      "OpenAI request: url=#{redact_url(url)}, auth=#{if key, do: "<set>", else: "<none>"}, body_keys=#{inspect(Map.keys(request_body))}"
     )
 
     post_chat_completion(request_body, opts)
@@ -105,11 +105,11 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp resolve_chat_response({:ok, %Req.Response{status: status} = resp}, fuse) do
-    handle_api_error(fuse, {:http_status, status, resp})
+    ApiFailure.handle(fuse, {:http_status, status, resp})
   end
 
   defp resolve_chat_response({:error, reason}, fuse) do
-    handle_api_error(fuse, reason)
+    ApiFailure.handle(fuse, reason)
   end
 
   defp post_chat_completion(request_body, opts) do
@@ -123,7 +123,13 @@ defmodule Doctrans.Processing.OpenAI do
           receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
           # :transient retries all methods (incl. POST) on 408/429/5xx and
           # connection errors; chat-completion POSTs are safe to replay
-          retry: :transient
+          retry: :transient,
+          # Req follows redirects by default, and a 307/308 replays the POST
+          # body at the Location host. That would send document text somewhere
+          # `Doctrans.Config.Inference` never classified, breaking the privacy
+          # claim the UI makes from it. An inference server has no cause to
+          # redirect; if one does, fail loudly rather than silently re-target.
+          redirect: false
         )
       end,
       melt: false
@@ -162,54 +168,57 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp do_chat_stream(messages, on_delta, opts) do
-    request_body = build_request_body(opts ++ [messages: messages, stream: true])
     fuse = :openai_api
     collector = SSECollector.new(on_delta)
-
-    # Stream the response body chunk by chunk: each raw chunk is fed into the
-    # SSE collector (kept in resp.body), which parses complete `data:` frames
-    # and invokes on_delta/1 as soon as content arrives.
-    into = fn
-      {:data, data}, {req, resp} ->
-        state =
-          if is_map(resp.body),
-            do: SSECollector.feed(resp.body, data),
-            else: SSECollector.feed(collector, data)
-
-        {:cont, {req, %{resp | body: state}}}
-    end
 
     case build_base_req()
          |> Req.post(
            url: api_url("/v1/chat/completions"),
-           json: request_body,
+           json: build_request_body(opts ++ [messages: messages, stream: true]),
            receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
            retry: :transient,
-           into: into
+           # See post_chat_completion/2: a redirect would replay the document
+           # text at an endpoint the privacy copy never accounted for.
+           redirect: false,
+           into: stream_into(collector)
          ) do
       {:ok, %Req.Response{status: 200} = resp} ->
-        # resp.body holds the collector state once any chunk arrived; it is
-        # still the default "" (not a map) if the stream had no data frames.
-        state = if is_map(resp.body), do: resp.body, else: collector
-
-        content =
-          state
-          |> SSECollector.finish()
-          |> String.trim()
-          |> strip_code_fences()
-
-        if content == "" do
-          {:error, :empty_response}
-        else
-          {:ok, content}
-        end
+        collected_content(resp.body, collector)
 
       {:ok, %Req.Response{} = resp} ->
-        handle_api_error(fuse, {:http_status, resp.status, resp})
+        ApiFailure.handle(fuse, {:http_status, resp.status, resp})
 
       {:error, reason} ->
-        handle_api_error(fuse, reason)
+        ApiFailure.handle(fuse, reason)
     end
+  end
+
+  # Stream the response body chunk by chunk: each raw chunk is fed into the
+  # SSE collector (kept in resp.body), which parses complete `data:` frames
+  # and invokes on_delta/1 as soon as content arrives.
+  defp stream_into(collector) do
+    fn {:data, data}, {req, resp} ->
+      state =
+        if is_map(resp.body),
+          do: SSECollector.feed(resp.body, data),
+          else: SSECollector.feed(collector, data)
+
+      {:cont, {req, %{resp | body: state}}}
+    end
+  end
+
+  # `body` holds the collector state once any chunk arrived; it is still the
+  # default "" (not a map) if the stream had no data frames.
+  defp collected_content(body, collector) do
+    state = if is_map(body), do: body, else: collector
+
+    content =
+      state
+      |> SSECollector.finish()
+      |> String.trim()
+      |> strip_code_fences()
+
+    if content == "", do: {:error, :empty_response}, else: {:ok, content}
   end
 
   @impl true
@@ -281,21 +290,30 @@ defmodule Doctrans.Processing.OpenAI do
     _ -> false
   end
 
+  # The model list only ever backs a modal a user is waiting in front of, so it
+  # gets a tighter budget than the processing calls: with `retry: :safe_transient`
+  # a transport failure costs this much per attempt, not the default 15s.
+  @list_models_timeout 5_000
+
   @impl true
   @spec list_models() :: {:ok, [String.t()]} | {:error, Doctrans.Errors.reason()}
   def list_models do
     fuse = :openai_api
 
     case build_base_req()
-         |> Req.get(url: api_url("/v1/models"), retry: :safe_transient) do
+         |> Req.get(
+           url: api_url("/v1/models"),
+           retry: :safe_transient,
+           receive_timeout: @list_models_timeout
+         ) do
       {:ok, %Req.Response{status: 200, body: body}} ->
         parse_list_models_response(body)
 
       {:ok, %Req.Response{status: status} = resp} ->
-        handle_api_error(fuse, {:http_status, status, resp})
+        ApiFailure.handle(fuse, {:http_status, status, resp}, melt: false)
 
       {:error, reason} ->
-        handle_api_error(fuse, reason)
+        ApiFailure.handle(fuse, reason, melt: false)
     end
   end
 
@@ -326,7 +344,7 @@ defmodule Doctrans.Processing.OpenAI do
     fuse = :embedding_api
 
     Logger.debug(
-      "Embedding POST #{embed_url("/v1/embeddings")}, model: #{model}, api_key: #{if(embed_api_key(), do: "<set>", else: "<none>")}"
+      "Embedding POST #{redact_url(embed_url("/v1/embeddings"))}, model: #{model}, api_key: #{if(embed_api_key(), do: "<set>", else: "<none>")}"
     )
 
     request = %{model: model, input: text}
@@ -337,16 +355,19 @@ defmodule Doctrans.Processing.OpenAI do
            json: request,
            receive_timeout: timeout,
            # Embedding POSTs are idempotent; replay them on transient failures
-           retry: :transient
+           retry: :transient,
+           # An embedding request carries the chunk text it is embedding, so a
+           # followed redirect is document egress. See post_chat_completion/2.
+           redirect: false
          ) do
       {:ok, %Req.Response{status: 200, body: body}} ->
         parse_embed_response(body)
 
       {:ok, %Req.Response{status: status} = resp} ->
-        handle_api_error(fuse, {:http_status, status, resp})
+        ApiFailure.handle(fuse, {:http_status, status, resp})
 
       {:error, reason} ->
-        handle_api_error(fuse, reason)
+        ApiFailure.handle(fuse, reason)
     end
   end
 
@@ -371,6 +392,12 @@ defmodule Doctrans.Processing.OpenAI do
   defp api_url(path) do
     "#{base_url()}/#{String.trim_leading(path, "/")}"
   end
+
+  # The base URL is operator-supplied and may carry credentials. Req redacts its
+  # own auth header, but these URLs are logged before Req ever sees them, and dev
+  # logs at :debug. `Doctrans.Config.Inference` owns the redaction because it
+  # renders the same URLs into the privacy copy; one rule, one place.
+  defp redact_url(url), do: Inference.redact_url(url)
 
   defp base_url do
     OpenAI.base_url()
@@ -451,32 +478,6 @@ defmodule Doctrans.Processing.OpenAI do
     # Larger context for chat, smaller for extraction/translation
     4096
   end
-
-  defp handle_api_error(fuse, reason) do
-    normalized = normalize_reason(reason)
-    classification = ErrorClassifier.classify(normalized)
-
-    if classification == :retryable do
-      # Only transient/5xx/transport failures count against the circuit
-      # breaker; a single 401 or bad request must not push it toward blown.
-      CircuitBreaker.melt(fuse, reason)
-    else
-      Logger.debug(
-        "Not melting fuse #{to_string(fuse)} for #{classification} error: #{inspect(reason)}"
-      )
-    end
-
-    Logger.error("API call failed (#{classification}): #{inspect(reason)}")
-    {:error, Doctrans.Errors.normalize(normalized)}
-  end
-
-  # ErrorClassifier keys HTTP failures as {:http_error, status}, so map our
-  # internal {:http_status, status, resp} tuple onto that shape.
-  defp normalize_reason({:http_status, status, _resp}), do: {:http_error, status}
-
-  defp normalize_reason({:error, reason}), do: normalize_reason(reason)
-
-  defp normalize_reason(reason), do: reason
 
   # Strip markdown code fences that LLMs sometimes wrap their output in
   @spec strip_code_fences(String.t()) :: String.t()

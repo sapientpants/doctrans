@@ -6,6 +6,19 @@
 @source "../js";
 @source "../../lib/doctrans_web";
 
+/* The viewer clips itself to the viewport only where there is actually room.
+   `lg:` alone was the wrong gate for that: the trap it guards against is a
+   *short* viewport rather than a narrow one, and short-but-wide is still `lg`
+   -- a 2560x800 display at 200% zoom computes to roughly 1280x400, keeps
+   `h-dvh overflow-hidden`, and puts the panel contents out of reach with no
+   page scroll to recover them. Width decides the side-by-side split; this
+   decides whether the page scrolls. */
+@custom-variant fitscreen {
+  @media (min-width: 64rem) and (min-height: 40rem) {
+    @slot;
+  }
+}
+
 /* A Tailwind plugin that makes "hero-#{ICON}" classes available.
    The heroicons installation itself is managed by your mix.exs */
 @plugin "../vendor/heroicons";
@@ -103,48 +116,335 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+/* ---------------------------------------------------------------------------
+   Markdown typography (`.markdown`)
 
-/* Markdown paragraph spacing without extra space at container edges. */
-.prose p {
-  margin-block: 0.75em;
+   The Tailwind typography plugin is NOT installed, and Preflight resets
+   headings, lists, borders and margins to nothing, so everything rendered from
+   Markdown (viewer pages and chat answers) is styled here by hand.
+
+   Deliberately NOT named `.prose`: that is the Tailwind Typography plugin's
+   class. Sharing the name would mean that installing the plugin later silently
+   collides these rules with generated ones of comparable specificity, and the
+   winner would vary per declaration.
+
+   Conventions:
+   - Type sizes and spacing are in `em`, so the block scales with whatever font
+     size the container inherits (16px in the viewer, 14px in the chat
+     bubbles). Hairlines and radii stay in px/rem — they should not scale.
+   - Colours are derived from `--color-base-content` with `color-mix`, never
+     from a fixed base shade, so the same rules read correctly in both the
+     light and dark daisyUI themes AND on top of any `base-100`/`base-200`
+     surface (chat bubbles are `bg-base-200`). Every mix is a `--md-*` token
+     below; do not hand-roll percentages in the rules.
+   - `.markdown-sm` (used by all three call sites) tightens the block scale;
+     see the variable overrides below.
+--------------------------------------------------------------------------- */
+
+.markdown {
+  --md-h1: 1.75em;
+  --md-h2: 1.4em;
+  --md-h3: 1.2em;
+  --md-h4: 1.05em;
+  --md-block-gap: 1em;
+  --md-tight-gap: 0.25em;
+  --md-rule: color-mix(in oklab, var(--color-base-content) 15%, transparent);
+  --md-rule-strong: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+  --md-cell-rule: color-mix(in oklab, var(--color-base-content) 20%, transparent);
+  --md-muted: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+  --md-fill: color-mix(in oklab, var(--color-base-content) 7%, transparent);
+  --md-fill-strong: color-mix(in oklab, var(--color-base-content) 14%, transparent);
+  --md-stripe: color-mix(in oklab, var(--color-base-content) 5%, transparent);
+  /* `--color-primary` is the same lightness in both themes and lands at 2.8:1
+     on the light surface — below AA for body-sized text. Mixing it toward
+     `--color-base-content` darkens it on light and lightens it on dark,
+     reaching 4.8:1 and 6.4:1 respectively, without a per-theme override. */
+  --md-link: color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));
+  --md-mono: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+
+  line-height: 1.65;
+  /* OCR output regularly contains long unbroken tokens (URLs, reference
+     numbers); they must wrap instead of widening the pane. */
+  overflow-wrap: break-word;
 }
 
-.prose p:first-child {
+/* Compact scale for narrow columns. Deliberately leaves the body font size
+   inherited so neither the viewer nor the chat bubble changes size; only the
+   heading scale and the vertical rhythm tighten. Both gap tokens are scaled,
+   so paragraphs and list items tighten along with the block-level spacing —
+   every margin below derives from one of them. */
+.markdown.markdown-sm {
+  --md-h1: 1.5em;
+  --md-h2: 1.25em;
+  --md-h3: 1.1em;
+  --md-h4: 1em;
+  --md-block-gap: 0.8em;
+  --md-tight-gap: 0.2em;
+
+  line-height: 1.6;
+}
+
+/* No extra space at the edges of the container, or of a list item or quote.
+   Cells are not included: comrak emits inline content directly into a GFM
+   cell, so a cell never has a block-level first or last child. */
+.markdown > :first-child,
+.markdown :is(li, blockquote) > :first-child {
   margin-block-start: 0;
 }
 
-.prose p:last-child {
+.markdown > :last-child,
+.markdown :is(li, blockquote) > :last-child {
   margin-block-end: 0;
 }
 
-/* Markdown table styling within prose containers */
-.prose table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 1rem;
-  margin-bottom: 1rem;
+/* Paragraphs */
+.markdown p {
+  margin-block: calc(var(--md-block-gap) * 0.75);
 }
 
-.prose th {
-  background-color: var(--color-base-200);
-  border: 1px solid var(--color-base-300);
-  padding: 0.5rem 0.75rem;
-  text-align: left;
+/* Headings */
+.markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin-block: calc(var(--md-block-gap) * 1.5) var(--md-block-gap);
+  font-weight: 600;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.markdown h1 {
+  font-size: var(--md-h1);
+  font-weight: 700;
+}
+
+.markdown h2 {
+  font-size: var(--md-h2);
+  font-weight: 700;
+}
+
+.markdown h3 {
+  font-size: var(--md-h3);
+}
+
+.markdown h4 {
+  font-size: var(--md-h4);
+}
+
+.markdown h5 {
+  font-size: 1em;
+}
+
+.markdown h6 {
+  font-size: 0.9em;
+  color: var(--md-muted);
+  letter-spacing: 0.02em;
+}
+
+/* A hairline under the top two levels gives scanned documents visible
+   structure without introducing another colour. */
+.markdown :is(h1, h2) {
+  padding-block-end: 0.2em;
+  border-block-end: 1px solid var(--md-rule);
+}
+
+/* Lists */
+.markdown :is(ul, ol) {
+  margin-block: var(--md-block-gap);
+  padding-inline-start: 1.5em;
+}
+
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown li {
+  margin-block: var(--md-tight-gap);
+}
+
+.markdown li::marker {
+  color: var(--md-muted);
+}
+
+/* Nested lists: tighter indent, alternating markers. */
+.markdown :is(ul, ol) :is(ul, ol) {
+  margin-block: var(--md-tight-gap);
+  padding-inline-start: 1.25em;
+}
+
+.markdown ul ul {
+  list-style: circle;
+}
+
+.markdown ul ul ul {
+  list-style: square;
+}
+
+.markdown ol ol {
+  list-style: lower-alpha;
+}
+
+.markdown ol ol ol {
+  list-style: lower-roman;
+}
+
+.markdown li > p {
+  margin-block: var(--md-tight-gap);
+}
+
+/* Quotes */
+.markdown blockquote {
+  margin-block: var(--md-block-gap);
+  padding-inline-start: 1em;
+  border-inline-start: 3px solid var(--md-rule);
+  color: var(--md-muted);
+}
+
+/* Code */
+.markdown code {
+  padding: 0.15em 0.35em;
+  border: 1px solid var(--md-rule);
+  border-radius: var(--radius-selector, 0.25rem);
+  background-color: var(--md-fill);
+  font-family: var(--md-mono);
+  font-size: 0.875em;
+}
+
+.markdown pre {
+  margin-block: var(--md-block-gap);
+  padding: 0.75em 1em;
+  border: 1px solid var(--md-rule);
+  border-radius: var(--radius-box, 0.5rem);
+  background-color: var(--md-fill);
+  overflow-x: auto;
+  font-family: var(--md-mono);
+  font-size: 0.875em;
+  line-height: 1.5;
+}
+
+.markdown pre code {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  font-size: inherit;
+}
+
+/* Rules, links, images, emphasis */
+.markdown hr {
+  margin-block: calc(var(--md-block-gap) * 1.5);
+  border: 0;
+  border-block-start: 1px solid var(--md-rule);
+}
+
+.markdown a {
+  color: var(--md-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  transition: text-decoration-thickness 0.15s ease;
+}
+
+.markdown a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.markdown img {
+  max-width: 100%;
+  height: auto;
+  margin-block: var(--md-block-gap);
+  border-radius: var(--radius-box, 0.5rem);
+}
+
+.markdown :is(strong, b) {
   font-weight: 600;
 }
 
-.prose td {
-  border: 1px solid var(--color-base-300);
-  padding: 0.5rem 0.75rem;
+.markdown :is(em, i) {
+  font-style: italic;
 }
 
-.prose tr:nth-child(even) {
-  background-color: var(--color-base-100);
+/* ---------------------------------------------------------------------------
+   Markdown tables
+
+   Wide OCR tables must not widen the pane or make the whole document scroll
+   sideways. The rendered Markdown cannot be wrapped per-table in HTML, so the
+   table itself becomes the scroll container (GitHub's approach):
+   `display: block` + `width: max-content` + `max-width: 100%` + `overflow`.
+
+   Tradeoff: as a block box the table is shrink-to-fit rather than full-width,
+   so narrow tables no longer stretch across the pane; and its horizontal
+   scrollbar is only reachable over the table itself.
+
+   Accessibility tradeoff: changing a table's `display` drops its table
+   semantics for assistive tech in WebKit, so the head/row relationship is not
+   announced there. The usual mitigation is `role="table"` on the element, which
+   is not available here — the scrubber allows no `role` attribute, and there is
+   no wrapper element to hang it on by design (the rendered blocks must be
+   direct children of `.markdown` for the edge-margin rules above to match).
+   Accepted because the alternative is a table that either widens the pane or is
+   crushed to min-content.
+--------------------------------------------------------------------------- */
+.markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin-block: var(--md-block-gap);
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+  /* Keep the scroll gesture inside the table instead of chaining to the pane. */
+  overscroll-behavior-x: contain;
 }
 
-.prose tr:nth-child(odd) td {
-  background-color: var(--color-base-200);
+.markdown :is(th, td) {
+  border: 1px solid var(--md-cell-rule);
+  padding: 0.4em 0.65em;
+  text-align: start;
+  vertical-align: top;
+  /* Keep rows on one line so the table scrolls instead of being crushed to its
+     minimum width. Without this the block above caps the table at 100% and the
+     auto layout squeezes every column to min-content, breaking short values
+     ("INV-2024-1001") across three lines. Tradeoff: a cell holding a whole
+     sentence makes the table wide and scrolled rather than tall. */
+  white-space: nowrap;
 }
+
+/* Comrak emits `align` on columns that the Markdown alignment row aligns.
+   Author rules beat the browser's presentational hint for `align`, so the
+   attribute has to be honoured explicitly here or the `text-align: start`
+   above would silently win. Harmless if the sanitizer drops the attribute. */
+.markdown :is(th, td)[align="left"] {
+  text-align: left;
+}
+
+.markdown :is(th, td)[align="center"] {
+  text-align: center;
+}
+
+.markdown :is(th, td)[align="right"] {
+  text-align: right;
+}
+
+/* Header: a stronger tint than the zebra stripe, plus a heavier bottom rule, so
+   the head stays distinguishable from body rows on any surface and in either
+   theme. */
+.markdown th {
+  background-color: var(--md-fill-strong);
+  border-block-end-width: 2px;
+  border-block-end-color: var(--md-rule-strong);
+  font-weight: 600;
+}
+
+/* Zebra striping for long tables. Only even body rows are tinted: the previous
+   rules tinted both even and odd rows (and used `base-200` for both the header
+   and the odd rows), which erased the stripe and the head/body distinction. */
+.markdown tbody tr:nth-child(even) {
+  background-color: var(--md-stripe);
+}
+
 
 /* Discrete zoom levels for the document page viewer.
    Rendered as classes (not inline styles) so the CSP can keep
@@ -152,7 +452,22 @@
 .zoom-50 { transform: scale(0.5); transform-origin: top center; }
 .zoom-75 { transform: scale(0.75); transform-origin: top center; }
 .zoom-100 { transform: scale(1); transform-origin: top center; }
-.zoom-125 { transform: scale(1.25); transform-origin: top center; }
-.zoom-150 { transform: scale(1.5); transform-origin: top center; }
-.zoom-175 { transform: scale(1.75); transform-origin: top center; }
-.zoom-200 { transform: scale(2); transform-origin: top center; }
+.zoom-125 { transform: scale(1.25); transform-origin: top left; }
+.zoom-150 { transform: scale(1.5); transform-origin: top left; }
+.zoom-175 { transform: scale(1.75); transform-origin: top left; }
+.zoom-200 { transform: scale(2); transform-origin: top left; }
+
+/* Decorative motion only. The loading spinner is deliberately left alone: it is
+   the only signal that an answer is coming, and freezing it removes feedback
+   rather than reducing motion. */
+@media (prefers-reduced-motion: reduce) {
+  #chat-jump-to-latest,
+  #original-panel,
+  #translated-panel {
+    transition: none;
+  }
+
+  #chat-jump-to-latest:hover {
+    transform: none;
+  }
+}

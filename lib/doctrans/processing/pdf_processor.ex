@@ -13,6 +13,7 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   require Logger
 
+  alias Doctrans.Config.PdfExtraction
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
@@ -28,8 +29,14 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   Returns `:ok`, `:cancelled`, or `{:error, reason}`.
   """
-  # pdf_path is the stored original upload or the converter output in the same document directory.
-  # sobelow_skip ["Traversal.FileModule"]
+  # pdf_path is the stored original upload or the converter output in the same document
+  # directory; the File calls themselves live further down the do_extract/3 chain.
+  @spec extract_document(
+          Ecto.UUID.t(),
+          String.t(),
+          MapSet.t(Ecto.UUID.t()),
+          Documents.Document.t() | nil
+        ) :: :ok | :cancelled | {:error, Doctrans.Errors.reason()}
   def extract_document(document_id, pdf_path, cancelled_documents, document \\ nil) do
     if MapSet.member?(cancelled_documents, document_id) do
       Logger.info("Document #{document_id} was cancelled, skipping PDF extraction")
@@ -47,7 +54,7 @@ defmodule Doctrans.Processing.PdfProcessor do
     else
       {:error, reason} ->
         Logger.error("Failed to extract PDF for document #{document_id}: #{inspect(reason)}")
-        maybe_update_error(document, reason)
+        _ = maybe_update_error(document, reason)
         {:error, reason}
     end
   end
@@ -55,7 +62,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp resume_failed_document(%{status: "error"} = document) do
     # Restore processing before queueing pages so retries can publish live progress.
     with {:ok, document} <- Documents.update_document_status(document, "processing") do
-      _ = Topics.broadcast_document_update(document)
+      _ = Topics.broadcast_document_updated(document)
       {:ok, document}
     end
   end
@@ -82,6 +89,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   upload directory and document ID. Note that this returns the expected path
   regardless of whether the file actually exists on disk.
   """
+  @spec get_pdf_path(Ecto.UUID.t()) :: String.t()
   def get_pdf_path(document_id) do
     Path.join([
       Uploads.upload_dir(),
@@ -98,9 +106,15 @@ defmodule Doctrans.Processing.PdfProcessor do
     File.mkdir_p!(pages_dir)
 
     # Get page count early so UI can show progress
+    # One budget for the whole document, so the per-page deadlines cannot add up
+    # past the job that contains them: without it a long document reaches Oban's
+    # timeout instead of failing cleanly with its finished pages preserved.
+    deadline = System.monotonic_time(:millisecond) + PdfExtraction.job_timeout()
+
     with {:ok, page_count} <- pdf_extractor_module().get_page_count(pdf_path),
          {:ok, document} <- set_total_pages(document, page_count),
-         :ok <- extract_pages_progressively(document, pdf_path, pages_dir, page_count) do
+         :ok <-
+           extract_pages_progressively(document, pdf_path, pages_dir, page_count, deadline) do
       Logger.info("Extracted #{page_count} pages for document #{document.id}")
 
       :ok
@@ -113,7 +127,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp set_total_pages(document, page_count) do
     case Documents.update_document(document, %{total_pages: page_count}) do
       {:ok, updated_document} ->
-        _ = Topics.broadcast_document_update(updated_document)
+        _ = Topics.broadcast_document_updated(updated_document)
         {:ok, updated_document}
 
       error ->
@@ -121,22 +135,26 @@ defmodule Doctrans.Processing.PdfProcessor do
     end
   end
 
-  defp extract_pages_progressively(document, pdf_path, pages_dir, page_count) do
+  defp extract_pages_progressively(document, pdf_path, pages_dir, page_count, deadline) do
     result =
       Enum.reduce_while(1..page_count, :ok, fn page_number, :ok ->
-        with {:ok, page} <- ensure_page(document, pdf_path, pages_dir, page_number),
-             :ok <-
-               Run.with_current(document, fn current ->
-                 queue_page_for_processing(page, current)
-               end) do
-          {:cont, :ok}
-        else
-          {:error, reason} ->
-            {:halt, {:error, reason}}
+        case extract_and_queue_page(document, pdf_path, pages_dir, page_number, deadline) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
         end
       end)
 
     if result == :ok, do: finish_extraction(document), else: result
+  end
+
+  defp extract_and_queue_page(document, pdf_path, pages_dir, page_number, deadline) do
+    case ensure_page(document, pdf_path, pages_dir, page_number, deadline) do
+      {:ok, page} ->
+        Run.with_current(document, fn current -> queue_page_for_processing(page, current) end)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   defp finish_extraction(document) do
@@ -151,7 +169,7 @@ defmodule Doctrans.Processing.PdfProcessor do
       end)
 
     with {:ok, current} <- result do
-      _ = Topics.broadcast_document_update(current)
+      _ = Topics.broadcast_document_updated(current)
       # Guard completion separately, without publishing inside the extraction transaction.
       case DocumentOrchestrator.check_document_completion(current) do
         {:error, _} = error -> error
@@ -178,32 +196,34 @@ defmodule Doctrans.Processing.PdfProcessor do
     end
   end
 
-  defp ensure_page(document, pdf_path, pages_dir, page_number) do
+  defp ensure_page(document, pdf_path, pages_dir, page_number, deadline) do
     page = Documents.get_page_by_number(document.id, page_number)
 
     if page && is_binary(page.image_path) &&
          File.regular?(Path.join(Documents.uploads_dir(), page.image_path)) do
       {:ok, page}
     else
-      extract_and_save_page(document, page, pdf_path, pages_dir, page_number)
+      extract_and_save_page(document, page, pdf_path, pages_dir, page_number, deadline)
     end
   end
 
-  defp extract_and_save_page(document, page, pdf_path, pages_dir, page_number) do
-    case pdf_extractor_module().extract_page(pdf_path, pages_dir, page_number, []) do
+  defp extract_and_save_page(document, page, pdf_path, pages_dir, page_number, deadline) do
+    case pdf_extractor_module().extract_page(pdf_path, pages_dir, page_number, deadline: deadline) do
       {:ok, image_path} ->
         relative_path = Path.relative_to(image_path, Documents.uploads_dir())
-        page_attrs = %{page_number: page_number, image_path: relative_path}
+        save_current_page(document, page, %{page_number: page_number, image_path: relative_path})
 
-        case Run.with_current(document, fn current -> save_page(current, page, page_attrs) end) do
-          {:ok, page} ->
-            # Broadcast page creation for progressive UI updates
-            Topics.broadcast_page_update(page)
-            {:ok, page}
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
-          {:error, reason} ->
-            {:error, reason}
-        end
+  defp save_current_page(document, page, attrs) do
+    case Run.with_current(document, fn current -> save_page(current, page, attrs) end) do
+      {:ok, saved} ->
+        # Broadcast page creation for progressive UI updates
+        Topics.broadcast_page_updated(saved)
+        {:ok, saved}
 
       {:error, reason} ->
         {:error, reason}

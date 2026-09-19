@@ -32,6 +32,33 @@ for config_key <- [:openai, :embedding] do
   end
 end
 
+# One storage root for writing and serving: `DOCTRANS_DATA_DIR` moves documents,
+# generated page images, and converted PDFs off the application directory, and the
+# endpoint serves page images from the same place. Left unset, the default
+# resolves at runtime (see `Doctrans.Config.Uploads.upload_dir/0`).
+#
+# Never honoured in :test. The suite owns the root configured in `config/test.exs`
+# and deletes directories beneath it, so reading the variable here would let
+# `mix test` erase the documents of an operator who set it in `.env`.
+if config_env() != :test do
+  case System.get_env("DOCTRANS_DATA_DIR") do
+    nil ->
+      :ok
+
+    "" ->
+      raise "DOCTRANS_DATA_DIR is set but empty; unset it to use the default storage root"
+
+    dir ->
+      if Path.type(dir) != :absolute do
+        raise "DOCTRANS_DATA_DIR must be an absolute path, got: #{dir}. " <>
+                "A relative path resolves against the working directory the " <>
+                "application happens to start in."
+      end
+
+      config :doctrans, :uploads, upload_dir: Path.expand(dir)
+  end
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -117,22 +144,4 @@ if config_env() == :prod do
   #       force_ssl: [hsts: true]
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.
-
-  # ## Configuring the mailer
-  #
-  # In production you need to configure the mailer to use a different adapter.
-  # Here is an example configuration for Mailgun:
-  #
-  #     config :doctrans, Doctrans.Mailer,
-  #       adapter: Swoosh.Adapters.Mailgun,
-  #       api_key: System.get_env("MAILGUN_API_KEY"),
-  #       domain: System.get_env("MAILGUN_DOMAIN")
-  #
-  # Most non-SMTP adapters require an API client. Swoosh supports Req, Hackney,
-  # and Finch out-of-the-box. This configuration is typically done at
-  # compile-time in your config/prod.exs:
-  #
-  #     config :swoosh, :api_client, Swoosh.ApiClient.Req
-  #
-  # See https://hexdocs.pm/swoosh/Swoosh.html#module-installation for details.
 end

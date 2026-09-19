@@ -1,12 +1,32 @@
 [
   verbose: false,
-  private: false,
+  # `private: true` suppresses Sobelow's version-check phone-home and its write to
+  # `~/.sobelow`. That is all this option does in 0.15.0 (`sobelow.ex:691`) — it is
+  # unrelated to private functions, and Sobelow analyses `defp` either way. A quality
+  # gate should not reach the network to run.
+  private: true,
+  # `skip: true` honours the `# sobelow_skip` annotations, each of which sits on the
+  # function that owns the flagged call with a one-line justification above it. They are
+  # load-bearing: turning `skip` off raises 23 findings, turning it on leaves 0.
   skip: true,
   router: "lib/doctrans_web/router.ex",
-  exit: "high",
+  # `exit: "low"` means every confidence level fails the build. The known-good sites
+  # are annotated individually at the function that owns them, so a *new* finding —
+  # including a low-confidence one — is a build failure rather than a line of noise.
+  exit: "low",
   format: "txt",
   ignore: [
-    # CSP and HTTPS are handled at deployment/infrastructure level
+    # Config.CSP and Config.HTTPS are correct to ignore for a loopback-bound,
+    # single-user app: there is no TLS terminator to redirect to, and the threat model
+    # has no remote origin to constrain. See AGENTS.md on deployment-level exposure.
+    #
+    # What would invalidate this: the app becoming reachable from anything but
+    # loopback, or gaining a third `raw/1` call site. Today exactly two sites render
+    # LLM-extracted content from arbitrary uploads through `raw/1`
+    # (viewer_components.ex, chat_components.ex) and both route through the single
+    # `MarkdownHelpers.sanitize_html/1` helper. CSP would be the defence-in-depth for a
+    # sanitizer bug and there is no second layer, so that invariant is guarded directly
+    # by `scripts/check_raw_call_sites.exs` instead.
     "Config.CSP",
     "Config.HTTPS"
   ],

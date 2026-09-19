@@ -16,10 +16,13 @@ defmodule Doctrans.Errors do
   def normalize(reason), do: {:operation_failed, [reason: reason]}
 
   @doc "Normalizes an error result, preserving successful results."
+  @spec result({:ok, value} | {:error, term()}) :: {:ok, value} | {:error, reason()}
+        when value: var
   def result({:error, reason}), do: {:error, normalize(reason)}
   def result(result), do: result
 
   @doc "Keeps the legacy status text column diagnostic, without calling Gettext."
+  @spec diagnostic(term()) :: String.t() | nil
   def diagnostic(nil), do: nil
   def diagnostic(reason) when is_binary(reason), do: reason
   def diagnostic(reason), do: inspect(reason)

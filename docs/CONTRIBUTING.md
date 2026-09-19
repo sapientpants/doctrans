@@ -66,9 +66,20 @@ and warms the PLT before analysis, caching it by OS, OTP, Elixir, and dependency
 lockfile. Generated `priv/plts/*.plt` and `*.plt.hash` files are ignored by Git.
 
 Add specs to public APIs and use concrete result types. Fix new warnings at their
-source before considering a suppression. Existing exceptions live in
-`.dialyzer_ignore.exs`; audit stale entries with
-`MIX_ENV=test mix dialyzer --list-unused-filters` when changing that file.
+source before considering a suppression.
+
+Suppressions live in `.dialyzer_ignore.exs`, which is a register rather than a
+dumping ground. Every entry is a narrow `{file, warning_class, line}` key — note
+that a warning carrying a column reports its location as `{line, column}`, and an
+integer-line filter silently matches nothing in that case — preceded by four
+comment annotations: `owner`, `expires` (an ISO date), `upstream` (an issue URL,
+or `none` for a first-party cause), and `rationale`. The register is capped at
+eight entries.
+
+`scripts/check_dialyzer_filters.exs` enforces all of that on every commit,
+including the expiry: once a date passes, the entry fails the gate until someone
+re-decides it. It complements `--list-unused-filters`, which retires a filter
+whose code moved but cannot judge whether the justification is still true.
 
 ## Chat persistence
 
@@ -88,3 +99,36 @@ notice. Model history uses the last eight complete question/answer pairs, ordere
 by answer completion, so overlapping turns from different tabs stay paired.
 Messages saved before question links were introduced remain visible, but are
 excluded from model history because their pairing cannot be recovered reliably.
+
+## Secret scanning
+
+Secret detection is a platform gate, not a repository tool. GitHub secret scanning
+and **push protection** are enabled on this repository, so a detected secret is
+blocked before it reaches the remote rather than reported after the fact. That
+covers the credential this project actually uses: `openai_api_key` is a supported
+provider pattern with push protection, so a real OpenAI key cannot be pushed here.
+Pre-commit adds `detect-private-key` locally.
+
+Generic — formerly "non-provider" — patterns, which would cover a homegrown token
+format, a connection string, or a bare HTTP authentication header, are **not
+available on this repository**. The row does not appear under Settings → Advanced
+Security → Secret Protection, and `PATCH /repos/{owner}/{repo}` returns `200 OK`
+while leaving `secret_scanning_non_provider_patterns` disabled. GitHub documents
+generic-pattern scanning for organization-owned repositories on GitHub Team with
+Secret Protection enabled; `doctrans` is a public repository on a personal account.
+Re-check if the repository ever moves to an organization:
+
+```bash
+gh api repos/sapientpants/doctrans --jq '.security_and_analysis'
+```
+
+Do not add a scanner such as gitleaks to fill that gap. It duplicates push
+protection with a weaker, post-hoc check, upstream declares itself
+feature-complete with security patches only, and the uncovered case — a
+self-invented credential format — is exactly the case a generic scanner is worst
+at. Keep credentials in the environment instead, and never in fixtures: a value
+that is not in the tree needs no pattern to catch it.
+
+A push-protection block is a real finding until proven otherwise. If it is
+genuinely a fixture, close it as used-in-tests through the alert UI rather than
+weakening a setting, and prefer fixture values that cannot read as credentials.

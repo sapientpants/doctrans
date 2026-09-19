@@ -1,17 +1,19 @@
 defmodule DoctransWeb.DocumentLive.ShowChatTest do
   use DoctransWeb.ConnCase, async: true
 
+  import Doctrans.Fixtures
   import Phoenix.LiveViewTest
 
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Repo
+  alias DoctransWeb.DocumentLive.ChatComponents
   alias DoctransWeb.DocumentLive.ChatSession
   alias DoctransWeb.DocumentLive.Show
 
   describe "chat panel" do
     setup do
-      document = create_completed_document_with_embeddings()
+      document = completed_document_with_embedding_fixture()
       %{document: document}
     end
 
@@ -353,7 +355,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
   describe "sending chat messages" do
     setup do
-      document = create_completed_document_with_embeddings()
+      document = completed_document_with_embedding_fixture()
       %{document: document}
     end
 
@@ -404,6 +406,138 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
     end
   end
 
+  describe "Markdown tables in chat answers" do
+    setup do
+      %{document: completed_document_with_embedding_fixture()}
+    end
+
+    # Answers quote OCR'd tables back verbatim, so the chat path must render the
+    # same header/delimiter/body shape the viewer does.
+    @answer_table """
+    Here are the balances I found:
+
+    | Account     | Debit    | Credit |
+    | :---        | ---:     | :---:  |
+    | Cash        | 1,234.50 | 0.00   |
+    | Receivables | 98.00    | 12.00  |
+    """
+
+    test "renders an assistant answer's Markdown table as table elements", %{
+      conn: conn,
+      document: document
+    } do
+      question = Conversations.start_question(document.id, "What are the balances?")
+      {:ok, answer} = Conversations.finish(question, "assistant", @answer_table, [])
+
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+
+      message = "#chat_messages-#{answer.id} .markdown"
+      assert has_element?(view, "#{message} table thead th", "Account")
+      assert has_element?(view, "#{message} table tbody td", "Receivables")
+      assert has_element?(view, "#{message} table tbody td", "1,234.50")
+      refute has_element?(view, "#{message} p", "| Account")
+    end
+
+    test "renders answer blocks as direct children of the markdown container", %{
+      conn: conn,
+      document: document
+    } do
+      # Same edge-margin contract as the viewer: `.markdown > :first-child` in app.css
+      # only matches when nothing wraps the rendered Markdown.
+      question = Conversations.start_question(document.id, "What are the balances?")
+      {:ok, answer} = Conversations.finish(question, "assistant", @answer_table, [])
+
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+
+      message = "#chat_messages-#{answer.id} .markdown"
+      assert has_element?(view, "#{message} > p", "Here are the balances")
+      assert has_element?(view, "#{message} > table tbody td", "Receivables")
+    end
+
+    test "renders a table in the still-streaming answer, not just the finalized one" do
+      # `#chat-streaming` is the third `.markdown` container and shares
+      # `markdown_content/1` with the finalized path, but renders partial Markdown.
+      # Rendered as a component: deltas only apply while a turn is in flight, and
+      # driving the real submit path races the async turn resetting the assign.
+      partial = "Here are the balances:\n\n| Account | Debit |\n"
+
+      assigns = %{
+        chat_messages: [],
+        chat_loading: true,
+        chat_streaming_content: partial,
+        embeddings_ready: true
+      }
+
+      document = render_panel(assigns)
+
+      # A header row with no delimiter row yet is not a table.
+      assert Enum.empty?(LazyHTML.query(document, "#chat-streaming .markdown table"))
+
+      completed =
+        %{
+          assigns
+          | chat_streaming_content: partial <> "| --- | ---: |\n| Receivables | 1,234.50 |\n"
+        }
+
+      document = render_panel(completed)
+
+      streaming = "#chat-streaming .markdown"
+
+      assert LazyHTML.query(document, "#{streaming} > p") |> Enum.map(&LazyHTML.text/1) == [
+               "Here are the balances:"
+             ]
+
+      assert LazyHTML.query(document, "#{streaming} table thead th")
+             |> Enum.map(&LazyHTML.text/1) == ["Account", "Debit"]
+
+      assert LazyHTML.query(document, "#{streaming} table tbody td[align='right']")
+             |> Enum.map(&LazyHTML.text/1) == ["1,234.50"]
+    end
+
+    test "carries the answer table's column alignment into the rendered cells", %{
+      conn: conn,
+      document: document
+    } do
+      question = Conversations.start_question(document.id, "What are the balances?")
+      {:ok, answer} = Conversations.finish(question, "assistant", @answer_table, [])
+
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+
+      message = "#chat_messages-#{answer.id} .markdown"
+      assert has_element?(view, "#{message} table thead th[align='right']", "Debit")
+      assert has_element?(view, "#{message} table tbody td[align='right']", "1,234.50")
+      assert has_element?(view, "#{message} table thead th[align='center']", "Credit")
+      assert has_element?(view, "#{message} table tbody td[align='left']", "Cash")
+    end
+
+    test "sanitizes answer table cells while keeping alignment and structure", %{
+      conn: conn,
+      document: document
+    } do
+      unsafe = """
+      | Item | Amount |
+      | :--- | ---:   |
+      | <script>alert('xss')</script>Widget | 1,234.50 |
+      | <span onclick="alert('xss')">Gadget</span> | 88.00 |
+      """
+
+      question = Conversations.start_question(document.id, "What did the invoice say?")
+      {:ok, answer} = Conversations.finish(question, "assistant", unsafe, [])
+
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+
+      message = "#chat_messages-#{answer.id} .markdown"
+      assert has_element?(view, "#{message} table tbody td", "Widget")
+      assert has_element?(view, "#{message} table tbody td[align='right']", "1,234.50")
+      refute has_element?(view, "#{message} script")
+      refute has_element?(view, "#{message} [onclick]")
+    end
+  end
+
   # Helper functions
 
   defp context_chunk(page, content) do
@@ -424,35 +558,8 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
     |> Map.merge(%{chunk_index: nil, translated_markdown: page.translated_markdown})
   end
 
-  defp create_completed_document_with_embeddings do
-    {:ok, document} =
-      Documents.create_document(%{
-        title: "Test Document",
-        original_filename: "test.pdf",
-        target_language: "de",
-        status: "completed",
-        total_pages: 1
-      })
-
-    # Use direct Repo insert to set deterministic embedding with Pgvector type
-    embedding =
-      List.duplicate(0.1, 1024)
-      |> Pgvector.new()
-
-    Repo.insert!(%Doctrans.Documents.Page{
-      id: Ecto.UUID.generate(),
-      document_id: document.id,
-      page_number: 1,
-      image_path: "documents/#{document.id}/pages/page_1.png",
-      original_markdown: "Test content for chat",
-      translated_markdown: "Testinhalt für Chat",
-      extraction_status: "completed",
-      translation_status: "completed",
-      embedding_status: "completed",
-      embedding: embedding
-    })
-
-    document
+  defp render_panel(assigns) do
+    ChatComponents.chat_panel(assigns) |> rendered_to_string() |> LazyHTML.from_fragment()
   end
 
   defp create_document_without_embeddings do

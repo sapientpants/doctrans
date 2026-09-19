@@ -90,12 +90,12 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
 
   # Call after the run/page guard returns, so subscribers can read committed state.
   defp publish_completion({:completed, document}) do
-    _ = Topics.broadcast_document_update(document)
+    _ = Topics.broadcast_document_updated(document)
     :completed
   end
 
   defp publish_completion({:failed, document}) do
-    _ = Topics.broadcast_document_update(document)
+    _ = Topics.broadcast_document_updated(document)
     :failed
   end
 
@@ -123,7 +123,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
 
       document ->
         {:ok, document} = Documents.update_document_status(document, "completed")
-        _ = Topics.broadcast_document_update(document)
+        _ = Topics.broadcast_document_updated(document)
         :ok
     end
   end
@@ -193,7 +193,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   end
 
   defp publish_status({:ok, document}) do
-    _ = Topics.broadcast_document_update(document)
+    _ = Topics.broadcast_document_updated(document)
     :ok
   end
 
@@ -278,7 +278,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
         # Use the existing document from database
         case existing_doc.status do
           "processing" ->
-            Documents.update_document_status(existing_doc, "error", error_message)
+            _ = Documents.update_document_status(existing_doc, "error", error_message)
             {:ok, :failed}
 
           _ ->
@@ -305,7 +305,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
             {:error, :cannot_reset_completed}
 
           _ ->
-            Documents.update_document_status(existing_doc, "queued")
+            _ = Documents.update_document_status(existing_doc, "queued")
             {:ok, :reset}
         end
     end

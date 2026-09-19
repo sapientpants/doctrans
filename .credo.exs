@@ -71,6 +71,11 @@
           {Credo.Check.Readability.PreferImplicitTry, []},
           {Credo.Check.Readability.RedundantBlankLines, []},
           {Credo.Check.Readability.Semicolons, []},
+          # Dialyzer never requires a spec to exist: it infers success typings and
+          # checks only the specs that are written. Requiring them is Credo's job.
+          # Scoped to the domain layer; lib/doctrans_web is excluded because its
+          # HEEx function components would take low-value specs on assigns maps.
+          {Credo.Check.Readability.Specs, [files: %{included: ["lib/doctrans/"]}]},
           {Credo.Check.Readability.SpaceAfterCommas, []},
           {Credo.Check.Readability.StringSigils, []},
           {Credo.Check.Readability.TrailingBlankLine, []},
@@ -86,8 +91,8 @@
           #
           {Credo.Check.Refactor.Apply, []},
           {Credo.Check.Refactor.CondStatements, []},
-          # Strict cyclomatic complexity limit
-          {Credo.Check.Refactor.CyclomaticComplexity, [max_complexity: 10]},
+          # Credo's default; see Refactor.Nesting for the same reasoning.
+          {Credo.Check.Refactor.CyclomaticComplexity, [max_complexity: 9]},
           {Credo.Check.Refactor.FilterCount, []},
           {Credo.Check.Refactor.FilterFilter, []},
           # Limit function arity
@@ -97,16 +102,31 @@
           {Credo.Check.Refactor.MatchInCondition, []},
           {Credo.Check.Refactor.NegatedConditionsInUnless, []},
           {Credo.Check.Refactor.NegatedConditionsWithElse, []},
-          # Strict nesting limit
-          {Credo.Check.Refactor.Nesting, [max_nesting: 3]},
+          # Credo's default. Deeper nesting is extracted into named helpers
+          # rather than granted a higher ceiling.
+          {Credo.Check.Refactor.Nesting, [max_nesting: 2]},
           {Credo.Check.Refactor.RedundantWithClauseResult, []},
           {Credo.Check.Refactor.RejectReject, []},
           {Credo.Check.Refactor.UnlessWithElse, []},
           {Credo.Check.Refactor.WithClauses, []},
-          # Limit module dependencies to reduce coupling
-          {Credo.Check.Refactor.ModuleDependencies, [max_deps: 20]},
-          # ABC complexity metric
-          {Credo.Check.Refactor.ABCSize, [max_size: 50]},
+          # Credo's default max_deps, counting first-party modules only.
+          # The check counts every module name in the body, so without
+          # `dependency_namespaces` the score is dominated by Enum/Map/String
+          # and by framework macros: `DocumentConverter` scored 15 with one
+          # first-party dependency, and `Endpoint` 19 with three, all of them
+          # Plug/Phoenix entries the plug pipeline requires. Namespacing makes
+          # the number mean what the check claims to measure.
+          # `Doctrans.Application` is exempt: a supervision tree must name its
+          # children, and three of its eleven "dependencies" are registered
+          # process names rather than modules.
+          {Credo.Check.Refactor.ModuleDependencies,
+           [
+             max_deps: 10,
+             dependency_namespaces: ["Doctrans"],
+             excluded_namespaces: ["Doctrans.Application"]
+           ]},
+          # Credo's default; see Refactor.Nesting for the same reasoning.
+          {Credo.Check.Refactor.ABCSize, [max_size: 30]},
           # Detect inefficient list appends
           {Credo.Check.Refactor.AppendSingleItem, []},
           # Simplify double boolean negation
@@ -180,8 +200,6 @@
           {Credo.Check.Readability.SingleFunctionToBlockPipe, []},
           # SinglePipe is controversial - short pipes are fine
           {Credo.Check.Readability.SinglePipe, []},
-          # Specs are enforced by Dialyzer, not Credo
-          {Credo.Check.Readability.Specs, []},
           # WithCustomTaggedTuple is too opinionated
           {Credo.Check.Readability.WithCustomTaggedTuple, []},
           # IoPuts is fine in scripts

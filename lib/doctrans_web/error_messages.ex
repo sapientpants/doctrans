@@ -76,6 +76,10 @@ defmodule DoctransWeb.ErrorMessages do
     do:
       dgettext("errors", "Unsupported file format: %{format}", format: binding(bindings, :format))
 
+  # A file with no extension at all, where naming the format would say nothing.
+  def message(:unsupported_format),
+    do: dgettext("errors", "Only PDF, Word, OpenDocument, and RTF documents are accepted")
+
   def message({:pdf_extraction_failed, bindings}),
     do: dgettext("errors", "PDF extraction failed: %{reason}", reason: binding(bindings, :reason))
 
@@ -90,6 +94,63 @@ defmodule DoctransWeb.ErrorMessages do
 
   def message({:pdfinfo_failed, bindings}),
     do: dgettext("errors", "pdfinfo failed: %{error}", error: binding(bindings, :error))
+
+  def message(:pdf_command_timeout),
+    do:
+      dgettext(
+        "errors",
+        "PDF rendering timed out. Lower the extraction resolution or split the document, then try again."
+      )
+
+  def message(:pdfinfo_timeout),
+    do:
+      dgettext(
+        "errors",
+        "Reading the PDF timed out before extraction started. The file may be damaged."
+      )
+
+  def message(:pdf_extraction_deadline_exceeded),
+    do:
+      dgettext(
+        "errors",
+        "Extraction ran out of time for this document. Finished pages were kept; reprocess it to continue."
+      )
+
+  def message({:pdf_too_many_pages, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "This PDF has %{pages} pages, above the limit of %{limit}. Split it into smaller documents before uploading.",
+        pages: binding(bindings, :pages),
+        limit: binding(bindings, :limit)
+      )
+
+  def message({:pdf_page_too_large, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "This PDF's pages are %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again.",
+        width: binding(bindings, :width),
+        height: binding(bindings, :height),
+        dpi: binding(bindings, :dpi),
+        limit: binding(bindings, :limit)
+      )
+
+  def message({:page_image_too_large, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "Page %{page_number} rendered too large (%{size} bytes, limit %{limit}). Lower the extraction resolution, then reprocess this page.",
+        page_number: binding(bindings, :page_number),
+        size: binding(bindings, :size),
+        limit: binding(bindings, :limit)
+      )
+
+  def message({:poppler_not_found, bindings}),
+    do:
+      dgettext("errors", "Required PDF tool %{command} is not installed",
+        command: binding(bindings, :command)
+      )
 
   def message(:soffice_not_found), do: dgettext("errors", "LibreOffice is not installed")
 
@@ -124,6 +185,23 @@ defmodule DoctransWeb.ErrorMessages do
   def message(:invalid_model), do: gettext("Invalid model selection")
   def message(:upload_unreadable), do: dgettext("errors", "Could not read uploaded file")
 
+  def message(:upload_store_failed),
+    do: dgettext("errors", "Could not store the uploaded file")
+
+  def message(:upload_start_failed),
+    do: dgettext("errors", "Could not start processing for this document")
+
+  # The upload list's own fallback. The generic one below is written in the chat
+  # assistant's first person ("Sorry, I encountered an error"), which reads as a
+  # non-sequitur next to a filename.
+  def message(:upload_failed),
+    do: dgettext("errors", "This file could not be uploaded. Please try again.")
+
+  # The changeset is dropped deliberately: a per-file upload message says the save
+  # failed, never which column the database objected to.
+  def message({:validation_failed, _bindings}),
+    do: dgettext("errors", "The document could not be saved")
+
   def message({:file_too_large, bindings}),
     do:
       dgettext("errors", "File too large (%{size}MB, max %{max}MB)",
@@ -135,6 +213,11 @@ defmodule DoctransWeb.ErrorMessages do
   def message({:database_error, _}), do: message(:database_error)
   def message(:database_error), do: gettext("Failed to search the document. Please try again.")
   def message(:search_failed), do: gettext("Search is temporarily unavailable. Please try again.")
+  def message({:retrieval_unavailable, _}), do: message(:retrieval_unavailable)
+
+  def message(:retrieval_unavailable),
+    do: gettext("Document search is temporarily unavailable. Please try again.")
+
   def message(:delete_failed), do: gettext("Failed to delete document")
   def message(:reprocess_failed), do: gettext("Failed to reset page for reprocessing")
   def message(:models_unavailable), do: gettext("Failed to fetch models from OpenAI")

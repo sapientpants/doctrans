@@ -26,8 +26,9 @@ to your device or a trusted network.
 
 ## Prerequisites
 
-- **Erlang/OTP** 29 (CI uses 29.0.5)
-- **Elixir** 1.20+ (`mix.exs` requires `~> 1.20`; CI and Docker use 1.20.3)
+- **Erlang/OTP** and **Elixir** - exact versions are pinned in [`mise.toml`](mise.toml),
+  which CI and local tooling both read; run `mise install` to match them
+  (`mix.exs` independently requires `~> 1.20`)
 - **PostgreSQL** with pgvector extension (CI uses PostgreSQL 17; Docker Compose uses 18)
 - **poppler-utils** - for PDF page extraction (`pdftoppm`)
 - **LibreOffice** (optional) - for DOCX, DOC, ODT, and RTF conversion
@@ -175,6 +176,15 @@ Use the search input on the dashboard to find content across all documents. Sear
 semantic similarity (AI embeddings) with keyword matching. Press Enter to see results, then
 click a result to jump directly to that page.
 
+A page is only offered as a semantic match when it is actually close to the query, so a search for
+something your library does not cover comes back empty instead of returning the nearest few hundred
+pages in rank order. Keyword matches are never filtered this way: a page that contains your search
+term is always a result, however far its meaning sits from the query.
+
+When the embedding server is unavailable, search keeps working on keyword matches alone and the
+results page says so, so an outage reads as reduced recall rather than as an empty library.
+Semantic matches return once inference is reachable again.
+
 ### Document Chat
 
 Open the chat panel on any document to ask questions about its content. The chat uses
@@ -189,6 +199,16 @@ Existing source embeddings remain usable without rebuilding: retrieval ignores l
 translations, including those in saved chat context. To rebuild existing chunks and remove their
 old translation pairings, run `mix rechunk_documents` with the embedding server available.
 Previously generated chat answers are retained.
+
+Chunks are bounded in size whatever the source looks like. A paragraph longer than the target is
+split at sentence boundaries, a sentence longer than the limit at word boundaries, and text that
+writes no spaces at all -- Chinese, Japanese, Thai -- at character boundaries. The bound is on
+words, characters and bytes together, so a page of emoji is held to the same size as a page of
+prose. Documents chunked before this was true keep their existing oversized chunks until the page
+is reprocessed or `mix rechunk_documents` is run.
+
+If every retrieval query fails -- an unreachable embedding server, say -- chat reports that
+document search is unavailable instead of answering as though the document held nothing relevant.
 
 Conversations are saved per document and can be resumed after reopening it.
 
@@ -224,10 +244,10 @@ config :doctrans, :retry,
   base_delay_ms: 2_000,
   max_delay_ms: 30_000
 
-# Upload settings
-config :doctrans, :uploads,
-  upload_dir: Path.expand("../priv/static/uploads", __DIR__),
-  max_file_size: 100_000_000  # 100MB
+# Upload settings. The storage root is deliberately absent: it resolves at
+# runtime to priv/static/uploads of the running application, and
+# DOCTRANS_DATA_DIR replaces it.
+config :doctrans, :uploads, max_file_size: 100_000_000  # 100MB
 
 # PDF extraction configuration
 config :doctrans, :pdf_extraction, dpi: 150
@@ -252,6 +272,7 @@ for documents in another source language.
 | `OPENAI_HOST` | `http://localhost:8000` | Shared API base URL, without `/v1` or a trailing slash |
 | `OPENAI_API_KEY` | unset | Bearer API key for both AI and embedding requests |
 | `DOCTRANS_ENV_FILE` | `.env` | Environment file path, relative to the working directory or absolute |
+| `DOCTRANS_DATA_DIR` | `priv/static/uploads` of the running application | Storage root for originals, converted PDFs, and generated page images. Must be an absolute path; created at startup and must be writable. See [Storage root](#storage-root) |
 | `DATABASE_HOST` | `localhost` | PostgreSQL hostname (dev/test) |
 | `DATABASE_URL` | - | Full database URL (required in production) |
 | `PORT` | `4000` | Phoenix server port (dev/prod; tests use 4002) |
@@ -262,6 +283,41 @@ for documents in another source language.
 | `POOL_SIZE` | `10` | Production database connection pool size |
 | `ECTO_IPV6` | unset | Enable IPv6 database sockets in production with `true` or `1` |
 | `DNS_CLUSTER_QUERY` | unset | Optional DNS cluster discovery query in production |
+
+### Storage root
+
+Originals, converted PDFs, and generated page images all live under one root,
+and page images are served from that same root — moving it moves both writing
+and serving.
+
+Unset, the root is `priv/static/uploads` inside the running application. That is
+fine for development, but it is *inside the build output*: a release stores data
+under `lib/doctrans-<version>/priv`, which a version bump, `mix release
+--overwrite`, or a rebuilt container image discards. **Set `DOCTRANS_DATA_DIR`
+to a path outside the release for any deployment you intend to keep.**
+
+```bash
+DOCTRANS_DATA_DIR=/var/lib/doctrans
+```
+
+The path must be absolute — a relative value is rejected at startup rather than
+resolved against whatever directory the release happened to start in. The
+directory is created at startup if missing, and the application refuses to boot
+if it cannot be created or written. It must also sit outside the application's
+`priv/static`, since directories served as static assets would hand out your
+original documents over HTTP.
+
+**Moving an existing root.** Nothing is migrated for you: the database keeps
+rows for documents whose files are no longer where the application looks, so
+page images 404 and originals become unreachable. Page paths are stored relative
+to the root, so copying the files across is sufficient:
+
+```bash
+# stop the application first
+mkdir -p /var/lib/doctrans
+cp -a priv/static/uploads/. /var/lib/doctrans/
+DOCTRANS_DATA_DIR=/var/lib/doctrans mix phx.server
+```
 
 ## Development
 

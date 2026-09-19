@@ -6,7 +6,7 @@ defmodule Doctrans.MixProject do
       app: :doctrans,
       version: "0.1.0",
       description:
-        "Privacy-first document translation powered by local AI models. All processing stays on your device.",
+        "Privacy-first document translation. Processing stays on your device when you use a local inference server.",
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -38,7 +38,6 @@ defmodule Doctrans.MixProject do
         # Stricter dialyzer flags
         flags: [
           :error_handling,
-          :underspecs,
           :unmatched_returns,
           :no_improper_lists
         ]
@@ -94,7 +93,6 @@ defmodule Doctrans.MixProject do
        app: false,
        compile: false,
        depth: 1},
-      {:swoosh, "~> 1.16"},
       {:req, "~> 0.6"},
       {:fuse, "~> 2.5"},
       {:telemetry_metrics, "~> 1.0"},
@@ -105,7 +103,7 @@ defmodule Doctrans.MixProject do
       {:bandit, "~> 1.5"},
       {:uniq, "~> 0.6"},
       {:mdex, "~> 0.13"},
-      {:html_sanitize_ex, "~> 1.4"},
+      {:html_sanitize_ex, "~> 1.5"},
       {:pgvector, "~> 0.3"},
       {:oban, "~> 2.20"},
       # Code quality tools

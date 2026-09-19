@@ -19,12 +19,16 @@ defmodule Doctrans.Chat.Grader do
   @grade_timeout 30_000
   @max_predict 256
 
+  @typedoc "A verdict on the retrieved context, with queries to retry when it falls short."
+  @type grade :: %{sufficient: boolean(), refined_queries: [String.t()]}
+
   @doc """
   Grades whether `context` is sufficient to answer `question`.
 
   Returns `{:ok, %{sufficient: boolean(), refined_queries: [String.t()]}}`.
   Always returns `{:ok, _}` — failures fall back to a "sufficient" verdict.
   """
+  @spec grade(String.t(), String.t(), keyword()) :: {:ok, grade()}
   def grade(question, context, opts \\ [])
 
   def grade(_question, "", _opts) do

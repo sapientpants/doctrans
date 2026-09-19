@@ -15,14 +15,16 @@ defmodule Doctrans.Documents.Progress do
     if pages == [] or total_pages in [nil, 0] do
       0.0
     else
-      completed_steps =
-        Enum.reduce(pages, 0, fn page, acc ->
-          extraction_done = if page.extraction_status == "completed", do: 1, else: 0
-          translation_done = if page.translation_status == "completed", do: 1, else: 0
-          acc + extraction_done + translation_done
-        end)
-
-      completed_steps / (total_pages * 2) * 100.0
+      completed_steps(pages) / (total_pages * 2) * 100.0
     end
   end
+
+  defp completed_steps(pages) do
+    Enum.reduce(pages, 0, fn page, acc ->
+      acc + step(page.extraction_status) + step(page.translation_status)
+    end)
+  end
+
+  defp step("completed"), do: 1
+  defp step(_status), do: 0
 end

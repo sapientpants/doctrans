@@ -3,7 +3,7 @@ defmodule Doctrans.Search.RetrievalAlignmentTest do
 
   alias Doctrans.{Chat, Repo, Search}
   alias Doctrans.Documents.{Chunk, Page}
-  alias Doctrans.Search.{Chunker, EmbeddingWorker}
+  alias Doctrans.Search.{Chunker, Indexer}
   alias Mix.Tasks.RechunkDocuments
 
   import Doctrans.Fixtures
@@ -12,7 +12,7 @@ defmodule Doctrans.Search.RetrievalAlignmentTest do
         {:expansion, 140, 220},
         {:contraction, 220, 140}
       ],
-      path <- [:worker, :maintenance] do
+      path <- [:indexer, :maintenance] do
     @source_words source_words
     @translated_words translated_words
     @path path
@@ -34,7 +34,7 @@ defmodule Doctrans.Search.RetrievalAlignmentTest do
         })
 
       case @path do
-        :worker -> run_worker(page, hd(source_chunks).content)
+        :indexer -> assert :ok = Indexer.index_page(page.id)
         :maintenance -> RechunkDocuments.run([])
       end
 
@@ -82,22 +82,5 @@ defmodule Doctrans.Search.RetrievalAlignmentTest do
     Enum.map_join(labels, "\n\n", fn label ->
       Enum.join([label | List.duplicate("detail", words - 1)], " ")
     end)
-  end
-
-  defp run_worker(page, first_content) do
-    barrier = make_ref()
-    Application.put_env(:doctrans, :embedding_stub_barrier, {first_content, self(), barrier})
-    on_exit(fn -> Application.delete_env(:doctrans, :embedding_stub_barrier) end)
-    EmbeddingWorker.generate_embedding(page.id)
-    assert_receive {:embedding_started, ^barrier, task}, 5_000
-    monitor = Process.monitor(task)
-
-    try do
-      send(task, {:continue_embedding, barrier})
-      assert_receive {:DOWN, ^monitor, :process, ^task, :normal}, 5_000
-    after
-      Task.Supervisor.terminate_child(Doctrans.TaskSupervisor, task)
-      Process.demonitor(monitor, [:flush])
-    end
   end
 end

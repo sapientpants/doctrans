@@ -13,7 +13,42 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
 
   def chat_panel(assigns) do
     ~H"""
-    <div class="w-80 border-l border-base-300 flex flex-col bg-base-100 flex-shrink-0">
+    <%!-- Below `lg` the panel has nowhere to sit in flow -- a fixed 320px third
+         column does not fit a narrow viewport -- so it becomes an overlay
+         pinned to the right edge, with a backdrop that dismisses it. From `lg`
+         up both revert to the in-flow sidebar.
+
+         z-30/z-40 is deliberate: it clears the page viewer's sticky footer
+         (`z-10`) while staying under the flash toasts and the reprocess dialog
+         (both `z-50`) and the daisyUI upload modal (`z-999`), so an open dialog
+         still renders above the chat.
+
+         It is *not* `role="dialog" aria-modal="true"`: `ChatInput` refuses to
+         take focus while such a dialog is open, and the chat input has to keep
+         being refocused after every answer. An `<aside>` with a name gives it a
+         landmark instead -- and the `ChatDismiss` hook hand-adds the two things
+         a modal would have provided, Escape-to-close and focus back to
+         `#toggle-chat`, neither of which a landmark brings with it.
+
+         The overlay stops short of the full width so a strip of backdrop stays
+         tappable. At `w-full` the panel covered the backdrop entirely on any
+         phone narrower than `max-w-sm`, which is exactly where tap-to-dismiss
+         is the affordance being relied on. --%>
+    <div
+      id="chat-backdrop"
+      class="fixed inset-0 z-30 bg-black/40 lg:hidden"
+      phx-click="toggle_chat"
+      aria-hidden="true"
+    >
+    </div>
+    <aside
+      id="chat-panel"
+      aria-label={gettext("Chat")}
+      phx-hook="ChatDismiss"
+      data-overlay-media="(max-width: 1023px)"
+      data-return-focus="#toggle-chat"
+      class="fixed inset-y-0 right-0 z-40 flex w-[calc(100%-3rem)] max-w-sm flex-col bg-base-100 shadow-xl lg:static lg:z-auto lg:w-80 lg:max-w-none lg:flex-shrink-0 lg:border-l lg:border-base-300 lg:shadow-none"
+    >
       <%!-- Header --%>
       <div class="px-4 py-3 border-b border-base-300 flex items-center justify-between bg-base-200">
         <div class="flex items-center gap-2">
@@ -24,6 +59,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
           type="button"
           phx-click="toggle_chat"
           class="btn btn-ghost btn-xs btn-circle"
+          aria-label={gettext("Close chat")}
           title={gettext("Close chat")}
         >
           <.icon name="hero-x-mark" class="w-4 h-4" />
@@ -42,38 +78,93 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
         {gettext("The last question has no saved answer. Send it again to retry.")}
       </p>
 
-      <%!-- Messages area (scroll container) --%>
-      <div id="chat-scroll" class="flex-1 overflow-y-auto p-3 space-y-3" phx-hook="ScrollToBottom">
-        <%!-- Finalized messages (managed by LiveView streams) --%>
-        <div id="chat-messages" phx-update="stream" class="space-y-3">
-          <%!-- Empty state - shown when no messages --%>
-          <div
-            id="chat-empty-state"
-            class="hidden only:flex flex-col items-center justify-center h-full text-base-content/50 px-4"
-          >
-            <.icon name="hero-chat-bubble-left-right" class="w-12 h-12 mb-3" />
-            <p class="text-sm text-center">{gettext("Ask questions about this document")}</p>
-            <p class="text-xs text-center mt-2 text-base-content/40">
-              {gettext("I'll find relevant content and answer based on it.")}
-            </p>
+      <%!-- Messages area: the scroll container plus the "new messages"
+           affordance floating over its bottom edge. --%>
+      <div class="relative flex flex-1 flex-col min-h-0">
+        <%!-- `tabindex="0"` because a scroll container that only a mouse can
+             reach strands a keyboard user: Chrome and Firefox now focus
+             scrollers themselves, Safari does not, and holding a reading
+             position is the whole point of this panel. The ids the hook needs
+             are passed as data attributes so renaming one stays a change to
+             this file. --%>
+        <div
+          id="chat-scroll"
+          class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3"
+          phx-hook="ChatScroll"
+          data-new-messages="chat-new-messages"
+          data-jump-to-latest="chat-jump-to-latest"
+          data-live-region="chat-new-messages-announcement"
+          data-follow-on-submit="#chat-form"
+          tabindex="0"
+          role="log"
+          aria-label={gettext("Chat transcript")}
+        >
+          <%!-- Finalized messages (managed by LiveView streams) --%>
+          <div id="chat-messages" phx-update="stream" class="space-y-3">
+            <%!-- Empty state - shown when no messages --%>
+            <div
+              id="chat-empty-state"
+              class="hidden only:flex flex-col items-center justify-center h-full text-base-content/50 px-4"
+            >
+              <.icon name="hero-chat-bubble-left-right" class="w-12 h-12 mb-3" />
+              <p class="text-sm text-center">{gettext("Ask questions about this document")}</p>
+              <p class="text-xs text-center mt-2 text-base-content/40">
+                {gettext("I'll find relevant content and answer based on it.")}
+              </p>
+            </div>
+            <%!-- Messages --%>
+            <div :for={{id, msg} <- @chat_messages} id={id}>
+              <.chat_message message={msg} />
+            </div>
           </div>
-          <%!-- Messages --%>
-          <div :for={{id, msg} <- @chat_messages} id={id}>
-            <.chat_message message={msg} />
+
+          <%!-- Live streaming answer, shown outside the stream until finalized. Must
+               be a sibling of (not inside) the phx-update="stream" container, or
+               LiveView will not remove it when it is cleared, doubling the answer. --%>
+          <div
+            :if={@chat_streaming_content != ""}
+            id="chat-streaming"
+            class="max-w-[95%] rounded-lg p-2.5 text-sm bg-base-200"
+          >
+            <div class="markdown markdown-sm">
+              <.markdown_content content={@chat_streaming_content} />
+            </div>
           </div>
         </div>
 
-        <%!-- Live streaming answer, shown outside the stream until finalized. Must
-             be a sibling of (not inside) the phx-update="stream" container, or
-             LiveView will not remove it when it is cleared, doubling the answer. --%>
+        <%!-- Shown by the `ChatScroll` hook when an answer arrives while the
+             reader is scrolled up, so following along stays their choice.
+             `phx-update="ignore"` keeps a later patch from re-hiding it: whether
+             it is visible is client state that no assign knows about. --%>
         <div
-          :if={@chat_streaming_content != ""}
-          id="chat-streaming"
-          class="max-w-[95%] rounded-lg p-2.5 text-sm bg-base-200"
+          id="chat-new-messages"
+          phx-update="ignore"
+          class="hidden absolute bottom-3 right-3 z-10"
         >
-          <div class="prose prose-sm max-w-none">
-            <.markdown_content content={@chat_streaming_content} />
-          </div>
+          <button
+            id="chat-jump-to-latest"
+            type="button"
+            class="btn btn-primary btn-sm gap-1 rounded-full shadow-lg transition-transform hover:scale-105 lg:btn-xs"
+          >
+            <.icon name="hero-arrow-down" class="w-3.5 h-3.5" />
+            {gettext("New messages")}
+          </button>
+        </div>
+
+        <%!-- Unhiding an `aria-live` region is not reliably announced, so the
+             region stays rendered and the hook writes its text instead. It sits
+             outside `#chat-scroll` on purpose: a text change inside the
+             observed subtree would retrigger the very MutationObserver that
+             wrote it. `ignore`, like the button, because the text is client
+             state no assign knows about. --%>
+        <div
+          id="chat-new-messages-announcement"
+          phx-update="ignore"
+          class="sr-only"
+          role="status"
+          aria-live="polite"
+          data-announce={gettext("New messages")}
+        >
         </div>
       </div>
 
@@ -106,6 +197,9 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
         class="p-3 border-t border-base-300"
         id="chat-form"
       >
+        <label for="chat-input" class="sr-only">
+          {gettext("Ask a question about this document")}
+        </label>
         <div class="flex gap-2">
           <input
             type="text"
@@ -121,13 +215,14 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
             type="submit"
             class="btn btn-primary btn-sm"
             disabled={@chat_loading}
+            aria-label={gettext("Send message")}
             title={gettext("Send message")}
           >
             <.icon name="hero-paper-airplane" class="w-4 h-4" />
           </button>
         </div>
       </form>
-    </div>
+    </aside>
     """
   end
 
@@ -144,7 +239,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
       <div :if={@message.role == "user"} class="text-right">
         {@message.content}
       </div>
-      <div :if={@message.role == "assistant"} class="prose prose-sm max-w-none">
+      <div :if={@message.role == "assistant"} class="markdown markdown-sm">
         <.markdown_content content={@message.content} />
       </div>
       <div :if={@message.role == "error"} class="flex items-center gap-2">
@@ -169,6 +264,8 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
     # so the layout is preserved instead of collapsing into run-on text.
     html = render_markdown(assigns.content || "", hardbreaks: true)
     assigns = assign(assigns, :html, html)
-    ~H"<div>{raw(@html)}</div>"
+    # No wrapper element: the rendered blocks must be direct children of the
+    # `.markdown` container so its edge-margin rules (`.markdown > :first-child`) match.
+    ~H"{raw(@html)}"
   end
 end

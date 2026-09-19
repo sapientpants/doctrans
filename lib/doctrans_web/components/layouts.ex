@@ -35,7 +35,11 @@ defmodule DoctransWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <main class="min-h-screen">
+    <%!-- `dvh`, not `vh`: the document viewer inside this slot is `min-h-dvh`, and
+         on a mobile browser where the toolbar makes the two differ, a `vh` main
+         around a `dvh` child leaves roughly a toolbar's height of dead scroll
+         below the page's own content. --%>
+    <main class="min-h-dvh">
       {render_slot(@inner_block)}
     </main>
 
@@ -59,63 +63,123 @@ defmodule DoctransWeb.Layouts do
       <.flash kind={:info} flash={@flash} />
       <.flash kind={:error} flash={@flash} />
 
-      <.flash
+      <.connectivity_notice
         id="client-error"
-        kind={:error}
+        error_class="phx-client-error"
         title={gettext("We can't find the internet")}
-        phx-disconnected={show(".phx-client-error #client-error") |> JS.remove_attribute("hidden")}
-        phx-connected={hide("#client-error") |> JS.set_attribute({"hidden", ""})}
-        hidden
-      >
-        {gettext("Attempting to reconnect")}
-        <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
-      </.flash>
+      />
 
-      <.flash
+      <.connectivity_notice
         id="server-error"
-        kind={:error}
+        error_class="phx-server-error"
         title={gettext("Something went wrong!")}
-        phx-disconnected={show(".phx-server-error #server-error") |> JS.remove_attribute("hidden")}
-        phx-connected={hide("#server-error") |> JS.set_attribute({"hidden", ""})}
-        hidden
-      >
-        {gettext("Attempting to reconnect")}
-        <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
-      </.flash>
+      />
     </div>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+
+  attr :error_class, :string,
+    required: true,
+    doc: "the LiveView body class that marks this kind of disconnection"
+
+  # Rendered with `transient={false}` so the auto-dismiss hook never takes the node
+  # out: `phx-disconnected` looks the element up by id, long after mount.
+  defp connectivity_notice(assigns) do
+    ~H"""
+    <.flash
+      id={@id}
+      kind={:error}
+      title={@title}
+      transient={false}
+      phx-disconnected={show(".#{@error_class} ##{@id}") |> JS.remove_attribute("hidden")}
+      phx-connected={hide("##{@id}") |> JS.set_attribute({"hidden", ""})}
+      hidden
+    >
+      {gettext("Attempting to reconnect")}
+      <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
+    </.flash>
     """
   end
 
   @doc """
   Provides dark vs light theme toggle based on themes defined in app.css.
 
-  See <head> in root.html.heex which applies the theme before page load.
+  Each button dispatches `phx:set-theme` carrying its `data-phx-theme`.
+  `assets/js/theme.js`, loaded render-blocking from `<head>` in
+  `root.html.heex`, is what listens for it, writes the choice to
+  `localStorage`, and applies `data-theme` before the first paint.
+
+  Three `aria-pressed` buttons in a named `role="group"`, following the panel
+  switcher in `lib/doctrans_web/live/document_live/page_viewer.ex` rather than
+  the ARIA radiogroup pattern, which would promise arrow-key navigation and a
+  roving `tabindex` that nothing here implements.
+
+  The pressed state cannot be rendered: the choice lives in `localStorage` and
+  the server never learns it. The values below are a "system" placeholder, and
+  `theme.js` overwrites them from the real theme before the first paint —
+  a socket is not involved, so the placeholder is never announced. The
+  `ThemeToggle` hook rewrites them again after any patch that re-renders the
+  group, since that restores this placeholder from the template.
   """
+  attr :id, :string,
+    default: "theme-toggle",
+    doc: "DOM id for the group; the buttons derive theirs from it"
+
   def theme_toggle(assigns) do
+    # Same focus ring as the panel switcher: the user-agent default all but
+    # disappears against the base-300 pill these sit in. `rounded-full` only
+    # shapes that ring -- the buttons have no background of their own.
+    assigns =
+      assign(assigns, :button_class, [
+        "flex p-2 cursor-pointer w-1/3 rounded-full",
+        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      ])
+
     ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
+    <div
+      id={@id}
+      phx-hook="ThemeToggle"
+      role="group"
+      aria-label={gettext("Theme")}
+      class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full"
+    >
       <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 transition-[left]" />
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        id={"#{@id}-system"}
+        type="button"
+        aria-label={gettext("Use system theme")}
+        class={@button_class}
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="system"
+        aria-pressed="true"
       >
         <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        id={"#{@id}-light"}
+        type="button"
+        aria-label={gettext("Use light theme")}
+        class={@button_class}
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="light"
+        aria-pressed="false"
       >
         <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        id={"#{@id}-dark"}
+        type="button"
+        aria-label={gettext("Use dark theme")}
+        class={@button_class}
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="dark"
+        aria-pressed="false"
       >
         <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>

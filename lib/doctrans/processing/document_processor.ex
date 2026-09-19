@@ -34,6 +34,12 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   Returns `:ok`, `:cancelled`, or `{:error, reason}`.
   """
+  @spec extract_document(
+          Ecto.UUID.t(),
+          String.t(),
+          MapSet.t(Ecto.UUID.t()),
+          Documents.Document.t() | nil
+        ) :: :ok | :cancelled | {:error, Doctrans.Errors.reason()}
   def extract_document(document_id, file_path, cancelled_documents, document \\ nil) do
     document = document || Documents.get_document(document_id)
 
@@ -47,7 +53,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   defp prepare_document(document) do
     with {:ok, document} <- Documents.update_document_status(document, "extracting") do
-      _ = Topics.broadcast_document_update(document)
+      _ = Topics.broadcast_document_updated(document)
       {:ok, document}
     end
   end
@@ -68,8 +74,8 @@ defmodule Doctrans.Processing.DocumentProcessor do
     end
   end
 
-  # The job path is the fixed original.<validated extension> path created during upload.
-  # sobelow_skip ["Traversal.FileModule"]
+  # The job path is the fixed original.<validated extension> path created during upload;
+  # the File calls themselves live in do_convert_and_extract/4.
   defp extract_convertible_document(document_id, file_path, cancelled_documents, document) do
     if MapSet.member?(cancelled_documents, document_id) do
       Logger.info("Document #{document_id} was cancelled, skipping conversion")
@@ -95,7 +101,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
       {:error, reason} ->
         Logger.error("Failed to convert document #{document_id}: #{inspect(reason)}")
         # Preserve the source for the persisted job's next attempt or manual recovery.
-        publish_conversion_error(document, reason)
+        _ = publish_conversion_error(document, reason)
         {:error, reason}
     end
   end
@@ -103,13 +109,14 @@ defmodule Doctrans.Processing.DocumentProcessor do
   defp publish_conversion_error(document, reason) do
     with %Documents.Document{} = document <- document,
          {:ok, document} <- Documents.update_document_status(document, "error", reason) do
-      _ = Topics.broadcast_document_update(document)
+      _ = Topics.broadcast_document_updated(document)
     end
   end
 
   @doc """
   Checks if the document processor can handle a given file type.
   """
+  @spec supported_format?(String.t()) :: boolean()
   def supported_format?(file_path) do
     extension = file_path |> Path.extname() |> String.downcase()
     extension in [".pdf", ".docx", ".doc", ".odt", ".rtf"]
@@ -118,6 +125,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
   @doc """
   Returns a list of supported file extensions.
   """
+  @spec supported_extensions() :: [String.t()]
   def supported_extensions do
     [".pdf", ".docx", ".doc", ".odt", ".rtf"]
   end

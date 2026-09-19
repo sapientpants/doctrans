@@ -24,6 +24,43 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       assert_redirect(view, ~p"/")
     end
 
+    # U11 broadcasts deletions to the per-document topic this viewer subscribes to,
+    # so a document deleted from the dashboard while it is open must fall back to
+    # the not-found branch instead of rendering against a row that is gone.
+    test "a deletion while the viewer is open renders the not-found branch", %{conn: conn} do
+      document = document_with_pages_fixture(%{title: "Open Elsewhere"}, 1)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      refute has_element?(view, "#document-not-found")
+
+      {:ok, _} = Documents.delete_document(document)
+
+      assert has_element?(view, "#document-not-found h1", "Document not found")
+      assert has_element?(view, "#document-not-found-home[href='/']")
+      refute has_element?(view, "#page-selector")
+
+      # Still answering events rather than having crashed on the missing row.
+      render_click(view, "next_page")
+      assert has_element?(view, "#document-not-found")
+    end
+
+    # `Worker.cancel_document/1` does not stop an Oban job that is already
+    # executing, so a job working on the deleted document can still broadcast on
+    # `document:<id>` after `{:document_deleted, _}` has emptied the assign.
+    test "a document update arriving after the deletion leaves the viewer standing", %{conn: conn} do
+      document = document_with_pages_fixture(%{title: "Open Elsewhere"}, 1)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      # The nil state is reached the way it is in production: through the real
+      # deletion broadcast, not by assigning it here.
+      {:ok, deleted} = Documents.delete_document(document)
+      assert has_element?(view, "#document-not-found")
+
+      Topics.broadcast_document_updated(deleted)
+
+      assert has_element?(view, "#document-not-found h1", "Document not found")
+      assert Process.alive?(view.pid)
+    end
+
     test "renders malformed and deleted document IDs safely", %{conn: conn} do
       document = document_fixture()
       {:ok, _} = Documents.delete_document(document)
@@ -327,7 +364,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       # Update document and broadcast
       {:ok, updated_doc} = Documents.update_document(doc, %{title: "Updated Title"})
-      Topics.broadcast_document_update(updated_doc)
+      Topics.broadcast_document_updated(updated_doc)
 
       # Wait for the message to be processed
       assert render(view) =~ "Updated Title"
@@ -346,12 +383,97 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
           original_markdown: "# PubSub Updated Content"
         })
 
-      Topics.broadcast_page_update(updated_page)
+      Topics.broadcast_page_updated(updated_page)
 
       # Toggle to original to see the content
       view |> element("input[type='checkbox']") |> render_click()
 
       assert render(view) =~ "PubSub Updated Content"
+    end
+  end
+
+  describe "Markdown tables in the viewer" do
+    # Shape an OCR pass produces from a ledger-like page: a header row, a
+    # delimiter row declaring per-column alignment, and numeric body rows.
+    @translated_table """
+    | Account     | Debit    | Credit |
+    | :---        | ---:     | :---:  |
+    | Cash        | 1,234.50 | 0.00   |
+    | Receivables | 98.00    | 12.00  |
+    | Total       | 1,332.50 | 12.00  |
+    """
+
+    @original_table """
+    | Konto       | Soll     | Haben |
+    | :---        | ---:     | :---: |
+    | Kasse       | 1.234,50 | 0,00  |
+    | Forderungen | 98,00    | 12,00 |
+    | Summe       | 1.332,50 | 12,00 |
+    """
+
+    test "renders a page's Markdown table as table elements in the markdown container", %{
+      conn: conn
+    } do
+      doc = completed_page_document(@original_table, @translated_table)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(view, ".markdown table thead th", "Account")
+      assert has_element?(view, ".markdown table thead th", "Credit")
+      assert has_element?(view, ".markdown table tbody td", "Receivables")
+      assert has_element?(view, ".markdown table tbody td", "1,234.50")
+      refute has_element?(view, ".markdown p", "| Account")
+    end
+
+    test "renders the original page's Markdown table as table elements when toggled", %{
+      conn: conn
+    } do
+      doc = completed_page_document(@original_table, @translated_table)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      view |> element("input[type='checkbox']") |> render_click()
+
+      assert has_element?(view, ".markdown table thead th", "Konto")
+      assert has_element?(view, ".markdown table tbody td", "Forderungen")
+      assert has_element?(view, ".markdown table tbody td", "1.234,50")
+      refute has_element?(view, ".markdown table tbody td", "Receivables")
+    end
+
+    test "renders markdown blocks as direct children of the markdown container", %{conn: conn} do
+      # `.markdown > :first-child` / `> :last-child` in app.css trim the margins at the
+      # container edges. A wrapper element around the rendered Markdown makes those
+      # rules match the wrapper instead, which restores the space they exist to remove.
+      doc = completed_page_document(@original_table, "## Ledger\n\n" <> @translated_table)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(view, ".markdown > h2", "Ledger")
+      assert has_element?(view, ".markdown > table tbody td", "Receivables")
+    end
+
+    test "carries the delimiter row's column alignment into the rendered cells", %{conn: conn} do
+      doc = completed_page_document(@original_table, @translated_table)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(view, ".markdown table thead th[align='right']", "Debit")
+      assert has_element?(view, ".markdown table tbody td[align='right']", "1,234.50")
+      assert has_element?(view, ".markdown table thead th[align='center']", "Credit")
+      assert has_element?(view, ".markdown table tbody td[align='left']", "Cash")
+    end
+
+    test "sanitizes table cell content while keeping alignment and structure", %{conn: conn} do
+      unsafe = """
+      | Item | Amount |
+      | :--- | ---:   |
+      | <script>alert('xss')</script>Widget | 1,234.50 |
+      | <span onclick="alert('xss')">Gadget</span> | 88.00 |
+      """
+
+      doc = completed_page_document(unsafe, unsafe)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(view, ".markdown table tbody td", "Widget")
+      assert has_element?(view, ".markdown table tbody td[align='right']", "1,234.50")
+      refute has_element?(view, ".markdown script")
+      refute has_element?(view, ".markdown [onclick]")
     end
   end
 
@@ -504,5 +626,24 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       # Should show error flash
       assert render(view) =~ "Invalid model selection"
     end
+  end
+
+  defp completed_page_document(original_markdown, translated_markdown) do
+    doc = document_with_pages_fixture(%{}, 1)
+    [page] = doc.pages
+
+    {:ok, page} =
+      Documents.update_page_extraction(page, %{
+        extraction_status: "completed",
+        original_markdown: original_markdown
+      })
+
+    {:ok, _page} =
+      Documents.update_page_translation(page, %{
+        translation_status: "completed",
+        translated_markdown: translated_markdown
+      })
+
+    doc
   end
 end

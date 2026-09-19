@@ -21,12 +21,6 @@ config :doctrans, DoctransWeb.Endpoint,
   live_view: [signing_salt: "P9wT4yH6jN2mV8kD0qL3xR7zB5cF1aG4"],
   server: false
 
-# In test we don't send emails
-config :doctrans, Doctrans.Mailer, adapter: Swoosh.Adapters.Test
-
-# Disable swoosh api client as it is only required for production adapters
-config :swoosh, :api_client, false
-
 # Print only warnings and errors during test
 config :logger, level: :warning
 
@@ -42,9 +36,12 @@ config :doctrans, :embedding_module, Doctrans.Search.EmbeddingMock
 config :doctrans, :openai_module, Doctrans.Processing.OpenAIStub
 config :doctrans, :pdf_extractor_module, Doctrans.Processing.PdfExtractorMock
 
-# Use isolated upload directory for tests to avoid conflicts with development
+# Use an isolated storage root for tests, outside the application directory, so
+# the suite exercises the same nondefault root an operator gets from
+# DOCTRANS_DATA_DIR. `config/runtime.exs` deliberately ignores that variable in
+# :test, and `test/test_helper.exs` refuses to run against any other root.
 config :doctrans, :uploads,
-  upload_dir: Path.expand("../priv/static/uploads_test", __DIR__),
+  upload_dir: Path.expand("../tmp/uploads_test", __DIR__),
   max_file_size: 100_000_000
 
 # Use shorter retry delays for faster tests
@@ -64,3 +61,21 @@ config :doctrans, Oban,
   ],
   queues: false,
   testing: :inline
+
+# Extraction bounds are deliberately small in tests: the suite drives the bounds
+# with fake poppler executables, and the production ceilings would make a test
+# that exercises a timeout take two minutes to do it. Tests that need a specific
+# bound still override it locally.
+config :doctrans, :pdf_extraction,
+  dpi: 150,
+  timeout: 5_000,
+  info_timeout: 2_000,
+  job_timeout: 30_000,
+  max_pages: 1_000,
+  max_page_pixels: 40_000_000,
+  max_image_bytes: 20_000_000
+
+# The dev-only routes are compiled into the test router as well, so the
+# dashboard's CSP nonce (U13) is covered where it actually renders rather than
+# only at the plug. This mirrors config/dev.exs; no other code reads the flag.
+config :doctrans, dev_routes: true

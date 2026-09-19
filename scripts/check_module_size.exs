@@ -1,14 +1,32 @@
 #!/usr/bin/env elixir
 # Module Size Checker
-# Enforces maximum line count per module to encourage smaller, focused modules.
 #
-# Usage: elixir scripts/check_module_size.exs [--max-lines N] [paths...]
+# What this measures, and what it does not. Credo's `Refactor.Nesting`,
+# `CyclomaticComplexity`, `ABCSize` and `ModuleDependencies` all run at Credo's default
+# thresholds (G11) and measure complexity and coupling directly. Line count measures
+# neither. What it catches that none of them can is a module that has accumulated
+# several *simple* responsibilities: a file can hold a long template, a multi-stage
+# upload pipeline and a stream-ordering subsystem while every function in it stays
+# shallow, short and cheap, and pass every Credo check. That is the only property this
+# check is for.
 #
-# Default max lines: 500
+# The limit is 500 lines and is stated once, in `.pre-commit-config.yaml`. There is no
+# default here on purpose: this script carried `@default_max_lines 500` while the hook
+# passed `--max-lines 600`, so the rule had two numbers and the smaller one was
+# unreachable. `--max-lines` is required, so a caller cannot disagree with a default it
+# cannot see.
+#
+# Only `.ex` files are measured. `.exs` scripts — `scripts/`, `priv/repo/seeds.exs`,
+# `config/`, and the test suite — are excluded deliberately: they are read top to
+# bottom rather than navigated, so length is not the same signal there. Passing a
+# non-`.ex` file explicitly is an error rather than a silent pass.
+#
+# Usage: elixir scripts/check_module_size.exs --max-lines N [paths...]
+#
 # Exit code: 1 if any module exceeds the limit, 0 otherwise
 
 defmodule ModuleSizeChecker do
-  @default_max_lines 500
+  @default_paths ["lib/"]
   @excluded_patterns [
     ~r"/_build/",
     ~r"/deps/",
@@ -20,87 +38,130 @@ defmodule ModuleSizeChecker do
 
   def run(args) do
     {opts, paths} = parse_args(args)
-    max_lines = Keyword.get(opts, :max_lines, @default_max_lines)
+    max_lines = required_max_lines(opts)
+    paths = if paths == [], do: @default_paths, else: paths
 
-    paths = if paths == [], do: ["lib/"], else: paths
-
-    violations =
+    measured =
       paths
       |> Enum.flat_map(&find_elixir_files/1)
       |> Enum.reject(&excluded?/1)
-      |> Enum.map(&check_file(&1, max_lines))
-      |> Enum.filter(& &1)
+      |> Enum.map(&{&1, count_lines(&1)})
 
-    case violations do
+    # A path that matches nothing would otherwise report every module as within the
+    # limit and exit 0 — a pass that verifies nothing, which is the failure mode this
+    # phase exists to remove.
+    if measured == [] do
+      abort("no .ex files matched #{Enum.join(paths, ", ")}")
+    end
+
+    case Enum.filter(measured, fn {_file, lines} -> lines > max_lines end) do
       [] ->
-        IO.puts(
-          IO.ANSI.green() <>
-            "All modules are within the #{max_lines} line limit." <> IO.ANSI.reset()
-        )
-
-        System.halt(0)
+        report_ok(measured, max_lines)
 
       violations ->
-        IO.puts(IO.ANSI.red() <> "Module size violations found:" <> IO.ANSI.reset())
-        IO.puts("")
-
-        Enum.each(violations, fn {file, lines, over} ->
-          IO.puts("  #{file}")
-          IO.puts("    Lines: #{lines} (#{over} over limit)")
-          IO.puts("")
-        end)
-
-        IO.puts(
-          IO.ANSI.yellow() <>
-            "Consider breaking these modules into smaller, focused modules." <>
-            IO.ANSI.reset()
-        )
-
-        System.halt(1)
+        report_violations(violations, max_lines)
     end
   end
 
+  defp report_ok(measured, max_lines) do
+    {largest, lines} = Enum.max_by(measured, &elem(&1, 1))
+
+    IO.puts(
+      IO.ANSI.green() <>
+        "All #{length(measured)} modules are within the #{max_lines} line limit " <>
+        "(largest: #{relative(largest)} at #{lines})." <> IO.ANSI.reset()
+    )
+
+    System.halt(0)
+  end
+
+  defp report_violations(violations, max_lines) do
+    IO.puts(IO.ANSI.red() <> "Module size violations found:" <> IO.ANSI.reset())
+    IO.puts("")
+
+    Enum.each(violations, fn {file, lines} ->
+      IO.puts("  #{relative(file)}")
+      IO.puts("    Lines: #{lines} (#{lines - max_lines} over the #{max_lines} line limit)")
+      IO.puts("")
+    end)
+
+    IO.puts(
+      IO.ANSI.yellow() <>
+        "Split these along a seam the code already has, rather than raising the limit.\n" <>
+        "The limit was raised 500 -> 600 once before, inside a feature PR, to let that\n" <>
+        "feature land; moving it again is a decision that belongs in PLAN.md." <>
+        IO.ANSI.reset()
+    )
+
+    System.halt(1)
+  end
+
   defp parse_args(args) do
-    {opts, paths, _} =
+    {opts, paths, invalid} =
       OptionParser.parse(args,
         strict: [max_lines: :integer, help: :boolean],
         aliases: [m: :max_lines, h: :help]
       )
 
-    if opts[:help] do
-      IO.puts("""
-      Module Size Checker
+    if opts[:help], do: print_help()
 
-      Usage: elixir scripts/check_module_size.exs [options] [paths...]
-
-      Options:
-        -m, --max-lines N    Maximum lines per module (default: #{@default_max_lines})
-        -h, --help           Show this help message
-
-      Examples:
-        elixir scripts/check_module_size.exs
-        elixir scripts/check_module_size.exs --max-lines 250
-        elixir scripts/check_module_size.exs lib/my_app/
-      """)
-
-      System.halt(0)
+    case invalid do
+      [] -> {opts, paths}
+      [{option, _value} | _] -> abort("unrecognised option #{option}")
     end
+  end
 
-    {opts, paths}
+  defp required_max_lines(opts) do
+    case Keyword.fetch(opts, :max_lines) do
+      {:ok, max_lines} when max_lines > 0 ->
+        max_lines
+
+      {:ok, max_lines} ->
+        abort("--max-lines must be positive, got #{max_lines}")
+
+      :error ->
+        abort("--max-lines is required; the limit is stated in .pre-commit-config.yaml")
+    end
+  end
+
+  defp print_help do
+    IO.puts("""
+    Module Size Checker
+
+    Usage: elixir scripts/check_module_size.exs --max-lines N [paths...]
+
+    Options:
+      -m, --max-lines N    Maximum lines per module (required, no default)
+      -h, --help           Show this help message
+
+    Only .ex files are measured; .exs scripts are excluded by design.
+    Paths default to #{Enum.join(@default_paths, ", ")}.
+
+    Examples:
+      elixir scripts/check_module_size.exs --max-lines 500
+      elixir scripts/check_module_size.exs --max-lines 500 lib/doctrans/
+    """)
+
+    System.halt(0)
   end
 
   defp find_elixir_files(path) do
-    path = Path.expand(path)
+    expanded = Path.expand(path)
 
     cond do
-      File.regular?(path) and String.ends_with?(path, ".ex") ->
-        [path]
+      File.regular?(expanded) and String.ends_with?(expanded, ".ex") ->
+        [expanded]
 
-      File.dir?(path) ->
-        Path.wildcard(Path.join(path, "**/*.ex"))
+      # An explicitly named file that is not a `.ex` used to be dropped silently, so
+      # `... check_module_size.exs mix.exs` reported a pass it had not performed.
+      File.regular?(expanded) ->
+        abort("#{path} is not a .ex file; .exs scripts are out of scope")
+
+      File.dir?(expanded) ->
+        Path.wildcard(Path.join(expanded, "**/*.ex"))
 
       true ->
-        []
+        abort("#{path} does not exist")
     end
   end
 
@@ -108,18 +169,23 @@ defmodule ModuleSizeChecker do
     Enum.any?(@excluded_patterns, &Regex.match?(&1, file))
   end
 
-  defp check_file(file, max_lines) do
-    lines =
-      file
-      |> File.read!()
-      |> String.split("\n")
-      |> length()
-
-    if lines > max_lines do
-      {file, lines, lines - max_lines}
-    else
-      nil
+  # `String.split("\n") |> length()` counted the empty string after the final newline,
+  # so every file measured one line longer than `wc -l` reports and than an editor
+  # shows. That inflated every reading by one, and the reported overage with it. Only
+  # the single terminating newline is discarded, so a file with trailing blank lines
+  # still counts them.
+  defp count_lines(file) do
+    case File.read!(file) do
+      "" -> 0
+      content -> content |> String.replace_suffix("\n", "") |> String.split("\n") |> length()
     end
+  end
+
+  defp relative(file), do: Path.relative_to_cwd(file)
+
+  defp abort(message) do
+    IO.puts(IO.ANSI.red() <> "Module size check failed: #{message}" <> IO.ANSI.reset())
+    System.halt(1)
   end
 end
 

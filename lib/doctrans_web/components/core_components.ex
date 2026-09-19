@@ -16,24 +16,47 @@ defmodule DoctransWeb.CoreComponents do
 
       <.flash kind={:info} flash={@flash} />
       <.flash kind={:info} phx-mounted={show("#flash")}>Welcome Back!</.flash>
+      <.flash kind={:error} transient={false}>Connection lost</.flash>
   """
   attr :id, :string, doc: "the optional id of flash container"
   attr :flash, :map, default: %{}, doc: "the map of flash messages to display"
   attr :title, :string, default: nil
   attr :kind, :atom, values: [:info, :error], doc: "used for styling and flash lookup"
+
+  attr :transient, :boolean,
+    default: true,
+    doc:
+      "whether the notice dismisses itself on a timer; `false` for banners driven by " <>
+        "`phx-connected`/`phx-disconnected`, which need the node to survive"
+
   attr :rest, :global, doc: "the arbitrary HTML attributes to add to the flash container"
 
   slot :inner_block, doc: "the optional inner block that renders the flash message"
 
   def flash(assigns) do
-    assigns = assign_new(assigns, :id, fn -> "flash-#{assigns.kind}" end)
+    assigns =
+      assigns
+      |> assign_new(:id, fn -> "flash-#{assigns.kind}" end)
+      |> assign(:flash_msg, Phoenix.Flash.get(assigns.flash, assigns.kind))
+
+    # Only a notice whose text *came from* the flash map may clear it. Keying off
+    # `@flash_msg` alone would let a notice rendering its inner block discard an
+    # unrelated message of the same kind that the user never saw.
+    assigns =
+      assign(assigns, :from_flash?, assigns.inner_block == [] and assigns.flash_msg != nil)
 
     ~H"""
     <div
-      :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
+      :if={msg = render_slot(@inner_block) || @flash_msg}
       id={@id}
-      phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
-      phx-hook="AutoDismiss"
+      phx-click={
+        if @from_flash? do
+          JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")
+        else
+          hide("##{@id}")
+        end
+      }
+      phx-hook={@transient && "AutoDismiss"}
       role="alert"
       class="toast toast-top toast-end z-50"
       {@rest}
@@ -50,7 +73,7 @@ defmodule DoctransWeb.CoreComponents do
           <p>{msg}</p>
         </div>
         <div class="flex-1" />
-        <button type="button" class="group self-start cursor-pointer" aria-label={gettext("close")}>
+        <button type="button" class="group self-start cursor-pointer" aria-label={gettext("Close")}>
           <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
         </button>
       </div>
@@ -209,6 +232,97 @@ defmodule DoctransWeb.CoreComponents do
   end
 
   @doc """
+  Renders a modal dialog.
+
+  Owns the parts that every dialog has to get right and that are easy to get
+  subtly different when each one spells them out for itself: the container
+  semantics, a named close button, a click-to-dismiss backdrop, and the focus
+  contract implemented by the `DialogFocus` hook -- focus moves inside on open,
+  Tab cycles within, and focus returns to `return_focus` when it closes, or to
+  the page's `<main>` if the patch that closed the dialog also removed or
+  disabled that trigger. Escape pushes `on_close`, as do the close button and
+  the backdrop.
+
+  Only layout classes differ between call sites, so those are the attributes;
+  the semantics are not overridable.
+
+  ## Examples
+
+      <.dialog
+        id="upload-modal"
+        title_id="upload-modal-title"
+        on_close="hide_upload_modal"
+        return_focus="#upload-document-btn"
+        class="modal modal-open"
+        box_class="modal-box max-w-lg"
+        backdrop_class="modal-backdrop bg-black/50"
+      >
+        <h3 id="upload-modal-title">Upload New Document</h3>
+      </.dialog>
+  """
+  attr :id, :string, required: true
+
+  attr :title_id, :string,
+    required: true,
+    doc: "id of the element that names the dialog, referenced by aria-labelledby"
+
+  attr :on_close, :string,
+    required: true,
+    doc: "event pushed by Escape, the close button and the backdrop"
+
+  attr :return_focus, :string,
+    required: true,
+    doc: "selector for the control that opened the dialog, focused again on close"
+
+  attr :class, :string, default: nil, doc: "classes for the dialog container"
+  attr :box_class, :string, default: nil, doc: "classes for the content box"
+  attr :backdrop_class, :string, default: nil, doc: "classes for the backdrop"
+  attr :close_class, :string, default: nil, doc: "classes for the close button"
+
+  slot :inner_block, required: true
+
+  def dialog(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class={@class}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={@title_id}
+      phx-window-keydown={@on_close}
+      phx-key="escape"
+      phx-hook="DialogFocus"
+      data-return-focus={@return_focus}
+    >
+      <div class={@box_class}>
+        <button
+          type="button"
+          id={"#{@id}-close"}
+          phx-click={@on_close}
+          aria-label={gettext("Close")}
+          class={@close_class}
+        >
+          <.icon name="hero-x-mark" class="w-5 h-5" />
+        </button>
+        {render_slot(@inner_block)}
+      </div>
+      <%!-- A button rather than a div so dismissing by click is a real control
+            with real click semantics. `tabindex="-1"` keeps it out of the tab
+            cycle and `aria-hidden` keeps it off the virtual cursor: it only
+            duplicates Cancel, which is already in both. --%>
+      <button
+        type="button"
+        tabindex="-1"
+        aria-hidden="true"
+        class={@backdrop_class}
+        phx-click={@on_close}
+      >
+      </button>
+    </div>
+    """
+  end
+
+  @doc """
   Renders a [Heroicon](https://heroicons.com).
 
   Heroicons come in three styles – outline, solid, and mini.
@@ -225,13 +339,17 @@ defmodule DoctransWeb.CoreComponents do
 
       <.icon name="hero-x-mark" />
       <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
+
+  Icons are always `aria-hidden`: they are CSS masks with no text, so they never
+  carried an accessible name to begin with. A control whose only content is an
+  icon must therefore carry its own `aria-label`.
   """
   attr :name, :string, required: true
   attr :class, :string, default: "size-4"
 
   def icon(%{name: "hero-" <> _} = assigns) do
     ~H"""
-    <span class={[@name, @class]} />
+    <span class={[@name, @class]} aria-hidden="true" />
     """
   end
 

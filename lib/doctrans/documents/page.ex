@@ -64,6 +64,21 @@ defmodule Doctrans.Documents.Page do
   end
 
   @doc """
+  Query-land predicate for a page whose content has reached a terminal state.
+
+  The union of success and `failed?/1`, expressed by delegating to it rather
+  than restating it: a settled page has either finished translation or errored
+  in a required stage, so nothing but reprocessing will change its contribution
+  to its document's outcome.
+  """
+  defmacro settled?(page) do
+    quote do
+      unquote(page).translation_status == "completed" or
+        unquote(__MODULE__).failed?(unquote(page))
+    end
+  end
+
+  @doc """
   In-memory counterpart of `failed?/1` for already-loaded page statuses.
 
   Must express the same rule; the database and the UI would otherwise disagree
@@ -79,6 +94,7 @@ defmodule Doctrans.Documents.Page do
   end
 
   @doc false
+  @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(page, attrs) do
     page
     |> cast(attrs, [
@@ -97,6 +113,7 @@ defmodule Doctrans.Documents.Page do
   @doc """
   Changeset for updating extraction results.
   """
+  @spec extraction_changeset(t(), map()) :: Ecto.Changeset.t()
   def extraction_changeset(page, attrs) do
     page
     |> cast(attrs, [:original_markdown, :extraction_status, :extraction_model])
@@ -106,6 +123,7 @@ defmodule Doctrans.Documents.Page do
   @doc """
   Changeset for updating translation results.
   """
+  @spec translation_changeset(t(), map()) :: Ecto.Changeset.t()
   def translation_changeset(page, attrs) do
     page
     |> cast(attrs, [:translated_markdown, :translation_status, :translation_model])
@@ -115,6 +133,7 @@ defmodule Doctrans.Documents.Page do
   @doc """
   Changeset for updating embedding results.
   """
+  @spec embedding_changeset(t(), map()) :: Ecto.Changeset.t()
   def embedding_changeset(page, attrs) do
     page
     |> cast(attrs, [:embedding, :embedding_status])

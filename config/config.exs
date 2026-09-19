@@ -43,13 +43,47 @@ config :doctrans, :retry,
   max_delay_ms: 30_000
 
 # File upload configuration
-config :doctrans, :uploads,
-  upload_dir: Path.expand("../priv/static/uploads", __DIR__),
-  max_file_size: 100_000_000
+#
+# The storage root is deliberately absent: `Doctrans.Config.Uploads.upload_dir/0`
+# resolves it at runtime, so a release is not pinned to the directory layout of
+# the machine that built it.
+config :doctrans, :uploads, max_file_size: 100_000_000
 
 # PDF extraction configuration
 # Higher DPI = better text recognition but larger files
-config :doctrans, :pdf_extraction, dpi: 150
+#
+# Extraction runs in a single-slot queue against external poppler commands, so
+# every bound here exists to keep one document from holding that slot:
+# - timeout: milliseconds one `pdftoppm` render may take before its process
+#   group is killed
+# - info_timeout: the same deadline for the much cheaper `pdfinfo` call
+# - job_timeout: milliseconds the whole extraction job may take. It is also the
+#   budget the extractor clamps each page render against, so per-page deadlines
+#   cannot add up past it. Pages already rendered are kept, so a retry resumes
+#   rather than restarting. `RunCleanupJob` shares this single-slot queue, so
+#   this is also how long cleanup can be kept waiting.
+# - max_pages: documents above this are rejected before any page is rendered
+# - max_page_pixels: a page whose geometry would rasterize to more pixels than
+#   this at the configured :dpi is rejected before it is rendered. A maximal PDF
+#   media box renders to gigabytes well inside the deadline, so this is the bound
+#   that has to come first. The default admits an E-size (36x48in) drawing at
+#   150 dpi.
+# - max_image_bytes: a rendered page above this is deleted and reported, since
+#   the image is about to be sent to a model; lower :dpi is the usual answer
+#
+# Optional keys:
+# - pdftoppm_path / pdfinfo_path: explicit paths to the poppler executables,
+#   for installations that are not on $PATH
+# - search_dirs: directories to fall back to when $PATH has no match, for a
+#   daemon started with a slim environment. Set to [] to require $PATH.
+config :doctrans, :pdf_extraction,
+  dpi: 150,
+  timeout: 120_000,
+  info_timeout: 15_000,
+  job_timeout: 3_600_000,
+  max_pages: 1_000,
+  max_page_pixels: 40_000_000,
+  max_image_bytes: 20_000_000
 
 # Document conversion configuration (for Word, OpenDocument, etc.)
 # Requires LibreOffice to be installed:
@@ -92,17 +126,33 @@ config :doctrans, :embedding,
 # Queue concurrency values:
 # - pdf_extraction: 1 - Sequential extraction to ensure pages are processed in order
 # - llm_processing: 1 - Sequential processing to process pages in order (one at a time)
+# - embedding_generation: 2 - Indexing is bounded so a backlog of pages cannot open
+#   an unbounded number of concurrent embedding requests, but stays above one so a
+#   slow page does not stall the rest of the queue. Chunks within a page are
+#   embedded one at a time regardless.
 # - health_check: 1 - Single worker for periodic health checks (cron job)
 config :doctrans, Oban,
   repo: Doctrans.Repo,
   plugins: [
-    Oban.Plugins.Pruner,
-    {Oban.Lifeline, rescue_after: {1, :hour}},
+    # Oban prunes after 60 seconds by default, which is too eager to be useful
+    # here: a settled indexing job is the record that says "this revision was
+    # already given up on", and startup recovery reads it to avoid re-queueing
+    # the same failure on every boot. A week of history costs little for a
+    # single-user app and makes a failed run diagnosable after the fact.
+    {Oban.Plugins.Pruner, max_age: {7, :days}},
+    # An orphaned `executing` job — one whose node was killed rather than shut
+    # down — blocks both recovery and re-enqueue for the page it holds until it
+    # is rescued, so the window should not be much longer than the work itself.
+    # A page's chunks are embedded one at a time against a 60s-per-call timeout
+    # and a dense page yields a handful of chunks, so 15 minutes leaves a wide
+    # margin over a realistic run while cutting the stall from an hour.
+    {Oban.Lifeline, rescue_after: {15, :minutes}},
     {Oban.Plugins.Cron, crontab: [{"* * * * *", Doctrans.Jobs.HealthCheckJob}]}
   ],
   queues: [
     pdf_extraction: 1,
     llm_processing: 1,
+    embedding_generation: 2,
     health_check: 1
   ]
 
@@ -116,21 +166,16 @@ config :doctrans, DoctransWeb.Endpoint,
   ],
   pubsub_server: Doctrans.PubSub
 
-# Configures the mailer
-#
-# By default it uses the "Local" adapter which stores the emails
-# locally. You can see the emails in your browser, at "/dev/mailbox".
-#
-# For production it's recommended to configure a different adapter
-# at the `config/runtime.exs`.
-config :doctrans, Doctrans.Mailer, adapter: Swoosh.Adapters.Local
-
 # Configure esbuild (the version is required)
+# `js/theme.js` is a second entry point, not an import of `js/app.js`: it is
+# loaded render-blocking from `<head>` so the saved theme is on the document
+# before the first paint, which the deferred app bundle is too late for. Both
+# entries write to the same outdir under their own basenames.
 config :esbuild,
   version: "0.25.4",
   doctrans: [
     args:
-      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
+      ~w(js/app.js js/theme.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
   ]

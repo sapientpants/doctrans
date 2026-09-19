@@ -20,6 +20,12 @@ defmodule Doctrans.Chat.Conversations do
 
   @context_fields ~w(page_id page_number chunk_index content_revision similarity original_markdown translated_markdown)a
 
+  @spec load(Ecto.UUID.t()) :: %{
+          messages: [Message.t()],
+          history: [Chat.message()],
+          context: [Doctrans.Search.document_result()],
+          interrupted?: boolean()
+        }
   def load(document_id) do
     case Repo.get_by(Session, document_id: document_id) do
       nil -> %{messages: [], history: [], context: [], interrupted?: false}
@@ -27,6 +33,7 @@ defmodule Doctrans.Chat.Conversations do
     end
   end
 
+  @spec start_question(Ecto.UUID.t(), String.t()) :: Message.t()
   def start_question(document_id, content) do
     {:ok, message} =
       Repo.transaction(fn ->
@@ -56,12 +63,21 @@ defmodule Doctrans.Chat.Conversations do
   Single-page reprocessing takes the same document lock, so context outdated by
   a page reset is already visible here and is discarded rather than saved.
   """
+  @spec finish(
+          Message.t(),
+          String.t(),
+          String.t(),
+          [Doctrans.Search.document_result()],
+          Doctrans.Documents.Document.t()
+        ) :: {:ok, Message.t()} | {:error, term()}
   def finish(question, role, content, context, document) do
     Run.with_current(document, fn _current ->
       finish(question, role, content, context)
     end)
   end
 
+  @spec finish(Message.t(), String.t(), String.t(), [Doctrans.Search.document_result()]) ::
+          {:ok, Message.t()} | {:error, term()}
   def finish(question, role, content, context) do
     Repo.transaction(fn ->
       session =
@@ -69,36 +85,38 @@ defmodule Doctrans.Chat.Conversations do
 
       # A slow answer must not resurrect a question already removed by rotation.
       case Repo.get(Message, question.id) do
-        nil ->
-          %Message{id: "expired-#{question.id}", role: role, content: content}
-
-        saved ->
-          _ = Repo.update!(Ecto.Changeset.change(saved, completed: role == "assistant"))
-
-          message =
-            Repo.insert!(%Message{
-              chat_session_id: session.id,
-              question_id: saved.id,
-              role: role,
-              content: content,
-              completed: role == "assistant"
-            })
-
-          if role == "assistant" do
-            bounded = Chat.merge_context([], Chat.current_context(context))
-
-            _ =
-              Repo.update!(
-                Ecto.Changeset.change(session,
-                  retrieved_context: Enum.map(bounded, &Map.take(&1, @context_fields))
-                )
-              )
-          end
-
-          rotate(session.id)
-          message
+        nil -> %Message{id: "expired-#{question.id}", role: role, content: content}
+        saved -> record_answer(session, saved, role, content, context)
       end
     end)
+  end
+
+  defp record_answer(session, question, role, content, context) do
+    _ = Repo.update!(Ecto.Changeset.change(question, completed: role == "assistant"))
+
+    message =
+      Repo.insert!(%Message{
+        chat_session_id: session.id,
+        question_id: question.id,
+        role: role,
+        content: content,
+        completed: role == "assistant"
+      })
+
+    if role == "assistant", do: save_context(session, context)
+
+    rotate(session.id)
+    message
+  end
+
+  defp save_context(session, context) do
+    bounded = Chat.merge_context([], Chat.current_context(context))
+
+    Repo.update!(
+      Ecto.Changeset.change(session,
+        retrieved_context: Enum.map(bounded, &Map.take(&1, @context_fields))
+      )
+    )
   end
 
   defp lock_session(document_id) do
@@ -157,14 +175,16 @@ defmodule Doctrans.Chat.Conversations do
 
     messages
     |> Enum.filter(&(&1.role == "assistant" and &1.completed))
-    |> Enum.flat_map(fn answer ->
-      case Map.fetch(questions, answer.question_id) do
-        {:ok, question} -> [[question, answer]]
-        :error -> []
-      end
-    end)
+    |> Enum.flat_map(&paired_exchange(&1, questions))
     |> Enum.take(-8)
     |> List.flatten()
     |> Enum.map(&Map.take(&1, [:role, :content]))
+  end
+
+  defp paired_exchange(answer, questions) do
+    case Map.fetch(questions, answer.question_id) do
+      {:ok, question} -> [[question, answer]]
+      :error -> []
+    end
   end
 end

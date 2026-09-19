@@ -8,9 +8,18 @@ defmodule Doctrans.Chat do
 
   alias Doctrans.Chat.MultiSearch
   alias Doctrans.Chat.QueryExpander
+  alias Doctrans.Documents
+  alias Doctrans.Errors
   alias Doctrans.Search
 
   require Logger
+
+  @typedoc "A chat turn as the model sees it: saved history entries and request messages."
+  @type message :: %{
+          required(:role) => String.t(),
+          required(:content) => String.t(),
+          optional(atom()) => term()
+        }
 
   @doc """
   Sends a chat message and returns the LLM response.
@@ -40,6 +49,8 @@ defmodule Doctrans.Chat do
   - `{:ok, response_text}` on success
   - `{:error, reason}` on failure
   """
+  @spec send_message(Documents.Document.t(), String.t() | nil, [message()], keyword()) ::
+          {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def send_message(document, question, chat_history \\ [], opts \\ [])
 
   def send_message(_document, "", _chat_history, _opts) do
@@ -56,52 +67,60 @@ defmodule Doctrans.Chat do
     if trimmed_question == "" do
       {:error, :empty_question}
     else
-      context_limit = Keyword.get(opts, :context_limit, 5)
-      min_similarity = Keyword.get(opts, :min_similarity)
+      answer_question(document, trimmed_question, chat_history, opts)
+    end
+  end
 
-      Logger.info(
-        "Processing chat question for document #{document.id}: #{String.slice(trimmed_question, 0, 100)}"
-      )
+  defp answer_question(document, question, chat_history, opts) do
+    Logger.info(
+      "Processing chat question for document #{document.id}: #{String.slice(question, 0, 100)}"
+    )
 
-      # Expand the query: reformulate with chat context + generate alternative phrasings
-      {standalone_question, queries} = QueryExpander.expand(trimmed_question, chat_history, opts)
+    # Expand the query: reformulate with chat context + generate alternative phrasings
+    {standalone_question, queries} = QueryExpander.expand(question, chat_history, opts)
 
-      search_opts =
-        [limit: context_limit]
-        |> then(fn o ->
-          if min_similarity, do: Keyword.put(o, :min_similarity, min_similarity), else: o
-        end)
+    # Search with all query variants and merge via RRF
+    case retrieve(document.id, standalone_question, queries, search_opts(opts)) do
+      {:ok, pages} ->
+        log_search_results(pages, document.id)
+        request_answer(document, pages, standalone_question, chat_history, opts)
 
-      # Search with all query variants and merge via RRF
-      search_result = retrieve(document.id, standalone_question, queries, search_opts)
+      {:error, reason} = error ->
+        Logger.error(
+          "Chat search failed for document #{document.id}: #{inspect(reason, limit: 5, printable_limit: 256)}"
+        )
 
-      case search_result do
-        {:ok, pages} ->
-          log_search_results(pages, document.id)
+        error
+    end
+  end
 
-          context = build_context(pages)
+  defp search_opts(opts) do
+    base = [limit: Keyword.get(opts, :context_limit, 5)]
 
-          Logger.debug(
-            "Chat context (#{String.length(context)} chars):\n#{String.slice(context, 0, 500)}..."
-          )
+    case Keyword.get(opts, :min_similarity) do
+      nil -> base
+      min_similarity -> Keyword.put(base, :min_similarity, min_similarity)
+    end
+  end
 
-          system_prompt = build_system_prompt(document.title, context)
-          # Use the standalone question so the LLM sees a clear, contextual question
-          messages = build_messages(system_prompt, chat_history, standalone_question)
+  defp request_answer(document, pages, standalone_question, chat_history, opts) do
+    context = build_context(pages)
 
-          case openai_module().chat(messages, opts) do
-            {:ok, response} ->
-              {:ok, response}
+    Logger.debug(
+      "Chat context (#{String.length(context)} chars):\n#{String.slice(context, 0, 500)}..."
+    )
 
-            {:error, reason} = error ->
-              Logger.error("Chat failed for document #{document.id}: #{inspect(reason)}")
-              error
-          end
+    system_prompt = build_system_prompt(document.title, context)
+    # Use the standalone question so the LLM sees a clear, contextual question
+    messages = build_messages(system_prompt, chat_history, standalone_question)
 
-        {:error, reason} = error ->
-          Logger.error("Chat search failed for document #{document.id}: #{inspect(reason)}")
-          error
-      end
+    case openai_module().chat(messages, opts) do
+      {:ok, response} ->
+        {:ok, response}
+
+      {:error, reason} = error ->
+        Logger.error("Chat failed for document #{document.id}: #{inspect(reason)}")
+        error
     end
   end
 
@@ -127,30 +146,27 @@ defmodule Doctrans.Chat do
   page number for citation. When multiple chunks come from the same page,
   they are sorted by chunk_index and joined together.
   """
+  @spec build_context([Search.document_result()]) :: String.t()
   def build_context([]), do: ""
 
   def build_context(results) do
     results
     |> Enum.group_by(& &1.page_number)
-    |> Enum.sort_by(fn {page_num, _} -> page_num end)
-    |> Enum.map(fn {page_number, items} ->
-      content =
-        items
-        |> Enum.sort_by(&(Map.get(&1, :chunk_index) || 0))
-        |> Enum.map(fn item ->
-          String.trim(context_content(item) || "")
-        end)
-        |> Enum.reject(&(&1 == ""))
-        |> Enum.join("\n\n")
-
-      if content != "" do
-        "[Page #{page_number}]\n#{content}"
-      else
-        nil
-      end
-    end)
+    |> Enum.sort_by(fn {page_number, _items} -> page_number end)
+    |> Enum.map(fn {page_number, items} -> page_section(page_number, items) end)
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n\n---\n\n")
+  end
+
+  defp page_section(page_number, items) do
+    content =
+      items
+      |> Enum.sort_by(&(Map.get(&1, :chunk_index) || 0))
+      |> Enum.map(fn item -> String.trim(context_content(item) || "") end)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n\n")
+
+    if content != "", do: "[Page #{page_number}]\n#{content}"
   end
 
   # Old saved chunk context can still contain translations paired by index.
@@ -191,6 +207,9 @@ defmodule Doctrans.Chat do
 
   Returns the merged chunk list, suitable for `build_context/1`.
   """
+  @spec merge_context([Search.document_result()], [Search.document_result()], keyword()) :: [
+          Search.document_result()
+        ]
   def merge_context(prior_chunks, new_chunks, opts \\ []) do
     max_chunks = Keyword.get(opts, :max_chunks, @max_context_chunks)
     max_bytes = Keyword.get(opts, :max_bytes, @max_context_bytes)
@@ -303,28 +322,14 @@ defmodule Doctrans.Chat do
   untranslated at a revision that stays current once the translation lands. Such
   context is dropped as well; the next turn retrieves the translated page.
   """
+  @spec current_context([Search.document_result()]) :: [Search.document_result()]
   def current_context([]), do: []
 
   def current_context(chunks) do
-    import Ecto.Query
-
-    page_ids =
-      chunks
-      |> Enum.flat_map(fn chunk ->
-        case Ecto.UUID.cast(Map.get(chunk, :page_id)) do
-          {:ok, id} -> [id]
-          :error -> []
-        end
-      end)
-      |> Enum.uniq()
-
     pages =
-      from(p in Doctrans.Documents.Page,
-        where: p.id in ^page_ids,
-        select: {p.id, {p.content_revision, p.translated_markdown}}
-      )
-      |> Doctrans.Repo.all()
-      |> Map.new()
+      chunks
+      |> Enum.map(&Map.get(&1, :page_id))
+      |> Documents.page_content_state()
 
     kept =
       Enum.filter(chunks, fn chunk ->
@@ -353,6 +358,7 @@ defmodule Doctrans.Chat do
   A chunk read from another page is never superseded by this one, so callers can
   pass their whole accumulated context without pre-filtering by `page_id`.
   """
+  @spec superseded_by?(Search.document_result(), Documents.Page.t()) :: boolean()
   def superseded_by?(chunk, page) do
     Map.get(chunk, :page_id) == page.id and
       not current_chunk?(chunk, page.content_revision, page.translated_markdown)
@@ -366,34 +372,11 @@ defmodule Doctrans.Chat do
   @doc """
   Checks if a document has any chunks or pages with embeddings ready for chat.
 
-  Prefers chunks (fine-grained), falls back to page-level embeddings.
+  Prefers chunks (fine-grained), falls back to page-level embeddings. Accepts a
+  `Document` struct or a bare document id.
   """
-  def embeddings_ready?(document) do
-    import Ecto.Query
-
-    # Check for chunk-level embeddings first
-    chunk_count =
-      Doctrans.Documents.Chunk
-      |> join(:inner, [c], p in assoc(c, :page))
-      |> where([c, p], p.document_id == ^document.id)
-      |> where([c], c.embedding_status == "completed")
-      |> where([c], not is_nil(c.embedding))
-      |> Doctrans.Repo.aggregate(:count)
-
-    if chunk_count > 0 do
-      true
-    else
-      # Fall back to page-level embeddings
-      page_count =
-        Doctrans.Documents.Page
-        |> where([p], p.document_id == ^document.id)
-        |> where([p], p.embedding_status == "completed")
-        |> where([p], not is_nil(p.embedding))
-        |> Doctrans.Repo.aggregate(:count)
-
-      page_count > 0
-    end
-  end
+  @spec embeddings_ready?(Documents.Document.t() | Ecto.UUID.t()) :: boolean()
+  defdelegate embeddings_ready?(document), to: Documents
 
   # Private functions
 
@@ -407,18 +390,47 @@ defmodule Doctrans.Chat do
   Runs multi-query search with RRF when there are multiple query variants,
   otherwise a single semantic search using the supplied query, falling back to
   the standalone question only when no queries are supplied.
-  Returns `{:ok, pages}` or `{:error, reason}`.
+  Returns `{:ok, pages}`, or `{:error, {:retrieval_unavailable, [reason: tag]}}`
+  when retrieval could not run at all -- on any of the three branches, so an
+  outage never reaches the reader as "the document holds nothing relevant".
+  `{:ok, []}` keeps its own meaning: searched, nothing matched.
+
   Shared by `send_message/4` and `Doctrans.Chat.Agent`.
   """
+  @spec retrieve(Ecto.UUID.t(), String.t(), [String.t()], keyword()) ::
+          {:ok, [Search.document_result()]} | {:error, Doctrans.Errors.reason()}
   def retrieve(document_id, standalone_question, queries, search_opts) do
-    case queries do
-      [] -> Search.search_in_document(document_id, standalone_question, search_opts)
-      [query] -> Search.search_in_document(document_id, query, search_opts)
-      queries -> MultiSearch.search_with_queries(document_id, queries, search_opts)
-    end
+    result =
+      case queries do
+        [] -> Search.search_in_document(document_id, standalone_question, search_opts)
+        [query] -> Search.search_in_document(document_id, query, search_opts)
+        queries -> MultiSearch.search_with_queries(document_id, queries, search_opts)
+      end
+
+    tag_outage(result)
   end
 
+  # Retrieval that returned nothing because it is down is a different answer
+  # than retrieval that returned nothing because the document holds nothing, so
+  # every branch has to say which -- the single-query one most of all. The
+  # planner and the embedder are the same server, so a planner outage collapses
+  # the query list to one (`QueryExpander.expand/3` falls back to `[question]`)
+  # and lands on the branch that would otherwise report a bare `:circuit_open`
+  # as the generic "I encountered an error".
+  #
+  # The tag carries the reason's tag alone: the detail is already logged where
+  # it arose, and what reaches the reader is a rendered message, not a payload.
+  defp tag_outage({:error, reason}) do
+    {:error, {:retrieval_unavailable, [reason: tag_only(Errors.normalize(reason))]}}
+  end
+
+  defp tag_outage(result), do: result
+
+  defp tag_only({code, _bindings}), do: code
+  defp tag_only(code) when is_atom(code), do: code
+
   @doc false
+  @spec build_system_prompt(String.t(), String.t()) :: String.t()
   def build_system_prompt(document_title, context) when context == "" do
     """
     You answer questions about the document "#{document_title}".
@@ -449,6 +461,7 @@ defmodule Doctrans.Chat do
   end
 
   @doc false
+  @spec build_messages(String.t(), [message()], String.t()) :: [message()]
   def build_messages(system_prompt, chat_history, question) do
     # Start with system prompt
     system_message = %{role: "system", content: system_prompt}

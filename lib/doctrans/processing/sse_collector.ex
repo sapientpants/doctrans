@@ -8,9 +8,13 @@ defmodule Doctrans.Processing.SSECollector do
   trailing incomplete line, so it stays small even for long responses.
   """
 
+  @typedoc "Collector state: the delta callback, the trailing partial line, and deltas in reverse order."
+  @type t :: %{on_delta: (String.t() -> any()), buffer: String.t(), content: [String.t()]}
+
   @doc """
   Creates a collector that invokes `on_delta/1` for each content delta.
   """
+  @spec new((String.t() -> any())) :: t()
   def new(on_delta) do
     %{on_delta: on_delta, buffer: "", content: []}
   end
@@ -18,6 +22,7 @@ defmodule Doctrans.Processing.SSECollector do
   @doc """
   Feeds a raw chunk into the collector, emitting any completed frames.
   """
+  @spec feed(t(), binary()) :: t()
   def feed(state, chunk) when is_binary(chunk) do
     parts = :binary.split(state.buffer <> chunk, "\n", [:global])
 
@@ -29,6 +34,7 @@ defmodule Doctrans.Processing.SSECollector do
   @doc """
   Flushes any trailing line and joins the accumulated deltas in order.
   """
+  @spec finish(t()) :: String.t()
   def finish(state) do
     state = emit_line(state.buffer, state)
     state.content |> Enum.reverse() |> :erlang.iolist_to_binary()

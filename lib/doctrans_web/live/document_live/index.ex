@@ -2,20 +2,19 @@ defmodule DoctransWeb.DocumentLive.Index do
   @moduledoc "Dashboard LiveView for managing documents."
   use DoctransWeb, :live_view
 
-  alias Doctrans.Config.Uploads
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Processing.Worker
   alias Doctrans.Validation
+  alias DoctransWeb.DocumentLive.DocumentStream
+  alias DoctransWeb.DocumentLive.UploadIntake
   alias DoctransWeb.ErrorMessages
+  alias DoctransWeb.PrivacyCopy
 
   require Logger
 
   import DoctransWeb.DocumentLive.Components
-
-  @type upload_result ::
-          {:ok, document_id :: Ecto.UUID.t(), filename :: String.t(), path :: String.t()}
-          | {:error, filename :: String.t(), reason :: Doctrans.Errors.reason()}
+  import DoctransWeb.DocumentLive.UploadComponents
 
   # How long to wait after a page-level update before refreshing affected cards.
   # Page updates arrive very frequently (one per page, per document); this
@@ -28,38 +27,37 @@ defmodule DoctransWeb.DocumentLive.Index do
 
     socket =
       socket
-      |> assign(:document_topics, [])
       |> assign(:refresh_scheduled?, false)
       |> assign(:pending_document_ids, [])
       |> assign(:show_upload_modal, false)
+      |> assign(:upload_failures, [])
+      |> assign(:upload_pending, [])
+      |> assign(:upload_started, 0)
       |> assign(:target_language, defaults[:target_language] || "en")
       |> assign(:sort_by, :inserted_at)
       |> assign(:sort_dir, :desc)
-      |> assign(:documents_count, 0)
-      |> stream(:documents, [])
+      |> DocumentStream.init()
       |> allow_upload(:document,
         accept: ~w(.pdf .docx .doc .odt .rtf),
-        max_entries: 10,
+        max_entries: UploadIntake.max_entries(),
         # max_file_size: client-side limit; the on-disk size is re-verified
-        # in consume_upload_entry/2 before the file is accepted
-        max_file_size: max_file_size()
+        # in UploadIntake.consume_entry/2 before the file is accepted
+        max_file_size: UploadIntake.max_file_size()
       )
 
-    if connected?(socket) do
-      subscribe_to_documents_topics(socket.assigns.document_topics)
-    end
+    _ = if connected?(socket), do: Topics.subscribe_documents()
 
-    {:ok, refresh_list(socket)}
+    {:ok, DocumentStream.refresh(socket)}
   end
 
   @impl true
   def handle_params(_params, _uri, socket), do: {:noreply, socket}
 
   @impl true
-  def terminate(_reason, socket) do
-    # Unsubscribe from the pubsub topics we registered for, so the client
+  def terminate(_reason, _socket) do
+    # Unsubscribe from the collection topic we registered for, so the client
     # process doesn't accumulate subscriptions across visits.
-    unsubscribe_from_documents_topics(socket.assigns.document_topics)
+    Topics.unsubscribe_documents()
     :ok
   end
 
@@ -68,16 +66,28 @@ defmodule DoctransWeb.DocumentLive.Index do
     ~H"""
     <Layouts.app flash={@flash}>
       <div class="w-full px-8 py-8">
-        <div class="flex justify-between items-center mb-6">
+        <%!-- Wraps like the Show header: this row carries the search field,
+             the sort control, Upload and the theme toggle, which together
+             overflow a fixed row well before the narrowest supported width. --%>
+        <div class="flex flex-wrap justify-between items-center gap-x-4 gap-y-3 mb-6">
           <div>
             <h1 class="text-3xl font-bold text-base-content">{gettext("Doctrans")}</h1>
-            <p class="text-base-content/70 mt-1">
-              {gettext("Private document translation powered by local AI")}
+            <p id="privacy-tagline" class="text-base-content/70 mt-1">
+              {PrivacyCopy.tagline()}
             </p>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-3">
             <%!-- Inline search form --%>
-            <form action="/search" method="get" class="relative" id="dashboard-search-form">
+            <form
+              action="/search"
+              method="get"
+              role="search"
+              class="relative"
+              id="dashboard-search-form"
+            >
+              <label for="dashboard-search-input" class="sr-only">
+                {gettext("Search documents")}
+              </label>
               <.icon
                 name="hero-magnifying-glass"
                 class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 z-10 text-base-content/60 pointer-events-none"
@@ -93,16 +103,36 @@ defmodule DoctransWeb.DocumentLive.Index do
 
             <%!-- Sort dropdown --%>
             <div class="dropdown dropdown-end">
-              <label tabindex="0" class="btn btn-sm btn-ghost gap-1.5 text-base-content/70">
+              <%!-- A real `<button>`, not a `<label tabindex="0">`: daisyUI opens the
+                    dropdown from CSS `:focus-within`, which a button satisfies just as
+                    well, and a bare label is announced as nothing at all.
+
+                    This is a disclosure, not a menu. `aria-haspopup="menu"` would
+                    promise arrow-key navigation between `menuitem`s that nothing here
+                    implements, so the trigger only claims what it delivers: it controls
+                    a group of buttons, and says whether that group is showing.
+                    `aria-expanded` is mirrored from focus by `DropdownExpanded`, since
+                    the open state lives entirely in CSS. --%>
+              <button
+                type="button"
+                id="sort-documents-trigger"
+                phx-hook="DropdownExpanded"
+                aria-expanded="false"
+                aria-controls="sort-documents-menu"
+                aria-label={gettext("Sort documents")}
+                class="btn btn-sm btn-ghost gap-1.5 text-base-content/70"
+              >
                 <.icon name="hero-arrows-up-down" class="w-4 h-4" />
                 <span class="text-xs font-normal">{sort_label(@sort_by, @sort_dir)}</span>
-              </label>
+              </button>
               <ul
                 tabindex="0"
+                id="sort-documents-menu"
                 class="dropdown-content z-10 menu menu-sm p-1 shadow-lg bg-base-200 rounded-lg w-40 mt-1"
               >
                 <li>
                   <button
+                    type="button"
                     phx-click="sort"
                     phx-value-field="inserted_at"
                     phx-value-dir="desc"
@@ -113,6 +143,7 @@ defmodule DoctransWeb.DocumentLive.Index do
                 </li>
                 <li>
                   <button
+                    type="button"
                     phx-click="sort"
                     phx-value-field="inserted_at"
                     phx-value-dir="asc"
@@ -123,6 +154,7 @@ defmodule DoctransWeb.DocumentLive.Index do
                 </li>
                 <li>
                   <button
+                    type="button"
                     phx-click="sort"
                     phx-value-field="title"
                     phx-value-dir="asc"
@@ -133,6 +165,7 @@ defmodule DoctransWeb.DocumentLive.Index do
                 </li>
                 <li>
                   <button
+                    type="button"
                     phx-click="sort"
                     phx-value-field="title"
                     phx-value-dir="desc"
@@ -153,27 +186,35 @@ defmodule DoctransWeb.DocumentLive.Index do
             >
               <.icon name="hero-plus" class="w-4 h-4 mr-1" /> {gettext("Upload")}
             </button>
+
+            <Layouts.theme_toggle />
           </div>
         </div>
 
+        <%!-- Sits outside the `phx-update="stream"` container on purpose: the client
+             refuses to discard an id-bearing child of a stream container, and a stream
+             reset only removes children carrying `data-phx-stream`. Moved back inside,
+             "No documents yet" would stay on screen underneath the first card that
+             arrives -- from this tab or another one. --%>
+        <div :if={@documents_count == 0} id="documents-empty" class="text-center py-16">
+          <.icon name="hero-document-text" class="w-16 h-16 mx-auto text-base-content/30" />
+          <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No documents yet")}</h3>
+          <p class="mt-2 text-base-content/70">
+            {PrivacyCopy.empty_state()}
+          </p>
+        </div>
+
+        <%!-- `data-documents-count` publishes the assign the empty state above is
+             driven by. It is the one piece of list state the page cannot show on
+             its own -- a stream is not countable from the DOM alone -- and without
+             it a count that drifts away from the cards on screen stays invisible
+             until it happens to cross zero and the empty state misfires. --%>
         <div
           id="documents"
+          data-documents-count={@documents_count}
           phx-update="stream"
           class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6"
         >
-          <div
-            :if={@documents_count == 0}
-            id="documents-empty"
-            class="text-center py-16 col-span-full"
-          >
-            <.icon name="hero-document-text" class="w-16 h-16 mx-auto text-base-content/30" />
-            <h3 class="mt-4 text-lg font-medium text-base-content">{gettext("No documents yet")}</h3>
-            <p class="mt-2 text-base-content/70">
-              {gettext(
-                "Upload a document to get started. All processing happens locally on your device."
-              )}
-            </p>
-          </div>
           <div :for={{id, document} <- @streams.documents} id={id}>
             <.document_card summary={document} />
           </div>
@@ -182,8 +223,12 @@ defmodule DoctransWeb.DocumentLive.Index do
 
       <.upload_modal
         :if={@show_upload_modal}
+        return_focus="#upload-document-btn"
         uploads={@uploads}
         target_language={@target_language}
+        failures={@upload_failures}
+        pending={@upload_pending}
+        started={@upload_started}
       />
     </Layouts.app>
     """
@@ -193,7 +238,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def handle_event("show_upload_modal", _params, socket),
-    do: {:noreply, assign(socket, :show_upload_modal, true)}
+    do: {:noreply, socket |> assign(:show_upload_modal, true) |> clear_upload_outcomes()}
 
   @impl true
   def handle_event("hide_upload_modal", _params, socket),
@@ -202,7 +247,19 @@ defmodule DoctransWeb.DocumentLive.Index do
   @impl true
   def handle_event("validate_upload", params, socket) do
     target_language = params["target_language"] || socket.assigns.target_language
-    {:noreply, assign(socket, :target_language, target_language)}
+
+    socket = assign(socket, :target_language, target_language)
+
+    # Picking files again is the retry the failure list asks for, so the list of
+    # what failed last time goes with the submission it described. This event also
+    # fires for the target-language select, which is not that retry: clearing there
+    # would take the explanation away from a user who is still reading it.
+    socket =
+      if params["_target"] == ["document"],
+        do: clear_upload_outcomes(socket),
+        else: socket
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -221,7 +278,7 @@ defmodule DoctransWeb.DocumentLive.Index do
     sort_dir = String.to_existing_atom(dir)
 
     socket = assign(socket, :sort_by, sort_by) |> assign(:sort_dir, sort_dir)
-    {:noreply, refresh_list(socket)}
+    {:noreply, DocumentStream.refresh(socket)}
   end
 
   @impl true
@@ -252,7 +309,7 @@ defmodule DoctransWeb.DocumentLive.Index do
         socket =
           socket
           |> put_flash(:info, gettext("Document deleted successfully"))
-          |> remove_document(id)
+          |> DocumentStream.remove(id)
 
         {:noreply, socket}
 
@@ -270,144 +327,116 @@ defmodule DoctransWeb.DocumentLive.Index do
     end
   end
 
+  # One pass over the entries in the order the user picked them, so the outcome list
+  # reads the same way the drop zone above it does. Entries are consumed one at a
+  # time rather than through `consume_uploaded_entries/3`, which takes the whole
+  # config at once and raises while any entry is still pending -- that is how one
+  # file the browser rejected took the outcome of every file beside it down with
+  # the socket.
   defp upload_documents_with_validated_language(socket, target_language) do
-    uploaded_files =
-      consume_uploaded_entries(socket, :document, fn meta, entry ->
+    upload = socket.assigns.uploads.document
+
+    {socket, outcomes} =
+      Enum.reduce(upload.entries, {socket, []}, fn entry, {socket, acc} ->
+        {socket, outcome} = process_entry(socket, upload, entry, target_language)
+        {socket, [outcome | acc]}
+      end)
+
+    handle_upload_results(socket, Enum.reverse(outcomes))
+  end
+
+  # One entry's whole journey, so that its place in the report is its place in the
+  # list the user is looking at.
+  defp process_entry(socket, upload, entry, target_language) do
+    cond do
+      not entry.valid? ->
+        # Cancelled so it stops blocking the config it sits in; its reason travels
+        # in the outcome list instead.
+        {cancel_upload(socket, :document, entry.ref),
+         {:error, entry.client_name,
+          UploadIntake.entry_reason(upload_errors(upload, entry), entry)}}
+
+      not entry.done? ->
+        # Still on its way. Left in the modal for the submission that finishes it,
+        # and reported so it is never silently dropped from a submission that
+        # otherwise succeeded.
+        {socket, {:pending, entry.client_name}}
+
+      true ->
+        {socket, start_entry(socket, entry, target_language)}
+    end
+  end
+
+  defp start_entry(socket, entry, target_language) do
+    consumed =
+      consume_uploaded_entry(socket, entry, fn meta ->
         # `meta` is an opaque map from LiveView; coerce the path to a string
         # so the type stays concrete for downstream File calls.
         path = to_string(Map.get(meta, :path, ""))
-        consume_upload_entry(path, entry)
+        UploadIntake.consume_entry(path, entry)
       end)
 
-    {valid_files, rejected} = Enum.split_with(uploaded_files, &successful_upload?/1)
-
-    handle_upload_results(socket, valid_files, rejected, target_language)
-  end
-
-  @spec successful_upload?(upload_result()) :: boolean()
-  defp successful_upload?({:ok, _document_id, _filename, _path}), do: true
-  defp successful_upload?({:error, _filename, _reason}), do: false
-
-  # LiveView unwraps the outer :ok, leaving an upload_result for each consumed file.
-  @spec consume_upload_entry(binary(), Phoenix.LiveView.UploadEntry.t()) :: {:ok, upload_result()}
-  # Source: LiveView temp metadata. Destination: generated UUID + original + magic-byte-validated extension.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp consume_upload_entry(path, entry) do
-    extension = entry.client_name |> Path.extname() |> String.downcase()
-    max_file_size = max_file_size()
-
-    with :ok <- validate_disk_size(path, max_file_size),
-         :ok <- Validation.validate_file_content(path, extension) do
-      document_id = Uniq.UUID.uuid7()
-      dest_dir = Documents.document_upload_dir(document_id)
-      File.mkdir_p!(dest_dir)
-
-      dest_path = Path.join(dest_dir, "original#{extension}")
-      File.cp!(path, dest_path)
-      {:ok, {:ok, document_id, entry.client_name, dest_path}}
+    if UploadIntake.accepted?(consumed) do
+      UploadIntake.create_and_process(consumed, target_language)
     else
-      {:error, reason} ->
-        Logger.warning("Upload rejected for #{entry.client_name}: #{inspect(reason)}")
-        {:ok, {:error, entry.client_name, reason}}
+      consumed
     end
   end
 
-  @spec max_file_size() :: pos_integer()
-  defp max_file_size do
-    Uploads.max_file_size()
-  end
-
-  # The client-side allow_upload size limit is not a security boundary;
-  # verify the actual size of the file on disk before accepting it.
-  @spec validate_disk_size(binary(), pos_integer()) :: :ok | {:error, Doctrans.Errors.reason()}
-  defp validate_disk_size(path, max_size) do
-    path = to_string(path)
-
-    case File.stat(path) do
-      {:ok, %{size: size}} when size <= max_size ->
-        :ok
-
-      {:ok, %{size: size}} ->
-        {:error, {:file_too_large, [size: div(size, 1_000_000), max: div(max_size, 1_000_000)]}}
-
-      {:error, _} ->
-        {:error, :upload_unreadable}
-    end
-  end
-
-  defp handle_upload_results(socket, [], [_ | _], _target_language) do
-    {:noreply,
-     put_flash(socket, :error, gettext("No valid files were uploaded. Check file formats."))}
-  end
-
-  defp handle_upload_results(socket, [], [], _target_language) do
-    {:noreply, put_flash(socket, :error, gettext("No files were uploaded"))}
-  end
-
-  defp handle_upload_results(socket, valid_files, rejected, target_language) do
-    Enum.each(valid_files, fn {:ok, document_id, client_name, dest_path} ->
-      create_and_process_document({document_id, client_name, dest_path}, target_language)
-    end)
-
-    message =
-      ngettext(
-        "Document uploaded! Processing will begin shortly.",
-        "%{count} documents uploaded! Processing will begin shortly.",
-        length(valid_files)
-      )
-
+  defp handle_upload_results(socket, []) do
     socket =
-      socket
-      |> assign(:show_upload_modal, false)
-      |> put_flash(:info, message)
-      |> refresh_list()
-
-    socket =
-      if rejected != [] do
-        rejected_names =
-          Enum.map_join(rejected, ", ", fn {:error, name, _reason} -> name end)
-
-        put_flash(
-          socket,
-          :warning,
-          gettext("Some files were rejected: %{names}", names: rejected_names)
-        )
-      else
-        socket
-      end
+      socket |> clear_upload_outcomes() |> put_flash(:error, gettext("No files were uploaded"))
 
     {:noreply, socket}
   end
 
-  # Helper to create a document and start processing
-  # The cleanup path is returned by consume_upload_entry, never built from the display filename.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp create_and_process_document({document_id, original_filename, pdf_path}, target_language) do
-    original_filename = Validation.sanitize_filename_string(original_filename)
+  defp handle_upload_results(socket, outcomes) do
+    started = Enum.count(outcomes, &match?({:ok, _document_id}, &1))
+    failures = Enum.filter(outcomes, &match?({:error, _filename, _reason}, &1))
+    pending = for {:pending, filename} <- outcomes, do: filename
 
-    title =
-      original_filename
-      |> Path.basename(".pdf")
-      |> String.replace(~r/[_-]+/, " ")
+    {:noreply,
+     socket
+     |> report_started(started)
+     |> report_outcomes(failures, pending, started)}
+  end
 
-    attrs = %{
-      id: document_id,
-      title: title,
-      original_filename: original_filename,
-      target_language: target_language,
-      status: "uploading"
-    }
+  # No flash for the nothing-started case: it only happens alongside failures, which
+  # keep the modal open, and the modal's backdrop covers the toast (z-999 against
+  # z-50) until it dismisses itself unseen. The failure list says it instead.
+  defp report_started(socket, 0), do: socket
 
-    case Documents.create_document(attrs) do
-      {:ok, document} ->
-        Logger.debug("Dashboard now tracking new document:#{document.id}")
-        _ = subscribe_to_document_topic(document.id)
-        _ = Worker.process_document(document.id, pdf_path)
+  defp report_started(socket, count) do
+    socket
+    |> put_flash(:info, upload_started_message(count))
+    |> DocumentStream.refresh()
+  end
 
-      {:error, changeset} ->
-        Logger.error("Failed to create document: #{inspect(changeset)}")
-        File.rm(pdf_path)
-    end
+  # The modal closes only when there is nothing left to say. Anything else keeps it
+  # open to carry the list: a rejected file needs its reason next to the drop zone
+  # it goes back into, and a file still uploading needs to stay visible.
+  defp report_outcomes(socket, [], [], _started) do
+    socket |> assign(:show_upload_modal, false) |> clear_upload_outcomes()
+  end
+
+  defp report_outcomes(socket, failures, pending, started) do
+    socket
+    |> assign(:upload_failures, Enum.map(failures, &describe_failure/1))
+    |> assign(:upload_pending, pending)
+    |> assign(:upload_started, started)
+  end
+
+  defp clear_upload_outcomes(socket) do
+    socket
+    |> assign(:upload_failures, [])
+    |> assign(:upload_pending, [])
+    |> assign(:upload_started, 0)
+  end
+
+  # The name is displayed, so it is the sanitized one rather than whatever the
+  # browser sent, matching the title the accepted files are stored under.
+  defp describe_failure({:error, filename, reason}) do
+    %{name: Validation.sanitize_filename_string(filename), message: ErrorMessages.message(reason)}
   end
 
   # --- PubSub: progress updates ----------------------------------------------
@@ -415,7 +444,24 @@ defmodule DoctransWeb.DocumentLive.Index do
   @impl true
   def handle_info({:document_updated, document}, socket) do
     Logger.debug("Dashboard received document_updated for #{document.id}")
-    {:noreply, refresh_documents(socket, [document.id])}
+    {:noreply, DocumentStream.refresh_documents(socket, [document.id])}
+  end
+
+  # Another tab's upload. Refreshing this one id folds the new card into the stream
+  # in its sorted position; the tab that did the uploading has already refreshed and
+  # gets the same card back unchanged.
+  @impl true
+  def handle_info({:document_created, document}, socket) do
+    Logger.debug("Dashboard received document_created for #{document.id}")
+    {:noreply, DocumentStream.refresh_documents(socket, [document.id])}
+  end
+
+  # Likewise for a deletion: the deleting tab has already removed the card, and
+  # removing an id that is no longer tracked is a no-op.
+  @impl true
+  def handle_info({:document_deleted, document_id}, socket) do
+    Logger.debug("Dashboard received document_deleted for #{document_id}")
+    {:noreply, DocumentStream.remove(socket, document_id)}
   end
 
   @impl true
@@ -429,7 +475,7 @@ defmodule DoctransWeb.DocumentLive.Index do
       {:noreply,
        socket
        |> assign(:refresh_scheduled?, true)
-       |> refresh_documents([page.document_id])}
+       |> DocumentStream.refresh_documents([page.document_id])}
     end
   end
 
@@ -441,136 +487,12 @@ defmodule DoctransWeb.DocumentLive.Index do
      socket
      |> assign(:refresh_scheduled?, false)
      |> assign(:pending_document_ids, [])
-     |> refresh_documents(ids)}
+     |> DocumentStream.refresh_documents(ids)}
   end
 
   @impl true
   def handle_info(msg, socket) do
     Logger.warning("Dashboard received unknown message: #{inspect(msg)}")
     {:noreply, socket}
-  end
-
-  # --- List refresh ----------------------------------------------------------
-
-  # Re-queries the document list, resets the stream, and keeps the socket
-  # subscribed to the (global) document topics it needs to receive updates.
-  defp refresh_list(socket) do
-    documents =
-      Documents.list_documents_with_progress(
-        sort_by: socket.assigns.sort_by,
-        sort_dir: socket.assigns.sort_dir
-      )
-
-    topics = Enum.map(documents, & &1.id)
-
-    if connected?(socket) do
-      unsubscribe_from_documents_topics(socket.assigns.document_topics -- topics)
-      subscribe_to_documents_topics(topics -- socket.assigns.document_topics)
-    end
-
-    socket
-    |> assign(:document_topics, topics)
-    |> assign(:document_order, Enum.map(documents, &order_entry(&1, socket)))
-    |> assign(:documents_count, length(documents))
-    |> stream(:documents, documents, reset: true)
-  end
-
-  # Keys detect changes; PostgreSQL determines ordering, including title collation.
-  defp order_entry(summary, socket) do
-    {summary.id, Map.fetch!(summary.document, socket.assigns.sort_by)}
-  end
-
-  defp refresh_documents(socket, []), do: socket
-
-  defp refresh_documents(socket, ids) do
-    summaries = Documents.list_documents_with_progress(document_ids: ids)
-    found_ids = Enum.map(summaries, & &1.id)
-    socket = Enum.reduce(ids -- found_ids, socket, &remove_document(&2, &1))
-    update_documents(socket, summaries)
-  end
-
-  defp update_documents(socket, summaries) do
-    previous_order = socket.assigns.document_order
-    order = updated_document_order(socket, summaries)
-
-    # The client applies all deletions before insertions. Remove affected cards
-    # together, then reinsert from left to right at their final batch positions.
-    socket =
-      if order != previous_order do
-        Enum.reduce(summaries, socket, &stream_delete(&2, :documents, &1))
-      else
-        socket
-      end
-
-    topics = Enum.map(order, &elem(&1, 0))
-
-    if connected?(socket),
-      do: subscribe_to_documents_topics(topics -- socket.assigns.document_topics)
-
-    socket =
-      socket
-      |> assign(:document_order, order)
-      |> assign(:documents_count, length(order))
-      |> assign(:document_topics, topics)
-
-    summaries_by_id = Map.new(summaries, &{&1.id, &1})
-
-    order
-    |> Enum.with_index()
-    |> Enum.reduce(socket, fn {{id, _key}, index}, socket ->
-      case Map.fetch(summaries_by_id, id) do
-        {:ok, summary} -> stream_insert(socket, :documents, summary, at: index)
-        :error -> socket
-      end
-    end)
-  end
-
-  defp updated_document_order(socket, summaries) do
-    previous_order = socket.assigns.document_order
-    previous_keys = Map.new(previous_order)
-    entries = Map.new(summaries, &order_entry(&1, socket))
-
-    if Enum.any?(entries, fn {id, key} -> Map.fetch(previous_keys, id) != {:ok, key} end) do
-      previous_keys
-      |> Map.merge(entries)
-      |> Map.to_list()
-      |> Documents.sort_document_order(
-        sort_by: socket.assigns.sort_by,
-        sort_dir: socket.assigns.sort_dir
-      )
-    else
-      previous_order
-    end
-  end
-
-  defp remove_document(socket, id) do
-    if connected?(socket), do: Topics.unsubscribe_document(id)
-    order = Enum.reject(socket.assigns.document_order, &(elem(&1, 0) == id))
-
-    socket
-    |> assign(:document_order, order)
-    |> assign(:documents_count, length(order))
-    |> assign(:document_topics, Enum.reject(socket.assigns.document_topics, &(&1 == id)))
-    |> assign(
-      :pending_document_ids,
-      Enum.reject(socket.assigns.pending_document_ids, &(&1 == id))
-    )
-    |> stream_delete(:documents, %{id: id})
-  end
-
-  defp subscribe_to_documents_topics(topics) do
-    Enum.each(topics, fn document_id ->
-      Topics.subscribe_document(document_id)
-    end)
-  end
-
-  defp unsubscribe_from_documents_topics(topics) do
-    Enum.each(topics, fn document_id ->
-      Topics.unsubscribe_document(document_id)
-    end)
-  end
-
-  defp subscribe_to_document_topic(document_id) do
-    Topics.subscribe_document(document_id)
   end
 end

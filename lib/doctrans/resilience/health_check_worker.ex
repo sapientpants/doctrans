@@ -27,6 +27,7 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   @default_interval_ms 60_000
   @default_auto_reset true
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -34,6 +35,15 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   @doc """
   Returns the current health check status.
   """
+  @spec status() :: %{
+          enabled: boolean(),
+          interval_ms: pos_integer(),
+          auto_reset_circuits: boolean(),
+          last_check: DateTime.t() | nil,
+          last_results: HealthCheck.results() | nil,
+          check_count: non_neg_integer(),
+          circuit_breakers: %{atom() => :ok | :blown | :not_found}
+        }
   def status do
     GenServer.call(__MODULE__, :status)
   end
@@ -41,6 +51,7 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   @doc """
   Triggers an immediate health check.
   """
+  @spec check_now() :: :ok
   def check_now do
     GenServer.cast(__MODULE__, :check_now)
   end

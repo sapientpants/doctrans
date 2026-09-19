@@ -1,5 +1,14 @@
 defmodule DoctransWeb.DocumentLive.IndexTest do
-  use DoctransWeb.ConnCase, async: true
+  # Sync on purpose, and it must stay that way. These tests mount `Index`, which
+  # subscribes to the process-global `"documents"` PubSub topic; the Ecto SQL
+  # sandbox isolates the database but not PubSub, so under `async: true` a
+  # `document_fixture/1` or a page broadcast from any concurrently running file
+  # lands in this file's dashboards and makes them re-query and re-render for
+  # documents this file never created. Neither "only the affected cards were
+  # re-queried" below nor the progress assertions can hold against that traffic.
+  # ExUnit starts sync modules only once every async module has finished and
+  # runs them one at a time, so serializing is what keeps it away.
+  use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
@@ -96,9 +105,16 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     for _ <- 1..4 do
       assert_receive {:dashboard_query, metadata}
       assert metadata.query =~ "WHERE"
-      refute untouched.id in List.flatten(metadata.params)
+
+      # `cast_params`, not `params`: `params` carries UUIDs already dumped to
+      # 16-byte binaries, so a string id can never appear in it and the
+      # refutation would hold no matter which rows the dashboard asked for.
+      refute untouched.id in List.flatten(List.wrap(metadata.cast_params))
     end
 
+    # This file is sync, so the only queries this dashboard can be making are
+    # the ones the sends above provoked; a further one means a card was
+    # refreshed that had no reason to be.
     refute_receive {:dashboard_query, _}
   end
 
@@ -446,13 +462,16 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
 
       # Update and broadcast
       {:ok, updated} = Doctrans.Documents.update_document(doc, %{title: "Updated PubSub"})
-      Topics.broadcast_document_update(updated)
+      Topics.broadcast_document_updated(updated)
 
       assert render(view) =~ "Updated PubSub"
     end
 
+    # Page progress reaches the dashboard on the collection topic, which is the
+    # only subscription it holds since U11 dropped the per-document ones.
     test "receives page updates via PubSub", %{conn: conn} do
-      doc = document_with_pages_fixture(%{title: "Page Update Test"}, 2)
+      doc = document_with_pages_fixture(%{title: "Page Update Test", status: "processing"}, 2)
+      other = document_with_pages_fixture(%{title: "Untouched", status: "processing"}, 2)
       {:ok, view, _html} = live(conn, ~p"/")
 
       [page | _] = doc.pages
@@ -461,10 +480,10 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       {:ok, updated_page} =
         Doctrans.Documents.update_page_extraction(page, %{extraction_status: "completed"})
 
-      Topics.broadcast_page_update(updated_page)
+      Topics.broadcast_page_updated(updated_page)
 
-      # Just verify no crash
-      assert render(view) =~ "Page Update Test"
+      assert has_element?(view, "#documents-#{doc.id} progress[value='25.0']")
+      assert has_element?(view, "#documents-#{other.id} progress[value='0.0']")
     end
 
     test "validate_upload changes target language", %{conn: conn} do
@@ -537,14 +556,21 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       end
     end
 
-    test "deleting an already removed document refreshes the stale card", %{conn: conn} do
-      doc = document_fixture()
+    # The card used to go stale until something else refreshed it; since U11 the
+    # deletion is broadcast, so an open dashboard drops the card on its own. The
+    # defensive path this test used to cover -- clicking delete for an id the
+    # dashboard no longer tracks -- is exercised by "repeated deletes and invalid
+    # IDs are harmless" above, which drives the event directly.
+    test "a deletion elsewhere removes the card from an open dashboard", %{conn: conn} do
+      doc = document_fixture(%{title: "Removed Elsewhere"})
+      kept = document_fixture(%{title: "Kept"})
       {:ok, view, _html} = live(conn, ~p"/")
+      assert has_element?(view, "#documents-#{doc.id}")
+
       {:ok, _} = Doctrans.Documents.delete_document(doc)
 
-      selector = "button[phx-click='delete_document'][phx-value-id='#{doc.id}']"
-      view |> element(selector) |> render_click()
-      refute has_element?(view, selector)
+      refute has_element?(view, "#documents-#{doc.id}")
+      assert has_element?(view, "#documents-#{kept.id}")
       refute has_element?(view, "#flash-error")
     end
 

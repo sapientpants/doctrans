@@ -9,7 +9,12 @@ defmodule DoctransWeb.Endpoint do
     signing_salt: "Qr5ZNHs0",
     encryption_salt: "Zm5XkR8p",
     same_site: "Lax",
-    secure: Application.compile_env(:doctrans, :env) == :prod,
+    # Not `Secure`: the app is served over plain HTTP on loopback or a LAN
+    # address, and a `Secure` cookie would simply not be stored, breaking the
+    # session. Confidentiality comes from the deployment binding, not the flag.
+    # (This previously read `compile_env(:doctrans, :env) == :prod`, but `:env`
+    # is configured nowhere, so it always evaluated to `false` regardless.)
+    secure: false,
     http_only: true
   ]
 
@@ -43,9 +48,11 @@ defmodule DoctransWeb.Endpoint do
   # share the upload root but must never be exposed by static serving.
   # These contain private document content: prevent browser/proxy storage,
   # including requests with Plug.Static's versioned query strings.
+  # `Plug.Static` resolves the MFA per request, so serving reads the same setting
+  # the writers use (`Doctrans.Config.Uploads`).
   plug DoctransWeb.Plugs.UploadImages,
     at: "/uploads",
-    from: {:doctrans, "priv/static/uploads"},
+    from: {Doctrans.Config.Uploads, :upload_dir, []},
     gzip: false,
     cache_control_for_etags: "private, no-store",
     cache_control_for_vsn_requests: "private, no-store"

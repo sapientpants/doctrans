@@ -26,8 +26,15 @@ defmodule Doctrans.Chat.Agent do
 
   alias Doctrans.Chat
   alias Doctrans.Chat.{Grader, QueryExpander}
+  alias Doctrans.Documents.Document
+  alias Doctrans.Search
 
   require Logger
+
+  @typedoc "Progress and streaming events reported to the caller's `on_event` callback."
+  @type event ::
+          {:stage, :understanding | :retrieving | :assessing | :generating}
+          | {:delta, String.t()}
 
   # Extra retrieval rounds the grader may trigger when context is insufficient
   # (on top of the initial planned multi-query search).
@@ -43,6 +50,8 @@ defmodule Doctrans.Chat.Agent do
   Returns `{:ok, full_answer, merged_context}` or `{:error, reason}`, where
   `merged_context` is the updated accumulated context to feed into the next turn.
   """
+  @spec run(Document.t(), String.t() | nil, [Chat.message()], keyword(), (event() -> any())) ::
+          {:ok, String.t(), [Search.document_result()]} | {:error, Doctrans.Errors.reason()}
   def run(document, question, chat_history \\ [], opts \\ [], on_event)
 
   def run(_document, question, _chat_history, _opts, _on_event)
@@ -61,17 +70,7 @@ defmodule Doctrans.Chat.Agent do
   end
 
   defp do_run(document, question, chat_history, opts, on_event) do
-    context_limit = Keyword.get(opts, :context_limit, 8)
-    min_similarity = Keyword.get(opts, :min_similarity)
-    # The caller's context can predate a single-page reprocess that finished
-    # while this socket held it; re-check it against current page revisions.
-    prior_context = opts |> Keyword.get(:retrieved_context, []) |> Chat.current_context()
-
-    search_opts =
-      [limit: context_limit]
-      |> then(fn o ->
-        if min_similarity, do: Keyword.put(o, :min_similarity, min_similarity), else: o
-      end)
+    search_opts = search_opts(opts)
 
     Logger.info(
       "Agent processing question for document #{document.id}: #{String.slice(question, 0, 100)}"
@@ -86,24 +85,41 @@ defmodule Doctrans.Chat.Agent do
 
     case Chat.retrieve(document.id, standalone_question, queries, search_opts) do
       {:ok, pages} ->
-        # 3. Merge new chunks into the accumulated context (dedup + cap)
-        merged = Chat.merge_context(prior_context, pages)
-
-        # 4. Assess the merged context; search once more if it is insufficient
-        on_event.({:stage, :assessing})
-        merged = assess_and_maybe_refine(document, merged, standalone_question, search_opts, opts)
-
-        # 5. Generate (streamed)
-        on_event.({:stage, :generating})
-
-        case generate(document, merged, chat_history, standalone_question, opts, on_event) do
-          {:ok, response} -> {:ok, response, merged}
-          {:error, _reason} = error -> error
-        end
+        answer(document, pages, standalone_question, chat_history, {search_opts, opts, on_event})
 
       {:error, reason} = error ->
         Logger.error("Agent retrieval failed for document #{document.id}: #{inspect(reason)}")
         error
+    end
+  end
+
+  defp search_opts(opts) do
+    base = [limit: Keyword.get(opts, :context_limit, 8)]
+
+    case Keyword.get(opts, :min_similarity) do
+      nil -> base
+      min_similarity -> Keyword.put(base, :min_similarity, min_similarity)
+    end
+  end
+
+  defp answer(document, pages, standalone_question, chat_history, {search_opts, opts, on_event}) do
+    # 3. Merge new chunks into the accumulated context (dedup + cap).
+    # The caller's context can predate a single-page reprocess that finished
+    # while this socket held it; re-check it against current page revisions.
+    prior_context = opts |> Keyword.get(:retrieved_context, []) |> Chat.current_context()
+    merged = Chat.merge_context(prior_context, pages)
+
+    # 4. Assess the merged context; search once more if it is insufficient
+    on_event.({:stage, :assessing})
+
+    merged = assess_and_maybe_refine(document, merged, standalone_question, search_opts, opts)
+
+    # 5. Generate (streamed)
+    on_event.({:stage, :generating})
+
+    case generate(document, merged, chat_history, standalone_question, opts, on_event) do
+      {:ok, response} -> {:ok, response, merged}
+      {:error, _reason} = error -> error
     end
   end
 
