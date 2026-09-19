@@ -26,8 +26,15 @@ defmodule Doctrans.Search.EmbeddingErrorStub do
     observe(text)
 
     case reason_for(text) do
-      :ok -> EmbeddingStub.generate(text, opts)
-      reason -> {:error, reason}
+      :ok ->
+        EmbeddingStub.generate(text, opts)
+
+      reason ->
+        # The success path waits on the barrier inside `EmbeddingStub.generate/2`;
+        # without this, a failing call returns before a test can observe the
+        # search it is part of still being in flight.
+        EmbeddingStub.await_barrier(text)
+        {:error, reason}
     end
   end
 

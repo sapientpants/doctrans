@@ -359,20 +359,37 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       %{document: document}
     end
 
-    test "can submit a chat message", %{conn: conn, document: document} do
+    test "a submitted question is answered by the turn it starts", %{
+      conn: conn,
+      document: document
+    } do
+      question = "What is this document about?"
+
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
       # Open chat panel
       view |> element("header button[phx-click='toggle_chat']") |> render_click()
 
-      # Submit a message
-      view
-      |> form("#chat-form", %{message: "What is this document about?"})
-      |> render_submit()
+      view |> form("#chat-form", %{message: question}) |> render_submit()
 
-      # User message should appear in the stream
+      # The question is on screen immediately, while the turn is still running.
+      assert render(view) =~ question
+      assigns = :sys.get_state(view.pid).socket.assigns
+      assert assigns.chat_loading
+
+      # The turn is an `async_nolink` task, which `render_async/2` does not
+      # cover, so wait on the task itself. It sends its result to the LiveView
+      # before it exits, so that message is already in the mailbox ahead of the
+      # round trip `render/1` makes: the answer below is awaited, not slept on.
+      # Waiting is also what keeps the task from outliving the test and querying
+      # the database with no sandbox owner, which is what it used to do here.
+      monitor = Process.monitor(assigns.chat_task_pid)
+      assert_receive {:DOWN, ^monitor, :process, _pid, :normal}, 2_000
+
       html = render(view)
-      assert html =~ "What is this document about?"
+      assert html =~ question
+      assert html =~ "This is a mock response to your question about"
+      refute :sys.get_state(view.pid).socket.assigns.chat_loading
     end
 
     test "empty message is not submitted", %{conn: conn, document: document} do

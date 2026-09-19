@@ -27,10 +27,19 @@ defmodule Doctrans.Search.EmbeddingStub do
     {:ok, Pgvector.new(fake_embedding)}
   end
 
-  # Only the selected input waits, so unrelated background embeddings keep
-  # using the ordinary stub. Monitoring the test prevents an abandoned barrier
-  # from leaking a blocked task when an assertion fails.
-  defp await_barrier(text) do
+  @doc """
+  Blocks the selected input until the test that installed the barrier releases it.
+
+  Public because `Doctrans.Search.EmbeddingErrorStub` parks its *failing* calls
+  on the same barrier: a test that wants to observe the in-flight state of a
+  search that will end in an embedding failure needs the failure held open too,
+  and holding it is the difference between asserting that state and racing it.
+
+  Only the selected input waits, so unrelated background embeddings keep using
+  the ordinary stub. Monitoring the test prevents an abandoned barrier from
+  leaking a blocked task when an assertion fails.
+  """
+  def await_barrier(text) do
     case Application.get_env(:doctrans, :embedding_stub_barrier) do
       {^text, owner, barrier} ->
         monitor = Process.monitor(owner)

@@ -303,11 +303,19 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
     test "says nothing about retrieval until the search reports", %{conn: conn} do
       searchable_page("Contains degradedterm in the text", "Degraded Doc")
       inference_down_for("degradedterm")
+      barrier = install_barrier("degradedterm")
 
       {:ok, view, _html} = live(conn, ~p"/search?q=degradedterm")
 
+      # The failing embedding is parked, so the "not yet" state below is pinned
+      # rather than raced: without the barrier these two assertions are only
+      # true while the search is slower than the two calls that make them, and
+      # the second one fails whenever it is not.
+      assert_receive {:embedding_started, ^barrier, task_pid}, @async_timeout
       assert has_element?(view, "#search-loading")
       refute has_element?(view, "#search-degraded")
+
+      send(task_pid, {:continue_embedding, barrier})
 
       capture_log(fn -> render_async(view, @async_timeout) end)
       assert has_element?(view, "#search-degraded")
