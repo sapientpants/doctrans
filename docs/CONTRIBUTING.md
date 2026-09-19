@@ -50,9 +50,15 @@ configuration-only changes. Tests run once in CI; its pre-commit invocation skip
 the coverage hook in favor of the explicit coverage step.
 
 The minimum coverage is 80%, configured in `coveralls.json`; falling below it
-fails the command and CI. The same file lists the existing coverage exclusions.
-Add meaningful tests for uncovered behavior instead of lowering the threshold or
-expanding exclusions. Use `mix coveralls.html` for a local report in `cover/`.
+fails the command and CI. `coveralls.json` is the only coverage configuration the
+project has: it is tracked, not generated, so do not add it to `.gitignore`.
+
+Coverage measures all of `lib/`. `skip_files` excludes only code that is not the
+application: `test/support/` (test scaffolding), `lib/mix/` (developer Mix tasks),
+and `deps/`. No production module is excluded, and none should be added --- an
+exclusion hides a gap instead of reporting it. Add meaningful tests for uncovered
+behavior instead of lowering the threshold or expanding exclusions. Use
+`mix coveralls.html` for a local report in `cover/`.
 
 ## Static type checks
 
