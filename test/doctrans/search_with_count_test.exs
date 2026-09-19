@@ -33,11 +33,11 @@ defmodule Doctrans.SearchWithCountTest do
       TestEnv.put_env(:embedding_probe_pid, self())
       use_embedding_module(EmbeddingProbe)
 
-      assert {:ok, %{results: results, total_count: total_count, retrieval: :hybrid}} =
+      assert {:ok, %{results: [result], total_count: 1, retrieval: :hybrid}} =
                Search.search_with_count("sharedembeddingterm")
 
-      assert Enum.any?(results, &(&1.page_id == page.id))
-      assert total_count == length(results)
+      assert result.page_id == page.id
+      assert result.snippet =~ "sharedembeddingterm"
 
       # One inference call is what makes the count and the results describe the
       # same vector: there is no second embedding for them to disagree about.
