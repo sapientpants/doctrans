@@ -9,6 +9,11 @@ defmodule DoctransWeb.SearchLiveTest do
   # Search runs off the LiveView process now, so assertions on results await it.
   @async_timeout 2_000
 
+  # Mirrors `DoctransWeb.SearchLive`'s page size. A corpus is sized against it so
+  # the split between page 1 and page 2 is a property of the fixture, not a
+  # coincidence of how many documents a test happened to create.
+  @per_page 20
+
   describe "Search LiveView" do
     test "shows validation errors in the selected locale", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search?lang=de")
@@ -26,17 +31,16 @@ defmodule DoctransWeb.SearchLiveTest do
       assert has_element?(view, "h1", "Search")
       assert has_element?(view, "#search-form")
       assert has_element?(view, "#search-input")
-      assert render(view) =~ "Search documents"
+      assert has_element?(view, "#search-prompt")
     end
 
     test "assigns default values on mount", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search")
 
-      # Check default assigns
-      assert view |> element("#search-input") |> render() =~ ""
-      assert render(view) =~ "Enter a search term to find content across all your documents."
-      refute render(view) =~ "Searching..."
-      refute render(view) =~ "No results found"
+      assert has_element?(view, "#search-input[value='']")
+      assert has_element?(view, "#search-prompt")
+      refute has_element?(view, "#search-loading")
+      refute has_element?(view, "#search-empty")
     end
 
     test "shows back button to index", %{conn: conn} do
@@ -65,14 +69,19 @@ defmodule DoctransWeb.SearchLiveTest do
     end
 
     test "shows no results message when search returns empty", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/search?q=nonexistent")
+      # A library with content in it, none of which answers this query: the empty
+      # state has to mean "nothing matched", not "nothing was searched".
+      ranked_corpus("presentterm", 2, "Present Doc")
 
       # No assertion on the loading state here: nothing holds the search open,
-      # so an empty library can answer before the first render is inspected.
-      # The async suite parks the embedding stub on a barrier and pins that
-      # state deterministically; what this test is for is the empty *outcome*.
+      # so the search can answer before the first render is inspected. The async
+      # suite parks the embedding stub on a barrier and pins that state
+      # deterministically; what this test is for is the empty *outcome*.
+      {:ok, view, _html} = live(conn, ~p"/search?q=nonexistent")
+
       render_async(view, @async_timeout)
       assert has_element?(view, "#search-empty")
+      refute has_element?(view, "#search-results")
       refute has_element?(view, "#search-loading")
     end
 
@@ -82,7 +91,7 @@ defmodule DoctransWeb.SearchLiveTest do
       view |> element("#search-form") |> render_submit(%{q: "   "})
 
       # Should stay on initial state
-      assert render(view) =~ "Search documents"
+      assert has_element?(view, "#search-prompt")
     end
 
     test "trims whitespace from search query", %{conn: conn} do
@@ -97,43 +106,27 @@ defmodule DoctransWeb.SearchLiveTest do
       render_async(view, @async_timeout)
     end
 
-    test "shows results when matching documents exist", %{conn: conn} do
-      # Create a completed document with completed page containing searchable content
-      doc = document_fixture(%{title: "Searchable Doc", status: "completed"})
-      page = page_fixture(doc, %{page_number: 1})
+    test "renders every match, in the order the search ranked them", %{conn: conn} do
+      [first, second, third] = ranked_corpus("orderedterm", 3, "Ordered Doc")
 
-      {:ok, page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "This is unique searchterm content"
-        })
-
-      {:ok, _page} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "This is unique searchterm translated"
-        })
-
-      {:ok, view, _html} = live(conn, ~p"/search?q=searchterm")
+      {:ok, view, _html} = live(conn, ~p"/search?q=orderedterm")
 
       # Wait for the asynchronous search to complete
       render_async(view, @async_timeout)
 
       assert has_element?(view, "#search-results")
-      assert has_element?(view, "#search-result-#{page.id}")
-      assert has_element?(view, "#search-summary")
+
+      # The cards are the match set, in rank order -- not a set of ids that
+      # happen to be on the page in whatever order they arrived.
+      assert rendered_result_ids(view) == [first.id, second.id, third.id]
+
+      assert summary(view) == ~s(Showing 1-3 of 3 results for "orderedterm")
       refute has_element?(view, "#search-empty")
+      refute has_element?(view, "#search-pagination")
     end
 
     test "does not warn about degraded retrieval on a healthy search", %{conn: conn} do
-      doc = document_fixture(%{title: "Healthy Doc", status: "completed"})
-      page = page_fixture(doc, %{page_number: 1})
-
-      {:ok, _page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "This is healthyterm content"
-        })
+      [page] = ranked_corpus("healthyterm", 1, "Healthy Doc")
 
       {:ok, view, _html} = live(conn, ~p"/search?q=healthyterm")
 
@@ -141,7 +134,7 @@ defmodule DoctransWeb.SearchLiveTest do
 
       # Semantic search ran, so the results are the whole answer and the page
       # must not hedge about them.
-      assert has_element?(view, "#search-results")
+      assert has_element?(view, "#search-result-#{page.id}")
       refute has_element?(view, "#search-degraded")
     end
 
@@ -163,10 +156,9 @@ defmodule DoctransWeb.SearchLiveTest do
       assert has_element?(view, "#search-input[value='myquery']")
     end
 
-    test "search results link to document pages", %{conn: conn} do
-      # Create completed document with searchable content
+    test "a result links to its own page, carrying the search behind it", %{conn: conn} do
       doc = document_fixture(%{title: "Link Test Doc", status: "completed"})
-      page = page_fixture(doc, %{page_number: 1})
+      page = page_fixture(doc, %{page_number: 7})
 
       {:ok, page} =
         Documents.update_page_extraction(page, %{
@@ -184,18 +176,11 @@ defmodule DoctransWeb.SearchLiveTest do
 
       render_async(view, @async_timeout)
 
-      # The card links back into the document, carrying the search it came from
-      # so the reader can return to these results.
-      assert has_element?(view, "#search-result-#{page.id}")
-
-      href =
-        view
-        |> element("#search-result-#{page.id}")
-        |> render()
-
-      assert href =~ doc.id
-      assert href =~ "from=search"
-      assert href =~ "q=LinkableContent"
+      # Every part of this link is load-bearing: the document and the page
+      # number are where the match actually is, and `q` plus `search_page` are
+      # what let the reader come back to the results they left.
+      assert result_href(view, page) ==
+               "/documents/#{doc.id}?page=7&from=search&q=LinkableContent&search_page=1"
     end
 
     test "back link navigates to home", %{conn: conn} do
@@ -212,8 +197,8 @@ defmodule DoctransWeb.SearchLiveTest do
       {:ok, view, _html} = live(conn, ~p"/search?q=")
 
       # Should show initial state
-      assert render(view) =~ "Search documents"
-      refute render(view) =~ "No results found"
+      assert has_element?(view, "#search-prompt")
+      refute has_element?(view, "#search-empty")
     end
 
     test "handles search with special characters", %{conn: conn} do
@@ -226,47 +211,63 @@ defmodule DoctransWeb.SearchLiveTest do
       refute has_element?(view, "#search-error")
     end
 
-    test "shows pagination controls when there are results", %{conn: conn} do
-      # Create multiple documents to potentially trigger pagination
-      Enum.each(1..25, fn i ->
-        doc = document_fixture(%{title: "Test Doc #{i}", status: "completed"})
-        page = page_fixture(doc, %{page_number: 1})
+    test "pages through a match set larger than one page", %{conn: conn} do
+      pages = ranked_corpus("pagedterm", 25, "Paged Doc")
+      {first_page, second_page} = Enum.split(pages, @per_page)
 
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "Content #{i}"
-        })
-
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "Content #{i}"
-        })
-      end)
-
-      {:ok, view, _html} = live(conn, ~p"/search?q=Content")
+      {:ok, view, _html} = live(conn, ~p"/search?q=pagedterm")
 
       render_async(view, @async_timeout)
 
-      # 25 matches against 20 per page: the total has to describe the whole match
-      # set, not the page, or the second page never becomes reachable.
-      assert has_element?(view, "#search-results")
+      # 25 matches against 20 per page: the summary has to describe the whole
+      # match set, not the page, or the second page never becomes reachable.
+      assert rendered_result_ids(view) == Enum.map(first_page, & &1.id)
+      assert summary(view) == ~s(Showing 1-20 of 25 results for "pagedterm")
       assert has_element?(view, "#search-pagination")
-      assert has_element?(view, "#search-summary", "of 25 results")
+      refute has_element?(view, "#search-pagination a[href*='page=0']")
+
+      # Reachable, not merely addressable: the Next control is what takes the
+      # reader to the rest of the matches.
+      view |> element("#search-pagination a[href*='page=2']") |> render_click()
+      assert_patch(view, ~p"/search?q=pagedterm&page=2")
+      render_async(view, @async_timeout)
+
+      # Page 2 is exactly the matches page 1 did not show, still in rank order.
+      assert rendered_result_ids(view) == Enum.map(second_page, & &1.id)
+      assert summary(view) == ~s(Showing 21-25 of 25 results for "pagedterm")
+      assert has_element?(view, "#search-pagination a[href*='page=1']")
     end
 
-    test "handles page parameter correctly", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/search?q=test&page=2")
+    test "a page parameter lands on that page of the match set", %{conn: conn} do
+      pages = ranked_corpus("directpageterm", 25, "Direct Page Doc")
+      [first_of_page_two | _] = tail = Enum.drop(pages, @per_page)
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=directpageterm&page=2")
 
       render_async(view, @async_timeout)
-      assert has_element?(view, "#search-empty")
-      refute has_element?(view, "#search-error")
+
+      assert rendered_result_ids(view) == Enum.map(tail, & &1.id)
+      assert summary(view) == ~s(Showing 21-25 of 25 results for "directpageterm")
+
+      # A result opened from page 2 has to remember it was page 2, or Back
+      # lands the reader on results they already scrolled past.
+      assert result_href(view, first_of_page_two) ==
+               "/documents/#{first_of_page_two.document_id}?page=21&from=search" <>
+                 "&q=directpageterm&search_page=2"
     end
 
-    test "handles invalid page parameter", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/search?q=test&page=invalid")
+    test "an unparseable page parameter falls back to the first page of matches", %{conn: conn} do
+      pages = ranked_corpus("invalidpageterm", 3, "Invalid Page Doc")
+
+      {:ok, view, _html} = live(conn, ~p"/search?q=invalidpageterm&page=invalid")
 
       render_async(view, @async_timeout)
-      assert has_element?(view, "#search-empty")
+
+      # Falling back means page 1 of a real match set, not an empty page: a
+      # fallback that skipped the results would look identical to a library
+      # with nothing in it.
+      assert rendered_result_ids(view) == Enum.map(pages, & &1.id)
+      assert summary(view) == ~s(Showing 1-3 of 3 results for "invalidpageterm")
       refute has_element?(view, "#search-error")
     end
 
@@ -280,5 +281,53 @@ defmodule DoctransWeb.SearchLiveTest do
       refute has_element?(view, "#search-error")
       assert has_element?(view, "#search-empty")
     end
+  end
+
+  # A match set whose ranking is fixed rather than incidental: each page repeats
+  # the term one time less than the page before it, so the full-text half ranks
+  # them strictly and the list returned here is the order the search owes back --
+  # highest first. Nothing else in the corpus mentions the term.
+  defp ranked_corpus(term, count, title_prefix) do
+    for rank <- 1..count do
+      document = document_fixture(%{title: "#{title_prefix} #{rank}", status: "completed"})
+      page = page_fixture(document, %{page_number: rank})
+
+      {:ok, page} =
+        Documents.update_page_extraction(page, %{
+          extraction_status: "completed",
+          original_markdown:
+            String.duplicate("#{term} ", count + 1 - rank) <> "and some filler text"
+        })
+
+      page
+    end
+  end
+
+  # The page ids of the rendered result cards, in the order the page lists them.
+  defp rendered_result_ids(view) do
+    view
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query("#search-results a[id^='search-result-']")
+    |> LazyHTML.attribute("id")
+    |> Enum.map(&String.replace_prefix(&1, "search-result-", ""))
+  end
+
+  defp result_href(view, page) do
+    view
+    |> element("#search-result-#{page.id}")
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.attribute("href")
+    |> List.first()
+  end
+
+  defp summary(view) do
+    view
+    |> element("#search-summary")
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.text()
+    |> String.trim()
   end
 end
