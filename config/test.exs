@@ -62,6 +62,19 @@ config :doctrans, Doctrans.Resilience.HealthCheckWorker, enabled: false
 # the tests that drive a sweep on demand are unaffected.
 config :doctrans, Doctrans.Documents.SweeperWorker, enabled: false
 
+# Disable the processing worker's startup recovery in tests, for the third
+# variant of the same reason. Its pass is scheduled five seconds after boot and
+# each batch reschedules the next one second later, so the messages land long
+# after the test that was running when the timer started has finished. The pass
+# then queries the database from a process with no sandbox owner, raises
+# `DBConnection.OwnershipError`, and is restarted by the supervisor -- which
+# schedules a fresh pass, so the churn repeats for the length of the run and
+# lands on whatever timing-sensitive test is executing. It also competed with
+# the recovery tests themselves, reconciling the rows they had just staged.
+# `recover_now/1` still runs the whole pass while this is off, so the tests that
+# drive recovery on demand are unaffected.
+config :doctrans, Doctrans.Processing.Worker, startup_recovery: false
+
 # Oban configuration for testing
 config :doctrans, Oban,
   repo: Doctrans.Repo,
