@@ -26,7 +26,7 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
     CircuitBreaker.reset(:embedding_api)
 
     bypass = Bypass.open()
-    TestEnv.put_env(:openai, base_url: "http://localhost:#{bypass.port}", api_key: "sk-test-123")
+    put_openai_env(base_url: "http://localhost:#{bypass.port}", api_key: "sk-test-123")
 
     on_exit(fn ->
       CircuitBreaker.reset(:openai_api)
@@ -273,6 +273,14 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
     Sandbox.allow(Doctrans.Repo, self(), pid)
 
     pid
+  end
+
+  # `:openai` also carries the model names the processing pipeline reads, and
+  # `Application.put_env/3` is VM-global: replacing the keyword list outright
+  # would unset them for every process for as long as the test runs.
+  defp put_openai_env(overrides) do
+    merged = Keyword.merge(Application.fetch_env!(:doctrans, :openai), overrides)
+    TestEnv.put_env(:openai, merged)
   end
 
   defp models(conn, test_pid, ids) do

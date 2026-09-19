@@ -1822,14 +1822,23 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   closing); the `queue_indexing/1` error arm (needs `Oban.insert/1` to fail under `testing: :inline`);
   `llm_processor.ex`'s two `nil -> []` option arms, which are unreachable because `Run.choices/1`
   always fills both model keys; and one `Logger.info` argument the test log level never evaluates.
+  Fixed in review, because the new tests are what paid for them: the OpenAI probe inherited Req's
+  default `retry: :safe_transient`, so `check_openai/0` spent three backoffs (~7 s) on an unreachable
+  endpoint despite its 5 s `receive_timeout`, and the new unreachable-endpoint test paid that on every
+  run — `lib/doctrans/resilience/health_check.ex` now passes `retry: false`, and the five modules
+  above run in 0.5 s rather than 7.6 s. The sweeper is now `enabled: false` in `config/test.exs`
+  alongside the health check worker, for the reason recorded against Q03 below.
+  Also fixed in review, in the tests themselves: `health_check_test.exs` and
+  `health_check_worker_test.exs` replaced the whole `:openai` keyword list to point the probe at
+  Bypass, which unset `vision_model`, `translation_model` and `chat_model` for every process for as
+  long as the test ran; both now merge into the configured value the way `sweeper_worker_test.exs`
+  already did.
   Handed to other items rather than fixed here, since Q02 is a coverage item and these are `lib/`
   defects: `HealthCheckWorker.handle_info(:check, ...)` ignores `state.enabled` where
   `handle_cast(:check_now, ...)` honours it, so a disabled worker that receives a stray `:check` runs a
-  full round of HTTP and DB checks; the OpenAI probe inherits Req's default `retry: :safe_transient`,
-  so a health check against an unreachable endpoint spends ~7 s retrying despite its 5 s
-  `receive_timeout`; `max_attempts` means "extra retries" in `LlmProcessor` and "total attempts" in
-  Oban, an off-by-one collision of the same name; and `LlmProcessor` sleeps in-process between
-  retries, holding its Oban queue slot for the whole backoff.
+  full round of HTTP and DB checks; `max_attempts` means "extra retries" in `LlmProcessor` and "total
+  attempts" in Oban, an off-by-one collision of the same name; and `LlmProcessor` sleeps in-process
+  between retries, holding its Oban queue slot for the whole backoff.
 - [ ] **Q03 · P2 · Assert successful outcomes and control test background work.**
   Some search tests allow either results or no results and conditionally skip link assertions.
   The passing suite logged database-ownership errors from background tasks.
@@ -1862,6 +1871,19 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   module's reported coverage, because the `handle_info(:sweep, ...)` and rescue arms were executed by
   the accidental sweep rather than by any test. Coverage of a module that depends on how long the
   suite takes is exactly the jitter this item exists to remove.
+  That half is now closed: `config/test.exs` sets `SweeperWorker, enabled: false`, the same shape as
+  the `HealthCheckWorker` line above it. `sweep_now/0` is unaffected by `enabled: false` by design, so
+  the Q02 tests that drive a sweep on demand still drive one. `Processing.Worker` remains, and it is
+  the harder half: it has no such switch, and its recovery pass is scheduled from `init/1`, before any
+  test exists to own a sandbox connection.
+  Evidence that it is worth more than log noise, gathered while reviewing Q02: across three full
+  `mix test --cover` runs the `Processing.Worker` GenServer terminated on the ownership error 2, 1 and
+  0 times, and the run with two terminations was the only run with test failures — `pdf_extractor_bounds_test.exs:85`
+  ("a hung renderer times out, is reaped, and frees the slot") and `subprocess_test.exs:56`, both
+  sub-second deadline assertions, both timing out within seconds of a termination timestamp. The crash
+  is not contained: the supervisor restarts the Worker, the restart schedules a fresh recovery pass,
+  and that churn lands on whatever timing-sensitive test is running. Two tests that look unrelated and
+  pre-existing are, on this evidence, downstream of this item.
   The fix already exists and is dead code: `test/support/worker_helpers.ex:20` calls
   `Ecto.Adapters.SQL.Sandbox.allow/3` correctly, but `grep -rn "WorkerHelpers\|setup_worker_sandbox"`
   matches only its own definition. That single call site is the only `Sandbox.allow/3` in the tree.

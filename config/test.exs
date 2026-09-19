@@ -53,6 +53,15 @@ config :doctrans, :retry,
 # Disable health check worker in tests (makes real HTTP/DB calls)
 config :doctrans, Doctrans.Resilience.HealthCheckWorker, enabled: false
 
+# Disable the document sweeper in tests, for the same reason. Its first sweep is
+# scheduled one minute after boot regardless of environment and the suite runs
+# longer than that, so an enabled worker performs a real sweep of whatever upload
+# root is configured when the timer fires -- the shared `tmp/uploads_test`, or the
+# temporary root a sweeper test has just pointed `:uploads` at and filled with the
+# fixtures it is about to assert on. `sweep_now/0` still works while disabled, so
+# the tests that drive a sweep on demand are unaffected.
+config :doctrans, Doctrans.Documents.SweeperWorker, enabled: false
+
 # Oban configuration for testing
 config :doctrans, Oban,
   repo: Doctrans.Repo,

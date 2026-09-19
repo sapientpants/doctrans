@@ -163,10 +163,13 @@ defmodule Doctrans.Documents.SweeperWorkerTest do
     TestEnv.put_env(SweeperWorker, config)
 
     worker =
-      start_supervised!(%{
-        id: :sweeper_worker_under_test,
-        start: {GenServer, :start_link, [SweeperWorker, []]}
-      })
+      start_supervised!(
+        %{
+          id: :sweeper_worker_under_test,
+          start: {GenServer, :start_link, [SweeperWorker, []]}
+        },
+        restart: :temporary
+      )
 
     Sandbox.allow(Repo, self(), worker)
     worker

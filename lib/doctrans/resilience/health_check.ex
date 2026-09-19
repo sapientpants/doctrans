@@ -78,8 +78,13 @@ defmodule Doctrans.Resilience.HealthCheck do
           # Actually check OpenAI connectivity
           url = "#{OpenAI.base_url()}/v1/models"
 
+          # `retry: false` because a health check reports the state of the
+          # dependency now, not after Req's default `:safe_transient` policy has
+          # spent three backoffs (~7 s) on it -- which would also overrun the 5 s
+          # `receive_timeout` this check is bounded by.
           case Req.get(url,
                  receive_timeout: 5_000,
+                 retry: false,
                  headers: [{"authorization", "Bearer #{OpenAI.api_key()}"}]
                ) do
             {:ok, %{status: 200, body: body}} ->

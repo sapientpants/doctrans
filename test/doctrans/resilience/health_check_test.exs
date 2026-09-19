@@ -20,7 +20,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
   setup do
     CircuitBreaker.reset(:openai_api)
     bypass = Bypass.open()
-    TestEnv.put_env(:openai, base_url: "http://localhost:#{bypass.port}", api_key: "sk-test-123")
+    put_openai_env(base_url: "http://localhost:#{bypass.port}", api_key: "sk-test-123")
 
     on_exit(fn -> CircuitBreaker.reset(:openai_api) end)
 
@@ -53,8 +53,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
     end
 
     test "reports the status code when the API rejects the request", %{bypass: bypass} do
-      # 401 rather than a 5xx: Req retries transient statuses, and an
-      # unauthorized key is the failure an operator actually gets here.
+      # An unauthorized key is the failure an operator actually gets here.
       Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
         Plug.Conn.resp(conn, 401, "unauthorized")
       end)
@@ -63,14 +62,14 @@ defmodule Doctrans.Resilience.HealthCheckTest do
     end
 
     test "reports a transport error when the API is unreachable" do
-      TestEnv.put_env(:openai, base_url: "http://127.0.0.1:1", api_key: nil)
+      put_openai_env(base_url: "http://127.0.0.1:1", api_key: nil)
 
       assert HealthCheck.check_openai() == {:error, {:transport_error, [reason: :econnrefused]}}
     end
 
     test "normalizes a raised failure instead of crashing the caller" do
       # A base URL without a scheme makes Req raise while building the request.
-      TestEnv.put_env(:openai, base_url: "localhost:9999", api_key: nil)
+      put_openai_env(base_url: "localhost:9999", api_key: nil)
 
       assert {:error, {:operation_failed, [reason: %ArgumentError{}]}} =
                HealthCheck.check_openai()
@@ -217,6 +216,14 @@ defmodule Doctrans.Resilience.HealthCheckTest do
 
       assert HealthCheck.circuit_breaker_status().openai_api == :blown
     end
+  end
+
+  # `:openai` also carries the model names the processing pipeline reads, and
+  # `Application.put_env/3` is VM-global: replacing the keyword list outright
+  # would unset them for every process for as long as the test runs.
+  defp put_openai_env(overrides) do
+    merged = Keyword.merge(Application.fetch_env!(:doctrans, :openai), overrides)
+    TestEnv.put_env(:openai, merged)
   end
 
   defp models(conn, ids) do
