@@ -1,0 +1,75 @@
+# BEGIN DOCTRANS COMMAND POLICY
+# Native Codex execpolicy rules -- the first of two layers. Installed into
+# ~/.codex/rules/default.rules by scripts/sync-command-policy.sh, between these
+# markers; nothing outside them is touched.
+#
+# A prefix rule matches leading tokens only, so it cannot see `git push origin
+# --force` (the flag is not in the prefix) or a command behind `zsh -lc`. That is
+# what the second layer is for: the PreToolUse hook running scripts/command-policy.sh,
+# which matches the whole command line. These rules are the cheap, always-on half.
+#
+# `forbidden` wins over a broader `allow` regardless of order, verified with
+# `codex execpolicy check`, so the allow rules already in default.rules -- gh api,
+# git switch -- stay in force everywhere except where a rule below overrides them.
+
+# Harmless probe. Its only job is to prove enforcement is live after a restart.
+prefix_rule(pattern=["doctrans-policy-probe"], decision="forbidden", justification="Harmless probe used to verify the policy is loaded.")
+
+# Verification bypass
+prefix_rule(pattern=["git", "commit", "--no-verify"], decision="forbidden", justification="Commit hooks are the quality gate and must not be bypassed.")
+prefix_rule(pattern=["git", "commit", "-n"], decision="forbidden", justification="Commit hooks are the quality gate and must not be bypassed.")
+
+# Discards uncommitted work
+prefix_rule(pattern=["git", "reset", "--hard"], decision="forbidden", justification="Hard reset discards uncommitted work.")
+prefix_rule(pattern=["git", "clean"], decision="forbidden", justification="Git clean permanently removes untracked files.")
+prefix_rule(pattern=["git", "restore"], decision="forbidden", justification="Git restore discards working-tree changes.")
+prefix_rule(pattern=["git", "checkout", "--"], decision="forbidden", justification="Checkout can discard working-tree changes.")
+prefix_rule(pattern=["git", "checkout", "."], decision="forbidden", justification="Checkout can discard working-tree changes.")
+prefix_rule(pattern=["git", "stash", "drop"], decision="forbidden", justification="Dropping a stash destroys stashed work.")
+prefix_rule(pattern=["git", "stash", "clear"], decision="forbidden", justification="Clearing the stash destroys stashed work.")
+
+# Rewrites history
+prefix_rule(pattern=["git", "rebase"], decision="forbidden", justification="Rebase rewrites history.")
+prefix_rule(pattern=["git", "commit", "--amend"], decision="forbidden", justification="Amend rewrites a commit.")
+prefix_rule(pattern=["git", "filter-branch"], decision="forbidden", justification="History rewriting is refused.")
+prefix_rule(pattern=["git", "filter-repo"], decision="forbidden", justification="History rewriting is refused.")
+prefix_rule(pattern=["git", "reflog", "expire"], decision="forbidden", justification="Expiring the reflog removes the recovery path for rewritten history.")
+prefix_rule(pattern=["git", "update-ref", "-d"], decision="forbidden", justification="Deleting a ref directly can orphan commits.")
+prefix_rule(pattern=["git", "branch", "-D"], decision="forbidden", justification="Forced branch deletion can drop unmerged commits.")
+
+# Irreversible publishing. Ordinary `git push` and `gh pr merge` are deliberately
+# absent: they are how work ships here. Only the forms nobody can undo are refused.
+prefix_rule(pattern=["git", "push", "--force"], decision="forbidden", justification="A force push overwrites published history.")
+prefix_rule(pattern=["git", "push", "-f"], decision="forbidden", justification="A force push overwrites published history.")
+prefix_rule(pattern=["git", "push", "--force-with-lease"], decision="forbidden", justification="A force push overwrites published history.")
+prefix_rule(pattern=["git", "push", "--mirror"], decision="forbidden", justification="Mirror push overwrites every remote ref.")
+prefix_rule(pattern=["git", "push", "--delete"], decision="forbidden", justification="Deletes a remote branch.")
+prefix_rule(pattern=["gh", "release", "delete"], decision="forbidden", justification="Mutating a published release is irreversible.")
+prefix_rule(pattern=["gh", "release", "delete-asset"], decision="forbidden", justification="Mutating a published release is irreversible.")
+prefix_rule(pattern=["gh", "release", "edit"], decision="forbidden", justification="Mutating a published release is irreversible.")
+prefix_rule(pattern=["gh", "release", "upload"], decision="forbidden", justification="Mutating a published release is irreversible.")
+prefix_rule(pattern=["gh", "api", "-X", "DELETE"], decision="forbidden", justification="A DELETE through the GitHub API is irreversible.")
+prefix_rule(pattern=["gh", "api", "--method", "DELETE"], decision="forbidden", justification="A DELETE through the GitHub API is irreversible.")
+
+# Remote configuration (doctrans AGENTS.md forbids changing the remote URL)
+prefix_rule(pattern=["git", "remote", "set-url"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "remote", "add"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "remote", "remove"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "remote", "rename"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+
+# Recursive deletion
+prefix_rule(pattern=["rm", "-r"], decision="forbidden", justification="Recursive deletion is refused.")
+prefix_rule(pattern=["rm", "-rf"], decision="forbidden", justification="Recursive deletion is refused.")
+prefix_rule(pattern=["rm", "-fr"], decision="forbidden", justification="Recursive deletion is refused.")
+prefix_rule(pattern=["rm", "-R"], decision="forbidden", justification="Recursive deletion is refused.")
+prefix_rule(pattern=["rmdir"], decision="forbidden", justification="Directory deletion is refused.")
+
+# Database and volumes. Global rules, so they apply outside doctrans too -- dropping
+# a database is not something worth doing by accident in any repository.
+prefix_rule(pattern=["mix", "ecto.drop"], decision="forbidden", justification="Dropping the database destroys local data.")
+prefix_rule(pattern=["mix", "ecto.reset"], decision="forbidden", justification="Resetting the database destroys local data.")
+prefix_rule(pattern=["dropdb"], decision="forbidden", justification="Dropping the database destroys local data.")
+prefix_rule(pattern=["docker", "volume", "rm"], decision="forbidden", justification="Removing a docker volume destroys the database.")
+prefix_rule(pattern=["docker", "volume", "prune"], decision="forbidden", justification="Removing docker volumes destroys the database.")
+prefix_rule(pattern=["docker", "system", "prune"], decision="forbidden", justification="Removing docker volumes destroys the database.")
+# END DOCTRANS COMMAND POLICY

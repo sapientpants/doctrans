@@ -19,6 +19,17 @@ This is a web application written using the Phoenix web framework.
   `https://github.com/...`). If a git operation such as `git push` fails with an access or
   connection error, **stop and wait for the user to fix it** — do not work around it by
   switching protocols, adding one-off remote URLs, or bypassing credentials
+- **A command policy refuses destructive shell commands**, and it refuses them to every agent:
+  Claude Code, opencode and Codex all run `scripts/command-policy.sh`, which is the single copy
+  of the rule table — work-destroying (`reset --hard`, `clean`, `restore`), history-rewriting
+  (`rebase`, `--amend`, `branch -D`), irreversibly-publishing (force push, push to `main`,
+  release mutation), recursive deletion, and the database and volume operations. Ordinary
+  `git push` to a feature branch and `gh pr merge` stay allowed. When one of these is genuinely
+  needed, **stop and ask** — do not route around the policy with an equivalent command. Add or
+  change a rule in that one file, then run `scripts/test-command-policy.sh`.
+- **Codex keeps its own copy** of that policy, because Codex reads hooks and execpolicy rules
+  only from `~/.codex`. `scripts/sync-command-policy.sh --check` reports drift and `--install`
+  refreshes it; run the check after editing the policy
 
 ### Phoenix v1.8 guidelines
 
