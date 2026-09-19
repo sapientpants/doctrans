@@ -14,10 +14,11 @@
 #     AGENTS.md, and the database and volume operations that would take the
 #     pgdata volume with them.
 #
-# One policy, three agents. This script is the only copy of the rule table:
+# One policy, every agent. This script is the only copy of the rule table:
 #
 #   Claude Code  .claude/settings.json runs it as a PreToolUse hook on Bash
 #   opencode     .opencode/plugins/block-dangerous-commands.js spawns it
+#   pi           .pi/extensions/block-dangerous-commands.ts spawns it on tool_call
 #   Codex        ~/.codex/hooks.json runs it with --json, backed by native
 #                forbidden rules in ~/.codex/rules/default.rules
 #
