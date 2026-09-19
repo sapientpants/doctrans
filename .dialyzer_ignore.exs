@@ -50,14 +50,6 @@
   # owner: @sapientpants
   # expires: 2026-12-12
   # upstream: none
-  # rationale: `Sandbox.allow/3` returns `:ok | {:already, …} | :not_found`, all of them
-  #   acceptable here — the worker may already hold the connection. Same `_ =` fix as
-  #   the fixtures entry, deferred for the same reason.
-  {"test/support/worker_helpers.ex", :unmatched_return, 16},
-
-  # owner: @sapientpants
-  # expires: 2026-12-12
-  # upstream: none
   # rationale: The stub implements `OpenAIBehaviour` by raising; terminating with an
   #   exception is the behaviour under test, so `no_return` is the correct typing of a
   #   correct function. Both raising callbacks are pinned by line.
