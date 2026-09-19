@@ -316,8 +316,7 @@ defmodule DoctransWeb.CoreComponents do
         aria-hidden="true"
         class={@backdrop_class}
         phx-click={@on_close}
-      >
-      </button>
+      ></button>
     </div>
     """
   end
