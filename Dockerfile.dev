@@ -5,7 +5,7 @@
 # and bumps alongside the digest. This digest is the multi-architecture index
 # (amd64/arm64), so it resolves on CI runners and Apple silicon alike, and the
 # version must stay in step with `mise.toml`.
-FROM elixir:1.20.4-otp-29@sha256:321ba13236f0831aa0ea6501e3bab9df0ed26188ba8863a53126057f8a933d71
+FROM elixir:1.20-otp-28@sha256:f44fd430afaceb9149fc0c1982b6a9f85eee12388d600ea9f589383286b9a48d
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
