@@ -14,13 +14,28 @@
 #     AGENTS.md, and the database and volume operations that would take the
 #     pgdata volume with them.
 #
-# The `--no-verify` rule was previously its own hook; it lives here now so that one
-# file answers "what is blocked". .opencode/plugins/block-git-no-verify.js still
-# mirrors that single rule for opencode and nothing else.
+# One policy, three agents. This script is the only copy of the rule table:
 #
-# PreToolUse hook on Bash. Reads the tool call as JSON on stdin; exit 2 blocks the
-# call and returns stderr to Claude.
+#   Claude Code  .claude/settings.json runs it as a PreToolUse hook on Bash
+#   opencode     .opencode/plugins/block-dangerous-commands.js spawns it
+#   Codex        ~/.codex/hooks.json runs it with --json, backed by native
+#                forbidden rules in ~/.codex/rules/default.rules
+#
+# Codex's config is global, so its copy lives under ~/.codex and has to be re-synced
+# when this file changes; scripts/sync-command-policy.sh does that and reports drift.
+#
+# Reads the tool call as JSON on stdin. Two output modes, because the agents differ:
+#
+#   (default)  exit 2 with the reason on stderr        -- Claude Code, opencode
+#   --json     a PreToolUse deny decision on stdout    -- Codex
 set -uo pipefail
+
+output=exit2
+case "${1:-}" in
+  --json) output=json ;;
+  "") ;;
+  *) printf 'usage: %s [--json]\n' "$0" >&2; exit 64 ;;
+esac
 
 command=$(jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
 [ -n "$command" ] || exit 0
@@ -165,11 +180,15 @@ fi
 
 [ -n "$verdict" ] || exit 0
 
-cat >&2 <<MSG
-Blocked by the project command policy: ${verdict}.
+reason="Blocked by the command policy: ${verdict}. The rule lives in scripts/command-policy.sh. If this operation is genuinely what is wanted, run it yourself -- the policy deliberately does not let the agent decide that its own case is the exception."
 
-The rule lives in .claude/hooks/block-dangerous-commands.sh. If this operation is
-genuinely what is wanted, run it yourself -- the policy deliberately does not let
-the agent decide that its own case is the exception.
-MSG
+if [ "$output" = json ]; then
+  # Codex (and Claude Code) read a decision object on stdout. jq builds it so the
+  # reason is escaped properly rather than hand-quoted.
+  jq -n --arg reason "$reason" \
+    '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
+  exit 0
+fi
+
+printf '%s\n' "$reason" >&2
 exit 2
