@@ -15,10 +15,13 @@ defmodule Doctrans.Processing.WorkerCallbacksTest do
 
   setup do
     worker =
-      start_supervised!(%{
-        id: :worker_under_test,
-        start: {GenServer, :start_link, [Worker, []]}
-      })
+      start_supervised!(
+        %{
+          id: :worker_under_test,
+          start: {GenServer, :start_link, [Worker, []]}
+        },
+        restart: :temporary
+      )
 
     # The instance reads Oban and the document tables from its own process.
     Sandbox.allow(Repo, self(), worker)
