@@ -4,8 +4,9 @@
 # filter stops matching and `--list-unused-filters` fails the gate, so a suppression
 # cannot outlive the line it was written for. File-level class mutes are forbidden —
 # they hide warnings nobody has looked at, which is how G02's two wrong diagnoses
-# survived. Warnings that carry a column report their location as `{line, column}`;
-# use that form, or the filter will never match.
+# survived. Always give the location as a bare line number: dialyxir 1.4.8 normalises a
+# warning's position to its line before matching filters, so a `{line, column}` filter
+# can never match (jeremyjh/dialyxir#584).
 #
 # Each entry carries four comment keys, enforced by scripts/check_dialyzer_filters.exs:
 #
@@ -25,7 +26,7 @@
   #   caller path validates `:title` as a binary first. It is kept as a defensive
   #   fallback for a private pipeline; the alternative is a FunctionClauseError if the
   #   validation order ever changes. Re-decide at expiry: delete the clause or keep it.
-  {"lib/doctrans/validation.ex", :pattern_match_cov, {223, 8}},
+  {"lib/doctrans/validation.ex", :pattern_match_cov, 223},
 
   # owner: @sapientpants
   # expires: 2026-12-12
@@ -44,7 +45,7 @@
   #   fixture reloads the document with its pages on the next line. Fixable with a
   #   `_ =` binding; left alone here so this register — not a test-support edit — is
   #   what changes in G14.
-  {"test/support/fixtures.ex", :unmatched_return, {42, 11}},
+  {"test/support/fixtures.ex", :unmatched_return, 42},
 
   # owner: @sapientpants
   # expires: 2026-12-12
@@ -67,5 +68,5 @@
   # upstream: none
   # rationale: See the entry above — `translate/4` is the second raising callback of the
   #   same stub.
-  {"test/support/openai_crash_stub.ex", :no_return, {22, 7}}
+  {"test/support/openai_crash_stub.ex", :no_return, 22}
 ]
