@@ -173,7 +173,10 @@ defmodule Doctrans.Processing.SubprocessTest do
     assert {:start_error, message} =
              Subprocess.run(Path.join(dir, "missing"), [], timeout: 10_000)
 
-    assert is_binary(message)
+    # The message is what the caller logs and stores, so it has to say why the
+    # spawn failed rather than merely be a string: `Port.open/2` raises
+    # `:enoent` for an executable that is not there.
+    assert message =~ "enoent"
   end
 
   test "supervised/1 returns the result of the work" do

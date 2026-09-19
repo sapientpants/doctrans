@@ -1,7 +1,33 @@
 defmodule Doctrans.Processing.OpenAITest do
-  use ExUnit.Case, async: true
+  @moduledoc """
+  Covers `Doctrans.Processing.OpenAI`'s local helpers and its two probe calls.
+
+  `available?/0` and `list_models/0` are the calls the reprocess modal makes
+  before anything has been processed, and they used to be asserted here with
+  `is_boolean/1` and `is_list/1` against whatever happened to be listening on
+  the configured host — assertions that cannot fail, run against the network.
+  Both now talk to a local Bypass server and are asserted exactly, reachable and
+  not. Nothing in this file leaves the machine.
+
+  The unreachable case is driven through a base URL Req cannot build a request
+  from rather than a closed port: Req retries a safe GET on `:econnrefused`, so
+  a refused connection costs about seven seconds of backoff per call, and
+  neither probe takes options this test could pass `retry: false` through.
+  `available?/0` has a rescue clause for exactly that failure; `list_models/0`
+  reports a rejected request instead.
+
+  The full HTTP surface — chat, streaming, extraction, translation, embedding
+  and the circuit-breaker paths — is covered in
+  `Doctrans.Processing.OpenAIRequestTest`.
+  """
+
+  use ExUnit.Case, async: false
 
   alias Doctrans.Processing.OpenAI
+  alias Doctrans.TestEnv
+
+  # A rejected request is logged at :error by `ApiFailure`.
+  @moduletag :capture_log
 
   describe "extract_markdown/2" do
     test "returns error for non-existent file" do
@@ -12,37 +38,60 @@ defmodule Doctrans.Processing.OpenAITest do
     end
   end
 
-  describe "translate/4" do
-    # Translation requires a running API server, which is mocked in integration tests.
-    # Here we test the module structure and function signatures
-    test "module defines expected functions" do
-      Code.ensure_loaded!(OpenAI)
-      # extract_markdown has a default for opts, so it can be called with 1 arg
-      assert function_exported?(OpenAI, :extract_markdown, 1)
-      # translate has a default for opts, so it can be called with 3 or 4 args
-      assert function_exported?(OpenAI, :translate, 3)
-      assert function_exported?(OpenAI, :translate, 4)
-      assert function_exported?(OpenAI, :available?, 0)
-      assert function_exported?(OpenAI, :list_models, 0)
-    end
-  end
-
   describe "available?/0" do
-    test "returns boolean" do
-      # Without an API server running, this should return false
-      result = OpenAI.available?()
-      assert is_boolean(result)
+    setup :bypass_api
+
+    test "reports the API as available when the model list answers", %{bypass: bypass} do
+      test_pid = self()
+
+      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
+        send(test_pid, :models_requested)
+        json(conn, 200, %{"object" => "list", "data" => [%{"id" => "vision"}]})
+      end)
+
+      assert OpenAI.available?()
+      assert_received :models_requested
+    end
+
+    test "reports the API as unavailable when it rejects the request", %{bypass: bypass} do
+      # An unauthorized key is what an operator with a misconfigured server gets,
+      # and unlike a 5xx it is not retried, so the probe answers in one round trip.
+      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
+        Plug.Conn.resp(conn, 401, "unauthorized")
+      end)
+
+      refute OpenAI.available?()
+    end
+
+    test "reports the API as unavailable when the base URL cannot be requested" do
+      # A base URL without a scheme makes Req raise while building the request.
+      # The probe backs a page load, so it has to answer rather than crash it.
+      put_openai_env(base_url: "localhost:9999", api_key: nil)
+
+      refute OpenAI.available?()
     end
   end
 
   describe "list_models/0" do
-    test "returns ok tuple or error tuple" do
-      result = OpenAI.list_models()
+    setup :bypass_api
 
-      case result do
-        {:ok, models} -> assert is_list(models)
-        {:error, reason} -> assert reason == Doctrans.Errors.normalize(reason)
-      end
+    test "returns the models the API advertises", %{bypass: bypass} do
+      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
+        json(conn, 200, %{
+          "object" => "list",
+          "data" => [%{"id" => "vision-model"}, %{"id" => "chat-model"}]
+        })
+      end)
+
+      assert OpenAI.list_models() == {:ok, ["vision-model", "chat-model"]}
+    end
+
+    test "reports the status when the API rejects the request", %{bypass: bypass} do
+      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
+        Plug.Conn.resp(conn, 401, "unauthorized")
+      end)
+
+      assert OpenAI.list_models() == {:error, {:http_error, [status: 401]}}
     end
   end
 
@@ -86,5 +135,25 @@ defmodule Doctrans.Processing.OpenAITest do
       input = "```\n  Hello  \n```"
       assert OpenAI.strip_code_fences(input) == "Hello"
     end
+  end
+
+  defp bypass_api(_context) do
+    bypass = Bypass.open()
+    put_openai_env(base_url: "http://localhost:#{bypass.port}", api_key: "sk-test-123")
+    %{bypass: bypass}
+  end
+
+  # Merged, not replaced: `:openai` also carries the vision, translation and chat
+  # model names, and application env is global, so replacing the list would unset
+  # them for every process for as long as this test runs.
+  defp put_openai_env(overrides) do
+    merged = Keyword.merge(Application.fetch_env!(:doctrans, :openai), overrides)
+    TestEnv.put_env(:openai, merged)
+  end
+
+  defp json(conn, status, body) do
+    conn
+    |> Plug.Conn.put_resp_content_type("application/json")
+    |> Plug.Conn.resp(status, Jason.encode!(body))
   end
 end
