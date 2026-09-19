@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { dirname, resolve } from "node:path"
 
-// Refuses the same operations as Claude Code and Codex do: work-destroying,
+// Refuses the same operations as Claude Code, pi and Codex do: work-destroying,
 // history-rewriting, and irreversibly-publishing commands.
 //
 // The rule table is deliberately NOT repeated here. scripts/command-policy.sh is

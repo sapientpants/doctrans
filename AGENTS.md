@@ -20,8 +20,8 @@ This is a web application written using the Phoenix web framework.
   connection error, **stop and wait for the user to fix it** — do not work around it by
   switching protocols, adding one-off remote URLs, or bypassing credentials
 - **A command policy refuses destructive shell commands**, and it refuses them to every agent:
-  Claude Code, opencode and Codex all run `scripts/command-policy.sh`, which is the single copy
-  of the rule table — work-destroying (`reset --hard`, `clean`, `restore`), history-rewriting
+  Claude Code, opencode, pi and Codex all run `scripts/command-policy.sh`, which is the single
+  copy of the rule table — work-destroying (`reset --hard`, `clean`, `restore`), history-rewriting
   (`rebase`, `--amend`, `branch -D`), irreversibly-publishing (force push, push to `main`,
   release mutation), recursive deletion, and the database and volume operations. Ordinary
   `git push` to a feature branch and `gh pr merge` stay allowed. When one of these is genuinely
@@ -30,6 +30,10 @@ This is a web application written using the Phoenix web framework.
 - **Codex keeps its own copy** of that policy, because Codex reads hooks and execpolicy rules
   only from `~/.codex`. `scripts/sync-command-policy.sh --check` reports drift and `--install`
   refreshes it; run the check after editing the policy
+- **pi loads its guard only in a trusted project.** `.pi/extensions/` is ignored until the
+  folder is trusted, and non-interactive runs (`-p`, `--mode json`, `--mode rpc`) skip untrusted
+  project resources outright — so run `/trust` once in an interactive `pi` session, or the guard
+  is simply absent there
 
 ### Phoenix v1.8 guidelines
 
