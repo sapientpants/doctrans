@@ -13,7 +13,16 @@ defmodule Doctrans.Config.Embedding do
   @spec model() :: String.t()
   def model, do: Config.get(:embedding, :model) || OpenAI.chat_model()
 
-  @doc "Request timeout in milliseconds; defaults to one minute."
+  @doc "Per-receive timeout in milliseconds; defaults to one minute."
   @spec timeout() :: pos_integer()
   def timeout, do: Config.get(:embedding, :timeout) || 60_000
+
+  @doc "Total budget for one embedding call, retries included; defaults to the API setting."
+  @spec deadline() :: pos_integer()
+  def deadline, do: Config.get(:embedding, :deadline) || OpenAI.deadline()
+
+  @doc "Largest embedding response accepted, in bytes; defaults to the API setting."
+  @spec max_response_bytes() :: pos_integer()
+  def max_response_bytes,
+    do: Config.get(:embedding, :max_response_bytes) || OpenAI.max_response_bytes()
 end

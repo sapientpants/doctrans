@@ -1,6 +1,6 @@
 # Doctrans improvement plan
 
-Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q05 completed,
+Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q06 completed,
 plus Phase 6 items G01–G19.
 Base: `main` at `6953656`, reviewed on 11 September 2026.
 Phase 6 added 12 September 2026 from a quality-gate, toolchain, and supply-chain review.
@@ -2263,7 +2263,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   does. Only a hand-built list with whitespace-only content reaches it, and `chunk/1` never emits one.
   Left in `lib/` as a defensive fallback; it is a candidate for Q07's mutation-testing scope.
 
-- [ ] **Q06 · P2 · Cover the remaining trust boundaries and bound the inference client.**
+- [x] **Q06 · P2 · Cover the remaining trust boundaries and bound the inference client.**
   Upload and image serving are the best-tested boundaries in the app and need only two additions: a
   zero-byte file at the LiveView level (`validation_test.exs:215` covers the unit), and a corrupt PDF with
   valid magic bytes but a garbage body, which passes `validate_file_content/2` and then fails at `pdfinfo`.
@@ -2288,6 +2288,64 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Evidence: `lib/doctrans/processing/openai.ex:126,183-188`, `config/openai.ex:23`,
   `lib/doctrans_web/live/document_live/viewer_components.ex:101-103`,
   `lib/doctrans_web/live/document_live/chat_components.ex:170-172`.
+  Implemented as one `lib/` change and three test additions; upload and image serving needed no
+  production change, and no markdown vector survived.
+  **Bounds.** New `Doctrans.Processing.RequestBounds` carries one budget per API call — a monotonic
+  deadline and a byte cap — and every request now goes out through its `post/3`/`get/3`
+  (`post_chat_completion/2`, `do_chat_stream/2`, `embed/2`, `list_models/0`). Bodies stream through
+  Req's `into:`, so each chunk is checked against the clock and the budget *before* it is appended: a
+  drip-feeder that resets `:receive_timeout` forever is cut off, and an oversized body is refused at
+  the chunk that crosses the cap rather than after it is buffered. Req's retry mode is replaced by a
+  function restating `:transient`/`:safe_transient` with the deadline folded in, allowing a retry only
+  while a whole attempt still fits before it — so the twenty minutes Q06 names is now the deadline. A
+  silent endpoint never reaches `into:`, so `:receive_timeout` is clamped to the budget as well and a
+  transport timeout arriving past the deadline is reported as the deadline, which points at the
+  endpoint rather than at one lost packet. Under the cap the body stays an ordinary binary and Req's
+  own decode steps still run; over it the accumulator becomes a marker tuple, which both halts the
+  stream and keeps the JSON decoder off a half-read payload. The streaming path keeps its SSE
+  collector, now as a `:collect` reducer, so deltas still arrive as they stream.
+  Config: `:openai, :deadline` (600_000) and `:openai, :max_response_bytes` (8_000_000), with the
+  `:embedding` section falling back to both; documented in `config/config.exs` and the README.
+  Errors: `:inference_deadline_exceeded`, classified retryable because a hung endpoint is what the
+  breaker exists for, and `{:inference_response_too_large, limit: bytes}`, permanent because a replay
+  buys the same oversized body — both with actionable `ErrorMessages` text in all 11 locales.
+  `openai_bounds_test.exs` drives raw TCP fake endpoints rather than Bypass, which cannot shut down
+  cleanly under a handler that deliberately outlives the call: silent, drip-feeding and 20 MB-flooding
+  endpoints on both the completion and the stream path, at `deadline: 300` with `timeout: 60_000` set
+  deliberately far above it, asserting the drip case saw a delta before the cut and the flood case
+  left most of what it offered in the socket. `available?/0` is deliberately still unbounded: it has
+  no `lib/` caller, and `openai.ex` now sits at 498 of the 500-line module gate — the next addition
+  there needs the embedding half extracted first.
+  **Upload.** Both additions are tests. `upload_validation_test.exs` gains the too-small file driven
+  through the real LiveView flow, where `validate_file_content/2`'s 8-byte window is the only gate
+  that refuses it, plus the genuinely zero-byte file at `UploadIntake.consume_entry/2`. The empty file
+  cannot go through `render_upload/3`: `Phoenix.LiveViewTest.UploadClient.progress_stats/2` divides by
+  `entry.size` and raises in the harness before the LiveView hears anything, and `file_input/4`
+  refuses a `:size` that disagrees with the content. A real browser does produce that entry, so the
+  test covers it one layer below the socket and records why. New `upload_corrupt_pdf_test.exs` uploads
+  `%PDF-1.7` followed by a garbage body against the **real** extractor, which the other upload files
+  stub: the upload is accepted and stored byte-for-byte, the inline Oban job then fails the document
+  with `pdf_extraction_failed`/`pdfinfo_failed`, no page rows are written, and the viewer shows the
+  failure. Both were mutation-checked — relaxing `:file_too_small` fails the validation pair, and
+  returning `:ok` from `PdfProcessor`'s error branch fails the corrupt-PDF test.
+  **Sanitizer.** `markdown_sanitization_test.exs` drives one payload through all three surfaces that
+  reach `raw/1` — translated page, original OCR page, and a chat answer on its distinct
+  `hardbreaks: true` path — asserting on the LiveView's own output with LazyHTML. The trap worth
+  recording: MDEx renders in safe mode, so raw HTML becomes `<!-- raw HTML omitted -->` and a
+  dangerous link target is blanked before any HTML exists, which means a test that only looks for
+  `<script>` passes with the scrubber unhooked. Each test therefore also refutes that comment, which
+  only `MarkdownScrubber` removes; unhooking `sanitize_html/1` fails all three.
+  `markdown_helpers_test.exs` gains the markdown-native vectors the HTML-first unit tests could not
+  reach: `javascript:`, `vbscript:` and `data:` in inline links, images, reference definitions and
+  autolinks, entity-encoded, whitespace-padded and uppercased variants, and a link-title breakout,
+  with safe schemes as the positive control. Nothing survived. Two behaviours are pinned rather than
+  fixed: an autolinked `javascript:` scheme renders as inert anchor *text* with an empty href, and a
+  protocol-relative `//host` destination keeps its href, which is `HtmlSanitizeEx.basic_html/1`
+  behaviour and external navigation rather than script execution.
+  Gate: `mix precommit` passes — 1,407 tests, 92.7% coverage. One unrelated pre-existing flake
+  surfaced across seven full runs and is untouched here: `pdf_extractor_bounds_test.exs:85` (R04)
+  polls for pid files a forked shell writes and failed two of those runs under load. It belongs with
+  the timing sleeps Q03 owns.
 
 - [ ] **Q08 · P2 · Build the asset bundles somewhere a broken one fails.**
   No CI job and no pre-commit hook runs `mix assets.build`, and `priv/static/assets/` is gitignored, so

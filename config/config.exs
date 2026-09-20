@@ -18,12 +18,25 @@ config :doctrans, Doctrans.Repo, types: Doctrans.PostgrexTypes
 # OpenAI-compatible API configuration for AI models (OMLX).
 # OPENAI_HOST / OPENAI_API_KEY env vars allow overriding (e.g., Docker:
 # http://host.docker.internal:8000). Defaults match the local OMLX server.
+#
+# The three settings below are what keep a misbehaving endpoint from holding a
+# page (see `Doctrans.Processing.RequestBounds`):
+# - timeout: milliseconds one receive may take. A server that keeps sending
+#   resets it, so on its own it bounds silence, not the request.
+# - deadline: milliseconds the whole call may take, retries included. A silent,
+#   drip-feeding, or flooding endpoint fails the page at this point instead of
+#   holding it for a timeout per attempt.
+# - max_response_bytes: how much response body is accepted before the stream is
+#   cut off. A completion capped at a few thousand tokens is far below this.
 config :doctrans, :openai,
   base_url: "http://localhost:8000",
   api_key: nil,
   vision_model: "mlx-community/Qwen3.5-9B-MLX-4bit",
   translation_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
-  chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit"
+  chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
+  timeout: 300_000,
+  deadline: 600_000,
+  max_response_bytes: 8_000_000
 
 # Circuit breaker configuration for resilience
 config :doctrans, :circuit_breakers,
@@ -116,6 +129,10 @@ config :doctrans, DoctransWeb.Gettext,
   locales: ~w(da de en es fr it nl no pl pt sv)
 
 # Embedding configuration for semantic search. A nil URL uses the OpenAI endpoint.
+#
+# Embedding calls are bounded the same way: :timeout defaults to 60_000 here,
+# while :deadline and :max_response_bytes fall back to the :openai settings
+# unless they are set in this section.
 config :doctrans, :embedding,
   base_url: nil,
   api_key: nil,

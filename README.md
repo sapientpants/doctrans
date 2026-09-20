@@ -224,7 +224,9 @@ config :doctrans, :openai,
   vision_model: "mlx-community/Qwen3.5-9B-MLX-4bit",
   translation_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
   chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
-  timeout: 300_000
+  timeout: 300_000,           # One receive; a server that keeps sending resets it
+  deadline: 600_000,          # The whole call, retries included
+  max_response_bytes: 8_000_000
 
 # Embedding settings
 config :doctrans, :embedding,
@@ -232,6 +234,7 @@ config :doctrans, :embedding,
   api_key: nil,
   model: "mlx-community/Qwen3-Embedding-8B-4bit-DWQ",
   timeout: 60_000
+  # :deadline and :max_response_bytes fall back to the :openai settings
 
 # Circuit breaker configuration for resilience
 config :doctrans, :circuit_breakers,
@@ -260,6 +263,12 @@ config :doctrans, :defaults,
   source_language: "de",
   target_language: "en"
 ```
+
+`:timeout` bounds one receive, so on its own it bounds silence rather than the request: an
+endpoint that drips a byte at a time resets it forever, and each retry pays it again. `:deadline`
+is the wall clock for the whole call, retries included, and `:max_response_bytes` is refused at
+the chunk that crosses it rather than after the body is buffered. A page that hits either bound
+fails with a message naming the endpoint, and the finished pages around it are kept.
 
 The default source language is German (`de`), and the target language is English (`en`).
 The upload dialog selects the target language; change `source_language` in the configuration

@@ -195,6 +195,123 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
     end
   end
 
+  # Every `sanitize_html/1` test above starts from HTML, so none of them reaches
+  # a link or image whose target is written as *Markdown*. Those never arrive at
+  # the scrubber as an attribute at all: MDEx renders in safe mode and blanks a
+  # dangerous destination to `""` while producing the HTML, so the scrubber only
+  # ever sees `href=""`.
+  #
+  # That makes this block the only thing standing between the model and a live
+  # `javascript:` link, and it is one option away from being needed: `unsafe:
+  # true` in `mdex_options/1` would hand every vector below straight to the page.
+  # Asserted on the rendered anchor rather than as `refute html =~ "javascript:"`,
+  # which would also pass if rendering stopped emitting the link entirely.
+  describe "render_markdown/2 link and image targets" do
+    test "blanks a dangerous link destination, whatever its spelling" do
+      for markdown <- [
+            "[x](javascript:alert(1))",
+            "[x](JaVaScRiPt:alert(1))",
+            "[x](java&#115;cript:alert(1))",
+            "[x](&#106;avascript:alert(1))",
+            "[x](<  javascript:alert(1)>)",
+            "[x]( javascript:alert(1) )",
+            "[x](vbscript:msgbox(1))",
+            "[x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)"
+          ] do
+        document = markdown |> MarkdownHelpers.render_markdown() |> document()
+
+        assert texts(document, "a") == ["x"], "link was not rendered for: #{markdown}"
+        assert count(document, "a[href='']") == 1, "destination survived: #{markdown}"
+      end
+    end
+
+    test "blanks a dangerous image source" do
+      for markdown <- [
+            "![](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)",
+            "![alt](javascript:alert(1))",
+            "![alt](DATA:text/html,<script>alert(1)</script>)"
+          ] do
+        document = markdown |> MarkdownHelpers.render_markdown() |> document()
+
+        assert count(document, "img") == 1, "image was not rendered for: #{markdown}"
+        assert count(document, "img[src='']") == 1, "source survived: #{markdown}"
+      end
+    end
+
+    test "blanks a dangerous reference-style link and image too" do
+      # A reference definition is resolved after the inline pass, which is the
+      # reason to assert it separately from the inline spelling above.
+      markdown = """
+      [link][ref] and ![image][imgref]
+
+      [ref]: javascript:alert(1)
+      [imgref]: data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+      """
+
+      document = markdown |> MarkdownHelpers.render_markdown() |> document()
+
+      assert texts(document, "a") == ["link"]
+      assert count(document, "a[href='']") == 1
+      assert count(document, "img[src='']") == 1
+      assert LazyHTML.attribute(LazyHTML.query(document, "img"), "alt") == ["image"]
+    end
+
+    test "blanks an autolink, leaving the scheme as inert text" do
+      document = "<javascript:alert(1)>" |> MarkdownHelpers.render_markdown() |> document()
+
+      # The scheme still appears, but only as the anchor's *text*. Recorded so a
+      # reader does not mistake it for a surviving payload.
+      assert texts(document, "a") == ["javascript:alert(1)"]
+      assert count(document, "a[href='']") == 1
+    end
+
+    test "cannot break out of the title attribute a link destination carries" do
+      markdown = ~S{[x](https://example.com "a\" onmouseover=alert(1) x=\"")}
+
+      html = MarkdownHelpers.render_markdown(markdown)
+      document = document(html)
+
+      assert LazyHTML.attribute(LazyHTML.query(document, "a"), "href") ==
+               ["https://example.com"]
+
+      assert count(document, "a[onmouseover]") == 0
+      assert count(document, "[onmouseover]") == 0
+    end
+
+    test "keeps the link and image targets a document legitimately uses" do
+      markdown = """
+      [https](https://example.com/a?b=1#c), [mail](mailto:a@b.c),
+      [relative](/documents/1), [anchor](#section) and
+      ![figure](https://example.com/figure.png)
+      """
+
+      document = markdown |> MarkdownHelpers.render_markdown() |> document()
+
+      assert LazyHTML.attribute(LazyHTML.query(document, "a"), "href") == [
+               "https://example.com/a?b=1#c",
+               "mailto:a@b.c",
+               "/documents/1",
+               "#section"
+             ]
+
+      assert LazyHTML.attribute(LazyHTML.query(document, "img"), "src") ==
+               ["https://example.com/figure.png"]
+    end
+
+    test "blanks the same destinations through the hardbreaks chat path" do
+      # The chat renders with a different MDEx option set, so the safe-mode
+      # behaviour is re-asserted there rather than assumed to carry over.
+      markdown = "[a](javascript:alert(1))\n![b](data:text/html;base64,PHN2Zz4=)"
+
+      document =
+        markdown |> MarkdownHelpers.render_markdown(hardbreaks: true) |> document()
+
+      assert count(document, "a[href='']") == 1
+      assert count(document, "img[src='']") == 1
+      assert count(document, "br") == 1
+    end
+  end
+
   describe "render_markdown/2 tables" do
     test "renders an OCR-style table as table elements with the right cell contents" do
       document = @ocr_table |> MarkdownHelpers.render_markdown() |> document()
