@@ -1,5 +1,6 @@
 defmodule Doctrans.Search.ChunkerTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Doctrans.Search.Chunker
 
@@ -10,6 +11,29 @@ defmodule Doctrans.Search.ChunkerTest do
   @max_words 400
   @max_graphemes 3200
   @max_bytes 12_800
+
+  # The fill target the generator sizes an oversized paragraph against, so it
+  # is over the target whatever script it is written in.
+  @target_graphemes 2400
+
+  # One token per script family Q04 names, so a generated document mixes byte
+  # widths (1, 2, 3 and 4 bytes per codepoint), a grapheme cluster built from
+  # joined codepoints, and a script that separates no words with spaces.
+  @tokens ["word", "Ubermassig", "Übermäßig", "文書", "वाक्य", "👨‍👩‍👧‍👦"]
+
+  # Whitespace runs inside one paragraph: a single newline does not start a new
+  # one. Two of these are sentence terminators, so the split ladder's top rung
+  # is reachable.
+  @intra_separators [" ", "  ", "\t", "\n", " \n ", ". ", "。"]
+
+  # What separates two paragraphs. Every one of these is a paragraph break and
+  # all but the first are longer than the two bytes `finalize_paras/1` used to
+  # rebuild the join from -- which is the bug this property exists to catch.
+  @paragraph_separators ["\n\n", "\n\n\n", "\n\n\n\n\n", "\n \n\n", "\n\n\t\n", "\n\n   \n\n"]
+
+  # Leading and trailing whitespace on the document itself: `chunk/1` trims it
+  # and has to add the leading run back to every offset it reports.
+  @document_edges ["", " ", "\n", "\t\n", "  \n\n ", "\n\n\n"]
 
   # The overlap bound, plus the two graphemes of the join between it and the
   # chunk it is prepended to.
@@ -83,35 +107,35 @@ defmodule Doctrans.Search.ChunkerTest do
       assert String.contains?(hd(chunks).content, "Third paragraph")
     end
 
-    test "byte offsets are consistent" do
-      text = "Hello world.\n\nSecond part.\n\nThird part."
+    test "whitespace between grouped paragraphs counts against the budget" do
+      # A grouped chunk's content is the whole span from its first paragraph to
+      # its last, so the blank lines inside it are stored and have to be
+      # budgeted for. Sixty short paragraphs separated by 504-byte whitespace
+      # runs are 60 words in 30 KB: budgeting the separator as the two bytes of
+      # a "\n\n" join makes the lot one chunk, 2.3x the byte ceiling and 9.4x
+      # the grapheme ceiling this module documents.
+      gap = "\n\n" <> String.duplicate(" ", 500) <> "\n\n"
+      text = Enum.map_join(1..60, gap, &"para#{&1}")
+
       chunks = Chunker.chunk(text)
 
-      assert length(chunks) == 1
-      chunk = hd(chunks)
-      assert chunk.start_offset >= 0
-      assert chunk.end_offset > chunk.start_offset
+      assert length(chunks) > 1
+      assert_within_limits(chunks)
     end
 
-    test "byte offsets are correct for multi-byte characters" do
-      text = "Ärger mit Ümlauten.\n\nNoch ein Absatz mit Ößen."
+    test "a gap of whitespace word_count/1 does not recognise stays within the word ceiling" do
+      # `word_count/1` splits on ASCII whitespace, so a line holding only a
+      # non-breaking space -- what an HTML-to-markdown conversion makes of
+      # `<p>&nbsp;</p>` -- is a word to it. Those lines are in a grouped chunk's
+      # span, so counting the gap as zero words undercounts the chunk by one per
+      # spacer: 500 of them between two paragraphs made a single 501-word chunk
+      # against a ceiling of 400.
+      nbsp = List.to_string([0xA0])
+      text = "alpha" <> String.duplicate(nbsp <> "\n\n", 500) <> "beta"
+
       chunks = Chunker.chunk(text)
 
-      assert length(chunks) == 1
-      chunk = hd(chunks)
-      # byte_size should be greater than String.length for multi-byte chars
-      assert chunk.start_offset >= 0
-      assert chunk.end_offset > chunk.start_offset
-    end
-
-    test "preserves start and end offsets" do
-      text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
-      chunks = Chunker.chunk(text)
-
-      assert length(chunks) == 1
-      chunk = hd(chunks)
-      assert chunk.start_offset >= 0
-      assert chunk.end_offset > chunk.start_offset
+      assert_within_limits(chunks)
     end
 
     test "handles text with only one paragraph" do
@@ -525,11 +549,9 @@ defmodule Doctrans.Search.ChunkerTest do
       end
     end
 
-    @tag skip: "PLAN.md Q04: finalize_paras/1 rejoins paragraphs on a literal \"\\n\\n\""
     test "offsets slice back out of the source for grouped paragraphs" do
-      # The half of Q04 this change did not touch, recorded so it fails the day
-      # it is fixed rather than being rediscovered. The span covers the source's
-      # three newlines; the content was rebuilt with two.
+      # The second half of Q04: the span covers the source's three newlines, and
+      # the content used to be rebuilt with two.
       source = "aaa bbb\n\n\nccc ddd\n\n\neee fff"
 
       [chunk] = Chunker.chunk(source)
@@ -549,6 +571,39 @@ defmodule Doctrans.Search.ChunkerTest do
 
       assert length(chunks) > 1
       assert Enum.all?(chunks, &String.valid?(&1.content))
+    end
+  end
+
+  describe "offsets round-trip (property)" do
+    # The three tests this replaces asserted `start_offset >= 0` and
+    # `end_offset > start_offset` on single-chunk inputs, which no offset
+    # arithmetic can fail. What the offsets are for is locating the chunk in the
+    # page, so that is what is asserted, over generated documents rather than
+    # one hand-written string (PLAN.md Q04).
+    property "every chunk slices back out of the source text" do
+      # 50 runs rather than the default 100: a generated document runs about
+      # 1 KB at the median, 31 KB at the 95th percentile and 68 KB at the
+      # largest seen over a thousand draws, and the paragraph shapes here are
+      # few enough to be covered well inside 50. Runs are kept low deliberately
+      # so the suite stays fast.
+      check all(text <- document(), max_runs: 50) do
+        chunks = Chunker.chunk(text)
+
+        # Without this the property is vacuous for any document that chunks to
+        # nothing, and the generator is built so none does.
+        assert chunks != []
+
+        for chunk <- chunks do
+          assert binary_part(text, chunk.start_offset, chunk.end_offset - chunk.start_offset) ==
+                   chunk.content,
+                 "chunk #{chunk.chunk_index} of #{length(chunks)} does not slice back out"
+        end
+
+        # Slicing the span rather than rejoining puts the blank lines between
+        # grouped paragraphs into the stored content, so the ceilings are
+        # asserted over the same generated documents.
+        assert_within_limits(chunks)
+      end
     end
   end
 
@@ -592,6 +647,52 @@ defmodule Doctrans.Search.ChunkerTest do
       assert embedded |> String.split(~r/\s+/, trim: true) |> length() ==
                Enum.at(chunks, 1).word_count + 50
     end
+  end
+
+  defp document do
+    gen all(
+          lead <- member_of(@document_edges),
+          paras <- list_of(paragraph(), min_length: 1, max_length: 4),
+          seps <- list_of(member_of(@paragraph_separators), length: length(paras) - 1),
+          trail <- member_of(@document_edges)
+        ) do
+      lead <> interleave(paras, seps) <> trail
+    end
+  end
+
+  # Mostly short paragraphs, so a document usually groups several into one
+  # chunk -- the case the literal join broke -- with a long one often enough to
+  # exercise the split path alongside it.
+  defp paragraph do
+    frequency([{3, short_paragraph()}, {1, long_paragraph()}])
+  end
+
+  defp short_paragraph do
+    gen all(
+          tokens <- list_of(member_of(@tokens), min_length: 1, max_length: 25),
+          seps <- list_of(member_of(@intra_separators), length: length(tokens) - 1)
+        ) do
+      interleave(tokens, seps)
+    end
+  end
+
+  # A paragraph over the fill target, whatever script it is in: repeating the
+  # unit past the grapheme target passes that budget for a space-free script and
+  # the word or byte budget well before it for the others.
+  defp long_paragraph do
+    gen all(
+          token <- member_of(@tokens),
+          sep <- member_of(@intra_separators)
+        ) do
+      unit = token <> sep
+      String.duplicate(unit, div(@target_graphemes, String.length(unit)) + 1)
+    end
+  end
+
+  defp interleave([first | rest], seps) do
+    seps
+    |> Enum.zip(rest)
+    |> Enum.reduce(first, fn {sep, part}, acc -> acc <> sep <> part end)
   end
 
   defp words(n), do: Enum.map_join(1..n, " ", &"word#{&1}")

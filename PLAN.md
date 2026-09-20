@@ -1,6 +1,7 @@
 # Doctrans improvement plan
 
-Status: implementation in progress; C01–C05 and Q01 completed, plus Phase 6 items G01–G08.
+Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q04 completed,
+plus Phase 6 items G01–G19.
 Base: `main` at `6953656`, reviewed on 11 September 2026.
 Phase 6 added 12 September 2026 from a quality-gate, toolchain, and supply-chain review.
 Branch: `plan/project-improvements`.
@@ -1997,7 +1998,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   sees no staged diff and reports every file-based hook as "no files to check", so a merge lands
   ungated. The gate for this branch was therefore run explicitly with `pre-commit run --all-files`.
 
-- [ ] **Q04 · P2 · Fix chunk byte offsets and assert them with a property.**
+- [x] **Q04 · P2 · Fix chunk byte offsets and assert them with a property.**
   `Chunker` writes `start_offset`/`end_offset` to the `chunks` table, and they do not slice back to the
   chunk content. A probe against the real module produced 14/14 mismatched offsets for a long single
   paragraph and 6/6 for ordinary paragraphs; chunk 1 of the first case has content starting
@@ -2017,6 +2018,107 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   blank lines, and paragraphs long enough to split; a deliberate reintroduction of either bug fails it.
   Evidence: `lib/doctrans/search/chunker.ex:171-176,183-211`, `lib/doctrans/documents/chunk.ex:17-18`,
   `test/doctrans/search/chunker_test.exs:74,84,95`. Reproduced with a probe against the real module.
+  Implemented. Q04 names two causes and the first was already closed: `split_long_paragraph` advancing
+  offsets by `byte_size(Enum.join(sentences, " "))` went when `Chunker.Segments` was rewritten to work in
+  byte spans, which the S04 entry above records. This change closes the second. `finalize_paras/1` rebuilt
+  a grouped chunk's content with `Enum.map_join(paras, "\n\n", ...)` while its offsets spanned the source,
+  which may hold `"\n\n\n"` or a longer whitespace run. `finalize_paras/2` now returns
+  `binary_part(text, start_offset, end_offset - start_offset)` — the contiguous source span, blank lines
+  and all — so a grouped chunk follows the same principle `Segments` already applied within a split
+  paragraph: one contiguous span, nothing reconstructed. The trimmed text is threaded down through
+  `build_raw_chunks/2`, `accumulate_paragraph/3`, `flush_paragraphs/3` and `finalize_paras/2`. The test in
+  `chunker_test.exs` that was left skipped against exactly this ("offsets slice back out of the source for
+  grouped paragraphs", source `"aaa bbb\n\n\nccc ddd\n\n\neee fff"`) is un-skipped and passes.
+  The budget follows the span. `@paragraph_join {0, 2, 2}` assumed the join was two bytes; with the real
+  separator inside the span, `extend/5` now measures the actual gap between the previous paragraph's end
+  and this one's start.
+  Also found in review, a regression this change introduced: the first implementation measured that gap
+  with `Segments.gap_measure/2`, which reports `{0, graphemes, bytes}` — zero words — justified in a
+  comment by "the separator is whitespace by construction, which is exactly what `word_count/1` splits
+  on". That is false. `Segments.word_count/1` splits on `~r/\s+/` **without** the `u` modifier, so ASCII
+  whitespace only, while the paragraph boundary comes from `String.trim/1`, which trims Unicode
+  whitespace. A gap can therefore hold whitespace `word_count/1` does not recognise — a line holding only
+  a non-breaking space, which is what an HTML-to-markdown conversion makes of `<p>&nbsp;</p>` — that it
+  counts as a word in the stored content while the budget counted it as none. Input
+  `"alpha" <> String.duplicate(<<0xA0::utf8>> <> "\n\n", 500) <> "beta"` produced one chunk of **501
+  words against a ceiling of 400**; the same probe against the unmodified module gave 2 words, because the
+  old code rebuilt the content as `"alpha\n\nbeta"` — so slicing the span is what made the undercount
+  reachable. `extend/5` now adds `Segments.measure(gap)`, measuring the gap exactly as a paragraph is
+  measured. For an all-ASCII-whitespace gap — every ordinary document — the result is byte-identical;
+  elsewhere it over-counts by at most one word per run, which is the safe direction. The invariant it
+  rests on: `word_count/1` and `String.length/1` are subadditive under concatenation (a join can merge two
+  tokens, or two grapheme clusters, into one, but never create a third) while `byte_size/1` is exactly
+  additive, so the carried measure is always an upper bound on the span's true measure, and that is what
+  the ceilings rest on. `Segments.gap_measure/2`, briefly made public for the first implementation, is
+  private again.
+  Also found in review, the budget half was unpinned: swapping the gap measure back for the old
+  `{0, 2, 2}` left **all 37 tests then in `chunker_test.exs` passing**. The consequence is not
+  theoretical — 60 short paragraphs separated by 504-byte whitespace runs became **one 30,087-byte chunk,
+  2.3x the byte ceiling and 9.4x the grapheme ceiling**. Two example tests now pin it, a long ASCII
+  whitespace run and the non-breaking-space spacer case, and `assert_within_limits/1` was added inside the
+  property. The property's own equality assertion catches neither mutation, because its generated
+  separators are at most 7 bytes of ASCII whitespace over at most four paragraphs; the examples are what
+  cover the budget.
+  Also found in review, `find_offset/3` was deleted rather than guarded. `split_paragraphs/1` located each
+  paragraph with `:binary.match/3` and fell back to `search_from` on `:nomatch`. That branch is provably
+  unreachable — the parts come from splitting the same text in order, `String.trim/1` only removes from
+  the ends, and the scope runs to the end of the text — but after this change an out-of-range offset is no
+  longer a pointer that merely reads back wrong: `finalize_paras/2` slices with it, and a length past the
+  end raises `ArgumentError`, which `Indexer`'s Oban job retries deterministically and leaves the page's
+  `embedding_status` at "processing" for good. That is the same failure mode the module's `String.valid?`
+  guard (`chunker.ex:65`) already exists for. A clamp was rejected: it turns a raise into a silently wrong
+  offset, which is the defect class Q04 exists to kill, and adds a branch no test can reach.
+  `split_paragraphs/1` now uses `String.split(~r/\n\n+/, include_captures: true)`, so each part's start is
+  the running byte sum and every offset is arithmetic and in-bounds by construction, with no fallback to
+  guard. Verified differentially against the old implementation over **193,703** generated documents (CJK,
+  Devanagari, ZWJ emoji, regional indicators, combining marks, NBSP, line separator, NEL, ogham and em
+  space, CR/VT/FF and newline runs): identical paragraph lists, zero raises, every offset in-bounds and
+  round-tripping. It is also faster — 1.15 MB of short paragraphs went 106 ms → 81 ms.
+  The property. `{:stream_data, "~> 1.4", only: [:dev, :test]}` is added to `mix.exs`, at 1.4.0 in
+  `mix.lock`. Q05 also lists this dependency; it is added here because Q04's acceptance criterion demands
+  generated inputs, and Q05 builds its other three properties on it. The three tests Q04 names —
+  "byte offsets are consistent", "byte offsets are correct for multi-byte characters" and "preserves start
+  and end offsets", each asserting only `start_offset >= 0` and `end_offset > start_offset` on single-chunk
+  input — are replaced by one property asserting
+  `binary_part(text, c.start_offset, c.end_offset - c.start_offset) == c.content` for every chunk, plus
+  `assert chunks != []` so it cannot go vacuous. The generator builds a document from one to four
+  paragraphs: tokens spanning 1-, 2-, 3- and 4-byte codepoints, a ZWJ grapheme cluster and a space-free
+  script; intra-paragraph separators including two sentence terminators; six paragraph separators, five of
+  them longer than two bytes; and six leading and trailing whitespace edges, which is what the `base`
+  rebasing in `chunk/1` has to add back. One paragraph in four is sized past the fill target, which clears
+  it for all 42 token-by-separator combinations. Bounds are `max_runs: 50` and at most four paragraphs;
+  measured over 1,000 draws a document is 1.1 KB at the median, 31 KB at p95 and 68 KB at most.
+  Replicating the generator over 50 draws: 25 yield a grouped multi-paragraph chunk, 24 yield a grouped
+  chunk containing a separator longer than two bytes — the exact mutation target — 11 to 19 exercise the
+  split path, and none chunks to nothing.
+  Acceptance met. Restoring the literal `"\n\n"` join fails the property, shrunk to the minimal
+  counterexample `"word\n\n\nword"`, and fails the grouped-paragraph example with
+  `left: "aaa bbb\n\n\nccc ddd\n\n\neee fff"` / `right: "aaa bbb\n\nccc ddd\n\neee fff"`. Reproducing the
+  original `split_long_paragraph` defect — rejoining a span's words on `" "` and advancing the end offset
+  by the rejoined length — fails the property after 6 runs. Both mutations were reverted.
+  `chunker_test.exs` runs in 0.3 s against 0.2 s before, the property alone 0.1 s of that. Full suite:
+  **1376 passed**, with no skipped test left, against 1375 passed and 1 skipped before.
+  `mix precommit`, which runs `pre-commit run --all-files`: all 30 hooks pass.
+  Two consequences worth stating, neither a defect. Stored `content` for a grouped chunk now carries the
+  source's real inter-paragraph whitespace rather than a normalised `"\n\n"`, so a corpus holds both
+  spellings until its pages are re-indexed; the stored `word_count` is unchanged wherever the gap is
+  whitespace `word_count/1` recognises, which is every ordinary document, and the exception is the
+  paragraph below. And because gap bytes now count against the fill target, a whitespace-heavy document
+  may group one fewer paragraph per chunk than before — which is the correct reading of a budget on the
+  span that is actually stored and embedded.
+  Handed on rather than fixed here: `Segments.word_count/1`'s non-Unicode `\s` means the
+  stored `word_count` of a grouped chunk counts a non-breaking-space spacer line as a word — `"alpha"`
+  plus five spacer lines plus `"beta"` stores 6 for 2 real words. On the paragraph gaps this change owns,
+  the ceiling is safe because the budget is now conservative and only the stored number is inflated.
+  On `Segments`' own sentence gaps it is not, and that half predates this change: `@sentence_boundary`
+  and `@word_boundary` match Unicode whitespace, so a dropped separator can hold a non-breaking or
+  ideographic space, `gap_measure/2` counts it as zero words, and `subtract_joined_word/4` corrects only
+  the zero-width case — a gap mixing the two, `" " <> nbsp <> " "`, undercounts by one per separator.
+  Measured on both this branch and `main`: 400 sentences so separated pack into chunks of up to
+  **1,033 words against a ceiling of 400**, with byte and grapheme ceilings passed too. Found reviewing
+  this branch and left where it is, because a Unicode-aware `word_count/1` drags `@ascii_whitespace` and
+  `subtract_joined_word/4` with it and changes packing for every document; the comment on `gap_measure/2`
+  now states the gap rather than claiming the case is handled.
 
 - [ ] **Q05 · P2 · Add property tests for the invariants that fixtures state only by example.**
   Add `{:stream_data, "~> 1.4", only: [:dev, :test]}` and four properties, in value order.
@@ -2037,6 +2139,12 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: each property fails when its invariant is deliberately broken; run counts and collection
   sizes are bounded so pull-request latency stays predictable; minimal counterexamples are kept as
   regression examples.
+  Q04 landed `{:stream_data, "~> 1.4", only: [:dev, :test]}` and the first of the four `Chunker.chunk/1`
+  properties, the offset round-trip, as `chunker_test.exs`'s "every chunk slices back out of the source
+  text", with the generator and the `max_runs: 50` bound described there. What remains for
+  `Chunker.chunk/1` is word-multiset preservation, contiguous `chunk_index`, and non-decreasing
+  `start_offset` — extend that property or add siblings beside it rather than starting a new generator.
+  The `cond` it guards is now `accumulate_paragraph/3`, which takes the source text as a third argument.
 
 - [ ] **Q06 · P2 · Cover the remaining trust boundaries and bound the inference client.**
   Upload and image serving are the best-tested boundaries in the app and need only two additions: a

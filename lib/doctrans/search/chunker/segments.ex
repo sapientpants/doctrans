@@ -13,10 +13,11 @@ defmodule Doctrans.Search.Chunker.Segments do
   strings back together, and a chunk is always one contiguous span. That is what
   makes `binary_part(text, start_offset, end_offset - start_offset)` return a
   chunk's content exactly: the separators between segments are inside the span,
-  so nothing is reconstructed and nothing can drift (PLAN.md Q04). This holds
-  within a split paragraph -- `Chunker` still rejoins whole paragraphs on a
-  literal "\\n\\n" the source may not have, which is the half of Q04 that
-  remains open.
+  so nothing is reconstructed and nothing can drift (PLAN.md Q04). `Chunker`
+  groups whole paragraphs on the same principle, slicing the span from the
+  first paragraph's start to the last one's end rather than rejoining them on a
+  separator the source may not have, and measuring the gaps between them with
+  `measure/1` so that what it budgets for is what the span will hold.
   """
 
   # A chunk fills to the target and then takes whatever the current segment is,
@@ -226,7 +227,17 @@ defmodule Doctrans.Search.Chunker.Segments do
   defp union({open_start, _open_len}, {start, len}), do: {open_start, start + len - open_start}
 
   # The bytes between two segments -- the separator the split dropped -- which
-  # the combined span covers and so has to be counted.
+  # the combined span covers and so has to be counted. Words are reported as
+  # zero, which holds only as far as `word_count/1`'s non-Unicode `\s` reaches.
+  # `@sentence_boundary` and `@word_boundary` match Unicode whitespace, so a
+  # dropped separator can hold a non-breaking or ideographic space that
+  # `word_count/1` counts as a word in the content while this counts none, and
+  # `subtract_joined_word/4` corrects only the zero-width case. A gap mixing the
+  # two -- `" " <> nbsp <> " "` -- therefore undercounts by one per separator:
+  # 400 sentences so separated pack into chunks of up to 1,033 words against a
+  # ceiling of 400, measured. This predates the span rewrite -- `Chunker` hit
+  # the same mismatch on its paragraph gaps and now measures them exactly --
+  # and is handed to the Unicode-aware `word_count/1` item (PLAN.md Q04).
   defp gap_measure(_text, {_start, 0}), do: zero()
   defp gap_measure(text, {_start, len} = gap), do: {0, grapheme_count(slice(text, gap)), len}
 
