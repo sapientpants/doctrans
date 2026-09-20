@@ -13,8 +13,18 @@ defmodule Doctrans.Processing.RequestBounds do
   `post/3` and `get/3` stream their body through `into:`, so every chunk is
   checked against that deadline and against the byte budget *before* it is
   appended, and a retry only starts while a full attempt still fits inside the
-  deadline. A bounded call therefore returns inside its deadline whether the
-  endpoint hangs silently, drips forever, or floods.
+  deadline. A silent endpoint never reaches `into:` at all, so the per-attempt
+  `:receive_timeout` is clamped to the budget as well.
+
+  What that adds up to is worth stating exactly, because it is a bound and not a
+  kill: a drip-feeder and a flood end on the chunk that crosses the budget, and
+  silence ends on the clamped receive timeout. The one case that outlives the
+  deadline is an endpoint that sends something and *then* stops -- nothing calls
+  `into:` during the silence that follows, so the attempt runs on until its own
+  receive window expires. Clamping that window to the total budget is what caps
+  the case: the call returns within the deadline plus one receive window, which
+  is at worst twice the deadline. Req's backoff between attempts sits outside
+  the budget too, since the retry is decided before it sleeps.
 
   Under the cap the accumulated body is an ordinary binary, so Req's own
   response steps still decode it; over the cap the accumulator is replaced by a

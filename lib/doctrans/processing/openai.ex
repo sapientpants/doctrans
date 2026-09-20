@@ -424,8 +424,9 @@ defmodule Doctrans.Processing.OpenAI do
     Embedding.api_key()
   end
 
-  # Embeddings carry their own budget: a stalled embedding endpoint must not
-  # hold a search box for as long as a page-sized completion may take.
+  # Embeddings read the `:embedding` section, so a search box can be bounded on
+  # its own. Only `:timeout` differs by default -- a minute against five, spending
+  # the same total budget in shorter attempts until a deadline is set there.
   defp embed_bounds(timeout) do
     RequestBounds.new(
       timeout: timeout,

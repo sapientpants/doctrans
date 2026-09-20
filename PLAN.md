@@ -2297,10 +2297,16 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   drip-feeder that resets `:receive_timeout` forever is cut off, and an oversized body is refused at
   the chunk that crosses the cap rather than after it is buffered. Req's retry mode is replaced by a
   function restating `:transient`/`:safe_transient` with the deadline folded in, allowing a retry only
-  while a whole attempt still fits before it — so the twenty minutes Q06 names is now the deadline. A
-  silent endpoint never reaches `into:`, so `:receive_timeout` is clamped to the budget as well and a
-  transport timeout arriving past the deadline is reported as the deadline, which points at the
-  endpoint rather than at one lost packet. Under the cap the body stays an ordinary binary and Req's
+  while a whole attempt still fits before it. A silent endpoint never reaches `into:`, so
+  `:receive_timeout` is clamped to the budget as well, and a transport timeout arriving past the
+  deadline is reported as the deadline, which points at the endpoint rather than at one lost packet.
+  The bound is worth stating exactly, since it is a budget and not a kill: a drip-feeder and a flood
+  end on the chunk that crosses it, and silence ends on the clamped receive timeout, but an endpoint
+  that sends something and *then* stops runs on until that receive window expires — nothing calls
+  `into:` during silence. Clamping the window to the total budget is what caps that case at the
+  deadline plus one window, so the twenty minutes Q06 names becomes ten by default and fifteen at
+  worst, not a hard ten. A hard stop needs a supervising task around every request, which is more
+  machinery than the failure mode earns. Under the cap the body stays an ordinary binary and Req's
   own decode steps still run; over it the accumulator becomes a marker tuple, which both halts the
   stream and keeps the JSON decoder off a half-read payload. The streaming path keeps its SSE
   collector, now as a `:collect` reducer, so deltas still arrive as they stream.
