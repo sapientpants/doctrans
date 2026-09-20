@@ -144,17 +144,21 @@ defmodule Doctrans.SearchTest do
 
     test "breaks a fused-score tie by page id" do
       # One match from each half, both at rank 1, so both score 1/(k + 1) and
-      # only the tie-break can order them. Created first, so its time-ordered
-      # UUID is the lower of the two.
+      # only the tie-break can order them.
       semantic_only = embedded_page("nothing lexical in common here", query_aligned_embedding())
       keyword_only = searchable_page("a page about tiebreakterm only", "Tie Keyword Doc")
 
-      assert semantic_only.id < keyword_only.id
+      # Ascending page id is the rule under test, so the expectation is derived
+      # from the ids rather than from the order the two were created in: UUIDv7
+      # carries no counter below the millisecond, so two rows written inside one
+      # millisecond are ordered by random bits, and a test that assumed
+      # creation order would be deciding this on the clock.
+      [lower, higher] = Enum.sort([semantic_only.id, keyword_only.id])
 
       assert {:ok, [first, second]} = Search.search("tiebreakterm")
 
       assert first.score == second.score
-      assert [first.page_id, second.page_id] == [semantic_only.id, keyword_only.id]
+      assert [first.page_id, second.page_id] == [lower, higher]
     end
 
     test "limit returns the top-ranked matches only" do

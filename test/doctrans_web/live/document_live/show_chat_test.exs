@@ -372,24 +372,27 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       view |> form("#chat-form", %{message: question}) |> render_submit()
 
-      # The question is on screen immediately, while the turn is still running.
+      # The question is streamed in by the event itself, so this holds however
+      # far the turn behind it has got.
       assert render(view) =~ question
-      assigns = :sys.get_state(view.pid).socket.assigns
-      assert assigns.chat_loading
 
-      # The turn is an `async_nolink` task, which `render_async/2` does not
-      # cover, so wait on the task itself. It sends its result to the LiveView
-      # before it exits, so that message is already in the mailbox ahead of the
-      # round trip `render/1` makes: the answer below is awaited, not slept on.
-      # Waiting is also what keeps the task from outliving the test and querying
-      # the database with no sandbox owner, which is what it used to do here.
-      monitor = Process.monitor(assigns.chat_task_pid)
-      assert_receive {:DOWN, ^monitor, :process, _pid, :normal}, 2_000
+      await_chat_turn(view)
 
       html = render(view)
       assert html =~ question
       assert html =~ "This is a mock response to your question about"
-      refute :sys.get_state(view.pid).socket.assigns.chat_loading
+
+      # The rendered text alone would not prove the turn landed: the stub streams
+      # its answer in deltas, so it is on screen while the turn is still running.
+      # The saved message is what only a completed turn produces.
+      assert %{messages: messages} = Conversations.load(document.id)
+      assert [%{role: "user"}, %{role: "assistant", content: answer}] = messages
+      assert answer =~ "This is a mock response to your question about"
+      assert answer =~ question
+
+      assigns = :sys.get_state(view.pid).socket.assigns
+      refute assigns.chat_loading
+      assert assigns.chat_task_ref == nil
     end
 
     test "empty message is not submitted", %{conn: conn, document: document} do
@@ -556,6 +559,22 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   end
 
   # Helper functions
+
+  # A chat turn is an `async_nolink` task, which `render_async/2` does not cover,
+  # so this waits on the task itself rather than on a render. Nothing holds the
+  # turn open -- the stubs answer immediately, and this file is `async: true`, so
+  # it cannot install the global embedding barrier that would -- so the task may
+  # already have finished by the time this looks. Monitoring covers both: the
+  # exit reason is `:normal` if we got here first and `:noproc` if we did not,
+  # and either way the task sent its result to the LiveView before exiting, so
+  # that message sits ahead of the caller's next round trip. Waiting at all is
+  # also what keeps the task from outliving the test and querying the database
+  # with no sandbox owner.
+  defp await_chat_turn(view) do
+    pid = :sys.get_state(view.pid).socket.assigns.chat_task_pid
+    monitor = Process.monitor(pid)
+    assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 2_000
+  end
 
   defp context_chunk(page, content) do
     %{
