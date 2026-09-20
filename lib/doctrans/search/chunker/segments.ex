@@ -228,8 +228,16 @@ defmodule Doctrans.Search.Chunker.Segments do
 
   # The bytes between two segments -- the separator the split dropped -- which
   # the combined span covers and so has to be counted. Words are reported as
-  # zero because the separator this packer drops is whitespace or nothing at
-  # all, and `subtract_joined_word/4` corrects the "nothing at all" case.
+  # zero, which holds only as far as `word_count/1`'s non-Unicode `\s` reaches.
+  # `@sentence_boundary` and `@word_boundary` match Unicode whitespace, so a
+  # dropped separator can hold a non-breaking or ideographic space that
+  # `word_count/1` counts as a word in the content while this counts none, and
+  # `subtract_joined_word/4` corrects only the zero-width case. A gap mixing the
+  # two -- `" " <> nbsp <> " "` -- therefore undercounts by one per separator:
+  # 400 sentences so separated pack into chunks of up to 1,033 words against a
+  # ceiling of 400, measured. This predates the span rewrite -- `Chunker` hit
+  # the same mismatch on its paragraph gaps and now measures them exactly --
+  # and is handed to the Unicode-aware `word_count/1` item (PLAN.md Q04).
   defp gap_measure(_text, {_start, 0}), do: zero()
   defp gap_measure(text, {_start, len} = gap), do: {0, grapheme_count(slice(text, gap)), len}
 

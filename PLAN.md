@@ -2108,10 +2108,17 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   span that is actually stored and embedded.
   Handed on rather than fixed here: `Segments.word_count/1`'s non-Unicode `\s` means the
   stored `word_count` of a grouped chunk counts a non-breaking-space spacer line as a word — `"alpha"`
-  plus five spacer lines plus `"beta"` stores 6 for 2 real words. The ceiling is safe because the budget
-  is now conservative, but the number is inflated. A Unicode-aware `word_count/1` drags
-  `@ascii_whitespace` and `subtract_joined_word/4` with it and changes packing, so it is a separate item;
-  the same mismatch already exists for `Segments`' own sentence gaps and predates this change.
+  plus five spacer lines plus `"beta"` stores 6 for 2 real words. On the paragraph gaps this change owns,
+  the ceiling is safe because the budget is now conservative and only the stored number is inflated.
+  On `Segments`' own sentence gaps it is not, and that half predates this change: `@sentence_boundary`
+  and `@word_boundary` match Unicode whitespace, so a dropped separator can hold a non-breaking or
+  ideographic space, `gap_measure/2` counts it as zero words, and `subtract_joined_word/4` corrects only
+  the zero-width case — a gap mixing the two, `" " <> nbsp <> " "`, undercounts by one per separator.
+  Measured on both this branch and `main`: 400 sentences so separated pack into chunks of up to
+  **1,033 words against a ceiling of 400**, with byte and grapheme ceilings passed too. Found reviewing
+  this branch and left where it is, because a Unicode-aware `word_count/1` drags `@ascii_whitespace` and
+  `subtract_joined_word/4` with it and changes packing for every document; the comment on `gap_measure/2`
+  now states the gap rather than claiming the case is handled.
 
 - [ ] **Q05 · P2 · Add property tests for the invariants that fixtures state only by example.**
   Add `{:stream_data, "~> 1.4", only: [:dev, :test]}` and four properties, in value order.
