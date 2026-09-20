@@ -1,10 +1,28 @@
 defmodule Doctrans.SearchTest do
   use Doctrans.DataCase, async: true
 
+  alias Doctrans.Documents.Page
   alias Doctrans.Documents.Pages
+  alias Doctrans.Repo
   alias Doctrans.Search
 
   import Doctrans.Fixtures
+
+  # The RRF constant `search/2` uses when the caller names none. Scores are
+  # asserted against it rather than against "something positive", because
+  # 1/(k + rank) is the whole of what a fused score means.
+  @default_rrf_k 60
+
+  # The stub every test in this module embeds with returns this vector for any
+  # text, so a page carrying it is a perfect semantic match for any query.
+  defp query_aligned_embedding, do: Pgvector.new(List.duplicate(0.1, 1024))
+
+  # Half the dimensions zeroed: cosine similarity 0.707 against the vector
+  # above -- clear of the 0.55 floor the semantic half applies, and strictly
+  # below a page that carries the query's own vector.
+  defp half_aligned_embedding do
+    Pgvector.new(List.duplicate(0.1, 512) ++ List.duplicate(0.0, 512))
+  end
 
   describe "search/2" do
     test "returns empty list for empty query" do
@@ -15,48 +33,35 @@ defmodule Doctrans.SearchTest do
       assert {:ok, []} = Search.search(nil)
     end
 
-    test "returns empty results when no documents match" do
-      # Create document but don't complete it (search only searches completed docs)
-      _doc = document_fixture(%{status: "uploading"})
+    test "returns no matches when nothing in the library answers the query" do
+      # A completed, indexed page that simply says something else: the empty
+      # answer has to come from the ranking, not from an empty library.
+      searchable_page("A page about gardening tools", "Unrelated Doc")
 
-      # This will fail to generate embedding (no OpenAI in test) and return error
-      # or return empty results
-      result = Search.search("test query")
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
+      assert {:ok, []} = Search.search("nothinginthelibrarysaysthis")
     end
 
-    test "accepts limit option" do
-      # Just verify the option is accepted without error
-      result = Search.search("test", limit: 5)
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
-    end
+    test "finds a page by a keyword in its original markdown" do
+      document = document_fixture(%{status: "completed", title: "Keyword Test Doc"})
+      page = page_fixture(document, %{page_number: 3})
 
-    test "accepts rrf_k option" do
-      # RRF smoothing constant - higher values give smoother ranking
-      result = Search.search("test", rrf_k: 100)
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
-    end
-
-    test "finds documents by keyword match in original_markdown" do
-      # Create a completed document with pages containing searchable text
-      doc = document_fixture(%{status: "completed", title: "Keyword Test Doc"})
-      page = page_fixture(doc, %{page_number: 1})
-
-      {:ok, _page} =
+      {:ok, page} =
         Pages.update_page_extraction(page, %{
           extraction_status: "completed",
           original_markdown: "This is searchable content about cats and dogs"
         })
 
-      {:ok, results} = Search.search("cats")
-
-      # We should find the page via FTS
-      assert is_list(results)
+      assert {:ok, [result]} = Search.search("cats")
+      assert result.page_id == page.id
+      assert result.document_id == document.id
+      assert result.document_title == "Keyword Test Doc"
+      assert result.page_number == 3
+      assert result.snippet =~ "cats"
     end
 
-    test "finds documents by keyword match in translated_markdown" do
-      doc = document_fixture(%{status: "completed", title: "Translated Test Doc"})
-      page = page_fixture(doc, %{page_number: 1})
+    test "finds a page by a keyword in its translated markdown" do
+      document = document_fixture(%{status: "completed", title: "Translated Test Doc"})
+      page = page_fixture(document, %{page_number: 2})
 
       {:ok, page} =
         Pages.update_page_extraction(page, %{
@@ -64,19 +69,21 @@ defmodule Doctrans.SearchTest do
           original_markdown: "Original content"
         })
 
-      {:ok, _page} =
+      {:ok, page} =
         Pages.update_page_translation(page, %{
           translation_status: "completed",
           translated_markdown: "Translated content about elephants"
         })
 
-      {:ok, results} = Search.search("elephants")
-      assert is_list(results)
+      assert {:ok, [result]} = Search.search("elephants")
+      assert result.page_id == page.id
+      assert result.page_number == 2
+      assert result.snippet =~ "elephants"
     end
 
     test "FTS applies stemming - 'running' matches 'run'" do
-      doc = document_fixture(%{status: "completed", title: "Stemming Test"})
-      page = page_fixture(doc, %{page_number: 1})
+      document = document_fixture(%{status: "completed", title: "Stemming Test"})
+      page = page_fixture(document, %{page_number: 1})
 
       {:ok, page} =
         Pages.update_page_extraction(page, %{
@@ -84,43 +91,120 @@ defmodule Doctrans.SearchTest do
           original_markdown: "placeholder"
         })
 
-      {:ok, _page} =
+      {:ok, page} =
         Pages.update_page_translation(page, %{
           translation_status: "completed",
           translated_markdown: "The runner was running fast through the field"
         })
 
       # "run" should match "running" and "runner" due to English stemming
-      {:ok, results} = Search.search("run")
-      refute Enum.empty?(results)
-      assert Enum.any?(results, fn r -> r.page_id == page.id end)
+      assert {:ok, [result]} = Search.search("run")
+      assert result.page_id == page.id
     end
 
-    test "returns results with correct structure" do
-      doc = document_fixture(%{status: "completed", title: "Structure Test"})
-      page = page_fixture(doc, %{page_number: 1})
+    test "describes a match by page, document, rank and snippet" do
+      document = document_fixture(%{status: "completed", title: "Structure Test"})
+      page = page_fixture(document, %{page_number: 5})
 
-      {:ok, _page} =
+      {:ok, page} =
         Pages.update_page_extraction(page, %{
           extraction_status: "completed",
           original_markdown: "Unique searchterm findme content"
         })
 
-      {:ok, results} = Search.search("findme")
+      assert {:ok, [result]} = Search.search("findme")
 
-      for result <- results do
-        assert Map.has_key?(result, :page_id)
-        assert Map.has_key?(result, :document_id)
-        assert Map.has_key?(result, :document_title)
-        assert Map.has_key?(result, :page_number)
-        assert Map.has_key?(result, :score)
-        assert Map.has_key?(result, :snippet)
-      end
+      # The only ranking that ran is the full-text one, and this is its first
+      # rank -- so the fused score is exactly one reciprocal rank.
+      assert result == %{
+               page_id: page.id,
+               document_id: document.id,
+               document_title: "Structure Test",
+               page_number: 5,
+               image_path: page.image_path,
+               score: 1 / (@default_rrf_k + 1),
+               snippet: "Unique searchterm findme content"
+             }
+    end
+
+    test "ranks the whole match set, best match first" do
+      [first, second, third, fourth] = ranked_corpus("rankedterm", 4)
+
+      assert {:ok, results} = Search.search("rankedterm")
+
+      # The order is the answer, not an accident of how the rows came back:
+      # each page mentions the term once less than the page before it.
+      assert Enum.map(results, & &1.page_id) == [first.id, second.id, third.id, fourth.id]
+      assert Enum.map(results, & &1.page_number) == [1, 2, 3, 4]
+
+      scores = Enum.map(results, & &1.score)
+      assert scores == Enum.sort(scores, :desc)
+      assert Enum.uniq(scores) == scores
+    end
+
+    test "breaks a fused-score tie by page id" do
+      # One match from each half, both at rank 1, so both score 1/(k + 1) and
+      # only the tie-break can order them.
+      semantic_only = embedded_page("nothing lexical in common here", query_aligned_embedding())
+      keyword_only = searchable_page("a page about tiebreakterm only", "Tie Keyword Doc")
+
+      # Ascending page id is the rule under test, so the expectation is derived
+      # from the ids rather than from the order the two were created in: UUIDv7
+      # carries no counter below the millisecond, so two rows written inside one
+      # millisecond are ordered by random bits, and a test that assumed
+      # creation order would be deciding this on the clock.
+      [lower, higher] = Enum.sort([semantic_only.id, keyword_only.id])
+
+      assert {:ok, [first, second]} = Search.search("tiebreakterm")
+
+      assert first.score == second.score
+      assert [first.page_id, second.page_id] == [lower, higher]
+    end
+
+    test "limit returns the top-ranked matches only" do
+      [first, second, _third, _fourth] = ranked_corpus("limitedterm", 4)
+
+      assert {:ok, results} = Search.search("limitedterm", limit: 2)
+      assert Enum.map(results, & &1.page_id) == [first.id, second.id]
+    end
+
+    test "offset pages past the matches already returned" do
+      [_first, _second, third, fourth] = ranked_corpus("offsetterm", 4)
+
+      assert {:ok, results} = Search.search("offsetterm", limit: 2, offset: 2)
+      assert Enum.map(results, & &1.page_id) == [third.id, fourth.id]
+    end
+
+    test "limit and offset together walk the match set without repeating or dropping one" do
+      pages = ranked_corpus("combinedterm", 5)
+
+      walked =
+        Enum.flat_map(0..4//2, fn offset ->
+          assert {:ok, results} = Search.search("combinedterm", limit: 2, offset: offset)
+          Enum.map(results, & &1.page_id)
+        end)
+
+      assert walked == Enum.map(pages, & &1.id)
+    end
+
+    test "rrf_k smooths the fused score without changing the ranking" do
+      [first, second] = ranked_corpus("smoothedterm", 2)
+
+      assert {:ok, [default_top, default_next]} = Search.search("smoothedterm")
+      assert {:ok, [smoothed_top, smoothed_next]} = Search.search("smoothedterm", rrf_k: 100)
+
+      assert [default_top.page_id, default_next.page_id] == [first.id, second.id]
+      assert [smoothed_top.page_id, smoothed_next.page_id] == [first.id, second.id]
+
+      # A larger k is a flatter curve: the same two ranks, closer together.
+      assert default_top.score == 1 / (@default_rrf_k + 1)
+      assert smoothed_top.score == 1 / 101
+      assert smoothed_top.score - smoothed_next.score < default_top.score - default_next.score
     end
 
     test "returns empty list when document not completed" do
-      doc = document_fixture(%{status: "processing", title: "Incomplete Doc"})
-      page = page_fixture(doc, %{page_number: 1})
+      document = document_fixture(%{status: "processing", title: "Incomplete Doc"})
+      page = page_fixture(document, %{page_number: 1})
 
       {:ok, _page} =
         Pages.update_page_extraction(page, %{
@@ -128,169 +212,101 @@ defmodule Doctrans.SearchTest do
           original_markdown: "Content with uniqueword99"
         })
 
-      {:ok, results} = Search.search("uniqueword99")
-
       # Should not find anything because document status is "processing"
-      assert results == []
+      assert {:ok, []} = Search.search("uniqueword99")
     end
 
     test "returns empty list when page extraction not completed" do
-      doc = document_fixture(%{status: "completed", title: "Test Doc"})
-      _page = page_fixture(doc, %{page_number: 1})
+      document = document_fixture(%{status: "completed", title: "Test Doc"})
+      _page = page_fixture(document, %{page_number: 1})
 
       # Page is created with pending extraction status
-      {:ok, results} = Search.search("anything")
-
-      # Should not find pages with pending extraction
-      assert results == []
+      assert {:ok, []} = Search.search("anything")
     end
 
-    test "accepts combined options" do
-      result =
-        Search.search("test",
-          limit: 10,
-          rrf_k: 80
-        )
+    test "RRF ranks a page both halves found above a page only one half found" do
+      # A page the keyword index and the semantic index both rank first, against
+      # one match from each half alone. Two reciprocal ranks beat one, which is
+      # the whole point of fusing them.
+      both =
+        embedded_page("a page about fusedterm and more fusedterm", query_aligned_embedding())
 
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
-    end
+      keyword_only = searchable_page("another page about fusedterm", "Fused Keyword Doc")
+      semantic_only = embedded_page("nothing lexical in common", half_aligned_embedding())
 
-    test "RRF boosts results appearing in both semantic and FTS rankings" do
-      # Create two pages: one with FTS match, one without
-      # The page with the FTS match should rank higher due to RRF boosting
-      doc = document_fixture(%{status: "completed", title: "RRF Test Doc"})
+      assert {:ok, [top | rest]} = Search.search("fusedterm")
 
-      # Page with text that matches FTS query
-      page_with_fts = page_fixture(doc, %{page_number: 1})
+      assert top.page_id == both.id
+      assert top.score == 1 / (@default_rrf_k + 1) + 1 / (@default_rrf_k + 1)
 
-      {:ok, page_with_fts} =
-        Pages.update_page_extraction(page_with_fts, %{
-          extraction_status: "completed",
-          original_markdown: "Important information about machine learning algorithms"
-        })
+      # Both runners-up hold one rank-2 reciprocal, so they tie; what matters
+      # here is that neither reaches the fused page.
+      assert Enum.sort(Enum.map(rest, & &1.page_id)) ==
+               Enum.sort([keyword_only.id, semantic_only.id])
 
-      # Page without FTS match (different content)
-      page_without_fts = page_fixture(doc, %{page_number: 2})
-
-      {:ok, _page_without_fts} =
-        Pages.update_page_extraction(page_without_fts, %{
-          extraction_status: "completed",
-          original_markdown: "Completely unrelated content about cooking recipes"
-        })
-
-      # Search for a term that should match FTS for page 1 only
-      {:ok, results} = Search.search("machine learning")
-
-      # Verify at least one result is returned
-      refute Enum.empty?(results)
-
-      # Verify the FTS-matching page is found
-      assert Enum.any?(results, fn r -> r.page_id == page_with_fts.id end)
-
-      # Note: Full RRF score comparison would require controlling the embedding
-      # mock to return different similarity scores. The current test verifies
-      # that FTS-matching pages are included in results.
+      assert Enum.all?(rest, &(&1.score == 1 / (@default_rrf_k + 2)))
     end
   end
 
   describe "search_in_document/3" do
     test "returns empty list for empty query" do
-      doc = document_fixture(%{status: "completed"})
-      assert {:ok, []} = Search.search_in_document(doc.id, "")
+      document = document_fixture(%{status: "completed"})
+      assert {:ok, []} = Search.search_in_document(document.id, "")
     end
 
     test "returns empty list for nil query" do
-      doc = document_fixture(%{status: "completed"})
-      assert {:ok, []} = Search.search_in_document(doc.id, nil)
+      document = document_fixture(%{status: "completed"})
+      assert {:ok, []} = Search.search_in_document(document.id, nil)
     end
 
-    test "accepts limit option" do
-      doc = document_fixture(%{status: "completed"})
-      assert {:ok, results} = Search.search_in_document(doc.id, "test", limit: 2)
-      assert is_list(results)
+    test "limit caps the pages returned" do
+      document = document_fixture(%{status: "completed"})
+
+      for page_number <- 1..3 do
+        insert_indexed_page(document, page_number, query_aligned_embedding())
+      end
+
+      assert {:ok, results} = Search.search_in_document(document.id, "test", limit: 2)
+      assert length(results) == 2
     end
 
-    test "accepts min_similarity option" do
-      doc = document_fixture(%{status: "completed"})
-      assert {:ok, results} = Search.search_in_document(doc.id, "test", min_similarity: 0.5)
-      assert is_list(results)
+    test "min_similarity excludes pages the query is only loosely related to" do
+      document = document_fixture(%{status: "completed"})
+      aligned = insert_indexed_page(document, 1, query_aligned_embedding())
+      loose = insert_indexed_page(document, 2, half_aligned_embedding())
+
+      # The default floor admits both, most similar first.
+      assert {:ok, results} = Search.search_in_document(document.id, "test")
+      assert Enum.map(results, & &1.page_id) == [aligned.id, loose.id]
+
+      # Raised past the loose page's 0.707, it is the only one left.
+      assert {:ok, [only]} = Search.search_in_document(document.id, "test", min_similarity: 0.9)
+      assert only.page_id == aligned.id
     end
 
     test "only searches within specified document" do
-      # Create two documents with pages that have embeddings
-      doc1 = document_fixture(%{status: "completed", title: "Doc One"})
-      doc2 = document_fixture(%{status: "completed", title: "Doc Two"})
+      document = document_fixture(%{status: "completed", title: "Doc One"})
+      other = document_fixture(%{status: "completed", title: "Doc Two"})
 
-      # Create embeddings for both pages
-      embedding = Pgvector.new(List.duplicate(0.1, 1024))
+      page = insert_indexed_page(document, 1, query_aligned_embedding())
+      _other_page = insert_indexed_page(other, 1, query_aligned_embedding())
 
-      page1 =
-        Doctrans.Repo.insert!(%Doctrans.Documents.Page{
-          id: Ecto.UUID.generate(),
-          document_id: doc1.id,
-          page_number: 1,
-          image_path: "documents/#{doc1.id}/pages/page_1.png",
-          original_markdown: "Content in document one",
-          extraction_status: "completed",
-          translation_status: "pending",
-          embedding_status: "completed",
-          embedding: embedding
-        })
-
-      _page2 =
-        Doctrans.Repo.insert!(%Doctrans.Documents.Page{
-          id: Ecto.UUID.generate(),
-          document_id: doc2.id,
-          page_number: 1,
-          image_path: "documents/#{doc2.id}/pages/page_1.png",
-          original_markdown: "Content in document two",
-          extraction_status: "completed",
-          translation_status: "pending",
-          embedding_status: "completed",
-          embedding: embedding
-        })
-
-      # Search in doc1 - should only return doc1's pages
-      assert {:ok, results} = Search.search_in_document(doc1.id, "content")
-
-      # Results should only include pages from doc1
-      for r <- results do
-        assert r.page_id == page1.id
-      end
+      assert {:ok, results} = Search.search_in_document(document.id, "content")
+      assert Enum.map(results, & &1.page_id) == [page.id]
     end
 
-    test "returns results with correct structure" do
-      doc = document_fixture(%{status: "completed"})
+    test "returns the page text and its similarity to the query" do
+      document = document_fixture(%{status: "completed"})
+      page = insert_indexed_page(document, 4, query_aligned_embedding())
 
-      # Create page with embedding so search can find it
-      embedding = Pgvector.new(List.duplicate(0.1, 1024))
+      assert {:ok, [result]} = Search.search_in_document(document.id, "test")
 
-      page =
-        Doctrans.Repo.insert!(%Doctrans.Documents.Page{
-          id: Ecto.UUID.generate(),
-          document_id: doc.id,
-          page_number: 1,
-          image_path: "documents/#{doc.id}/pages/page_1.png",
-          original_markdown: "Test content for structure",
-          translated_markdown: "Translated test content",
-          extraction_status: "completed",
-          translation_status: "completed",
-          embedding_status: "completed",
-          embedding: embedding
-        })
-
-      assert {:ok, results} = Search.search_in_document(doc.id, "test")
-      # With embedding, we should get results
-      refute Enum.empty?(results)
-
-      for result <- results do
-        assert Map.has_key?(result, :page_id)
-        assert Map.has_key?(result, :page_number)
-        assert Map.has_key?(result, :original_markdown)
-        assert Map.has_key?(result, :translated_markdown)
-        assert Map.has_key?(result, :similarity)
-        assert result.page_id == page.id
-      end
+      assert result.page_id == page.id
+      assert result.page_number == 4
+      assert result.original_markdown == page.original_markdown
+      assert result.translated_markdown == page.translated_markdown
+      assert result.content_revision == page.content_revision
+      assert_in_delta result.similarity, 1.0, 1.0e-6
     end
   end
 
@@ -346,5 +362,61 @@ defmodule Doctrans.SearchTest do
       assert {:ok, %{results: [], total_count: 0, retrieval: :hybrid}} =
                Search.search_with_count("test", offset: 9_223_372_036_854_775_807)
     end
+  end
+
+  # A match set whose ranking is fixed rather than incidental: each page repeats
+  # the term one time less than the page before it, so the full-text half ranks
+  # them strictly. Returned in the order the search owes them back, and each
+  # page's number is its rank, so an assertion can name either.
+  defp ranked_corpus(term, count) do
+    for rank <- 1..count do
+      text = String.duplicate("#{term} ", count + 1 - rank) <> "and some filler text"
+      indexed_page("Ranked Doc #{rank}", rank, text)
+    end
+  end
+
+  defp searchable_page(text, title), do: indexed_page(title, 1, text)
+
+  # One completed, extracted page in a completed document of its own: the
+  # smallest thing global search is allowed to find.
+  defp indexed_page(title, page_number, markdown) do
+    document = document_fixture(%{status: "completed", title: title})
+
+    {:ok, page} =
+      document
+      |> page_fixture(%{page_number: page_number})
+      |> Pages.update_page_extraction(%{
+        extraction_status: "completed",
+        original_markdown: markdown
+      })
+
+    page
+  end
+
+  # A page the semantic half can rank: indexed with a vector of this module's
+  # choosing, so its similarity to the stubbed query embedding is arithmetic
+  # rather than a property of any model.
+  defp embedded_page(text, embedding) do
+    text
+    |> searchable_page("Embedded Doc")
+    |> Ecto.Changeset.change(embedding: embedding)
+    |> Repo.update!()
+  end
+
+  # Inserted through `Repo` rather than the `Pages` API to pin the embedding
+  # alongside the text in one write.
+  defp insert_indexed_page(document, page_number, embedding) do
+    Repo.insert!(%Page{
+      id: Ecto.UUID.generate(),
+      document_id: document.id,
+      page_number: page_number,
+      image_path: "documents/#{document.id}/pages/page_#{page_number}.png",
+      original_markdown: "Content in document #{document.title} page #{page_number}",
+      translated_markdown: "Translated content page #{page_number}",
+      extraction_status: "completed",
+      translation_status: "completed",
+      embedding_status: "completed",
+      embedding: embedding
+    })
   end
 end

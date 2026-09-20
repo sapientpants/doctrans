@@ -32,11 +32,6 @@ defmodule Doctrans.DataCase do
   setup tags do
     Doctrans.DataCase.setup_sandbox(tags)
 
-    # For tests involving background processes (like Worker), ensure shared mode
-    if tags[:background_processes] do
-      Ecto.Adapters.SQL.Sandbox.mode(Doctrans.Repo, {:shared, self()})
-    end
-
     :ok
   end
 

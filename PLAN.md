@@ -1839,7 +1839,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   full round of HTTP and DB checks; `max_attempts` means "extra retries" in `LlmProcessor` and "total
   attempts" in Oban, an off-by-one collision of the same name; and `LlmProcessor` sleeps in-process
   between retries, holding its Oban queue slot for the whole backoff.
-- [ ] **Q03 · P2 · Assert successful outcomes and control test background work.**
+- [x] **Q03 · P2 · Assert successful outcomes and control test background work.**
   Some search tests allow either results or no results and conditionally skip link assertions.
   The passing suite logged database-ownership errors from background tasks.
   Use deterministic retrieval fixtures, assert result IDs/pagination/links, and own/drain supervised work
@@ -1908,6 +1908,94 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `document_converter_test.exs:253,419` and two in `openai_request_test.exs:642,644` are legitimate fixture
   behavior. Only 8% of suite wall time is parallel (0.9 s async vs 55.8 s sync), mostly because
   `Application.put_env` on `:openai`/`:uploads`/`:pdf_extractor_module` forces `async: false`.
+  Implemented 20 September 2026, in four parallel worktrees -- one slice each, one `MIX_TEST_PARTITION`
+  each so the suites could not collide on the shared Postgres -- then merged and re-measured as a whole.
+  **The root cause is closed at the source.** `Processing.Worker` now reads `startup_recovery`,
+  `startup_delay_ms` and `batch_interval_ms`, the same shape as the two sibling workers, and
+  `config/test.exs` sets `startup_recovery: false` with the reason stated where the SweeperWorker line
+  above it states its own. Production behaviour is unchanged: same defaults, same schedule. The switch
+  is not a way to stop testing recovery -- `recover_now/1` is the counterpart of `sweep_now/0` and runs
+  the whole pass while the boot pass is off, walking every batch back to back and replying only at
+  `:done`, so a test gets a signal where it used to get a sleep. Start options override the application
+  environment, so a test can start an instance on either side of the switch without a global
+  `put_env`.
+  Measured, full suite each time: **before 5 ownership errors, 5 Worker terminations, 1 failure;
+  after 0, 0, 0 across every run on the merged branch** (1375 passed, 1 skipped). The baseline failure
+  was `completion_reconciliation_test.exs:180`, where `run_batch({:completion, nil})` returned `:done`
+  because the application's Worker had already reconciled the rows that test had just staged -- a
+  second symptom of this bug that had never been attributed to it, and one that no amount of rewriting
+  that test would have fixed.
+  Three pieces of dead scaffolding went with it: `test/support/worker_helpers.ex`, whose
+  `Sandbox.allow/3` was the only one in the tree and which nothing ever called; the
+  `.dialyzer_ignore.exs` entry pinned to line 16 of that file; and `DataCase`'s `background_processes`
+  branch, which had no taggers left once `worker_test.exs` stopped needing shared mode.
+  `worker_test.exs` is rewritten -- the 50 ms `setup` sleep, `ensure_worker_responsive/1`, every
+  `Process.sleep`, all five `is_map(status)` assertions and the four "doesn't crash" tests are gone, in
+  favour of 15 tests asserting exact queue counts, job args, `priority` (2 for a queue, 1 for a
+  reprocess), the Oban uniqueness conflict on `:page_id`, cancellation scope with a bystander document
+  that must survive, transactional rollback on an unsupported extension, and `recover_now/1`
+  reconciling a settled-but-unreconciled document while queueing nothing. `queue_page_reprocess/2` had
+  no coverage at all before. A new `worker_startup_test.exs` drives the switch from both sides and,
+  with a third instance that passes no option, guards the `config/test.exs` line itself.
+  **Retrieval now fails when it is broken.** The search slice was mutation-tested rather than reviewed:
+  16 mutations against the real modules, of which **5 survived the old suite** -- results returned
+  reversed, a result link that drops the page number, one that drops `search_page`, the fused-score
+  tie-break by page id, and `format_row` hardcoding `page_number: 1`. Each now fails a named test. The
+  fixture that makes this statable is `ranked_corpus/2,3`: each page repeats the term one time less
+  than the one before, so `ts_rank_cd` orders them strictly and page number equals rank, which lets a
+  test name an expected id list instead of a set. Summary text, the whole result `href`, the page-2
+  split and the Next control are asserted exactly; the two tests that asserted emptiness for queries
+  with no fixtures behind them now assert pagination against a real match set. The genuine edge cases
+  -- the bigint-overflow page clamp, the special-characters query -- still assert emptiness, because
+  there emptiness is the outcome.
+  **Integration coverage was gap-filled, not bulk-added**, after an inventory: startup recovery already
+  had 14 tests and completion reconciliation 8, so what was missing was the inter-phase handover in a
+  single pass (the exact cursor sequence `[{:pages,nil},{:embeddings,nil},{:completion,nil},:done]`),
+  the documents phase's own batch bound and cursor, a job carrying a concrete older generation, and
+  `LlmProcessingJob.publish_final_error/3`'s generation match, which nothing exercised on a mismatch.
+  Nothing had ever run a source file through render, extraction, translation and indexing and then
+  searched for it; that test needed new per-page stubs, because `EmbeddingStub` returns the same vector
+  for every input and `OpenAIStub` the same markdown for every image, so no existing fixture could tie
+  a result to a particular page. Every new test was checked by breaking the `lib/` code it covers and
+  confirming the failure.
+  **The cannot-fail list is closed.** The three `rescue ErlangError -> :ok` blocks in
+  `pdf_extractor_test.exs` are replaced by assertions on the exact error tag -- raising is not the
+  contract; poppler exits non-zero and `classify/4` returns `{:pdfinfo_failed, …}` or
+  `{:pdf_command_failed, …}` -- plus two facts the rescue had made unstatable: a failed `extract_pages/3`
+  leaves no output directory, and a failed `extract_page/4` leaves no page image a retry could mistake
+  for finished work. Injecting `:erlang.error(:badarg)` there fails all three tests, which is precisely
+  what the rescue used to turn into a pass. `openai_test.exs` no longer reaches the network: it runs
+  against Bypass, merging into the configured `:openai` list rather than replacing it (replacing it
+  unsets the three model keys for every process for as long as the test runs). Its unreachable case
+  uses a 401 rather than a refused connection, because Req retries a safe GET and neither probe takes
+  options a test could pass `retry: false` through -- measured at 6.7 s per call; the file now runs in
+  0.06 s. `function_exported?/3` assertions that only proved the compiler had compiled are deleted.
+  Two defects the work found rather than the diagnosis, both fixed here. `show_chat_test.exs`'s "can
+  submit a chat message" started an `async_nolink` chat turn, asserted its own echo and ended, leaving
+  the task to query the database with no sandbox owner -- the one unowned-task source still standing
+  after the Worker fix, and the last `DBConnection` shutdown in the log. It now waits on the task and
+  asserts the answer, which is both the drain and the outcome the test was missing. And
+  `search_live_async_test.exs`'s "says nothing about retrieval until the search reports" asserted the
+  in-flight state without holding the search open, so it failed whenever the failing embedding beat the
+  two calls that assert it (observed once in five full runs); `EmbeddingErrorStub` now parks its
+  failing calls on the same barrier `EmbeddingStub` already honoured, so that state is pinned.
+  Sleeps: 9 remain and none stands in for a signal. Four are the fixture behaviour this item already
+  excepted (`document_converter_test.exs:253,419`, `openai_request_test.exs:642,644`); the rest are the
+  backoff inside a bounded polling helper that ends in a real assertion -- `eventually/2` polling OS
+  process liveness and files written by a forked `/bin/sh`, where there is no message to receive, and
+  `await_no_async/2`, which polls `Channel.async_pids/1`, the same thing `render_async/1` uses. Parallel
+  share improved from 0.9 s async / 55.8 s sync to 20.6 s async / 116.3 s sync.
+  Two gate findings from the merge pass, both fixed rather than carried: the register entry pinned to
+  `fixtures.ex:42` went unused when that file gained a fixture, and rather than re-pin it the
+  `Pages.create_pages/2` return it covered is now bound with `_ =`, as its own rationale had said it
+  could be -- one fewer suppression. The new superseding crash stub raises in two callbacks, the same
+  case as `openai_crash_stub.ex`, so both lines are pinned the same way; the register stands at 6 of 8.
+  Handed on rather than fixed here: `openai_request_test.exs` replaces the `:openai` env instead of
+  merging and pays Req backoff on its 500s; `HybridQuery`'s snippet for a result matched on the
+  original column is a `ts_headline` over the translated text, so a source-language search shows a
+  snippet with no highlight; and **the pre-commit gate does not run on a merge commit** -- pre-commit
+  sees no staged diff and reports every file-based hook as "no files to check", so a merge lands
+  ungated. The gate for this branch was therefore run explicitly with `pre-commit run --all-files`.
 
 - [ ] **Q04 · P2 · Fix chunk byte offsets and assert them with a property.**
   `Chunker` writes `start_offset`/`end_offset` to the `chunks` table, and they do not slice back to the
