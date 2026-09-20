@@ -255,11 +255,25 @@ defmodule Doctrans.Search.Chunker do
   # The tail of the previous chunk, prepended to this one for embedding. Bounded
   # in graphemes and bytes as well as words, because the word tail is the whole
   # chunk for any script that does not space-separate.
+  #
+  # `include_captures` keeps the separators, so the tail is a byte suffix of the
+  # chunk it came from rather than its words rebuilt on a separator the source
+  # may never have had -- the same principle `finalize_paras/2` applies to a
+  # chunk's own content (PLAN.md Q04, Q05). Joining on a literal `" "` flattened
+  # every newline, tab and run of spaces inside the tail: `"a\nb"` was embedded
+  # as `"a b"`, so what the embedding server saw was not text that appears
+  # anywhere in the page.
+  #
+  # With the separators kept, the parts alternate word, separator, word -- chunk
+  # content is trimmed at both ends, so neither end is a separator -- and 50
+  # words are the last `2 * 50 - 1` parts: the words plus the 49 separators
+  # between them. The grapheme and byte bound below trims only from the front of
+  # that, which leaves it a suffix.
   defp overlap_tail(text) do
     text
-    |> String.split(~r/\s+/, trim: true)
-    |> Enum.take(-@overlap_words)
-    |> Enum.join(" ")
+    |> String.split(~r/\s+/, trim: true, include_captures: true)
+    |> Enum.take(-(2 * @overlap_words - 1))
+    |> Enum.join()
     |> String.graphemes()
     |> Enum.reverse()
     |> Enum.reduce_while({[], 0, 0}, fn grapheme, {acc, count, size} ->

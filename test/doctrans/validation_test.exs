@@ -1,7 +1,58 @@
 defmodule Doctrans.ValidationTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Doctrans.Validation
+
+  # The directory a sanitized filename would be joined onto. Absolute and already
+  # expanded, so `Path.expand/1` on a join with it moves only for a `..` component.
+  @upload_dir "/var/doctrans/uploads"
+
+  # What a hostile client puts in a multipart filename. Ordered cheapest-first so a
+  # shrunk counterexample names the smallest fragment that still breaks the
+  # invariant: traversal shapes, both separators, NUL and other C0 controls, the
+  # Windows-reserved set, absolute and drive-letter paths, 2-, 3- and 4-byte UTF-8,
+  # a ZWJ grapheme cluster, and byte sequences that are not UTF-8 at all.
+  @fragments [
+    "a",
+    ".",
+    "..",
+    "/",
+    "\\",
+    <<0>>,
+    "../",
+    "..\\",
+    "....//",
+    "./",
+    "...",
+    "//",
+    "/etc/passwd",
+    "C:\\Windows\\system32",
+    "file",
+    ".pdf",
+    "-",
+    "_",
+    " ",
+    "\t",
+    "\n",
+    <<1>>,
+    <<0x1F>>,
+    "<",
+    ">",
+    ":",
+    "\"",
+    "?",
+    "*",
+    "|",
+    "Übermäßig",
+    "文書",
+    "वाक्य",
+    "👨‍👩‍👧‍👦",
+    <<0xFF>>,
+    <<0xC3>>,
+    <<0xED, 0xA0, 0x80>>,
+    <<0xF0, 0x9F>>
+  ]
 
   defp write_file!(dir, name, content) do
     path = Path.join(dir, name)
@@ -293,6 +344,79 @@ defmodule Doctrans.ValidationTest do
 
     test "handles nil filename" do
       assert "" == Validation.sanitize_filename_string(nil)
+    end
+
+    # Shrunk counterexamples from the property below, kept as examples so the two
+    # clauses that matter stay pinned by a named input even if the generator is
+    # ever changed (PLAN.md Q05).
+    test "collapses a traversal prefix to underscores" do
+      assert Validation.sanitize_filename_string("../") == "__"
+      assert Validation.sanitize_filename_string("..\\") == "__"
+    end
+
+    test "an absolute path collapses to one component" do
+      assert Validation.sanitize_filename_string("/etc/passwd") == "_etc_passwd"
+      assert Validation.sanitize_filename_string("C:\\Windows\\system32") == "C__Windows_system32"
+    end
+
+    # Regression, found by the property below (PLAN.md Q05): the NUL strip used to
+    # run after the ".." replacement and closed up a ".." it never saw, so ".\0."
+    # sanitized to ".." -- a filename resolving to the parent directory.
+    test "a NUL between two dots cannot rebuild `..`" do
+      assert Validation.sanitize_filename_string(".\0.") == "_"
+      assert Validation.sanitize_filename_string("a.\0.b") == "a_b"
+    end
+  end
+
+  describe "sanitize_filename_string/1 (property)" do
+    # 50 runs rather than the default 100: a draw is a handful of hostile
+    # fragments concatenated at most six deep -- 7 bytes at the median and 76 at
+    # the largest over a thousand draws -- and 50 draws already land a traversal
+    # in 24% of them, a separator in 44% and invalid UTF-8 in 36%. The bound is
+    # what keeps pull-request latency predictable (PLAN.md Q05). The examples
+    # above state this by example and none of them states the containment clause,
+    # which is the one that matters.
+    property "the result is one component that cannot escape the directory it is joined onto" do
+      check all(filename <- filename(), max_runs: 50) do
+        result = Validation.sanitize_filename_string(filename)
+
+        assert Path.basename(result) == result,
+               "#{inspect(filename)} sanitized to a multi-component path"
+
+        refute String.contains?(result, ["/", "\\", <<0>>]),
+               "#{inspect(filename)} sanitized to #{inspect(result)}, which still holds a separator"
+
+        refute String.contains?(result, ".."),
+               "#{inspect(filename)} sanitized to #{inspect(result)}, which still traverses"
+
+        # The clause the example tests never stated. `""` and `"."` sanitize to
+        # themselves and both resolve to `@upload_dir` itself rather than to a
+        # path strictly beneath it, so "stays under" cannot mean strict descent:
+        # a filename that resolves to the directory is not an escape, it is a
+        # caller-level emptiness bug. Escaping is what this asserts.
+        expanded = Path.expand(Path.join(@upload_dir, result))
+
+        assert expanded == @upload_dir or String.starts_with?(expanded, @upload_dir <> "/"),
+               "#{inspect(filename)} sanitized to #{inspect(result)}, which resolves to " <>
+                 "#{inspect(expanded)}, outside #{@upload_dir}"
+      end
+    end
+  end
+
+  # A filename as a browser may send it: hostile fragments concatenated, with raw
+  # byte runs mixed in so the generator is not limited to the shapes listed.
+  defp filename do
+    gen all(
+          parts <-
+            list_of(
+              frequency([
+                {6, member_of(@fragments)},
+                {1, binary(max_length: 4)}
+              ]),
+              max_length: 6
+            )
+        ) do
+      IO.iodata_to_binary(parts)
     end
   end
 end
