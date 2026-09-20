@@ -2444,6 +2444,20 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   directories this item proposed are the *most* hand-mutated code in the repository, so the pilot should
   be judged on whether the tool is trustworthy, not on how many bugs it finds.
 
+  Found by review of this branch and fixed here, since it is two lines and the reviewer was already in
+  the caller: `openai.ex:327` carried a `parse_list_models_response(%{"data" => [_]} = body)` clause
+  that could never run — the clause above it matches `%{"data" => models} when is_list(models)`, and a
+  one-element list is a list, so the general clause always won. Its body also merely rebuilt the same
+  map and recursed. Dialyzer does not catch it and no suppression hides it; map patterns with dynamic
+  values analyse too weakly to prove the overlap. Deleted, with the single-model case pinned by a new
+  test rather than assumed: `{"data" => [%{"id" => "only-model"}]}` parses to `{:ok, ["only-model"]}`,
+  and narrowing the surviving guard to `length(models) > 1` fails that test alone while the two-model
+  test still passes.
+  Not changed, and recorded as a product question rather than a defect: `%{"data" => []}` parses to
+  `{:ok, []}`, which reaches `assign_models(socket, [], nil)` — an empty model dropdown with no error,
+  where every genuine failure path assigns `models_unavailable`. Whether a server reporting zero models
+  should read as "unavailable" is a decision, not a bug, and it is left alone here.
+
 - [ ] **Q09 · P2 · Re-own the `pdf_extractor_bounds` flake; its handoff points at a closed item.**
   Q06 recorded "one unrelated pre-existing flake … `pdf_extractor_bounds_test.exs:85` (R04) polls for
   pid files a forked shell writes and failed two of those runs under load", and handed it to "the

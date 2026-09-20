@@ -885,6 +885,17 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert {:ok, ["model-a", "model-b"]} = OpenAI.list_models()
     end
 
+    # A one-element list used to have its own parse clause, which was unreachable:
+    # the general `is_list/1` clause above it already matched. This pins that the
+    # single-model case parses identically now that the dead clause is gone.
+    test "returns the one name a single-model server reports", %{bypass: bypass} do
+      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
+        json(conn, 200, %{"data" => [%{"id" => "only-model"}]})
+      end)
+
+      assert {:ok, ["only-model"]} = OpenAI.list_models()
+    end
+
     test "returns error on non-200 status", %{bypass: bypass} do
       # stub (not expect): safe GETs are retried on 5xx, so the route may hit multiple times
       Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
