@@ -4,11 +4,13 @@ defmodule Doctrans.Processing.OpenAI do
 
   Handles extraction, translation, chat, streaming, embedding, and
   model listing against OpenAI-compatible API endpoints.
+
+  Every request goes out under `Doctrans.Processing.RequestBounds`, which caps
+  how long the endpoint may take in total and how much body it may return.
   """
 
   alias Doctrans.Config.{Embedding, Inference, OpenAI}
-  alias Doctrans.Processing.ApiFailure
-  alias Doctrans.Processing.SSECollector
+  alias Doctrans.Processing.{ApiFailure, RequestBounds, SSECollector}
   alias Doctrans.Resilience.CircuitBreaker
 
   require Logger
@@ -112,15 +114,18 @@ defmodule Doctrans.Processing.OpenAI do
     ApiFailure.handle(fuse, reason)
   end
 
+  # One deadline and one size cap per call; Req's retries run inside it.
+  defp bounds(opts),
+    do: RequestBounds.new(Keyword.take(opts, [:timeout, :deadline, :max_response_bytes]))
+
   defp post_chat_completion(request_body, opts) do
     CircuitBreaker.call(
       :openai_api,
       fn ->
         build_base_req()
-        |> Req.post(
+        |> RequestBounds.post(bounds(opts),
           url: api_url("/v1/chat/completions"),
           json: request_body,
-          receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
           # :transient retries all methods (incl. POST) on 408/429/5xx and
           # connection errors; chat-completion POSTs are safe to replay
           retry: :transient,
@@ -172,15 +177,14 @@ defmodule Doctrans.Processing.OpenAI do
     collector = SSECollector.new(on_delta)
 
     case build_base_req()
-         |> Req.post(
+         |> RequestBounds.post(bounds(opts),
            url: api_url("/v1/chat/completions"),
            json: build_request_body(opts ++ [messages: messages, stream: true]),
-           receive_timeout: Keyword.get(opts, :timeout, OpenAI.timeout()),
            retry: :transient,
            # See post_chat_completion/2: a redirect would replay the document
            # text at an endpoint the privacy copy never accounted for.
            redirect: false,
-           into: stream_into(collector)
+           collect: collect_sse(collector)
          ) do
       {:ok, %Req.Response{status: 200} = resp} ->
         collected_content(resp.body, collector)
@@ -193,17 +197,14 @@ defmodule Doctrans.Processing.OpenAI do
     end
   end
 
-  # Stream the response body chunk by chunk: each raw chunk is fed into the
-  # SSE collector (kept in resp.body), which parses complete `data:` frames
-  # and invokes on_delta/1 as soon as content arrives.
-  defp stream_into(collector) do
-    fn {:data, data}, {req, resp} ->
-      state =
-        if is_map(resp.body),
-          do: SSECollector.feed(resp.body, data),
-          else: SSECollector.feed(collector, data)
-
-      {:cont, {req, %{resp | body: state}}}
+  # Each raw chunk is fed into the SSE collector (kept in resp.body), which
+  # parses complete `data:` frames and invokes on_delta/1 as soon as content
+  # arrives. `RequestBounds` counts the bytes and watches the clock around it.
+  defp collect_sse(collector) do
+    fn data, body ->
+      if is_map(body),
+        do: SSECollector.feed(body, data),
+        else: SSECollector.feed(collector, data)
     end
   end
 
@@ -291,8 +292,7 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   # The model list only ever backs a modal a user is waiting in front of, so it
-  # gets a tighter budget than the processing calls: with `retry: :safe_transient`
-  # a transport failure costs this much per attempt, not the default 15s.
+  # gets a tighter per-attempt budget than the processing calls.
   @list_models_timeout 5_000
 
   @impl true
@@ -301,10 +301,9 @@ defmodule Doctrans.Processing.OpenAI do
     fuse = :openai_api
 
     case build_base_req()
-         |> Req.get(
+         |> RequestBounds.get(RequestBounds.new(timeout: @list_models_timeout),
            url: api_url("/v1/models"),
-           retry: :safe_transient,
-           receive_timeout: @list_models_timeout
+           retry: :safe_transient
          ) do
       {:ok, %Req.Response{status: 200, body: body}} ->
         parse_list_models_response(body)
@@ -350,10 +349,9 @@ defmodule Doctrans.Processing.OpenAI do
     request = %{model: model, input: text}
 
     case build_embed_base_req()
-         |> Req.post(
+         |> RequestBounds.post(embed_bounds(timeout),
            url: embed_url("/v1/embeddings"),
            json: request,
-           receive_timeout: timeout,
            # Embedding POSTs are idempotent; replay them on transient failures
            retry: :transient,
            # An embedding request carries the chunk text it is embedding, so a
@@ -424,6 +422,17 @@ defmodule Doctrans.Processing.OpenAI do
 
   defp embed_api_key do
     Embedding.api_key()
+  end
+
+  # Embeddings read the `:embedding` section, so a search box can be bounded on
+  # its own. Only `:timeout` differs by default -- a minute against five, spending
+  # the same total budget in shorter attempts until a deadline is set there.
+  defp embed_bounds(timeout) do
+    RequestBounds.new(
+      timeout: timeout,
+      deadline: Embedding.deadline(),
+      max_response_bytes: Embedding.max_response_bytes()
+    )
   end
 
   defp build_embed_base_req do

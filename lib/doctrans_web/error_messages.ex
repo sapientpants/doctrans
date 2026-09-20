@@ -48,6 +48,21 @@ defmodule DoctransWeb.ErrorMessages do
         "The model did not return complete final text. Use a model with a larger output budget or split the page into smaller sections, then reprocess. The provider must return finish_reason=stop."
       )
 
+  def message(:inference_deadline_exceeded),
+    do:
+      dgettext(
+        "errors",
+        "The model server ran out of time and the request was stopped. Check that it is running and responsive, then reprocess this page."
+      )
+
+  def message({:inference_response_too_large, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "The model server's answer went past the %{limit} byte limit and was stopped before it was read. Check the configured model and endpoint, then try again.",
+        limit: binding(bindings, :limit)
+      )
+
   def message(:page_not_found), do: dgettext("errors", "Page not found")
 
   def message({:page_extraction_failed, bindings}),

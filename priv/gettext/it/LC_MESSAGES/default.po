@@ -57,12 +57,12 @@ msgstr "Annulla"
 msgid "Completed"
 msgstr "Completato"
 
-#: lib/doctrans_web/live/document_live/index.ex:75
+#: lib/doctrans_web/live/document_live/index.ex:74
 #, elixir-autogen, elixir-format
 msgid "Doctrans"
 msgstr "Doctrans"
 
-#: lib/doctrans_web/live/document_live/index.ex:304
+#: lib/doctrans_web/live/document_live/index.ex:311
 #, elixir-autogen, elixir-format
 msgid "Document deleted successfully"
 msgstr "Documento eliminato con successo"
@@ -92,7 +92,7 @@ msgstr "Errore"
 msgid "Extracting text from page..."
 msgstr "Estrazione del testo dalla pagina..."
 
-#: lib/doctrans_web/error_messages.ex:221
+#: lib/doctrans_web/error_messages.ex:236
 #, elixir-autogen, elixir-format
 msgid "Failed to delete document"
 msgstr "Impossibile eliminare il documento"
@@ -117,12 +117,12 @@ msgstr "Tedesco"
 msgid "Italian"
 msgstr "Italiano"
 
-#: lib/doctrans_web/live/document_live/index.ex:164
+#: lib/doctrans_web/live/document_live/index.ex:163
 #, elixir-autogen, elixir-format
 msgid "Name (A-Z)"
 msgstr "Nome (A-Z)"
 
-#: lib/doctrans_web/live/document_live/index.ex:175
+#: lib/doctrans_web/live/document_live/index.ex:174
 #, elixir-autogen, elixir-format
 msgid "Name (Z-A)"
 msgstr "Nome (Z-A)"
@@ -132,7 +132,7 @@ msgstr "Nome (Z-A)"
 msgid "Newest"
 msgstr "Più recente"
 
-#: lib/doctrans_web/live/document_live/index.ex:142
+#: lib/doctrans_web/live/document_live/index.ex:141
 #, elixir-autogen, elixir-format
 msgid "Newest First"
 msgstr "Più recente prima"
@@ -143,12 +143,12 @@ msgstr "Più recente prima"
 msgid "Next"
 msgstr "Avanti"
 
-#: lib/doctrans_web/live/document_live/index.ex:206
+#: lib/doctrans_web/live/document_live/index.ex:201
 #, elixir-autogen, elixir-format
 msgid "No documents yet"
 msgstr "Nessun documento"
 
-#: lib/doctrans_web/live/document_live/index.ex:381
+#: lib/doctrans_web/live/document_live/index.ex:388
 #, elixir-autogen, elixir-format
 msgid "No files were uploaded"
 msgstr "Nessun file è stato caricato"
@@ -168,7 +168,7 @@ msgstr "Nessun risultato trovato"
 msgid "Oldest"
 msgstr "Più vecchio"
 
-#: lib/doctrans_web/live/document_live/index.ex:153
+#: lib/doctrans_web/live/document_live/index.ex:152
 #, elixir-autogen, elixir-format
 msgid "Oldest First"
 msgstr "Più vecchio prima"
@@ -232,14 +232,14 @@ msgstr "In coda"
 msgid "Search"
 msgstr "Cerca"
 
-#: lib/doctrans_web/live/document_live/index.ex:90
+#: lib/doctrans_web/live/document_live/index.ex:89
 #: lib/doctrans_web/live/search_live.ex:223
 #: lib/doctrans_web/live/search_live.ex:339
 #, elixir-autogen, elixir-format
 msgid "Search documents"
 msgstr "Cerca documenti"
 
-#: lib/doctrans_web/live/document_live/index.ex:99
+#: lib/doctrans_web/live/document_live/index.ex:98
 #: lib/doctrans_web/live/search_live.ex:232
 #, elixir-autogen, elixir-format
 msgid "Search..."
@@ -300,7 +300,7 @@ msgstr "Prova con un termine di ricerca diverso."
 msgid "Unknown"
 msgstr "Sconosciuto"
 
-#: lib/doctrans_web/live/document_live/index.ex:188
+#: lib/doctrans_web/live/document_live/index.ex:187
 #, elixir-autogen, elixir-format
 msgid "Upload"
 msgstr "Carica"
@@ -373,7 +373,7 @@ msgstr "Trascina e rilascia documenti qui, oppure"
 msgid "Extraction Model"
 msgstr "Extraction Model"
 
-#: lib/doctrans_web/error_messages.ex:222
+#: lib/doctrans_web/error_messages.ex:237
 #, elixir-autogen, elixir-format
 msgid "Failed to reset page for reprocessing"
 msgstr "Failed to reset page for reprocessing"
@@ -384,7 +384,7 @@ msgstr "Failed to reset page for reprocessing"
 msgid "Go to page %{page}"
 msgstr "Go to page %{page}"
 
-#: lib/doctrans_web/error_messages.ex:185
+#: lib/doctrans_web/error_messages.ex:200
 #, elixir-autogen, elixir-format
 msgid "Invalid model selection"
 msgstr "Invalid model selection"
@@ -419,7 +419,7 @@ msgstr "Reprocess"
 msgid "Reprocess Page"
 msgstr "Rielabora pagina"
 
-#: lib/doctrans_web/error_messages.ex:215
+#: lib/doctrans_web/error_messages.ex:230
 #, elixir-autogen, elixir-format
 msgid "Search is temporarily unavailable. Please try again."
 msgstr "Search is temporarily unavailable. Please try again."
@@ -488,7 +488,7 @@ msgstr "Chiudi chat"
 msgid "Document is still being processed. Chat will be available soon."
 msgstr "Il documento è ancora in fase di elaborazione. La chat sarà disponibile al termine dell'elaborazione."
 
-#: lib/doctrans_web/error_messages.ex:214
+#: lib/doctrans_web/error_messages.ex:229
 #, elixir-autogen, elixir-format
 msgid "Failed to search the document. Please try again."
 msgstr "Impossibile cercare nel documento. Per favore riprova."
@@ -498,7 +498,7 @@ msgstr "Impossibile cercare nel documento. Per favore riprova."
 msgid "I'll find relevant content and answer based on it."
 msgstr "Troverò contenuti pertinenti e risponderò in base ad essi."
 
-#: lib/doctrans_web/error_messages.ex:212
+#: lib/doctrans_web/error_messages.ex:227
 #, elixir-autogen, elixir-format
 msgid "Please enter a question."
 msgstr "Per favore inserisci una domanda."
@@ -514,7 +514,7 @@ msgstr "Traduzione privata di documenti basata su IA locale"
 msgid "Send message"
 msgstr "Invia messaggio"
 
-#: lib/doctrans_web/error_messages.ex:224
+#: lib/doctrans_web/error_messages.ex:239
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Mi dispiace, si è verificato un errore. Per favore riprova."
@@ -539,7 +539,7 @@ msgstr "I tuoi documenti non lasciano mai il tuo dispositivo"
 msgid "Checking the sources..."
 msgstr "Verifica delle fonti..."
 
-#: lib/doctrans_web/error_messages.ex:223
+#: lib/doctrans_web/error_messages.ex:238
 #, elixir-autogen, elixir-format
 msgid "Failed to fetch models from OpenAI"
 msgstr "Impossibile recuperare i modelli da OpenAI"
@@ -579,8 +579,8 @@ msgstr "Elaborazione del documento"
 msgid "Document queued for reprocessing"
 msgstr "Documento in coda per la rielaborazione"
 
-#: lib/doctrans_web/error_messages.ex:178
-#: lib/doctrans_web/live/document_live/show.ex:305
+#: lib/doctrans_web/error_messages.ex:193
+#: lib/doctrans_web/live/document_live/show.ex:378
 #: lib/doctrans_web/live/document_live/show.html.heex:81
 #, elixir-autogen, elixir-format
 msgid "Original upload unavailable. Re-upload this document to process it again."
@@ -607,7 +607,7 @@ msgid "Queuing…"
 msgstr "Inserimento in coda…"
 
 #: lib/doctrans_web/live/document_live/reprocess_modal.ex:278
-#: lib/doctrans_web/live/document_live/show.ex:302
+#: lib/doctrans_web/live/document_live/show.ex:375
 #, elixir-autogen, elixir-format
 msgid "Reprocess document"
 msgstr "Rielabora documento"
@@ -617,12 +617,12 @@ msgstr "Rielabora documento"
 msgid "Run every processing step again from the original upload. Existing pages and search results will be replaced. This may take some time."
 msgstr "Esegui nuovamente tutti i passaggi di elaborazione a partire dal file originale. Le pagine e i risultati di ricerca esistenti verranno sostituiti. Potrebbe essere necessario del tempo."
 
-#: lib/doctrans_web/error_messages.ex:183
+#: lib/doctrans_web/error_messages.ex:198
 #, elixir-autogen, elixir-format
 msgid "The document has changed. Please try again."
 msgstr "Il documento è stato modificato. Riprova."
 
-#: lib/doctrans_web/error_messages.ex:181
+#: lib/doctrans_web/error_messages.ex:196
 #, elixir-autogen, elixir-format
 msgid "This document still has active processing jobs. Please wait for them to finish."
 msgstr "Questo documento ha ancora attività di elaborazione in corso. Attendi che terminino."
@@ -632,7 +632,7 @@ msgstr "Questo documento ha ancora attività di elaborazione in corso. Attendi c
 msgid "Select a model"
 msgstr "Seleziona un modello"
 
-#: lib/doctrans_web/error_messages.ex:219
+#: lib/doctrans_web/error_messages.ex:234
 #, elixir-autogen, elixir-format
 msgid "Document search is temporarily unavailable. Please try again."
 msgstr "La ricerca nel documento non è temporaneamente disponibile. Riprova."
@@ -718,7 +718,7 @@ msgstr "Rimuovi %{file}"
 msgid "Reprocess page"
 msgstr "Rielabora pagina"
 
-#: lib/doctrans_web/live/document_live/index.ex:123
+#: lib/doctrans_web/live/document_live/index.ex:122
 #, elixir-autogen, elixir-format
 msgid "Sort documents"
 msgstr "Ordina documenti"
