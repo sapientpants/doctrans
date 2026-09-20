@@ -128,12 +128,14 @@ defmodule Doctrans.Validation do
   @spec sanitize_filename_string(term()) :: String.t()
   def sanitize_filename_string(filename) when is_binary(filename) do
     filename
+    # Remove null bytes completely, and do it first: stripping them afterwards
+    # closes up a ".." the replacement below never saw, so ".\0." came out as
+    # ".." -- a filename that resolves to the parent directory (PLAN.md Q05).
+    |> String.replace("\0", "")
     # Replace .. with _
     |> String.replace(~r/\.\./, "_")
     |> String.replace("/", "_")
     |> String.replace("\\", "_")
-    # Remove null bytes completely
-    |> String.replace("\0", "")
     |> String.replace(~r/[<>:"\/?*|\x01-\x1f]/, "_")
   end
 

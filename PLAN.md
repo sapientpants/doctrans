@@ -1,6 +1,6 @@
 # Doctrans improvement plan
 
-Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q04 completed,
+Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q05 completed,
 plus Phase 6 items G01–G19.
 Base: `main` at `6953656`, reviewed on 11 September 2026.
 Phase 6 added 12 September 2026 from a quality-gate, toolchain, and supply-chain review.
@@ -2120,7 +2120,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `subtract_joined_word/4` with it and changes packing for every document; the comment on `gap_measure/2`
   now states the gap rather than claiming the case is handled.
 
-- [ ] **Q05 · P2 · Add property tests for the invariants that fixtures state only by example.**
+- [x] **Q05 · P2 · Add property tests for the invariants that fixtures state only by example.**
   Add `{:stream_data, "~> 1.4", only: [:dev, :test]}` and four properties, in value order.
   `Chunker.chunk/1`: the offset round-trip above, plus word-multiset preservation, contiguous
   `chunk_index` over `0..n-1`, and non-decreasing `start_offset` — this restates C01's "retain every
@@ -2145,6 +2145,123 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   `Chunker.chunk/1` is word-multiset preservation, contiguous `chunk_index`, and non-decreasing
   `start_offset` — extend that property or add siblings beside it rather than starting a new generator.
   The `cond` it guards is now `accumulate_paragraph/3`, which takes the source text as a third argument.
+  Implemented, as three properties beside Q04's, plus two defect fixes the properties found.
+  `Chunker.chunk/1`. Three siblings of Q04's round-trip property in a new
+  `describe "chunk/1 invariants (properties)"`, sharing `document/0` and `max_runs: 50`:
+  "every word of the source survives into exactly one chunk", "chunk indexes run from zero without a
+  gap", and "chunks are ordered and never overlap" — the last asserting Q05's non-decreasing
+  `start_offset` and the stronger `start_offset >= previous.end_offset`, since stored content carries
+  no overlap by construction.
+  Word-multiset equality, which Q05 names, is **false**: asserting it fails on 163 of 2,000 generated
+  documents, shrinking to `String.duplicate("word。", 481)`. The cause is not grapheme-level splitting
+  but `Segments`' `@sentence_boundary` matching zero-width after a full-width terminator: a space-free
+  run is one word to `word_count/1` however long, so cutting it in three yields three chunk words with
+  not a character lost. The property therefore re-joins the pair either side of a **zero-byte junction**
+  and compares word *sequences*, which is free and strictly stronger — a multiset would not notice
+  chunks returned in the wrong order, and reversing them on
+  `String.duplicate("alpha ", 480) <> "\n\nomega"` is a case where the multiset matches and the sequence
+  does not. Measured over the same 2,000 documents: 0 non-whitespace junctions, and the chunks tile the
+  trimmed source exactly in 2,000 of 2,000. The counterexample is kept as an example test. This
+  supersedes `assert_preserves/2`, which strips whitespace and so cannot tell a word cut in two from one
+  left whole; its six example tests keep it for the fixed sources they pin.
+  **The generator could not reach a third of the `cond` Q05 wrote these properties to guard.**
+  `accumulate_paragraph/3`'s `true -> start_chunk(...)` branch was reached by 0 of 1,000 documents:
+  `short_paragraph/0` tops out near 100 words for a whole document, far under the 300-word fill target,
+  and anything larger is a `long_paragraph`, which takes the split branch instead. Deleting that
+  branch's flush, so it drops everything accumulated, left **all four properties passing** — only three
+  example tests caught it. A `medium_paragraph/0` arm was added to the existing generator, sized to half
+  of whichever of the three budgets binds first for its token, so one fits the target and two do not
+  whatever the script; weights are now `{3, short}, {3, medium}, {1, long}` and 161 of 1,000 documents
+  reach the branch, 5–10 per 50-run property. **This restates the generator statistics Q04's entry
+  cites**: one paragraph in four past the fill target is now one in seven, p50 1.1 KB → 2.9 KB, p95
+  31 KB → 23 KB, max 68 KB → 70 KB; per 50 draws the split path is hit 11–25 times and a grouped chunk
+  with a separator longer than two bytes appears in 19–26.
+  `Validation.sanitize_filename_string/1`. One property, "the result is one component that cannot escape
+  the directory it is joined onto", over a generator of hostile fragments concatenated at most six deep —
+  traversal shapes, both separators, NUL and other C0 controls, the Windows-reserved set, absolute and
+  drive-letter paths, 2-, 3- and 4-byte UTF-8, a ZWJ cluster, and byte sequences that are not UTF-8 at
+  all — with raw `binary/1` runs mixed in so the space is not limited to the listed shapes. Over 50
+  draws a traversal appears in 24%, a separator in 44%, invalid UTF-8 in 36% and a NUL in 12%.
+  Invalid UTF-8 does not raise: neither regex carries the `u` modifier, so `String.replace/3` runs
+  bytewise and `Path.basename/1` and `Path.expand/1` handle the result.
+  The containment clause is stated as `expanded == dir or starts_with?(expanded, dir <> "/")` rather than
+  strict descent, because `""` and `"."` sanitize to themselves and resolve to `dir` itself. That is not
+  an escape — the caller opens the directory and gets `EISDIR` — and rejecting empty filenames is a
+  caller-level concern; escaping is what the clause is for.
+  **Defect found and fixed: the NUL strip ran after the `..` replacement and rebuilt what it had
+  removed.** `sanitize_filename_string(".\0.")` returned `".."`, and `Path.expand(Path.join(dir, ".."))`
+  is `dir`'s *parent*. Exhaustive over all 30,941 strings of length ≤ 4 on the alphabet
+  `. / \ NUL a < \x01 ~ SPACE \xFF : \xC3 \n`: the basename and separator clauses had 0 violations, the
+  no-`..` clause 26 and the containment clause 4, and **every one required a NUL between two dots** —
+  the `..` regex is exhaustive on its own input, so NUL removal was the only way `..` could reappear.
+  Latent rather than exploitable: the sanitized value is stored as `Document.original_filename` for
+  display and `Path.extname/1`, while the on-disk path is `document_upload_dir(uuid)/original<ext>`
+  (`upload_intake.ex:124-137`), so nothing joins this string onto a directory. Fixed by moving
+  `String.replace("\0", "")` to the head of the pipeline — four lines moved, one comment rewritten —
+  after which all four clauses hold unconditionally over all 30,941 inputs, zero violations. The property
+  asserts every clause on every input with no exemption, and `.\0.` and `a.\0.b` are pinned as a
+  regression example.
+  `Chunker.content_for_embedding/2`. One property, "the embedded text is the chunk's own content with a
+  bounded prefix", asserting the index-0 and out-of-bounds clauses, that the result ends with the chunk's
+  own content, that the prefix is a suffix of what precedes it, and bounds in **both** graphemes and
+  bytes — only the grapheme half was pinned before.
+  **Defect found and fixed: the embedded prefix was text that appeared nowhere in the page.** Q05
+  predicted this and it is confirmed — 1,206 of 2,133 consecutive chunk pairs over 2,000 generated
+  documents. `overlap_tail/1` split the previous chunk on `~r/\s+/` and rejoined the tail on a literal
+  `" "`, discarding the separators: stored chunk `"a\nb"` was embedded in front of the next chunk as
+  `"a b"`, and Q04's grouped shape `"aaa\n\n\nbbb"` as `"aaa bbb"`. A single ASCII space was the only
+  separator that round-tripped. It is the Q04 bug class one function further down, and not a Unicode
+  one — the split regex has no `u` modifier, so NBSP and ideographic space are not separators and
+  survive. Fixed with `include_captures: true` and `Enum.take(-(2 * @overlap_words - 1))` — 50 words plus
+  the 49 separators between them — joined with `Enum.join()`, so the tail is a byte suffix of the chunk
+  it came from: the principle `finalize_paras/2` already applies to a chunk's own content. `trim: true`
+  with `include_captures: true` leaves no separator at either end of trimmed content, so the last 99
+  parts always start on a word, and the grapheme/byte bound below trims only from the front, which leaves
+  a suffix a suffix. The clause exercises that bound: over 2,000 documents 20.8% of pairs hit the
+  grapheme bound and 5.0% the byte bound, and the clause held on all of them.
+  Blast radius, latent: the string reaches only `Embedding.generate/2` from `indexer.ex:114` and
+  `rechunk_documents.ex:96` and is never persisted — only the vector is. Stored `chunks.content` is
+  untouched, and `chat_context` and snippets read that, never this. So vectors embedded before this
+  change carry flattened whitespace in a ≤ 50-word context prefix; retrieval impact is negligible and no
+  rebuild is required, though `mix rechunk_documents` exists if one is wanted. One consequence worth
+  stating: gap bytes now count against the 400-grapheme and 1,600-byte overlap bounds, so a
+  whitespace-heavy chunk contributes slightly fewer words of context than before — the correct reading of
+  a bound on the text actually sent.
+  One example test was deleted as subsumed: "content_for_embedding for chunk with short previous chunk"
+  wrapped its body in `if length(chunks) > 1` and then asserted `String.length(embed_content) > 0` — it
+  could go vacuous and its assertion could not fail, which is the shape of test this item exists to
+  remove. `short_paragraph/0` generates exactly that case.
+  Acceptance met. Every property fails under a deliberate mutation, each applied to `lib/` and reverted
+  by file copy. `chunk/1`: `Enum.with_index(1)` fails index contiguity after 0 runs, shrunk to `"word"`;
+  deleting `build_raw_chunks/2`'s `Enum.reverse()` fails ordering after 1 run — **and leaves Q04's
+  round-trip property passing**, which is coverage it did not have; dropping the accumulation in the
+  first `cond` branch fails preservation after 5 runs, and in the third after 3.
+  `sanitize_filename_string/1`: dropping the `..` replacement fails after 1 run (`"../"` → `".._"`),
+  dropping the `\` replacement after 6, dropping the NUL strip after 7, and restoring the old NUL
+  ordering after 7, shrunk to `".\0.pdf"` → `"..pdf"`.
+  `content_for_embedding/2`: reverting the fix fails after 7 runs, reversing the join after 7, reading
+  the *next* chunk as previous after 13, taking the *head* of the tail after 12, removing the
+  grapheme/byte cap after 7, and prepending to chunk 0 or falling through on an out-of-range index after
+  0 — the last three of those are caught by **nothing but the new property**.
+  Two mutations are equivalent rather than uncaught, which is worth recording. `sanitize_filename_string/1`'s
+  `|> String.replace("/", "_")` is **dead code**: the later `[<>:"\/?*|\x01-\x1f]` class already covers
+  `/`, and deleting the dedicated line leaves the output byte-identical over all 30,941 exhaustive
+  inputs. No test can kill that mutant because there is no behaviour to kill; dropping `/` from *both*
+  places does fail the property, after 5 runs. Left in place rather than widening this diff. And carrying
+  `current_rev ++ [para]` forward in `start_chunk/4` is invisible because `finalize_paras/2` reads only
+  `List.first/1` and `List.last/1` of the paragraph list.
+  Run counts and collection sizes stay bounded: every property is `max_runs: 50` over the existing
+  generator. `chunker_test.exs` runs in 0.5 s against 0.3 s before, 45 tests against 39;
+  `validation_test.exs` 0.08 s against 0.06 s, 43 against 39. Full suite: **1386 passed
+  (6 properties, 1380 tests)** against 1376 before, none skipped. `mix precommit`: all 30 hooks pass.
+  The `.dialyzer_ignore.exs` filter on `sanitize_title/1` moved 223 → 225 with the two lines the
+  validation fix adds; Dialyzer's "unnecessary skip" check is what caught it.
+  Handed on rather than fixed here: `content_for_embedding/2`'s `if overlap != "" do … else` branch
+  (`chunker.ex:105-109`) is **unreachable for any chunk list `chunk/1` produces** — 0 of 2,133 pairs
+  reached it. Chunk content is trimmed and non-empty, so `overlap_tail/1` always returns at least one
+  grapheme, and the reduce can only return empty if a single grapheme exceeds 1,600 bytes, which none
+  does. Only a hand-built list with whitespace-only content reaches it, and `chunk/1` never emits one.
+  Left in `lib/` as a defensive fallback; it is a candidate for Q07's mutation-testing scope.
 
 - [ ] **Q06 · P2 · Cover the remaining trust boundaries and bound the inference client.**
   Upload and image serving are the best-tested boundaries in the app and need only two additions: a
