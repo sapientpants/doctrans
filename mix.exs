@@ -114,7 +114,8 @@ defmodule Doctrans.MixProject do
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
       # Testing utilities
       {:mox, "~> 1.0", only: :test},
-      {:bypass, "~> 2.1", only: :test}
+      {:bypass, "~> 2.1", only: :test},
+      {:stream_data, "~> 1.4", only: [:dev, :test]}
     ]
   end
 

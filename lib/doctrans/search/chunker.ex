@@ -23,10 +23,6 @@ defmodule Doctrans.Search.Chunker do
   @overlap_graphemes 400
   @overlap_bytes 1600
 
-  # Paragraphs are rejoined on "\n\n" by `finalize_paras/1`, which those two
-  # graphemes account for when measuring what a chunk would become.
-  @paragraph_join {0, 2, 2}
-
   alias Doctrans.Search.Chunker.Segments
 
   @typedoc "One chunk of a page's markdown, as stored in `Doctrans.Documents.Chunk`."
@@ -79,7 +75,7 @@ defmodule Doctrans.Search.Chunker do
 
       trimmed
       |> split_paragraphs()
-      |> build_raw_chunks()
+      |> build_raw_chunks(trimmed)
       |> index_chunks(base)
     end
   end
@@ -118,76 +114,79 @@ defmodule Doctrans.Search.Chunker do
 
   # Split text into paragraphs tracking byte offsets.
   # Returns [{content, start_byte_offset, end_byte_offset}]
+  #
+  # `include_captures` keeps the separators in the list, so a part's position is
+  # the sum of the byte sizes before it and every offset is arithmetic rather
+  # than searched for. Searching the text for each paragraph needed a fallback
+  # for a miss that could not happen, and an offset out of range is no longer a
+  # pointer that merely reads back wrong: `finalize_paras/2` slices the text
+  # with it, and a length past the end raises `ArgumentError`, which `Indexer`'s
+  # Oban job retries deterministically -- leaving the page's `embedding_status`
+  # at "processing" for good. This way there is nothing to guard.
   defp split_paragraphs(text) do
-    parts = String.split(text, ~r/\n\n+/)
-
-    {paragraphs, _} =
-      Enum.reduce(parts, {[], 0}, fn part, {acc, search_from} ->
-        trimmed = String.trim(part)
-
-        if trimmed == "" do
-          {acc, search_from}
-        else
-          start_offset = find_offset(text, trimmed, search_from)
-          end_offset = start_offset + byte_size(trimmed)
-          {[{trimmed, start_offset, end_offset} | acc], end_offset}
-        end
-      end)
-
-    Enum.reverse(paragraphs)
+    text
+    |> String.split(~r/\n\n+/, include_captures: true)
+    |> Enum.reduce({[], 0}, &take_paragraph/2)
+    |> elem(0)
+    |> Enum.reverse()
   end
 
-  defp find_offset(text, substring, search_from) do
-    scope_size = byte_size(text) - search_from
+  # Separators trim to "" and only advance the offset, so they need no clause of
+  # their own.
+  defp take_paragraph(part, {paragraphs, offset}) do
+    next_offset = offset + byte_size(part)
+    trimmed = String.trim(part)
 
-    if scope_size <= 0 do
-      search_from
+    if trimmed == "" do
+      {paragraphs, next_offset}
     else
-      case :binary.match(text, substring, scope: {search_from, scope_size}) do
-        {pos, _len} -> pos
-        :nomatch -> search_from
-      end
+      start_offset = next_offset - byte_size(String.trim_leading(part))
+      {[{trimmed, start_offset, start_offset + byte_size(trimmed)} | paragraphs], next_offset}
     end
   end
 
   # Pass 1: greedily group paragraphs into chunks, up to the fill target
   # `Segments` defines. Returns [raw_chunk()]
-  defp build_raw_chunks([]), do: []
+  defp build_raw_chunks([], _text), do: []
 
-  defp build_raw_chunks(paragraphs) do
+  defp build_raw_chunks(paragraphs, text) do
     # current_rev accumulates paragraphs in reverse order for efficiency, and
-    # `measure` is what those paragraphs come to once joined.
+    # `measure` is what the span from the first of them to the last comes to.
     {chunks, current_rev, _measure} =
-      Enum.reduce(paragraphs, {[], [], Segments.zero()}, &accumulate_paragraph/2)
+      Enum.reduce(paragraphs, {[], [], Segments.zero()}, &accumulate_paragraph(&1, &2, text))
 
     chunks
-    |> flush_paragraphs(current_rev)
+    |> flush_paragraphs(current_rev, text)
     |> Enum.reverse()
   end
 
-  defp accumulate_paragraph({para_text, _start, _end} = para, {_chunks, current_rev, acc} = state) do
+  defp accumulate_paragraph(
+         {para_text, para_start, _end} = para,
+         {_chunks, current_rev, acc} = state,
+         text
+       ) do
     para_measure = Segments.measure(para_text)
-    extended = extend(acc, para_measure, current_rev)
+    extended = extend(acc, para_measure, current_rev, para_start, text)
 
     cond do
-      not Segments.within?(para_measure, :target) -> split_paragraph(para, state)
+      not Segments.within?(para_measure, :target) -> split_paragraph(para, state, text)
       Segments.within?(extended, :target) -> keep_paragraph(para, extended, state)
-      true -> start_chunk(para, para_measure, state)
+      true -> start_chunk(para, para_measure, state, text)
     end
   end
 
   # A paragraph over the target is split on its own, whether or not anything
   # precedes it (PLAN.md S04). Whatever is accumulated is flushed first, so the
   # long paragraph starts a chunk rather than joining one.
-  defp split_paragraph({para_text, para_start, _end}, {chunks, current_rev, _acc}) do
+  defp split_paragraph({para_text, para_start, _end}, {chunks, current_rev, _acc}, text) do
     split = Enum.reverse(Segments.split(para_text, para_start))
-    {split ++ flush_paragraphs(chunks, current_rev), [], Segments.zero()}
+    {split ++ flush_paragraphs(chunks, current_rev, text), [], Segments.zero()}
   end
 
   # Adding this paragraph would pass the target and we have content: emit what
   # is accumulated, start the next chunk with this paragraph.
-  defp start_chunk(para, para_measure, {chunks, current_rev, _acc}) do
-    {flush_paragraphs(chunks, current_rev), [para], para_measure}
+  defp start_chunk(para, para_measure, {chunks, current_rev, _acc}, text) do
+    {flush_paragraphs(chunks, current_rev, text), [para], para_measure}
   end
 
   # Accumulate (prepend, reverse later).
@@ -195,23 +194,46 @@ defmodule Doctrans.Search.Chunker do
     {chunks, [para | current_rev], extended}
   end
 
-  defp flush_paragraphs(chunks, []), do: chunks
+  defp flush_paragraphs(chunks, [], _text), do: chunks
 
-  defp flush_paragraphs(chunks, current_rev),
-    do: [finalize_paras(Enum.reverse(current_rev)) | chunks]
+  defp flush_paragraphs(chunks, current_rev, text),
+    do: [finalize_paras(Enum.reverse(current_rev), text) | chunks]
 
-  # What the accumulated paragraphs would measure with this one appended.
-  defp extend(_measure, para_measure, []), do: para_measure
+  # What the accumulated paragraphs would measure with this one appended. The
+  # chunk is the span from the first paragraph's start to this one's end, so the
+  # gap between the two -- whatever the source actually holds there, not the two
+  # bytes an earlier version assumed -- is inside the span and has to be
+  # counted.
+  #
+  # The gap is measured the same way a paragraph is, which keeps the running
+  # total an upper bound on the span's own measure: concatenation can merge two
+  # tokens, or two grapheme clusters, into one, but it can never produce a
+  # third, so a sum of parts overshoots and never undershoots. An upper bound is
+  # what the ceilings rest on. Counting the gap as zero words instead would
+  # undershoot wherever it holds whitespace `word_count/1` does not recognise --
+  # non-breaking or ideographic spacer lines, which an HTML-to-markdown
+  # conversion leaves behind -- and 500 of those between two paragraphs made one
+  # 501-word chunk out of a ceiling of 400.
+  defp extend(_measure, para_measure, [], _para_start, _text), do: para_measure
 
-  defp extend(measure, para_measure, _current_rev) do
-    measure |> Segments.add(@paragraph_join) |> Segments.add(para_measure)
+  defp extend(measure, para_measure, [{_, _, prev_end} | _], para_start, text) do
+    gap = binary_part(text, prev_end, para_start - prev_end)
+
+    measure
+    |> Segments.add(Segments.measure(gap))
+    |> Segments.add(para_measure)
   end
 
-  defp finalize_paras(paras) do
-    content = Enum.map_join(paras, "\n\n", fn {text, _, _} -> text end)
+  # A chunk is one contiguous byte span, here as in `Segments`: its content is
+  # the source between the first paragraph's start and the last one's end, blank
+  # lines and all, rather than the paragraphs rejoined on a separator the source
+  # may never have had. That is what makes
+  # `binary_part(text, start_offset, end_offset - start_offset)` return the
+  # content exactly (PLAN.md Q04).
+  defp finalize_paras(paras, text) do
     {_, start_offset, _} = List.first(paras)
     {_, _, end_offset} = List.last(paras)
-    {content, start_offset, end_offset}
+    {binary_part(text, start_offset, end_offset - start_offset), start_offset, end_offset}
   end
 
   # Assign indexes to raw chunks, shifting offsets back onto the original text.
