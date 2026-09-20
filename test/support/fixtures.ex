@@ -42,7 +42,8 @@ defmodule Doctrans.Fixtures do
         }
       end)
 
-    Pages.create_pages(document, page_attrs_list)
+    # Discarded deliberately: the document is reloaded with its pages below.
+    _ = Pages.create_pages(document, page_attrs_list)
 
     Documents.get_document_with_pages!(document.id)
   end

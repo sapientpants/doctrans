@@ -41,19 +41,25 @@
   # owner: @sapientpants
   # expires: 2026-12-12
   # upstream: none
-  # rationale: `Pages.create_pages/2`'s `{count, rows}` return is discarded because the
-  #   fixture reloads the document with its pages on the next line. Fixable with a
-  #   `_ =` binding; left alone here so this register — not a test-support edit — is
-  #   what changes in G14.
-  {"test/support/fixtures.ex", :unmatched_return, 42},
-
-  # owner: @sapientpants
-  # expires: 2026-12-12
-  # upstream: none
   # rationale: The stub implements `OpenAIBehaviour` by raising; terminating with an
   #   exception is the behaviour under test, so `no_return` is the correct typing of a
   #   correct function. Both raising callbacks are pinned by line.
   {"test/support/openai_crash_stub.ex", :no_return, 19},
+
+  # owner: @sapientpants
+  # expires: 2026-12-12
+  # upstream: none
+  # rationale: Same case as the entries below, in the stub that supersedes a page and
+  #   then crashes: the crash is the scenario, so `extract_markdown/2` terminating only
+  #   with an exception is the correct typing of a correct function.
+  {"test/support/superseding_crash_stub.ex", :no_return, 23},
+
+  # owner: @sapientpants
+  # expires: 2026-12-12
+  # upstream: none
+  # rationale: See the entry above — `translate/4` is the second raising callback of the
+  #   superseding stub.
+  {"test/support/superseding_crash_stub.ex", :no_return, 29},
 
   # owner: @sapientpants
   # expires: 2026-12-12
