@@ -183,6 +183,28 @@ repos:
         # test/support is on elixirc_paths under MIX_ENV=test, so it feeds the graph too.
         files: ^(lib/|test/support/|mix\.exs$)
 
+      # 3.8. Asset bundle build. Nothing else in the gate compiles `assets/`: a syntax
+      # error in app.js or theme.js, an import that resolves to nothing, or a stylesheet
+      # `@import` naming a file that is not there all survive every check above and first
+      # surface at `mix phx.server`, which is to say in a browser rather than in the gate.
+      # `js/theme.js` is loaded render-blocking (U10) so the stored theme is applied before
+      # first paint, which makes a bundle that failed to build a 404 that stalls the parser
+      # rather than a deferred script quietly doing nothing. It has to sit after
+      # `mix-compile`: app.js imports the colocated hooks, which only exist under
+      # `_build/<env>` — the directory config.exs puts on NODE_PATH — once the app has
+      # compiled in this MIX_ENV. And `assets.setup` has to precede the build, on every run
+      # including a cache hit, because `mix esbuild` only checks that the binary file
+      # exists; a stale binary from an earlier pin is used with nothing but a warning, and
+      # only `esbuild.install --if-missing` compares the installed `--version` against the
+      # configured one. It must also stay ahead of `6. mix-test-coverage`, which asserts the
+      # emitted bundles are served.
+      - id: assets-build
+        name: Build asset bundles (esbuild, Tailwind)
+        entry: mix do assets.setup + assets.build
+        language: system
+        pass_filenames: false
+        files: ^(assets/|config/config\.exs|mix\.exs$)
+
       # 4. Static code analysis with Credo (medium speed)
       - id: credo
         name: Credo strict mode

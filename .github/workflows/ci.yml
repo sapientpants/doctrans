@@ -111,11 +111,86 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-plt-v2-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
 
+      # The asset toolchain is two downloaded executables, and the cache key below has to
+      # name their versions. This step reads them out of the source of truth rather than
+      # restating them here, the same way `setup-beam` above reads `mise.toml` instead of
+      # carrying its own copy of the Erlang and Elixir versions: a bump then moves the key
+      # on its own, and there is no second place to forget. It has to be a read of
+      # `config/config.exs` specifically — the versions of the *binaries* live there, not in
+      # `mix.lock`, where `{:esbuild, "~> 0.10"}` pins only the Mix task that downloads them.
+      # Hashing the lockfile would miss every binary bump and react to every unrelated one.
+      # An empty capture means the config was reshaped and the awk no longer matches, which
+      # would otherwise degrade into a key of `-assets-esbuild--tailwind-` shared by every
+      # future run, so it fails the job loudly instead.
+      - name: Read asset toolchain versions
+        id: assets
+        run: |
+          esbuild=$(awk '/^config :esbuild,/ {f = 1} f && /^  version:/ {gsub(/[^0-9.]/, "", $2); print $2; exit}' config/config.exs)
+          tailwind=$(awk '/^config :tailwind,/ {f = 1} f && /^  version:/ {gsub(/[^0-9.]/, "", $2); print $2; exit}' config/config.exs)
+          if [[ -z "$esbuild" || -z "$tailwind" ]]; then
+            echo "Could not read the esbuild/tailwind versions from config/config.exs"
+            exit 1
+          fi
+          echo "esbuild=$esbuild" >> "$GITHUB_OUTPUT"
+          echo "tailwind=$tailwind" >> "$GITHUB_OUTPUT"
+
+      # Both binaries install to `_build/esbuild-<target>` and `_build/tailwind-<target>-<version>`
+      # — the parent of the per-environment build directory, so they are MIX_ENV-independent
+      # and already sit inside the `deps`/`_build` cache restored above. That is not enough on
+      # its own: that cache is keyed on `mix.lock` and, deliberately, saved only `if: success()`,
+      # so a run that goes red leaves the roughly 86 MB toolchain unsaved and the retry pays the
+      # download a second time — exactly when a job is already being re-run. This pair is keyed
+      # on the two versions themselves and saved as soon as the download succeeds, below.
+      #
+      # There are deliberately no `restore-keys`. A prefix match is the right behaviour for the
+      # caches above, where a stale `_build` is merely recompiled, but here it would restore a
+      # binary of the wrong version — and `mix esbuild` would then run it without complaint.
+      - name: Restore asset toolchain cache
+        id: assets-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            _build/esbuild-*
+            _build/tailwind-*
+          key: ${{ runner.os }}-assets-esbuild-${{ steps.assets.outputs.esbuild }}-tailwind-${{ steps.assets.outputs.tailwind }}
+
       - name: Install dependencies
         run: mix deps.get --check-locked
 
       - name: Compile dependencies
         run: mix deps.compile
+
+      # This runs on every job, cache hit included, because `mix esbuild` — the task that
+      # actually builds the bundles — only checks that the binary file exists. A restored
+      # executable left over from an earlier pin is used regardless, with nothing but a
+      # `Logger.warning` to say so, and the gate would then be testing a build the app no
+      # longer performs. Only `esbuild.install --if-missing` asks the installed binary for
+      # its own `--version` and replaces it when it disagrees with the configured one. With
+      # the pinned binaries already on disk the step costs about a second and makes no
+      # network request at all, so running it unconditionally buys that guarantee for free.
+      #
+      # It is also the one step in this job that can reach a third party at all, which is
+      # why Q08 weighed it before adding it to a workflow that pins every `uses:` to a
+      # commit SHA. The two halves are not equally protected: esbuild comes from
+      # registry.npmjs.org with its npm signature verified against pinned public keys and a
+      # sha512 integrity check over the tarball, while Tailwind is a plain GitHub release
+      # download over verify_peer TLS with no checksum and no signature. For Tailwind, the
+      # pinned version and the TLS certificate are the whole of the assurance — weaker than
+      # what the SHA pins above give us, and worth knowing rather than assuming.
+      - name: Install asset toolchain
+        run: mix assets.setup
+
+      # Saved here rather than at the end of the job with the other caches: unlike `_build`,
+      # a downloaded toolchain is valid whether or not the checks that follow it pass, so
+      # there is no reason to make the next run re-fetch it just because this one went red.
+      - name: Save asset toolchain cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.assets-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            _build/esbuild-*
+            _build/tailwind-*
+          key: ${{ runner.os }}-assets-esbuild-${{ steps.assets.outputs.esbuild }}-tailwind-${{ steps.assets.outputs.tailwind }}
 
       - name: Build Dialyzer PLT
         run: mix dialyzer --plt

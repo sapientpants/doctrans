@@ -1,6 +1,6 @@
 # Doctrans improvement plan
 
-Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q07 completed,
+Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q08 completed,
 plus Phase 6 items G01–G19.
 Base: `main` at `6953656`, reviewed on 11 September 2026.
 Phase 6 added 12 September 2026 from a quality-gate, toolchain, and supply-chain review.
@@ -1449,10 +1449,12 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Review also found the two load-order claims this change argues hardest for — theme before stylesheet,
   app still deferred — asserted nowhere. Both are now pinned, and all four mutations that used to pass
   fail.
-  Not closed: nothing verifies the bundle was ever *built*. Deleting `priv/static/assets/js/theme.js`
-  leaves the suite green, because `priv/static/assets` is gitignored and no CI job builds assets, so a
-  syntax error in this file cannot fail the gate. That was tolerable for a deferred bundle and is less
-  so for a render-blocking one, where a 404 stalls the parser. Filed as Q08.
+  Not closed at the time: nothing verified the bundle was ever *built*. Deleting
+  `priv/static/assets/js/theme.js` left the suite green, because `priv/static/assets` is gitignored and
+  no CI job built assets, so a syntax error in this file could not fail the gate. That was tolerable for
+  a deferred bundle and less so for a render-blocking one, where a 404 stalls the parser. Filed as Q08,
+  and closed there: the gate now builds both bundles, and a test asserts every `/assets/` URL the layout
+  references answers 200 with a non-empty body.
   Found while fixing: `Layouts.theme_toggle/1` was rendered by no page, so even with the listener
   restored a reader had no control to reach it. Filed and fixed as U12.
   Evidence added: `assets/js/theme.js`, `config/config.exs` (esbuild entry points),
@@ -2353,7 +2355,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   polls for pid files a forked shell writes and failed two of those runs under load. It belongs with
   the timing sleeps Q03 owns.
 
-- [ ] **Q08 · P2 · Build the asset bundles somewhere a broken one fails.**
+- [x] **Q08 · P2 · Build the asset bundles somewhere a broken one fails.**
   No CI job and no pre-commit hook runs `mix assets.build`, and `priv/static/assets/` is gitignored, so
   the JavaScript and CSS this application serves are never compiled by the gate. A syntax error in
   `assets/js/app.js` or `assets/js/theme.js` passes every check and is discovered by whoever next runs
@@ -2369,6 +2371,108 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: a deliberate syntax error in either entry point fails CI; the asset toolchain is fetched
   reproducibly and cached; `priv/static/assets/` stays untracked.
   Evidence: `.github/workflows/ci.yml:114`, `.pre-commit-config.yaml`, `mix.exs:135`, `.gitignore:29`.
+
+  Implemented as one pre-commit hook, four CI steps, one new test, and a README correction; no
+  application code changed.
+
+  **The gate.** Hook `3.8. assets-build` runs `mix do assets.setup + assets.build`, placed between
+  `3.7. xref-cycles` and `4. credo`. It is defined only in `.pre-commit-config.yaml`, so `mix precommit`
+  and CI run the identical check — `ci.yml` gained no `mix assets.build` line of its own, which would
+  have been the second definition `docs/CONTRIBUTING.md` and G04 forbid. Two constraints fix the
+  position rather than taste. It must follow `4. mix-compile`, because `app.js` imports the colocated
+  hooks, which exist under `_build/<env>` — the directory `config/config.exs` puts on `NODE_PATH` — only
+  after the app has compiled in that same `MIX_ENV`. It must precede `6. mix-test-coverage`, because the
+  new test below asserts the emitted bundles are served.
+
+  **`assets.setup` runs on every invocation, including a cache hit, and that is not belt-and-braces.**
+  `mix esbuild` — the task that builds — only calls `File.exists?` on the binary: a restored executable
+  from an earlier pin is run regardless, with a `Logger.warning` the only trace, so the gate would be
+  exercising a build the application no longer performs. Only `esbuild.install --if-missing` asks the
+  installed binary for its own `--version` and replaces it on disagreement. Tailwind escapes this by
+  embedding the version in the filename, so its run path is already version-aware; esbuild's is not.
+  Measured cost with the pinned binaries present: about one second, and **no network request at all**,
+  verified by pointing `HTTPS_PROXY` at a dead port and watching `assets.setup` still exit 0.
+
+  **Caching.** The binaries install to `_build/esbuild-<target>` and `_build/tailwind-<target>-<version>`
+  — the *parent* of the per-environment build directory, so they are `MIX_ENV`-independent and already
+  sit inside the existing `deps`/`_build` cache. That was weighed and found insufficient rather than
+  assumed adequate: that cache is keyed on `mix.lock` and saved `if: success()`, so a red run leaves the
+  roughly 86 MB toolchain unsaved and the retry re-downloads it, precisely when a job is already being
+  re-run. The dedicated restore/save pair is keyed on the two versions themselves, read out of
+  `config/config.exs` by the `Read asset toolchain versions` step rather than restated in the workflow —
+  the same discipline as `setup-beam` reading `mise.toml`. `mix.lock` is the wrong key: `{:esbuild,
+  "~> 0.10"}` pins the Mix task, not the executable it downloads, so a binary bump lives in
+  `config/config.exs` and a lockfile hash would miss it entirely. An unreadable version fails the step
+  loudly instead of degrading into one key shared by every future run. `restore-keys` is deliberately
+  absent — a prefix match is right for the caches above, where a stale `_build` is merely recompiled,
+  but here it would restore a wrong-version binary that `mix esbuild` would then run without complaint.
+  The save sits next to the install rather than at the end of the job, since a downloaded toolchain is
+  valid whether or not the checks after it pass.
+
+  **The network dependency this item told us to weigh.** It is one step, and the two halves are not
+  equally protected: esbuild is fetched from `registry.npmjs.org` with its npm signature verified
+  against pinned public keys plus a sha512 integrity check over the tarball, while Tailwind is a plain
+  GitHub release download over `verify_peer` TLS with **no checksum and no signature**. For Tailwind the
+  pinned version and the certificate are the whole of the assurance — weaker than what the SHA pins give
+  every `uses:` in this workflow. Neither package supports a configured checksum, so closing that would
+  mean pre-seeding the binary from a trusted artifact; recorded here rather than done.
+
+  **Falsification, since a gate that cannot fail is the thing this item is about.** Four planted defects,
+  each run through the hook itself and then reverted, with the sources verified byte-for-byte by sha256
+  afterwards: a syntax error in `theme.js` (`js/theme.js:129`), the same in `app.js` (`js/app.js:590`),
+  an unresolvable `import "./does-not-exist.js"`, and a stylesheet `@import` naming a missing file. The
+  first three abort the alias at `mix esbuild doctrans`, the fourth at `mix tailwind doctrans`, each
+  with a non-zero exit that fails the hook; the restored tree passes. A useful property found
+  while testing: esbuild builds both entry points in one invocation, so an error in either writes
+  **neither** bundle — the failure cannot be half-applied. One gap measured and left open: a `url()` in
+  the stylesheet naming a file that does not exist builds clean, because the Tailwind CLI does not
+  resolve `url()` assets.
+
+  **The blind spot is now visible to the suite.** `theme_script_test.exs` gained "serves every asset it
+  references", which reads every `/assets/` URL out of the rendered `<head>` and requests each one
+  through the endpoint, asserting a 200 and a non-empty body — a zero-byte `theme.js` serves 200 and
+  applies no theme. Deleting `priv/static/assets/js/theme.js` and re-running is the direct demonstration
+  of what Q08 was: **16 of the file's 17 tests stay green** and only the new one fails, with
+  `/assets/js/theme.js is referenced by the root layout but answered 404`. It generalizes past the three
+  bundles that exist today, and it carries a vacuity guard — the three expected paths are asserted
+  present *before* the fetch loop, so a selector that silently matched nothing cannot leave an empty
+  `for` reading as green. There is deliberately no `File.exists?` guard and no tag excluded by default;
+  either would restore exactly the silence being closed, the shape Q05 deleted.
+
+  **`priv/static/assets/` staying untracked needs no new machinery, and that is a finding rather than an
+  omission.** The existing `Check for uncommitted changes` step already enforces it: the build now runs
+  on every CI job, so if the ignore rule were ever dropped the emitted bundles would appear as untracked
+  files and fail that step. Confirmed by running a full build and observing `git status --porcelain`
+  stay empty.
+
+  Corrections to text this change made false: `theme_script_test.exs` carried "Whether that build has
+  actually run is not checked here and cannot be: `priv/static/assets` is gitignored and CI never builds
+  assets", and U10's `Not closed` paragraph above said nothing verifies the bundle was ever built. Both
+  are rewritten. The `--outdir` assertion stays — it still pins the entry point against the path the
+  layout asks for — but it is no longer the only thing standing between a broken bundle and a reader.
+
+  Found while fixing, and corrected here since the list was already being edited: `README.md` claimed a
+  **600-line module limit** where the enforced figure is 500 (`.pre-commit-config.yaml` hook `3.6`). Its
+  hand-maintained list of nine pre-commit hooks had also drifted by five hooks; rather than restate a
+  list that had already proven it goes stale, it is replaced by a summary pointing at
+  `.pre-commit-config.yaml` as the single source of truth, which is what `mix.exs:141-143` and
+  `docs/CONTRIBUTING.md:42-45` already say about the gate.
+
+  Not closed, deliberately. `mix test` now depends on a prior `mix assets.build`, which `mix setup`
+  already runs but a bare `mix test` on a tree that has never built assets does not; adding
+  `assets.build` to the `test` alias was considered and rejected, since it would put a Tailwind run — and
+  a 76 MB download on a cold machine — in front of every `mix test --failed`. `Dockerfile.dev` still does
+  not build assets and is untouched: `docker-compose.yml` bind-mounts the host tree over `/app`, so an
+  image-built copy would be masked at run time and immediately superseded by the dev watchers, and a
+  `RUN mix assets.build` in the `docker` job would be a second definition of this gate. Its comment
+  claiming Node.js is "required for esbuild and tailwind" is stale — both are standalone binaries and
+  `assets/node_modules/` is empty — but removing Node from the image is a change this item did not
+  measure. `assets.deploy` (`--minify` plus `phx.digest`) is still exercised by nothing.
+
+  Gate: `mix precommit` passes — all 31 hooks, 1,409 tests, 92.7% coverage.
+  Evidence added: `.pre-commit-config.yaml` (hook `3.8`), `.github/workflows/ci.yml`
+  (`Read asset toolchain versions`, the toolchain cache pair, `Install asset toolchain`),
+  `test/doctrans_web/theme_script_test.exs` ("serves every asset it references"), `README.md`.
 
 - [x] **Q07 · P3 · Close the test-file warning blind spot, then reconsider mutation testing.**
   `mix compile` never loads `test/**/*.exs`, so Q01's corrected flag does not reach it. One warning lives

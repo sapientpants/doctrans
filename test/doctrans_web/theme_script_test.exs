@@ -95,6 +95,51 @@ defmodule DoctransWeb.ThemeScriptTest do
       assert theme < app
     end
 
+    test "serves every asset it references", %{document: document} do
+      # Q08. Until the gate built the bundles this could not be asserted at all:
+      # `priv/static/assets` is gitignored and neither CI nor pre-commit ever ran
+      # `mix assets.build`, so deleting `priv/static/assets/js/theme.js` left the
+      # whole suite green while a reader got a 404 on a render-blocking script --
+      # which stalls the parser rather than quietly doing nothing, the reason
+      # U10 moved theme initialization into a bundle of its own. The hook
+      # `3.8. assets-build` in `.pre-commit-config.yaml` now runs ahead of hook
+      # `6. mix-test-coverage`, and CI's separate `mix test --cover` step runs
+      # after `pre-commit run --all-files`, so by the time this test executes the
+      # bundles are on disk and their absence is a failure rather than silence.
+      #
+      # The consequence, stated plainly: `mix test` now depends on a prior
+      # `mix assets.build`, which `mix setup` already runs. There is deliberately
+      # no `File.exists?` guard and no tag excluded by default around this --
+      # either would restore exactly the silence Q08 closed.
+      references =
+        document
+        |> LazyHTML.query("head script[src], head link[rel=stylesheet]")
+        |> Enum.flat_map(fn node ->
+          LazyHTML.attribute(node, "src") ++ LazyHTML.attribute(node, "href")
+        end)
+        |> Enum.filter(&String.starts_with?(&1, "/assets/"))
+
+      # Named before they are fetched, so a query that matched nothing cannot
+      # leave the loop below iterating over an empty list and passing. Q05 is
+      # the cautionary tale: an assertion nothing could reach reads as green
+      # forever. Membership rather than equality, so a fourth asset is a reason
+      # to extend the loop and not a reason for this to fail.
+      for expected <- ["/assets/js/theme.js", "/assets/css/app.css", "/assets/js/app.js"] do
+        assert expected in references
+      end
+
+      for reference <- references do
+        served = get(build_conn(), reference)
+
+        assert served.status == 200,
+               "#{reference} is referenced by the root layout but answered #{served.status}"
+
+        # A zero-byte file is served with a 200 all the same, and an empty
+        # `theme.js` applies no theme.
+        assert byte_size(served.resp_body) > 0, "#{reference} is served empty"
+      end
+    end
+
     test "still forbids inline script in the content security policy", %{conn: conn} do
       assert [policy] = get_resp_header(conn, "content-security-policy")
       assert policy =~ "script-src 'self'"
@@ -110,8 +155,11 @@ defmodule DoctransWeb.ThemeScriptTest do
       assert "js/theme.js" in args
       # Both entries share `--outdir`, which is what puts the output at the
       # `/assets/js/theme.js` the layout asks for. Whether that build has
-      # actually run is not checked here and cannot be: `priv/static/assets` is
-      # gitignored and CI never builds assets. See Q08 in PLAN.md.
+      # actually run is no longer left unchecked: Q08 put `mix assets.build`
+      # into the gate ahead of the suite, and "serves every asset it
+      # references" above fails if the emitted file is missing or empty. The
+      # configuration is still pinned here so that the entry point and the path
+      # the layout asks for cannot drift apart without a named failure.
       assert "--outdir=../priv/static/assets/js" in args
     end
 
