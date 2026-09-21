@@ -121,12 +121,16 @@ jobs:
       # Hashing the lockfile would miss every binary bump and react to every unrelated one.
       # An empty capture means the config was reshaped and the awk no longer matches, which
       # would otherwise degrade into a key of `-assets-esbuild--tailwind-` shared by every
-      # future run, so it fails the job loudly instead.
+      # future run, so it fails the job loudly instead. Each scan is confined to its own
+      # block — the flag is cleared by the next top-level `config ` line rather than left
+      # set — because otherwise a version moved onto its `config :esbuild,` line would let
+      # the scan run on and report Tailwind's version as esbuild's: a wrong key that looks
+      # entirely plausible, which the empty-capture guard above would never catch.
       - name: Read asset toolchain versions
         id: assets
         run: |
-          esbuild=$(awk '/^config :esbuild,/ {f = 1} f && /^  version:/ {gsub(/[^0-9.]/, "", $2); print $2; exit}' config/config.exs)
-          tailwind=$(awk '/^config :tailwind,/ {f = 1} f && /^  version:/ {gsub(/[^0-9.]/, "", $2); print $2; exit}' config/config.exs)
+          esbuild=$(awk '/^config / {f = ($0 ~ /^config :esbuild,/)} f && /^  version:/ {gsub(/[^0-9.]/, "", $2); print $2; exit}' config/config.exs)
+          tailwind=$(awk '/^config / {f = ($0 ~ /^config :tailwind,/)} f && /^  version:/ {gsub(/[^0-9.]/, "", $2); print $2; exit}' config/config.exs)
           if [[ -z "$esbuild" || -z "$tailwind" ]]; then
             echo "Could not read the esbuild/tailwind versions from config/config.exs"
             exit 1
