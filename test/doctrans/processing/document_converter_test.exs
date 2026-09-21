@@ -298,7 +298,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
 
     profile =
       profile_file
-      |> await_pid_file("soffice to record the profile it was given")
+      |> await_file_line("soffice to record the profile it was given")
       |> URI.decode()
 
     assert File.dir?(profile)
@@ -330,9 +330,9 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     task = Task.async(fn -> DocumentConverter.convert_to_pdf(source, Path.join(dir, "out")) end)
 
     launcher =
-      ready |> await_pid_file("the launcher to record its own pid") |> String.to_integer()
+      ready |> await_file_line("the launcher to record its own pid") |> String.to_integer()
 
-    child = Path.join(dir, "child") |> await_pid_file("the launcher to record its child's pid")
+    child = Path.join(dir, "child") |> await_file_line("the launcher to record its child's pid")
     # The port is found by the executable it was spawned as, and its owner is the
     # process it is connected to: a task monitors more than the owner
     # `supervised/1` gives it, so matching a single monitor can raise instead.

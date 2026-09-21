@@ -162,7 +162,7 @@ defmodule Doctrans.Processing.SubprocessTest do
 
     assert {:ok, {"", 0}} = Subprocess.run(launcher, [], timeout: 10_000, kill_on_exit: true)
 
-    grandchild = await_pid_file(pid_file, "the launcher to record its grandchild's pid")
+    grandchild = await_file_line(pid_file, "the launcher to record its grandchild's pid")
     eventually(fn -> process_gone?(grandchild) end, "grandchild #{grandchild} to be reaped")
   end
 

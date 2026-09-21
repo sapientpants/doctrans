@@ -38,17 +38,25 @@ defmodule Doctrans.ProcessProbe do
   @doc """
   Retries until `fetch` returns a non-`nil` value, and returns it.
   """
-  def eventually_value(fetch, description, attempts \\ @poll_attempts)
-
-  def eventually_value(_fetch, description, 0) do
-    flunk("gave up after #{@poll_attempts * @poll_interval_ms}ms waiting for #{description}")
+  def eventually_value(fetch, description, attempts \\ @poll_attempts) do
+    poll(fetch, description, attempts, System.monotonic_time(:millisecond))
   end
 
-  def eventually_value(fetch, description, attempts) do
+  # The elapsed time is measured rather than derived from the budget. Several of
+  # the checks below fork a `/bin/ps` per attempt, which costs more than the
+  # interval slept between them, so `attempts * interval` understates a timed-out
+  # wait by more than half — and a wrong duration in the message is exactly the
+  # kind of unactionable diagnostic this module exists to stop producing.
+  defp poll(_fetch, description, 0, started) do
+    waited = System.monotonic_time(:millisecond) - started
+    flunk("gave up after #{waited}ms waiting for #{description}")
+  end
+
+  defp poll(fetch, description, attempts, started) do
     case fetch.() do
       nil ->
         Process.sleep(@poll_interval_ms)
-        eventually_value(fetch, description, attempts - 1)
+        poll(fetch, description, attempts - 1, started)
 
       value ->
         value
@@ -77,12 +85,15 @@ defmodule Doctrans.ProcessProbe do
   end
 
   @doc """
-  The trimmed contents of a pid file, once it is complete.
+  The trimmed contents of a file a child writes one line to, once it is complete.
 
-  Only safe where the writer is not racing a deadline — the trailing newline is
-  what distinguishes a finished write from a created-but-empty file.
+  Named for the shape rather than the payload: most callers want a pid, but one
+  wants the profile path LibreOffice was handed. Only safe where the writer is
+  not racing a deadline — the trailing newline is what distinguishes a finished
+  write from a created-but-empty file, which is the distinction that made an
+  empty read pass for a real value before Q09.
   """
-  def await_pid_file(path, description) do
+  def await_file_line(path, description) do
     eventually_value(
       fn ->
         with {:ok, contents} <- File.read(path),
