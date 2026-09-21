@@ -28,7 +28,26 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
       assert ErrorClassifier.classify({:error, %Req.TransportError{reason: :nxdomain}}) ==
                :retryable
 
+      assert ErrorClassifier.classify({:error, %Req.TransportError{reason: :ehostunreach}}) ==
+               :retryable
+
       assert ErrorClassifier.classify(%Req.TransportError{reason: :other}) == :retryable
+    end
+
+    test "classifies conversion timeout as retryable" do
+      assert ErrorClassifier.classify(:conversion_timeout) == :retryable
+    end
+
+    test "classifies pipeline stage failures as permanent" do
+      assert ErrorClassifier.classify({:validation_failed, [changeset: %Ecto.Changeset{}]}) ==
+               :permanent
+
+      assert ErrorClassifier.classify({:source_file_not_found, [path: "/tmp/missing.docx"]}) ==
+               :permanent
+
+      assert ErrorClassifier.classify(:document_not_found) == :permanent
+      assert ErrorClassifier.classify(:page_not_found) == :permanent
+      assert ErrorClassifier.classify(:soffice_not_found) == :permanent
     end
 
     test "classifies HTTP 5xx errors as retryable" do

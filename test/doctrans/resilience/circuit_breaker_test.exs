@@ -44,6 +44,17 @@ defmodule Doctrans.Resilience.CircuitBreakerTest do
     end
   end
 
+  describe "fuse_names/0" do
+    test "lists the fuses this module owns" do
+      assert CircuitBreaker.fuse_names() == [:openai_api, :embedding_api]
+    end
+
+    test "names exactly the fuses status_all/0 reports on" do
+      assert Enum.sort(CircuitBreaker.fuse_names()) ==
+               CircuitBreaker.status_all() |> Map.keys() |> Enum.sort()
+    end
+  end
+
   describe "call/2" do
     test "executes function when circuit is closed" do
       result = CircuitBreaker.call(:openai_api, fn -> {:ok, "success"} end)

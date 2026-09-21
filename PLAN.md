@@ -2670,7 +2670,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   "the renderer's children are reaped with it, not left behind", plus
   `test/doctrans/processing/subprocess_test.exs` "the reap check refuses a pid it cannot check".
 
-- [ ] **Q10 · P3 · Pilot `muex`, scoped and coverage-guided, as a calibration check.**
+- [x] **Q10 · P3 · Pilot `muex`, scoped and coverage-guided, as a calibration check.**
   Q07 re-measured its own deferral and found the preconditions met; this is the pilot it declined to run
   inline. Add `{:muex, "~> 0.11", only: [:dev, :test], runtime: false}` — MIT, one runtime dep
   (`jason`, already present), compatible with the pinned Elixir 1.20.4. Pin the minor: it is a 26-star
@@ -2696,6 +2696,150 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: a scoped coverage-guided run completes in the stated budget; Q03's five mutants report
   killed; every survivor is triaged as a real gap, an equivalent mutant, or tool noise, and recorded.
   Evidence: PLAN.md Q03 search-slice mutation list, Q05:2246 and :2264, `mise.toml`, `mix.exs`.
+  Run as **four invocations rather than two**, because the recorded command does not work and the
+  recorded acceptance is not satisfiable. The working command, for the record, is
+  `mix muex --files lib/doctrans/resilience --mirror scripts --coverage-guided --preset phoenix
+  --concurrency 1 --fail-at 0 --format json --output <report>`, and the same with
+  `--files lib/doctrans/search`.
+
+  **Correction to this item's own text: the invocation as written cannot score anything.** muex builds
+  each mutant a sandbox in `$TMPDIR` and symlinks only `mix.exs`, `mix.lock`, `.formatter.exs`,
+  `.credo.exs`, `config/`, `priv/`, `lib/`, the test paths and `deps/` into it (`sandbox.ex:452-469`).
+  `scripts/` is therefore absent, `test/scripts/check_translations_test.exs` cannot
+  `Code.require_file` the script it wraps, and *every* mutant fails to compile for a reason outside
+  the mutant. muex handled this exactly as it should — it re-ran the same tests with no mutation
+  applied, saw the identical failure, and refused to score the run rather than reporting 100% killed.
+  That is the single most reassuring thing observed about the tool. `--mirror scripts` is required.
+
+  **Correction: `--concurrency` is worse than "documents nothing about the Ecto sandbox".** muex sets
+  no per-worker environment variable at all. Each mutant is a real `mix test` subprocess that inherits
+  the parent environment verbatim, with `MIX_ENV` the only variable muex touches (`port.ex:92-99`), so
+  N workers would all open `doctrans_test`. There is no worker id to partition on; the only per-worker
+  signal that exists is the sandbox CWD, which ends in `worker_N`. The pilot ran at `--concurrency 1`
+  and the partitioning this item asks for was therefore never needed. Worth knowing before anyone
+  raises it: the per-mutant median is 1.9 s, so concurrency buys much less than the fixed pre-pass does.
+
+  **Correction, and the important one: the acceptance criterion is not satisfiable, and it is the
+  criterion that is wrong rather than the tests.** "muex must report all five as killed" presumes muex
+  can generate the five. It generates **none of them**, under any configuration tried:
+  two live inside a `~p` sigil nested in `~H` (`search_live.ex:280`) and `--preset phoenix` prunes the
+  whole `sigil_H` subtree (`config.ex:511-531`); one is text inside a SQL heredoc
+  (`hybrid_query.ex:161`), which no mutator can edit meaningfully; and the remaining two
+  (`search.ex:389` reversed results, `search.ex:415` `format_row`) are simply never mutated — a
+  dedicated run over `search.ex` with **all 18 mutators** produced 28 mutants and **zero** at either
+  line, and re-running with `--preset none` to rule the preset out produced zero at either line again.
+  Four of the five are also outside the `--files` scope this item specifies, so the scoped pilot could
+  not have reached them regardless.
+  The five were therefore re-verified **by hand**, the way Q03 did, in a worktree with its own database:
+  each one fails its named test, with an assertion message pointing at the mutated behaviour rather
+  than incidental damage. The tie-break removal fails 6 of 6 runs, and Postgres returned the tied rows
+  in descending page-id order every time, so it cannot accidentally pass here — though that is the
+  planner's natural order for a two-row CTE, not something SQL promises, which is what the comment at
+  `hybrid_query.ex:158-160` already says. **Q03's claim holds. muex is simply not the instrument that
+  can check it.**
+
+  **The scores, with the denominator that makes them honest.** `resilience/`: 61 mutants, 36 killed,
+  **0 survived**, 18 invalid, 1 equivalent, 6 no coverage, 12 min 29 s. `search/`: 47 mutants, 26
+  killed, **0 survived**, 20 invalid, 1 no coverage, 10 min 43 s. Both report 100%. Across the two,
+  **46 of 108 mutants — 43% — were never scored at all**, and a score computed over the remaining 62
+  is what "100%" describes. Both budgets held; `search/` came in at a quarter of its 30–90 min estimate
+  because it produced 47 mutants against a predicted 70–150.
+
+  **Three real gaps, each confirmed against `:cover` rather than taken from the tool.** Four
+  `classify/1` clauses are executed by nothing in the suite — `:conversion_timeout`,
+  `{:validation_failed, _}`, `{:source_file_not_found, _}` and `:document_not_found`
+  (`error_classifier.ex:51,53,54,55`), 0 calls each. `CircuitBreaker.fuse_names/0`
+  (`circuit_breaker.ex:222`) is public and `@spec`'d and has no caller in `lib/` and no test; the
+  internal uses read the `@fuse_names` attribute directly. And `flush_open_span(chunks, nil)`
+  (`segments.ex:264`) has 0 calls where its sibling clause has 116.
+
+  **Two of the three are closed here; the third is deliberately left alone.** The classifier gap was
+  wider than the pilot reported, because the same `:cover` pass over the whole clause table found three
+  more red lines the mutation run never surfaced: `:page_not_found`, `:soffice_not_found`, and the
+  `{:error, %Req.TransportError{}}` catch-all reason clause at `:75`, which the tests reached only for
+  five named reasons and for the bare struct at `:78`. Seven clauses are now asserted, with the binding
+  shapes `lib/` actually produces (`errors.ex:8`, `document_converter.ex:46`) rather than invented ones.
+  `{:image_unreadable, _}` and `:incomplete_output` sit in the same table and needed nothing — they were
+  already covered by `errors_test.exs:24` and, indirectly, `incomplete_output_test.exs:95`.
+  `fuse_names/0` is pinned rather than deleted, by two tests that are not redundant: one fixes the list
+  and its order, the other asserts it agrees with `status_all/0`'s keys. Mutating `status_all/0` to
+  report on a shorter list kills only the second, which is a regression the suite previously could not
+  see. It stays public, and the fact that nothing in `lib/`, `test/`, `priv/` or the dashboard calls it
+  is recorded here rather than acted on — deleting public API is a separate decision.
+  `error_classifier.ex` goes 79.5% → 93.8% and `circuit_breaker.ex` 85.3% → 87.8%. Every new assertion
+  was proved failable: ten mutations, each killing exactly one test, so no assertion is carried by
+  another.
+
+  **`flush_open_span(chunks, nil)` gets no test, on the Q05 precedent.** It has one call site
+  (`segments.ex:196-199`), and both `pack_segment/3` clauses return a non-`nil` open span in every
+  branch, so the accumulator is `nil` only when `segments == []` — at which point `chunks` is `[]` too.
+  `Chunker.chunk/1` can never produce that input: `take_paragraph/2` trims each paragraph and drops it
+  when the trim is empty, and `split_paragraph/3` runs only for an oversized paragraph. Confirmed over
+  20,042 inputs — adversarial seeds plus 20,000 random strings over terminator, space and CJK
+  characters — of which exactly one reached the clause, the empty string, and **zero** were paragraph
+  texts the chunker would pass. `Segments.split/2` is public, so `assert Segments.split("", 0) == []`
+  would turn the line green; that would pin a defensive fallback rather than any behaviour the chunker
+  can exhibit, which is the shape of test this phase exists to remove. Left red, like `chunker.ex:108`.
+
+  **A hazard for anyone hand-mutating in this repo, found the hard way.** Mix's staleness check has
+  one-second granularity, so a revert landing in the same wall-clock second as the mutated compile
+  leaves the *mutated* `.beam` in place and the next run reports a phantom failure against pristine
+  source. `git diff` coming back empty is not proof the beam matches the file; force the recompile
+  (`touch` the file) after each revert.
+
+  **Four things learned about the tool, which is what this item said to judge it on.**
+  (a) **It reports `No coverage` for code that is covered.** A whole-function deletion is anchored to
+  the `def` line, and a `def` line is not executable: `def sleep(attempt, opts \\ []) do`
+  (`backoff.ex:72`) shows 0 calls while its body lines show 1, and `backoff_test.exs:55` plainly
+  exercises it. The mutant was skipped silently. That is the failure direction that matters — it
+  shrinks the denominator without saying so.
+  (b) **Non-generation is invisible.** `chunker.ex:105`'s `if overlap != ""` is covered (46 calls) and
+  trivially mutable, and produced no mutant; so did `search.ex:389` and `:415` under all 18 mutators.
+  A `No coverage` result is at least reported. A site the generator never visits appears nowhere, and
+  no total distinguishes "mutated and killed" from "never considered".
+  (c) **The highest-value module in the scope is invisible to it.** `hybrid_query.ex` produced exactly
+  2 mutants and both were invalid — **zero scored mutants** for the RRF fusion and the tie-break. Its
+  logic is a SQL heredoc, and `--preset phoenix` drops the `literal` mutator, so there is nothing left
+  to mutate. Mutation testing measures the part of a module that is Elixir, and this module mostly is
+  not.
+  (d) **`StatementDeletion` is most of the noise.** 37 of 38 invalid results are that one mutator
+  producing uncompilable code, 36 of them "undefined variable/function" after deleting a binding or a
+  `defp` its callers still reference. The project's `--warnings-as-errors` gate, suspected in passing,
+  accounts for **exactly 1 of 108** mutants and is not worth changing.
+
+  **Coverage guidance is not optional, and narrowing `--test-paths` to save time falsifies the
+  result.** The pre-pass runs `mix test <file>` once per test file over all 107 of them, serially, at
+  the project root, and is **not cached between invocations**: it cost 440 s in both scoped runs
+  identically, 60–68% of each run's wall clock, against a per-mutant median of 1.9 s. Paying it is
+  still right. Re-running `search.ex` with `--test-paths` narrowed to `search_test.exs` turned **5 of
+  its 13 killable mutants into reported survivors** — a 38% false-survivor rate, every one of them
+  killed by a test in another file. A cheap run and a wrong answer.
+
+  **Correction to the two pre-explained results, neither of which could have appeared.** Q05's
+  defensive fallback is at `chunker.ex:105-109`, not in `segments.ex` as this item says; its dead
+  `else` at `:108` is confirmed at 0 calls while the `if` above it runs 46 times, so Q05's finding
+  stands. It did not surface as `No coverage` — it surfaced as nothing at all, per (b) above.
+  `sanitize_filename_string/1` is in `lib/doctrans/validation.ex`, outside both scoped directories, so
+  its equivalent `"/"` mutant was never reachable by this pilot in the first place.
+
+  **Verdict: trustworthy in what it reports, unreliable in what it omits.** Nothing it called killed
+  was wrong, it refused to score a broken baseline rather than fabricating a pass, and its TCE handling
+  is real — 8 equivalent mutants on `search.ex` alone, including the bodiless `def classify(error)`
+  head. But a "100%" from it means "100% of the 57% we scored", and it cannot see SQL, HEEx, or
+  several ordinary Elixir constructs. It is worth re-running against `processing/` and `jobs/`, which
+  this item correctly identifies as the genuinely un-mutated surface, and it is not worth a gate.
+
+  Gate: `mix precommit` passes — all 31 hooks, 1,415 passed (6 properties, 1,409 tests), 93.0%
+  coverage, against 1,411 and 92.7% before. `muex` is pinned at `~> 0.11.2` and carries a
+  `REVIEW BY 2026-12-21` note, because a pilot dependency with no expiry is how a 26-star tool becomes
+  permanent by default.
+  Evidence added: in `test/doctrans/resilience/error_classifier_test.exs` the new
+  "classifies conversion timeout as retryable" and "classifies pipeline stage failures as permanent",
+  plus a transport-reason assertion in the existing transport test; and in
+  `test/doctrans/resilience/circuit_breaker_test.exs` the new `describe "fuse_names/0"` with
+  "lists the fuses this module owns" and "names exactly the fuses status_all/0 reports on".
+  Reports for all four runs are outside the repository; the counts and every file:line above are
+  reproducible from the commands recorded here.
 
 ## Phase 6 — Quality gates, toolchain, and supply chain
 
