@@ -69,7 +69,7 @@ msgstr "Completed"
 msgid "Doctrans"
 msgstr "Doctrans"
 
-#: lib/doctrans_web/live/document_live/index.ex:319
+#: lib/doctrans_web/live/document_live/index.ex:317
 #, elixir-autogen, elixir-format
 msgid "Document deleted successfully"
 msgstr "Document deleted successfully"
@@ -155,7 +155,7 @@ msgstr "Next"
 msgid "No documents yet"
 msgstr "No documents yet"
 
-#: lib/doctrans_web/live/document_live/index.ex:396
+#: lib/doctrans_web/live/document_live/upload_outcomes.ex:31
 #, elixir-autogen, elixir-format
 msgid "No files were uploaded"
 msgstr "No files were uploaded"
