@@ -19,8 +19,11 @@ defmodule Doctrans.Processing.OpenAIStubTest do
     test "returns the default model list when unconfigured" do
       Application.delete_env(:doctrans, :openai_stub_models)
 
-      assert {:ok, models} = OpenAIStub.list_models()
-      assert is_list(models) and models != []
+      assert {:ok,
+              [
+                "mlx-community/Qwen3.6-35B-A3B-4bit",
+                "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"
+              ]} = OpenAIStub.list_models()
     end
 
     test "returns a custom model list when configured with a list" do

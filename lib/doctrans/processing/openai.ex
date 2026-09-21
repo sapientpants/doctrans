@@ -324,10 +324,6 @@ defmodule Doctrans.Processing.OpenAI do
     {:ok, names}
   end
 
-  defp parse_list_models_response(%{"data" => [_]} = body) do
-    parse_list_models_response(%{"data" => body["data"]})
-  end
-
   defp parse_list_models_response(_body), do: {:error, :invalid_api_response}
 
   @spec embed(String.t() | nil, keyword()) ::

@@ -1,6 +1,6 @@
 # Doctrans improvement plan
 
-Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q06 completed,
+Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q07 completed,
 plus Phase 6 items G01–G19.
 Base: `main` at `6953656`, reviewed on 11 September 2026.
 Phase 6 added 12 September 2026 from a quality-gate, toolchain, and supply-chain review.
@@ -2370,19 +2370,136 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   reproducibly and cached; `priv/static/assets/` stays untracked.
   Evidence: `.github/workflows/ci.yml:114`, `.pre-commit-config.yaml`, `mix.exs:135`, `.gitignore:29`.
 
-- [ ] **Q07 · P3 · Close the test-file warning blind spot, then reconsider mutation testing.**
+- [x] **Q07 · P3 · Close the test-file warning blind spot, then reconsider mutation testing.**
   `mix compile` never loads `test/**/*.exs`, so Q01's corrected flag does not reach it. One warning lives
   there today: `test/support/openai_stub_test.exs:23` asserts `is_list(models) and models != []`, which
   the type checker proves always succeeds — a dead assertion that is also proof the blind spot is real.
   Fix the assertion, then add `--warnings-as-errors` to the `test` alias so the gap closes permanently.
-  On mutation testing: do not pilot `muex` yet. Mutation testing grades assertions on code the suite
-  already executes, and the highest-value logic here has zero executions until Q02 lands, so every mutant
-  planted there would survive trivially. The runtime is also unfavourable (846 tests, 57 s, 98% of it
-  serial), and the suite is not yet deterministic enough to distinguish a surviving mutant from a flaky
-  kill while Q03's 17 ownership crashes and 11 timing sleeps remain. Revisit after Q02 and Q03, scoped to
-  `lib/doctrans/search/` and `lib/doctrans/resilience/`, where a full pass is minutes rather than hours.
-  Note that `muex` is real and current (0.10.0, released 12 September 2026) — the reason to wait is
-  sequencing, not tool maturity.
+  Acceptance: a warning in any test file fails validation locally and in CI; the suite passes clean.
+  Evidence: `mix.exs:133`, `.pre-commit-config.yaml:119`, `test/support/openai_stub_test.exs:23`.
+
+  Implemented. The one-warning claim was verified rather than trusted: all 107 `test/**/*_test.exs`
+  compiled under `MIX_ENV=test mix run --no-start` and a full suite run both produce **exactly one**
+  load-time diagnostic, the predicted one. The assertion is replaced by an exact match on the two
+  model names `list_models/0` returns from its `nil` branch, which keeps the test's intent — "returns
+  the default model list when unconfigured" — while being capable of failing; the old form was
+  provably always true. Mutation-checked: reordering the two defaults in `openai_stub.ex` fails it,
+  so it pins contents *and* order, where the old assertion would have passed both mutations.
+
+  The flag was measured non-vacuous, because Q01 is the cautionary tale — its misspelled compile flag
+  had silently never failed a build. Here `mix help test` documents `--warnings-as-errors` since
+  v1.12.0, and it demonstrably bites: with the warning present the run printed `Result: 3 passed` and
+  then exited **1** with "Test suite aborted after successful execution due to warnings"; a control
+  file with no warning exited **0**. After the fix, a planted unused variable was caught the same way
+  on the full suite — **1408 passed, then aborted** — and the planted warning was reverted.
+
+  One line, in the `test` alias, reaches every caller. CI runs `mix test --cover`
+  (`.github/workflows/ci.yml:130`), **not** `mix coveralls.json`, and `mix test` resolves the alias;
+  so do the pre-commit hook and a bare local `mix test`. The flag is deliberately *not* also added to
+  `ci.yml` or `.pre-commit-config.yaml` — that would state one rule in three places. It belongs in the
+  alias rather than the hook for the opposite reason to the usual one: it is not a check, it is how
+  this project runs tests, so putting it in the alias gates a developer's local `mix test` exactly as
+  CI is gated. It is complementary to hook 4 rather than redundant with it — Mix explicitly does not
+  pass the flag down to `compile` (`mix/tasks/test.ex:597`), so `compile` covers `lib/` and
+  `test/support/*.ex` while `test` covers `test/**/*.exs`. Argument append was verified in a scratch
+  project: `mix test <file>`, `--failed`, `--max-failures` and `--cover` all still work.
+  Two documented consequences, recorded in `docs/CONTRIBUTING.md` alongside the gate: a warnings-only
+  abort cannot be retried with `--failed`, and a warning alongside a real failure exits 3, not 2.
+  One hazard the flag introduces: any `.exs` under `test/` that is neither loaded as a test nor matched
+  by `test_ignore_filters` now aborts the suite. Only `test_helper.exs` is in that position today and
+  the default filter covers it, but a future `test/fixtures/*.exs` would need an entry.
+
+  Left unfixed deliberately: `dashboard_csp_test.exs:127` emits four "form with `phx-change` but
+  missing id" warnings. They do **not** gate — measured, that file exits 0 under the flag — because
+  they are runtime `IO.warn` calls from `Phoenix.LiveViewTest`, not load-time diagnostics, and the
+  markup is `live_dashboard`'s own `table_component.ex`; nothing in `lib/` carries those attributes.
+  Silencing them would need `config :phoenix_live_view, :test_warnings`, which would also hide the same
+  class of warning on first-party forms. They are true and they point upstream, so they stay.
+  Gate: `mix precommit` passes — all 30 hooks, 1,407 tests, 92.7% coverage.
+
+  **On mutation testing, the deferral is now overturned rather than restated.** The original text said
+  "do not pilot `muex` yet" and gave three reasons, all conditioned on "revisit after Q02 and Q03".
+  Both have since landed, so the reasons were re-measured rather than carried forward:
+  (a) **Resolved, but for a different scope than this item names.** Q02 took `health_check_worker.ex`
+  37.2% → 100%, `health_check.ex` 84.7% → 97.8% and `llm_processor.ex` 67.7% → 96.6%. Only the first
+  two are inside the proposed `search/` + `resilience/` scope; the most valuable newly-executing logic
+  landed in `processing/`.
+  (b) **Still true, and worse.** The suite is now 1,402 tests in **143.8 s** (20.3 s async, 123.4 s
+  sync) against the 846 tests / 57 s the reason was written against — 1.66× the tests but **2.52× the
+  wall clock**, and 2.2× the absolute serial seconds. Q03's parallelism work improved the *ratio*
+  (98% → 86% serial) but a mutation run multiplies wall clock, not ratio. muex's default full-suite
+  mode would therefore be **4.8–10 h** for the 120–250 mutants this scope implies — squarely the
+  "hours" the original reason predicted. It is only navigable through `--coverage-guided`, a feature
+  the original text did not know about: the covering tests for both directories run in **21.0 s**
+  (147 tests), putting a scoped pass at roughly **40 min – 2 h** serial.
+  (c) **Substantially resolved, one gap open.** Q03's ownership crashes went "before 5 … after 0,
+  0, 0 across every run". Nine `Process.sleep` calls remain and none stands in for a signal — four are
+  excepted fixture behaviour, the rest are backoff inside bounded pollers that end in a real assertion.
+  None is in either proposed scope.
+  Correction to this item's own text: `muex` is at **0.11.2 (14 September 2026)**, not the 0.10.0 it
+  claimed, and it is a young tool — 26 GitHub stars, ~1.5k downloads/week — though MIT, `~> 1.14`
+  compatible with the pinned 1.20.4, and dependent only on `jason`, which is already here.
+  The pilot is filed as **Q10** rather than run here, because it adds a dependency and hours of triage
+  to a change whose acceptance is a compiler flag. Its honest expected value is recorded there: the two
+  directories this item proposed are the *most* hand-mutated code in the repository, so the pilot should
+  be judged on whether the tool is trustworthy, not on how many bugs it finds.
+
+  Found by review of this branch and fixed here, since it is two lines and the reviewer was already in
+  the caller: `openai.ex:327` carried a `parse_list_models_response(%{"data" => [_]} = body)` clause
+  that could never run — the clause above it matches `%{"data" => models} when is_list(models)`, and a
+  one-element list is a list, so the general clause always won. Its body also merely rebuilt the same
+  map and recursed. Dialyzer does not catch it and no suppression hides it; map patterns with dynamic
+  values analyse too weakly to prove the overlap. Deleted, with the single-model case pinned by a new
+  test rather than assumed: `{"data" => [%{"id" => "only-model"}]}` parses to `{:ok, ["only-model"]}`,
+  and narrowing the surviving guard to `length(models) > 1` fails that test alone while the two-model
+  test still passes.
+  Not changed, and recorded as a product question rather than a defect: `%{"data" => []}` parses to
+  `{:ok, []}`, which reaches `assign_models(socket, [], nil)` — an empty model dropdown with no error,
+  where every genuine failure path assigns `models_unavailable`. Whether a server reporting zero models
+  should read as "unavailable" is a decision, not a bug, and it is left alone here.
+
+- [ ] **Q09 · P2 · Re-own the `pdf_extractor_bounds` flake; its handoff points at a closed item.**
+  Q06 recorded "one unrelated pre-existing flake … `pdf_extractor_bounds_test.exs:85` (R04) polls for
+  pid files a forked shell writes and failed two of those runs under load", and handed it to "the
+  timing sleeps Q03 owns". That handoff is dead: Q03 is complete and merged, and R04 does not mention
+  this test, so the only known non-deterministic test in the suite currently has no owner.
+  It is a real ~2-in-7-under-load failure, not a suspicion, and it is the single thing standing between
+  this suite and an honest claim of determinism. The mechanism is the `eventually/2` poll at
+  `pdf_extractor_bounds_test.exs:79/85` waiting on pid files written by a `/bin/sh` child — a filesystem
+  race, so the fix is a real signal rather than a longer backoff.
+  It also gates scope: Q10 can avoid it by staying coverage-guided inside `search/` + `resilience/`, but
+  any mutation run over `lib/doctrans/processing/` would re-run this test once per mutant and, at 2/7,
+  fabricate surviving mutants wholesale.
+  Acceptance: the test passes under load across repeated full runs without a sleep standing in for a
+  signal; whichever item owns it is named in PLAN.md.
+  Evidence: `test/doctrans/processing/pdf_extractor_bounds_test.exs:79`, `:85`, PLAN.md Q06 gate note.
+
+- [ ] **Q10 · P3 · Pilot `muex`, scoped and coverage-guided, as a calibration check.**
+  Q07 re-measured its own deferral and found the preconditions met; this is the pilot it declined to run
+  inline. Add `{:muex, "~> 0.11", only: [:dev, :test], runtime: false}` — MIT, one runtime dep
+  (`jason`, already present), compatible with the pinned Elixir 1.20.4. Pin the minor: it is a 26-star
+  tool with 26 releases in a few months.
+  Run `lib/doctrans/resilience/` first (`--files ... --coverage-guided --preset phoenix`, ~50–100
+  mutants, 5–15 min) because it is the half Q02 just rewrote, so it directly tests whether those new
+  tests assert or merely execute. Then `lib/doctrans/search/` (~70–150 mutants, 30–90 min, dominated by
+  `chunker_test.exs`'s properties).
+  **Judge it on a falsifiable calibration, not on a score:** Q03 recorded five specific mutants that
+  survived the old search suite — reversed results, a link dropping the page number, one dropping
+  `search_page`, the fused-score tie-break by page id, and `format_row` hardcoding `page_number: 1` —
+  and each now fails a named test. muex must report all five as killed. If it does not, the tool is
+  wrong rather than the tests, and an hour has bought that knowledge cheaply.
+  Two results are pre-explained and must not be counted as findings: `segments.ex`'s defensive fallback
+  (expect `No coverage`, see Q05) and `sanitize_filename_string/1`'s dead `"/"` replacement, a true
+  equivalent mutant.
+  Expect a high kill rate and few real findings: `search/` carries 16 hand-mutations from Q03 plus the
+  property work of Q04 and Q05. The genuinely un-mutated surface is `processing/`, `jobs/` and
+  `live/` — which needs Q09 fixed first, and an acceptance that those suites are the slow, serial 86%.
+  Do **not** run muex in default full-suite mode and do **not** wire it into `mix precommit` or CI; at
+  143.8 s per mutant that is a 5–10 hour job. Partition the database if `--concurrency` is used — muex
+  documents nothing about the Ecto sandbox.
+  Acceptance: a scoped coverage-guided run completes in the stated budget; Q03's five mutants report
+  killed; every survivor is triaged as a real gap, an equivalent mutant, or tool noise, and recorded.
+  Evidence: PLAN.md Q03 search-slice mutation list, Q05:2246 and :2264, `mise.toml`, `mix.exs`.
 
 ## Phase 6 — Quality gates, toolchain, and supply chain
 

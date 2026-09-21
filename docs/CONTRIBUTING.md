@@ -60,6 +60,36 @@ exclusion hides a gap instead of reporting it. Add meaningful tests for uncovere
 behavior instead of lowering the threshold or expanding exclusions. Use
 `mix coveralls.html` for a local report in `cover/`.
 
+## Compiler warnings
+
+Warnings fail the build, through two gates that cover different files. The
+`mix-compile` pre-commit hook runs `mix compile --warnings-as-errors
+--all-warnings`, which reaches everything on `elixirc_paths` --- `lib/`, and
+`test/support/*.ex` in the test environment. It never reaches `test/**/*.exs`,
+because those are not compiled: `mix test` loads them at run time.
+
+That blind spot is closed by the `test` alias in `mix.exs`, which runs
+`test --warnings-as-errors`. Mix documents the flag as applying to test files
+only, and it is deliberately not passed down to `compile`, so the two gates are
+complementary rather than redundant.
+
+It lives in the alias rather than in `.pre-commit-config.yaml` because it is not
+a separate check --- it is how this project runs its tests. Every entry point
+resolves the alias, so a bare local `mix test` is gated exactly like CI is; a
+flag on the hook would leave local runs unguarded. Mix appends your arguments to
+the last task in an alias, so `mix test test/some_test.exs`, `mix test --failed`
+and `mix test --cover` all keep working.
+
+Two consequences worth knowing. A run that fails only on warnings cannot be
+retried with `--failed`, which Elixir documents; re-run the file. And a warning
+alongside a real failure exits 3 rather than 2, which is the documented sum of
+the exit status and one.
+
+With the flag set, any `.exs` file under `test/` that is neither loaded as a test
+nor matched by `test_ignore_filters` aborts the suite. Today only
+`test/test_helper.exs` is in that position and the default filter covers it, but
+a new `test/fixtures/*.exs` would need a filter entry.
+
 ## Static type checks
 
 `mix precommit` runs Dialyzer in the test environment with the project's strict
