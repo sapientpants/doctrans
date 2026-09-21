@@ -423,6 +423,7 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
     Repo.insert!(%Document{
       title: title,
       original_filename: "#{title}.pdf",
+      source_language: "de",
       target_language: "en",
       status: "uploading"
     })

@@ -8,6 +8,7 @@ defmodule Doctrans.Chat.ConversationsTest do
       Documents.create_document(%{
         title: "Chat",
         original_filename: "chat.pdf",
+        source_language: "en",
         target_language: "de"
       })
 

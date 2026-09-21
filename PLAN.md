@@ -3348,11 +3348,65 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
 
 ## Optional product backlog — design after the defect fixes
 
-- [ ] **B01 · Per-document source language or language detection.**
-  Translation reads one application-wide language, defaulting to German. Store a document/run choice
+- [x] **B01 · Per-document source language or language detection.**
+  Translation read one application-wide language, defaulting to German. Store a document/run choice
   so mixed-language uploads and later retries remain reproducible. Migrate existing records deliberately.
   Acceptance: two documents with different source languages process concurrently with the correct choices.
   Evidence: `lib/doctrans/processing/llm_processor.ex:235`.
+  Implemented as a stored per-document choice; **detection was considered and rejected** for this item.
+  The item's own requirement is that a retry stay reproducible, and a detector that is not persisted
+  re-decides on every attempt — so detection would still have had to write its answer to the row, which
+  is the column built here. Detection can later fill that column in as a default without changing
+  anything downstream. Note the history: `source_language` existed until `e4bdfe0` removed it on the
+  reasoning that "the AI model detects it", after which the prompt was fed a single configured constant
+  instead. That constant is what this item removes.
+  `source_language` mirrors `target_language` exactly, which is what keeps the change small: the language
+  is never carried in Oban args or processing opts, it is read off the document record at the point of
+  use. So every retry path — the in-process stage retry, the Oban job retry, `StartupRecovery`, and
+  reprocessing — picks the stored value up with no change to any of them, and that is precisely what
+  makes a retry reproducible. The one production line that mattered is
+  `llm_processor.ex`'s `Application.get_env(:doctrans, :defaults, [])[:source_language] || "de"`, now
+  `document.source_language`.
+  The column is `NOT NULL`, not nullable-with-a-config-fallback: a nil that falls back to mutable
+  configuration is the non-reproducibility this item exists to remove, so the schema refuses it.
+  `Doctrans.Validation` and the changeset require it symmetrically with the target, and
+  `Doctrans.Languages` — which validates both directions and populates both selects — had a moduledoc
+  that called itself "the translation target list"; it now says what it is.
+  The migration backfills existing rows from the deployment's *configured* `:source_language` rather than
+  a hardcoded `"de"`, because that setting is what those documents were in fact translated with;
+  hardcoding would relabel every old document on a deployment that had changed it. The value is guarded
+  against an allowlist frozen inside the migration — deliberately a copy of `Doctrans.Languages.supported/0`
+  and not a call to it, since a migration must keep behaving the same forever while that module is free
+  to change — so what reaches the SQL is always one of a fixed known-safe set. `up/0` adds the column,
+  backfills, then applies `null: false`; `down/0` drops it, and the pair was verified by migrating,
+  rolling back, and migrating again.
+  The upload dialog gained a second select (`#source-lang-select`) beside the target one, reusing the same
+  `language_options/1`; the two codes travel to `UploadIntake` as one `%{source: _, target: _}` map rather
+  than a fifth positional argument. The document header now reads `German → English` via a
+  `language_direction/1` helper — the arrow is punctuation, deliberately not a translatable message.
+  One trap worth recording: `mix gettext.extract --merge` fuzzy-matched both new strings against their
+  *target*-language siblings and auto-filled "Source Language" with "Zielsprache" — German for *Target*
+  Language — in all 11 locales. Gettext renders fuzzy entries at runtime, so that is shipped wrong text,
+  not a placeholder; `scripts/check_translations.exs` is the gate that catches exactly this, and all 22
+  entries were translated by hand and de-fuzzed.
+  Acceptance: `test/doctrans/processing/source_language_test.exs` runs two documents with different source
+  languages (`de` and `fr`) through `process_page/3` concurrently, parked on a barrier and released
+  together so the two translations are genuinely in flight at once, and asserts each page persisted a
+  translation from its own language and not the other's. A second test moves
+  `config :doctrans, :defaults, source_language` out from under a document between two attempts and shows
+  the retry still follows the row. Both were confirmed non-vacuous by reverting the production line to a
+  constant and watching them fail. The upload path is covered end to end by a test that submits `fr`/`es`
+  — not the form's own `de`/`en` defaults, which would have passed even if the server ignored the new
+  select — and asserts both values reached the record.
+  Two gate consequences were paid rather than worked around. `index.ex` was two lines under the 500-line
+  module limit before this item and went over it, so the submission-reporting helpers moved out to
+  `DoctransWeb.DocumentLive.UploadOutcomes` — the seam the code already had, and the one its test file was
+  already named after. That extraction left the module one dependency over Credo's limit of ten, which
+  `UploadIntake.validate_languages/2` resolves: intake validation belongs beside the filename sanitizing
+  that module already owns, and the LiveView no longer needs `Doctrans.Validation` at all. The
+  `.dialyzer_ignore.exs` entry for `validation.ex` is line-keyed and moved 225 → 236.
+  Full `mix precommit` green: 1421 tests, coverage above the 80% gate, Dialyzer clean with 0 unused
+  filters.
 
 - [ ] **B02 · Export translated work.**
   Add Markdown download first, preserving page boundaries and provenance; consider formatted document exports

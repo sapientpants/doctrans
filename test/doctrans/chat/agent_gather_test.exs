@@ -69,6 +69,7 @@ defmodule Doctrans.Chat.AgentGatherTest do
       Documents.create_document(%{
         title: "Annual Report",
         original_filename: "report.pdf",
+        source_language: "en",
         target_language: "de",
         status: "completed",
         total_pages: 1

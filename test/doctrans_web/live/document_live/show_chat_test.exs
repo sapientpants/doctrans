@@ -603,6 +603,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       Documents.create_document(%{
         title: "Test Document",
         original_filename: "test.pdf",
+        source_language: "en",
         target_language: "de",
         status: "completed",
         total_pages: 1

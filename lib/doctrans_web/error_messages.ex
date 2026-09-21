@@ -39,6 +39,9 @@ defmodule DoctransWeb.ErrorMessages do
   def message(:invalid_target_language),
     do: dgettext("errors", "Target language is required and must be a string")
 
+  def message(:invalid_source_language),
+    do: dgettext("errors", "Source language is required and must be a string")
+
   def message(:document_not_found), do: dgettext("errors", "Document not found")
 
   def message(:incomplete_output),

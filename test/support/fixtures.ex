@@ -21,6 +21,7 @@ defmodule Doctrans.Fixtures do
         title: "Test Document",
         original_filename: "test.pdf",
         target_language: "en",
+        source_language: "de",
         status: "uploading"
       })
       |> Documents.create_document()

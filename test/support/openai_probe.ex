@@ -8,7 +8,9 @@ defmodule Doctrans.Processing.OpenAIProbe do
       Application.put_env(:doctrans, :openai_probe_pid, self())
 
   Each call sends `{function, opts}` to that process and returns a canned
-  successful response.
+  successful response. `translate/4` additionally sends
+  `{:translate_languages, {source_language, target_language}}`, so a test can
+  assert which languages a document was actually translated between.
   """
 
   @behaviour Doctrans.Processing.OpenAIBehaviour
@@ -39,8 +41,9 @@ defmodule Doctrans.Processing.OpenAIProbe do
   end
 
   @impl true
-  def translate(_markdown, _source_language, target_language, opts) do
+  def translate(_markdown, source_language, target_language, opts) do
     record(:translate, opts)
+    record(:translate_languages, {source_language, target_language})
     {:ok, "probe translation #{target_language}"}
   end
 

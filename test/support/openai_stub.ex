@@ -41,9 +41,9 @@ defmodule Doctrans.Processing.OpenAIStub do
   @impl true
   def translate(markdown, source_language, target_language, opts \\ [])
 
-  def translate(markdown, _source_language, target_language, _opts) do
+  def translate(markdown, source_language, target_language, _opts) do
     case Application.get_env(:doctrans, :openai_stub_translation_error) do
-      nil -> {:ok, "# Translated to #{target_language}\n\n#{markdown}"}
+      nil -> {:ok, "# Translated #{source_language} to #{target_language}\n\n#{markdown}"}
       error -> {:error, error}
     end
   end

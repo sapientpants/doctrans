@@ -50,7 +50,8 @@ defmodule Doctrans.ProductionRepoTest do
                  Repo.insert!(%Document{
                    title: "Production vector smoke test",
                    original_filename: "test.pdf",
-                   target_language: "en"
+                   target_language: "en",
+                   source_language: "de"
                  })
 
                page = Repo.insert!(%Page{document_id: document.id, page_number: 1})

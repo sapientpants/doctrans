@@ -32,6 +32,11 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
           | {:error, filename :: String.t(), reason :: Doctrans.Errors.reason()}
 
   @typedoc """
+  The direction one submission translates in, as two validated language codes.
+  """
+  @type languages :: %{source: String.t(), target: String.t()}
+
+  @typedoc """
   The outcome of starting one accepted upload: the document that is now queued for
   processing, or the file it failed on and why.
   """
@@ -145,6 +150,23 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   def accepted?({:error, _filename, _reason}), do: false
 
   @doc """
+  Validates the pair of language codes one submission was made with.
+
+  Both are checked before any file is consumed: a language the user has to fix
+  is theirs to fix with the files still in the dialog, and reporting it after
+  the files were stored would leave documents behind for a submission that
+  never started.
+  """
+  @spec validate_languages(term(), term()) ::
+          {:ok, languages()} | {:error, Doctrans.Errors.reason()}
+  def validate_languages(source_language, target_language) do
+    with {:ok, source} <- Validation.validate_language(source_language),
+         {:ok, target} <- Validation.validate_language(target_language) do
+      {:ok, %{source: source, target: target}}
+    end
+  end
+
+  @doc """
   Creates the document record for an accepted `consume_entry/2` result and queues it
   for processing.
 
@@ -158,8 +180,8 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   inserted under that id, so handing this a persisted id would delete that document
   and its files.
   """
-  @spec create_and_process(accepted(), String.t()) :: start_result()
-  def create_and_process({:ok, document_id, original_filename, pdf_path}, target_language) do
+  @spec create_and_process(accepted(), languages()) :: start_result()
+  def create_and_process({:ok, document_id, original_filename, pdf_path}, languages) do
     # Sanitized in the head of the function that carries the rescue: a rebinding
     # inside a `try` body is not visible to its `rescue`, so sanitizing in there
     # would leave the raise path reporting and logging the raw browser filename.
@@ -167,7 +189,7 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
       document_id,
       Validation.sanitize_filename_string(original_filename),
       pdf_path,
-      target_language
+      languages
     )
   end
 
@@ -179,12 +201,13 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   # Only the directory is cleaned up: the insert did not complete, so there is no
   # row this call can claim, and deleting whatever happens to sit at that id is how
   # a caller's own document would get destroyed.
-  defp start_upload(document_id, filename, pdf_path, target_language) do
+  defp start_upload(document_id, filename, pdf_path, languages) do
     attrs = %{
       id: document_id,
       title: title_from(filename),
       original_filename: filename,
-      target_language: target_language,
+      source_language: languages.source,
+      target_language: languages.target,
       status: "uploading"
     }
 

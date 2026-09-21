@@ -23,6 +23,7 @@ defmodule Doctrans.Documents.Document do
     field :total_pages, :integer
     field :status, :string, default: "uploading"
     field :target_language, :string
+    field :source_language, :string
     field :error_message, :string
     field :processing_run_id, Ecto.UUID
     field :extraction_model, :string
@@ -49,9 +50,10 @@ defmodule Doctrans.Documents.Document do
       :total_pages,
       :status,
       :target_language,
+      :source_language,
       :error_message
     ])
-    |> validate_required([:title, :original_filename, :target_language])
+    |> validate_required([:title, :original_filename, :target_language, :source_language])
     |> validate_inclusion(:status, @statuses)
   end
 

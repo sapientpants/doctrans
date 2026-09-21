@@ -19,11 +19,12 @@ defmodule Doctrans.Validation do
   """
   @spec validate_document_attrs(map()) :: {:ok, map()} | {:error, Doctrans.Errors.reason()}
   def validate_document_attrs(attrs) when is_map(attrs) do
-    required_fields = [:title, :original_filename, :target_language]
+    required_fields = [:title, :original_filename, :target_language, :source_language]
 
     with {:ok, attrs} <- validate_required_fields(attrs, required_fields),
          {:ok, attrs} <- validate_title(attrs),
          {:ok, attrs} <- validate_target_language(attrs),
+         {:ok, attrs} <- validate_source_language(attrs),
          {:ok, attrs} <- sanitize_title(attrs),
          {:ok, attrs} <- sanitize_filename(attrs) do
       {:ok, attrs}
@@ -209,6 +210,16 @@ defmodule Doctrans.Validation do
 
   defp validate_target_language(_attrs),
     do: {:error, :invalid_target_language}
+
+  defp validate_source_language(%{source_language: language} = attrs) when is_binary(language) do
+    case validate_language(language) do
+      {:ok, _} -> {:ok, attrs}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp validate_source_language(_attrs),
+    do: {:error, :invalid_source_language}
 
   defp sanitize_filename(%{original_filename: filename} = attrs) when is_binary(filename) do
     sanitized = sanitize_filename_string(filename)

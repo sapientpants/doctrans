@@ -13,6 +13,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "queued"
         })
@@ -28,6 +29,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "processing"
         })
@@ -43,6 +45,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "processing"
         })
@@ -62,6 +65,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "error",
           error_message: "Previous error"
@@ -79,6 +83,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "queued"
         })
@@ -87,6 +92,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "processing"
         })
@@ -95,6 +101,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "completed"
         })
@@ -103,6 +110,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "error"
         })
@@ -118,6 +126,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "processing"
         })
@@ -149,6 +158,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "processing"
         })
@@ -162,6 +172,7 @@ defmodule Doctrans.Processing.DocumentOrchestratorTest do
         Documents.create_document(%{
           title: "Test Document",
           original_filename: "test.pdf",
+          source_language: "de",
           target_language: "en",
           status: "completed"
         })

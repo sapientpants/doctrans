@@ -65,20 +65,23 @@ defmodule Doctrans.ValidationTest do
       attrs = %{
         title: "Test Document",
         original_filename: "test.pdf",
-        target_language: "en"
+        target_language: "en",
+        source_language: "de"
       }
 
       assert {:ok, validated_attrs} = Validation.validate_document_attrs(attrs)
       assert validated_attrs.title == "Test Document"
       assert validated_attrs.original_filename == "test.pdf"
       assert validated_attrs.target_language == "en"
+      assert validated_attrs.source_language == "de"
     end
 
     test "trims title whitespace" do
       attrs = %{
         title: "  Test Document  ",
         original_filename: "test.pdf",
-        target_language: "en"
+        target_language: "en",
+        source_language: "de"
       }
 
       assert {:ok, validated_attrs} = Validation.validate_document_attrs(attrs)
@@ -89,7 +92,8 @@ defmodule Doctrans.ValidationTest do
       attrs = %{
         title: "",
         original_filename: "test.pdf",
-        target_language: "en"
+        target_language: "en",
+        source_language: "de"
       }
 
       assert {:error, :empty_title} = Validation.validate_document_attrs(attrs)
@@ -99,7 +103,8 @@ defmodule Doctrans.ValidationTest do
       attrs = %{
         title: "   ",
         original_filename: "test.pdf",
-        target_language: "en"
+        target_language: "en",
+        source_language: "de"
       }
 
       assert {:error, :empty_title} = Validation.validate_document_attrs(attrs)
@@ -109,14 +114,17 @@ defmodule Doctrans.ValidationTest do
       attrs = %{}
 
       assert {:error,
-              {:missing_required_fields, [fields: "title, original_filename, target_language"]}} =
+              {:missing_required_fields,
+               [fields: "title, original_filename, target_language, source_language"]}} =
                Validation.validate_document_attrs(attrs)
     end
 
     test "returns error when missing some required fields" do
       attrs = %{title: "Test"}
 
-      assert {:error, {:missing_required_fields, [fields: "original_filename, target_language"]}} =
+      assert {:error,
+              {:missing_required_fields,
+               [fields: "original_filename, target_language, source_language"]}} =
                Validation.validate_document_attrs(attrs)
     end
 
@@ -124,7 +132,8 @@ defmodule Doctrans.ValidationTest do
       attrs = %{
         title: 123,
         original_filename: "test.pdf",
-        target_language: "en"
+        target_language: "en",
+        source_language: "de"
       }
 
       assert {:error, :invalid_title} =
@@ -135,7 +144,8 @@ defmodule Doctrans.ValidationTest do
       attrs = %{
         title: "Test",
         original_filename: "test.pdf",
-        target_language: "invalid"
+        target_language: "invalid",
+        source_language: "de"
       }
 
       assert {:error, reason} = Validation.validate_document_attrs(attrs)
@@ -146,10 +156,35 @@ defmodule Doctrans.ValidationTest do
       attrs = %{
         title: "Test",
         original_filename: "test.pdf",
-        target_language: 123
+        target_language: 123,
+        source_language: "de"
       }
 
       assert {:error, :invalid_target_language} =
+               Validation.validate_document_attrs(attrs)
+    end
+
+    test "returns error when source_language is invalid" do
+      attrs = %{
+        title: "Test",
+        original_filename: "test.pdf",
+        target_language: "en",
+        source_language: "xx"
+      }
+
+      assert {:error, reason} = Validation.validate_document_attrs(attrs)
+      assert {:unsupported_language, [language: "xx"]} = reason
+    end
+
+    test "returns error when source_language is not a string" do
+      attrs = %{
+        title: "Test",
+        original_filename: "test.pdf",
+        target_language: "en",
+        source_language: 123
+      }
+
+      assert {:error, :invalid_source_language} =
                Validation.validate_document_attrs(attrs)
     end
 
@@ -157,7 +192,8 @@ defmodule Doctrans.ValidationTest do
       attrs = %{
         title: "Test",
         original_filename: "../../../etc/passwd",
-        target_language: "en"
+        target_language: "en",
+        source_language: "de"
       }
 
       assert {:ok, validated_attrs} = Validation.validate_document_attrs(attrs)

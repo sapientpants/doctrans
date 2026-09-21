@@ -461,6 +461,7 @@ defmodule Doctrans.ChatTest do
       Enum.into(opts, %{
         title: "Test Document",
         original_filename: "test.pdf",
+        source_language: "en",
         target_language: "de"
       })
 

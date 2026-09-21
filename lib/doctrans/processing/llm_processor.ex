@@ -264,11 +264,9 @@ defmodule Doctrans.Processing.LlmProcessor do
     document = Documents.get_document!(page.document_id)
     openai_opts = build_translation_opts(opts)
 
-    source_language = Application.get_env(:doctrans, :defaults, [])[:source_language] || "de"
-
     case openai_module().translate(
            page.original_markdown,
-           source_language,
+           document.source_language,
            document.target_language,
            openai_opts
          ) do

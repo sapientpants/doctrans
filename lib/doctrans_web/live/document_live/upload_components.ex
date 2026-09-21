@@ -14,6 +14,7 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
   Renders the upload modal dialog.
   """
   attr :uploads, :map, required: true
+  attr :source_language, :string, required: true
   attr :target_language, :string, required: true
 
   attr :failures, :list,
@@ -95,6 +96,20 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
             pending={@pending}
             started={@started}
           />
+        </div>
+
+        <div class="form-control mb-4">
+          <label for="source-lang-select" class="label">
+            <span class="label-text">{gettext("Source Language")}</span>
+          </label>
+          <select
+            name="source_language"
+            class="select select-bordered w-full"
+            id="source-lang-select"
+            phx-hook="EscapeStaysInSelect"
+          >
+            <.language_options selected={@source_language} />
+          </select>
         </div>
 
         <div class="form-control mb-6">
@@ -212,9 +227,10 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
   attr :selected, :string, required: true
 
   defp language_options(assigns) do
-    # Codes come from the canonical translation-target list and names from
-    # `language_name/1`, so neither is spelled out twice. Sorting is by the
-    # translated name, so the order follows the interface language.
+    # Codes come from the canonical list of supported languages -- the same one
+    # either direction is picked from -- and names from `language_name/1`, so
+    # neither is spelled out twice. Sorting is by the translated name, so the
+    # order follows the interface language.
     languages =
       Doctrans.Languages.supported()
       |> Enum.map(&{&1, language_name(&1)})
