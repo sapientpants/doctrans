@@ -331,6 +331,7 @@ DOCTRANS_DATA_DIR=/var/lib/doctrans mix phx.server
 ## Development
 
 ```bash
+mix assets.build      # Build the CSS and JS bundles (mix setup does this; mix test needs them)
 mix test              # Run tests
 mix precommit         # Run the full quality gate (defined in .pre-commit-config.yaml)
 mix credo --strict    # Static code analysis
@@ -346,7 +347,7 @@ iex -S mix phx.server # Interactive console
 This project enforces strict code quality:
 
 - **80% test coverage** minimum (enforced in CI)
-- **600-line module limit** (enforced via pre-commit hook)
+- **500-line module limit** (enforced via pre-commit hook)
 - **Strict Credo checks** including cyclomatic complexity, nesting depth, and code duplication
 - **Security scanning** via Sobelow and dependency auditing
 - **Type checking** via Dialyzer with strict flags
@@ -360,17 +361,14 @@ pip install pre-commit
 pre-commit install
 ```
 
-Hooks run automatically on commit, selected by the changed file types, and include:
+Hooks run automatically on commit, selected by the changed file types.
 
-- Code formatting check (`mix format --check-formatted`)
-- Markdown/YAML and other file validation
-- Translation completeness checks for changed locale files
-- Compilation with warnings as errors
-- Credo strict mode
-- Sobelow security analysis
-- Module size limit check (600 lines max)
-- Dependency vulnerability audit
-- Test suite with coverage
+The gate is defined once, in [`.pre-commit-config.yaml`](.pre-commit-config.yaml), and that file is
+the single source of truth for which checks run — `mix precommit` and CI both run exactly those
+hooks. It is not restated here, because a second copy drifts. Broadly it covers file and format
+validation, translation completeness, compilation with warnings as errors, static and security
+analysis, asset bundle builds, type checking, and the test suite with coverage. Read the config for
+the current set; each hook carries a comment explaining why it blocks.
 
 Run manually with:
 
@@ -406,6 +404,7 @@ messages must follow this format:
 GitHub Actions runs on pushes to `main` and pull requests targeting `main`:
 
 - Pre-commit hooks (formatting, linting, security checks)
+- Asset toolchain install (`mix assets.setup`) and bundle build (esbuild, Tailwind)
 - Full test suite with 80% coverage requirement
 - Dialyzer type checking
 - Uncommitted changes detection
