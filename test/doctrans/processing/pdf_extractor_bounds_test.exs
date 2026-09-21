@@ -11,6 +11,8 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
   """
   use ExUnit.Case, async: false
 
+  import Doctrans.ProcessProbe
+
   # The fakes below deliberately fail, and the extractor logs each failure with
   # its diagnostic tail. Capturing keeps that out of the suite's output.
   @moduletag :capture_log
@@ -66,58 +68,78 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
     path
   end
 
-  defp process_gone?(pid) do
-    {_output, status} = System.cmd("/bin/ps", ["-p", pid], env: [])
-    status != 0
-  end
-
-  defp eventually(check, attempts \\ 100)
-  defp eventually(check, 0), do: assert(check.())
-
-  defp eventually(check, attempts) do
-    unless check.() do
-      Process.sleep(20)
-      eventually(check, attempts - 1)
-    end
-  end
-
   describe "deadlines" do
     test "a hung renderer times out, is reaped, and frees the slot", %{dir: dir, config: config} do
-      pid_file = Path.join(dir, "pid")
+      hung = fake(dir, "pdftoppm", "#!/bin/sh\nexec /bin/sleep 98765\n")
 
-      hung =
-        fake(dir, "pdftoppm", """
-        #!/bin/sh
-        /bin/sleep 98765 &
-        echo $! > "#{pid_file}.child"
-        echo $$ > "#{pid_file}"
-        wait
-        """)
-
-      put_config(config, pdftoppm_path: hung, timeout: 500)
+      # 2_000 rather than the 500 this ran at. The renderer has to be seen alive
+      # before the deadline kills it, and seeing it costs a `/bin/ps` — itself a
+      # process launch, and a launch can stall for most of a second before its
+      # first instruction runs. The deadline has to exceed that stall, not merely
+      # the scheduler. Lengthening the poll budget instead would be no help: this
+      # is a window that closes, not a wait that is slow.
+      put_config(config, pdftoppm_path: hung, timeout: 2_000)
       pages_dir = Path.join(dir, "pages")
 
       started = System.monotonic_time(:millisecond)
-      result = PdfExtractor.extract_page(source_pdf(dir), pages_dir, 1)
+      task = Task.async(fn -> PdfExtractor.extract_page(source_pdf(dir), pages_dir, 1) end)
+
+      # Read from the port rather than from a file the fake writes: the deadline
+      # SIGKILLs the whole process group, and a shell still starting up when that
+      # lands never runs the line that would have recorded its pid.
+      renderer = await_os_pid(task.pid, hung, "the renderer to be spawned")
+
+      # The vacuity guard, and the reason this test is worth anything: "the
+      # renderer is gone" is true of a renderer that was never started, so it is
+      # observed alive before it is awaited gone.
+      refute process_gone?(renderer), "renderer #{renderer} was never running"
+
+      assert {:error, :pdf_command_timeout} = Task.await(task, 30_000)
       elapsed = System.monotonic_time(:millisecond) - started
+      assert elapsed >= 2_000
 
-      assert {:error, :pdf_command_timeout} = result
-      assert elapsed >= 500
-
-      # The fake writes these from a forked shell; on a loaded runner the write
-      # can land after the deadline that killed it.
-      eventually(fn -> File.exists?(pid_file) and File.exists?(pid_file <> ".child") end)
-
-      renderer = pid_file |> File.read!() |> String.trim()
-      child = (pid_file <> ".child") |> File.read!() |> String.trim()
-      eventually(fn -> process_gone?(renderer) end)
-      eventually(fn -> process_gone?(child) end)
+      eventually(fn -> process_gone?(renderer) end, "renderer #{renderer} to be reaped")
 
       # The single extraction slot is free again: a working renderer runs next.
       put_config(config, pdftoppm_path: fake(dir, "pdftoppm", fake_pdftoppm_body()))
 
       assert {:ok, path} = PdfExtractor.extract_page(source_pdf(dir), pages_dir, 1)
       assert Path.basename(path) == "page-01.png"
+    end
+
+    test "the renderer's children are reaped with it, not left behind", %{
+      dir: dir,
+      config: config
+    } do
+      # Split out of the test above deliberately. Whether a grandchild exists at
+      # all is not something a timing-out run can promise: the renderer may still
+      # be starting up when its deadline kills it, so no forked child is ever
+      # visible. Under a 60-second deadline nothing is racing the observation,
+      # and killing the caller reaps through the same `kill_group/1` path a
+      # deadline uses, so the claim under test is unchanged.
+      forking =
+        fake(dir, "pdftoppm", """
+        #!/bin/sh
+        /bin/sleep 98765 &
+        wait
+        """)
+
+      put_config(config, pdftoppm_path: forking, timeout: 60_000)
+      pages_dir = Path.join(dir, "pages")
+
+      caller = spawn(fn -> PdfExtractor.extract_page(source_pdf(dir), pages_dir, 1) end)
+      on_exit(fn -> Process.exit(caller, :kill) end)
+
+      renderer = await_os_pid(caller, forking, "the renderer to be spawned")
+      child = await_child_pid(renderer, "the renderer to fork its child")
+
+      refute process_gone?(renderer), "renderer #{renderer} was never running"
+      refute process_gone?(child), "renderer child #{child} was never running"
+
+      Process.exit(caller, :kill)
+
+      eventually(fn -> process_gone?(renderer) end, "renderer #{renderer} to be reaped")
+      eventually(fn -> process_gone?(child) end, "renderer child #{child} to be reaped")
     end
 
     test "a hung pdfinfo times out instead of waiting forever", %{dir: dir, config: config} do

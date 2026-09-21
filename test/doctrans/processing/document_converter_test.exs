@@ -11,6 +11,8 @@ defmodule Doctrans.Processing.DocumentConverterTest do
   """
   use ExUnit.Case, async: false
 
+  import Doctrans.ProcessProbe
+
   alias Doctrans.Processing.DocumentConverter
 
   setup do
@@ -222,43 +224,34 @@ defmodule Doctrans.Processing.DocumentConverterTest do
       dir = tmp_dir()
       on_exit(fn -> File.rm_rf(dir) end)
 
-      pid_file = Path.join(dir, "pid.txt")
+      fake = make_fake_soffice(dir, "#!/bin/sh\nexec /bin/sleep 98765\n")
 
-      # A launcher waiting on a child models LibreOffice's process tree.
-      fake =
-        make_fake_soffice(dir, """
-        #!/bin/sh
-        echo $$ > #{pid_file}
-        /bin/sleep 98765 &
-        echo $! > #{pid_file}.child
-        wait
-        """)
-
-      put_config(soffice_path: fake, timeout: 800)
+      # 2_000 rather than the 800 this ran at. soffice has to be seen alive
+      # before the deadline kills it, and seeing it costs a `/bin/ps` — itself a
+      # process launch, and a launch can stall for most of a second before its
+      # first instruction runs.
+      put_config(soffice_path: fake, timeout: 2_000)
 
       source = make_source(dir, "book.docx")
       output_dir = Path.join(dir, "out")
 
       start = System.monotonic_time(:millisecond)
-      result = DocumentConverter.convert_to_pdf(source, output_dir)
-      elapsed = System.monotonic_time(:millisecond) - start
+      task = Task.async(fn -> DocumentConverter.convert_to_pdf(source, output_dir) end)
 
-      assert {:error, message} = result
-      assert :conversion_timeout = message
-      assert elapsed >= 800
+      # Read from the port rather than from a pid file. The file was worse than
+      # slow: the deadline SIGKILLs the process group, and a shell still starting
+      # up when that lands never writes it at all, so `File.read!` raised
+      # `File.Error` instead of failing an assertion.
+      soffice = await_os_pid(task.pid, fake, "soffice to be spawned")
 
-      pid = pid_file |> File.read!() |> String.trim() |> String.to_integer()
+      # The vacuity guard: "soffice is gone" is true of a soffice that never
+      # started, so it is observed alive before it is awaited gone.
+      refute process_gone?(soffice), "soffice #{soffice} was never running"
 
-      # Give the kill a moment to take effect, then verify the process is gone.
-      Process.sleep(300)
+      assert {:error, :conversion_timeout} = Task.await(task, 30_000)
+      assert System.monotonic_time(:millisecond) - start >= 2_000
 
-      {_out, status} = System.cmd("ps", ["-p", Integer.to_string(pid)], env: [])
-      assert status != 0, "soffice process #{pid} should have been killed"
-
-      child_pid = File.read!(pid_file <> ".child") |> String.trim()
-      {_out, status} = System.cmd("ps", ["-p", child_pid], env: [])
-      assert status != 0, "LibreOffice child #{child_pid} should have been reaped"
-      refute_receive {_port, {:exit_status, _}}
+      eventually(fn -> process_gone?(soffice) end, "soffice #{soffice} to be reaped")
     end
   end
 
@@ -274,34 +267,47 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     assert System.monotonic_time(:millisecond) - started < 3_000
   end
 
-  test "cleans up the process and profile when the caller is killed" do
+  test "cleans up the process, the child it forked, and the profile when the caller is killed" do
     dir = tmp_dir()
-    pid_file = Path.join(dir, "pid")
     profile_file = Path.join(dir, "profile")
 
+    # A launcher that forks and waits, the way LibreOffice does. The group kill
+    # is asserted here rather than on the timeout path, because whether a
+    # grandchild exists at all is not something a timing-out run can promise: the
+    # launcher may still be starting up when its deadline kills it. Nothing races
+    # the observation under a 60-second deadline, and caller death reaps through
+    # the same `kill_group/1` call a deadline uses.
     fake =
       make_fake_soffice(dir, """
       #!/bin/sh
       echo "${1#-env:UserInstallation=file://}" > "#{profile_file}"
-      echo $$ > "#{pid_file}"
-      exec /bin/sleep 98765
+      /bin/sleep 98765 &
+      wait
       """)
 
-    put_config(soffice_path: fake, timeout: 10_000)
+    put_config(soffice_path: fake, timeout: 60_000)
     source = make_source(dir, "book.docx")
     caller = spawn(fn -> DocumentConverter.convert_to_pdf(source, Path.join(dir, "out")) end)
     on_exit(fn -> Process.exit(caller, :kill) end)
-    eventually(fn -> File.exists?(pid_file) and File.read!(pid_file) != "" end)
-    pid = File.read!(pid_file) |> String.trim()
-    profile = File.read!(profile_file) |> String.trim() |> URI.decode()
+
+    soffice = await_os_pid(caller, fake, "soffice to be spawned")
+    child = await_child_pid(soffice, "soffice to fork its child")
+
+    refute process_gone?(soffice), "soffice #{soffice} was never running"
+    refute process_gone?(child), "soffice child #{child} was never running"
+
+    profile =
+      profile_file
+      |> await_pid_file("soffice to record the profile it was given")
+      |> URI.decode()
+
     assert File.dir?(profile)
     assert Bitwise.band(File.stat!(profile).mode, 0o777) == 0o700
     Process.exit(caller, :kill)
 
-    eventually(fn ->
-      {_output, status} = System.cmd("ps", ["-p", pid], env: [])
-      status != 0 and not File.exists?(profile)
-    end)
+    eventually(fn -> process_gone?(soffice) end, "soffice #{soffice} to be reaped")
+    eventually(fn -> process_gone?(child) end, "soffice child #{child} to be reaped")
+    eventually(fn -> not File.exists?(profile) end, "the profile #{profile} to be removed")
   end
 
   test "retains the launcher PID after exit and kills its surviving child" do
@@ -322,12 +328,16 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     put_config(soffice_path: fake, timeout: 10_000)
     source = make_source(dir, "book.docx")
     task = Task.async(fn -> DocumentConverter.convert_to_pdf(source, Path.join(dir, "out")) end)
-    eventually(fn -> File.exists?(ready) and File.read!(ready) != "" end)
-    launcher = File.read!(ready) |> String.trim() |> String.to_integer()
-    child = File.read!(Path.join(dir, "child")) |> String.trim()
-    {:monitors, [{:process, owner}]} = Process.info(task.pid, :monitors)
-    {:links, links} = Process.info(owner, :links)
-    port = Enum.find(links, &is_port/1)
+
+    launcher =
+      ready |> await_pid_file("the launcher to record its own pid") |> String.to_integer()
+
+    child = Path.join(dir, "child") |> await_pid_file("the launcher to record its child's pid")
+    # The port is found by the executable it was spawned as, and its owner is the
+    # process it is connected to: a task monitors more than the owner
+    # `supervised/1` gives it, so matching a single monitor can raise instead.
+    port = find_port(task.pid, fake)
+    {:connected, owner} = :erlang.port_info(port, :connected)
 
     # Hold the owner until the launcher has exited. PID lookup must still work
     # at this point, even if the owner was descheduled immediately after open.
@@ -335,15 +345,15 @@ defmodule Doctrans.Processing.DocumentConverterTest do
 
     try do
       File.touch!(release)
-      eventually(fn -> process_gone?(Integer.to_string(launcher)) end)
-      refute process_gone?(child)
+      eventually(fn -> process_gone?(launcher) end, "launcher #{launcher} to exit")
+      refute process_gone?(child), "launcher child #{child} should outlive the launcher"
       assert Port.info(port, :os_pid) == {:os_pid, launcher}
     after
       :erlang.resume_process(owner)
     end
 
     assert {:error, _message} = Task.await(task, 5_000)
-    eventually(fn -> process_gone?(child) end)
+    eventually(fn -> process_gone?(child) end, "launcher child #{child} to be reaped")
   end
 
   test "EOF without process exit still times out and cleans up" do
@@ -397,11 +407,6 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     assert File.read!(marker) == "do not reuse"
   end
 
-  defp process_gone?(pid) do
-    {_output, status} = System.cmd("/bin/ps", ["-p", pid], env: [])
-    status != 0
-  end
-
   test "reports a missing PDF after a successful process exit" do
     dir = tmp_dir()
     fake = make_fake_soffice(dir, "#!/bin/sh\nexit 0\n")
@@ -409,16 +414,6 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     source = make_source(dir, "book.docx")
     assert {:error, message} = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
     assert :converted_pdf_not_found = message
-  end
-
-  defp eventually(check, attempts \\ 100)
-  defp eventually(check, 0), do: assert(check.())
-
-  defp eventually(check, attempts) do
-    unless check.() do
-      Process.sleep(20)
-      eventually(check, attempts - 1)
-    end
   end
 
   # Emulates a soffice conversion: finds --outdir and the last argument (the

@@ -8,6 +8,8 @@ defmodule Doctrans.Processing.SubprocessTest do
   """
   use ExUnit.Case, async: false
 
+  import Doctrans.ProcessProbe
+
   alias Doctrans.Processing.Subprocess
 
   setup do
@@ -54,23 +56,38 @@ defmodule Doctrans.Processing.SubprocessTest do
   end
 
   test "kills a command that outruns its deadline and reports what it printed", %{dir: dir} do
-    pid_file = Path.join(dir, "pid")
+    command = script(dir, "#!/bin/sh\necho starting\nexec /bin/sleep 98765\n")
 
-    command =
-      script(dir, """
-      #!/bin/sh
-      echo starting
-      echo $$ > "#{pid_file}"
-      exec /bin/sleep 98765
-      """)
+    # 2_000 rather than the 300 this ran at. The command has to be seen alive
+    # before the deadline kills it, and seeing it costs a `/bin/ps` — itself a
+    # process launch, and a launch can stall for most of a second before its
+    # first instruction runs.
+    started = System.monotonic_time(:millisecond)
+    task = Task.async(fn -> Subprocess.run(command, [], timeout: 2_000) end)
 
-    assert {:timeout, "starting\n"} = Subprocess.run(command, [], timeout: 300)
+    # Read from the port, not from a pid file: the deadline SIGKILLs the process
+    # group, and a shell still starting up when that lands never runs the line
+    # that would have recorded its pid.
+    os_pid = await_os_pid(task.pid, command, "the command to be spawned")
+
+    # The vacuity guard: "the command is gone" is true of a command that never
+    # ran, so it is observed alive before it is awaited gone.
+    refute process_gone?(os_pid), "command #{os_pid} was never running"
+
+    assert {:timeout, "starting\n"} = Task.await(task, 30_000)
+    assert System.monotonic_time(:millisecond) - started >= 2_000
 
     # The deadline is only half the contract: the operating-system process has to
     # be gone too, or the slot it occupies is never freed.
-    eventually(fn -> File.exists?(pid_file) end)
-    os_pid = pid_file |> File.read!() |> String.trim()
-    eventually(fn -> process_gone?(os_pid) end)
+    eventually(fn -> process_gone?(os_pid) end, "command #{os_pid} to be reaped")
+  end
+
+  test "the reap check refuses a pid it cannot check" do
+    # `/bin/ps -p ""` exits 1, so a pid read from a file that existed but was
+    # still empty used to read as "that process is gone" — which made both reap
+    # assertions above pass while checking nothing at all.
+    assert_raise ExUnit.AssertionError, fn -> process_gone?("") end
+    assert_raise ExUnit.AssertionError, fn -> process_gone?(0) end
   end
 
   test "keeps a byte-limited tail valid to encode", %{dir: dir} do
@@ -145,9 +162,8 @@ defmodule Doctrans.Processing.SubprocessTest do
 
     assert {:ok, {"", 0}} = Subprocess.run(launcher, [], timeout: 10_000, kill_on_exit: true)
 
-    eventually(fn -> File.exists?(pid_file) end)
-    grandchild = pid_file |> File.read!() |> String.trim()
-    eventually(fn -> process_gone?(grandchild) end)
+    grandchild = await_pid_file(pid_file, "the launcher to record its grandchild's pid")
+    eventually(fn -> process_gone?(grandchild) end, "grandchild #{grandchild} to be reaped")
   end
 
   test "removes credentials from the child environment", %{dir: dir} do
@@ -204,14 +220,17 @@ defmodule Doctrans.Processing.SubprocessTest do
     assert_received {:DOWN, ^monitor, :process, ^unrelated, :normal}
   end
 
-  test "supervised/1 reaps the child when the caller dies", %{dir: dir} do
-    pid_file = Path.join(dir, "caller_child")
-
+  test "supervised/1 reaps the child and its own children when the caller dies", %{dir: dir} do
+    # The group kill is asserted here rather than on the deadline path above,
+    # because whether a grandchild exists at all is not something a timing-out
+    # run can promise: the command may still be starting up when its deadline
+    # kills it. Nothing races the observation under a 60-second deadline, and
+    # caller death reaps through the same `kill_group/1` call a deadline uses.
     command =
       script(dir, """
       #!/bin/sh
-      echo $$ > "#{pid_file}"
-      exec /bin/sleep 98765
+      /bin/sleep 98765 &
+      wait
       """)
 
     caller =
@@ -219,28 +238,19 @@ defmodule Doctrans.Processing.SubprocessTest do
         Subprocess.supervised(fn -> Subprocess.run(command, [], timeout: 60_000) end)
       end)
 
-    eventually(fn -> File.exists?(pid_file) end)
-    os_pid = pid_file |> File.read!() |> String.trim()
+    on_exit(fn -> Process.exit(caller, :kill) end)
+
+    os_pid = await_os_pid(caller, command, "the command to be spawned")
+    child = await_child_pid(os_pid, "the command to fork its child")
+
+    refute process_gone?(os_pid), "command #{os_pid} was never running"
+    refute process_gone?(child), "command child #{child} was never running"
 
     Process.exit(caller, :kill)
 
     # The owner monitors the caller, so the child is killed rather than left to
     # run out a 60-second deadline nobody is waiting on.
-    eventually(fn -> process_gone?(os_pid) end)
-  end
-
-  defp process_gone?(os_pid) do
-    {_output, status} = System.cmd("/bin/ps", ["-p", os_pid], env: [])
-    status != 0
-  end
-
-  defp eventually(check, attempts \\ 100)
-  defp eventually(check, 0), do: assert(check.())
-
-  defp eventually(check, attempts) do
-    unless check.() do
-      Process.sleep(20)
-      eventually(check, attempts - 1)
-    end
+    eventually(fn -> process_gone?(os_pid) end, "command #{os_pid} to be reaped")
+    eventually(fn -> process_gone?(child) end, "command child #{child} to be reaped")
   end
 end

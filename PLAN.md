@@ -1,6 +1,6 @@
 # Doctrans improvement plan
 
-Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q08 completed,
+Status: implementation in progress; C01–C05, R01–R06, S01–S04, U01–U15 and Q01–Q09 completed,
 plus Phase 6 items G01–G19.
 Base: `main` at `6953656`, reviewed on 11 September 2026.
 Phase 6 added 12 September 2026 from a quality-gate, toolchain, and supply-chain review.
@@ -2353,7 +2353,9 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Gate: `mix precommit` passes — 1,407 tests, 92.7% coverage. One unrelated pre-existing flake
   surfaced across seven full runs and is untouched here: `pdf_extractor_bounds_test.exs:85` (R04)
   polls for pid files a forked shell writes and failed two of those runs under load. It belongs with
-  the timing sleeps Q03 owns.
+  the timing sleeps Q03 owns. Both halves of that last sentence were wrong, and Q09 corrects them:
+  Q03 had already declined this line twice and was closed, and the failure is not load-driven but a
+  process-launch stall. Owned and fixed by Q09.
 
 - [x] **Q08 · P2 · Build the asset bundles somewhere a broken one fails.**
   No CI job and no pre-commit hook runs `mix assets.build`, and `priv/static/assets/` is gitignored, so
@@ -2562,7 +2564,7 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   where every genuine failure path assigns `models_unavailable`. Whether a server reporting zero models
   should read as "unavailable" is a decision, not a bug, and it is left alone here.
 
-- [ ] **Q09 · P2 · Re-own the `pdf_extractor_bounds` flake; its handoff points at a closed item.**
+- [x] **Q09 · P2 · Re-own the `pdf_extractor_bounds` flake; its handoff points at a closed item.**
   Q06 recorded "one unrelated pre-existing flake … `pdf_extractor_bounds_test.exs:85` (R04) polls for
   pid files a forked shell writes and failed two of those runs under load", and handed it to "the
   timing sleeps Q03 owns". That handoff is dead: Q03 is complete and merged, and R04 does not mention
@@ -2577,6 +2579,96 @@ workflow, or verification defects; P3 means secondary usability and maintenance 
   Acceptance: the test passes under load across repeated full runs without a sleep standing in for a
   signal; whichever item owns it is named in PLAN.md.
   Evidence: `test/doctrans/processing/pdf_extractor_bounds_test.exs:79`, `:85`, PLAN.md Q06 gate note.
+
+  Implemented as three test-file changes and no application change. The extractor and the bounds R04
+  put around it were correct throughout: the defect was a test assuming a process the deadline exists
+  to destroy would first reach a particular line of its own script.
+
+  **The mechanism, measured rather than assumed.** The `/bin/sh` fake never executes line one. It is
+  blocked inside `dyld` — `dyld4::RemoteNotificationResponder::blockOnSynchronousEvent`, a synchronous
+  mach-message to a process-launch observer — *before `main`*, when the deadline SIGKILLs its process
+  group (`subprocess.ex:241`, `kill -KILL -- -<pgid>`). Three independent proofs: a marker written by a
+  shell builtin on line one is also absent; `ps` at the deadline shows the process alive, state `Ss`,
+  `PGID == PID`, argv already the fake; and `sample` on a slow starter shows the dyld stack. The
+  counterfactual settles it — skip the kill and the pid files appear within about a second. So the
+  writer is dead before the first poll runs, the polled condition is permanently unreachable, and a
+  longer backoff cannot help. Across roughly 1,450 invocations a late write was observed **0 times**:
+  the distribution is strictly bimodal, present when the poll starts or never.
+
+  **Correction to this item's own text.** Q09 called this "a real ~2-in-7-under-load failure". Load is
+  not the driver. Forty-eight busy loops at load average ~100 produced **0 failures in 15 runs**, and
+  exec-storm and in-VM port-churn load moved the rate no further; the stall is outside the BEAM and
+  outside this repo. The failure is episodic instead: all seven observed failures fell inside one
+  twelve-minute window, with roughly 720 invocations either side of it clean, against a steady-state
+  **0.5–1% per invocation**. That clustering is exactly what makes "2 in 7" a credible observation and
+  a misleading model of the cause.
+
+  **Correction to the ownership record.** Q06 handed this to "the timing sleeps Q03 owns". Q03 was
+  already closed when that was written, and had already declined this exact line twice — once as
+  downstream of the `Processing.Worker` ownership crash (:1888), once by classifying it a bounded
+  poller ending in a real assertion rather than a substitute sleep (:1985-1988). Both are falsified:
+  the Worker crash was fixed and the flake outlived it, and a poller whose condition can become
+  permanently unreachable is not merely bounded. R04 authored the file and the helper and recorded
+  nothing about the race. **Q09 owns it**, and it is no longer anyone's to hand on.
+
+  **The fix asks the runtime and the OS, not the child.** OTP puts each port executable in its own
+  session before exec, so the port's `os_pid` is the process-group id the kill will use, and it is
+  known from the moment of spawn — there is nothing for a stalled launch to outrun. `await_os_pid/3`
+  walks caller → owner → port and matches the port by executable name, since one owner may run several
+  commands. The grandchild is read from the process table with `/bin/ps -e -o pid=,ppid=`, chosen over
+  `pgrep -P` because that flag's output differs between macOS and the Linux CI image. The fakes now
+  write nothing at all.
+
+  **The two claims are split, because one of them cannot be asserted on the deadline path.** Whether a
+  grandchild exists is not something a timing-out run can promise — a renderer still inside `dyld` has
+  forked nothing — so requiring one was the unsatisfiable wait this item is about. Reaping of the whole
+  group is therefore asserted under a 60-second deadline, where nothing races the observation, and
+  triggered by killing the caller, which reaps through the same `kill_group/1` call a deadline uses.
+  The deadline tests keep their own claim and observe only the renderer, which exists from `execve`
+  onward whatever it is doing.
+
+  **Found while fixing: two tests that could not fail.** `process_gone?/1` passed its argument
+  straight to `/bin/ps -p`, and `/bin/ps -p ""` exits 1 on "Invalid (zero-length) process id" — so an
+  empty pid file read as "that process is gone" and **both** reap assertions passed while checking
+  nothing. `echo $$ > f` creates the file before writing it, and that zero-length window was observed
+  in **558 of 2,000** spawns. It now refuses anything that is not a positive integer pid, with a test
+  of its own pinning both the empty string and `0`. Every reap assertion also gained a liveness
+  precondition, so "it was reaped" can no longer be satisfied by something that never ran.
+
+  **One defect, three sites.** `subprocess_test.exs:56` carried it verbatim on a *tighter* 300 ms
+  budget, and `document_converter_test.exs:221` was worse than either — `File.read!` on the pid file
+  with no wait at all, so a lost write raised `File.Error` rather than failing an assertion, followed
+  by `Process.sleep(300)` standing in for the signal. Fixing only the named test would have left the
+  next flake in place.
+
+  `eventually/2` now takes a required description and `flunk/1`s with it. It previously reported
+  `assert check.()` at the helper's own line, so a wait that timed out named neither its call site nor
+  its condition — three call sites in one test were indistinguishable in the output, with the
+  extractor's own diagnostic swallowed by `@moduletag :capture_log`.
+
+  Not closed, deliberately. The two deadline tests now run at 2,000 ms rather than 500 and 300: the
+  renderer must be seen alive before the deadline kills it, and seeing it costs a `/bin/ps`, which is
+  itself a process launch subject to the same stall. That is the subject under test being given enough
+  life to be observed, not a poll budget lengthened to paper over a race — the distinction this item
+  turns on. The remaining polls wait only on conditions guaranteed to become reachable: a port that
+  exists for the whole run, and OS teardown after a delivered SIGKILL. The underlying dyld stall is a
+  property of the machine, not of this repo, and is not fixed here.
+
+  Found while fixing, and the reason the helpers moved: at roughly 130 lines the shared block
+  triplicated across the three files failed `Credo.Check.Design.DuplicatedCode` with 17 findings, where
+  the eight-line `eventually/2` it replaced had stayed under the mass threshold. It now lives in
+  `test/support/process_probe.ex`, which `elixirc_paths(:test)` compiles and the credo, dialyzer and
+  xref hooks gate like `lib/`. A second defect surfaced in the same load runs and is fixed with it: a
+  spawn port exists before `erl_child_setup` reports the pid back and answers `{:os_pid, 0}` until it
+  does, so `await_os_pid/3` briefly returned `0`. The strict pid check turned that into a named failure
+  rather than a silent one, which is how it was found; `port_os_pid/1` now treats 0 as "not yet",
+  matching the guard `Subprocess.port_os_pid/1` already carried.
+
+  Gate: `mix precommit` passes — all 31 hooks, 1,411 tests, 92.7% coverage.
+  Evidence added: `test/support/process_probe.ex`, and in
+  `test/doctrans/processing/pdf_extractor_bounds_test.exs` the split-out
+  "the renderer's children are reaped with it, not left behind", plus
+  `test/doctrans/processing/subprocess_test.exs` "the reap check refuses a pid it cannot check".
 
 - [ ] **Q10 · P3 · Pilot `muex`, scoped and coverage-guided, as a calibration check.**
   Q07 re-measured its own deferral and found the preconditions met; this is the pilot it declined to run
