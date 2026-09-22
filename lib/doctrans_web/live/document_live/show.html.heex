@@ -24,6 +24,16 @@
         </div>
 
         <div class="flex flex-wrap items-center gap-3">
+          <.link
+            id="export-markdown"
+            href={~p"/documents/#{@document.id}/export.md"}
+            download
+            class="inline-flex items-center gap-2 rounded-lg border border-base-300 px-3 py-2 text-sm transition-colors hover:bg-base-300"
+            aria-label={gettext("Download translated Markdown")}
+            title={gettext("Download translated Markdown")}
+          >
+            <.icon name="hero-arrow-down-tray" class="size-4" />
+          </.link>
           <button
             id="show-document-reprocess"
             type="button"

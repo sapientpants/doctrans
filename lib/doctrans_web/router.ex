@@ -25,6 +25,11 @@ defmodule DoctransWeb.Router do
       live "/search", SearchLive, :index
       live "/documents/:id", DocumentLive.Show, :show
     end
+
+    # Outside the live_session: a download is a plain request/response, and the
+    # exported artifact is deliberately locale-independent (see
+    # `Doctrans.Documents.Export`), so it needs none of the LiveView hooks.
+    get "/documents/:id/export.md", DocumentExportController, :show
   end
 
   # Other scopes may use custom stacks.
