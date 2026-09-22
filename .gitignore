@@ -45,6 +45,12 @@ npm-debug.log
 # Claude Code local settings (user-specific)
 .claude/settings.local.json
 
+# Agent worktrees. An agent asked to work in isolation gets a full checkout of
+# the repo here, so a run that ends without cleaning up leaves a second tree of
+# the whole project -- ~100MB and several thousand files -- sitting untracked in
+# every `git status`. Scratch space, never work product.
+.claude/worktrees/
+
 # Per-developer agent config. The shared guidelines live in AGENTS.md, which
 # every agent reads; these two are each one developer's own tooling on top.
 /CLAUDE.md
