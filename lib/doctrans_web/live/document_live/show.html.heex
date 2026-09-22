@@ -38,7 +38,7 @@
             id="show-document-reprocess"
             type="button"
             phx-click="show_document_reprocess_modal"
-            disabled={!@source_available || @document.status not in ~w(completed error)}
+            disabled={!@source_available || @document.status not in ~w(completed error cancelled)}
             aria-label={reprocess_document_hint(@source_available)}
             title={reprocess_document_hint(@source_available)}
             class="inline-flex items-center gap-2 rounded-lg border border-base-300 px-3 py-2 text-sm transition-colors hover:bg-base-300 disabled:cursor-not-allowed disabled:opacity-40"
@@ -71,6 +71,11 @@
           <Layouts.theme_toggle />
         </div>
       </header>
+
+      <%!-- Its own section rather than a wider condition on the progress bar below:
+            index readiness is a separate answer that outlives translation, and
+            the progress section deliberately disappears once a document is done. --%>
+      <.status_panel status={@processing_status} />
 
       <section
         :if={@processing_progress < 100}
@@ -160,7 +165,7 @@
         </div>
 
         <%!-- Chat panel - fixed overlay below lg, in-flow sidebar at lg: and up --%>
-        <.chat_panel
+        <ChatComponents.chat_panel
           :if={@chat_open}
           chat_messages={@streams.chat_messages}
           chat_loading={@chat_loading}

@@ -1,12 +1,20 @@
 defmodule Doctrans.Processing.DocumentReprocessing do
   @moduledoc "Atomically replaces generated document content and starts a fresh run."
   import Ecto.Query
+  import Doctrans.Documents.Page, only: [failed?: 1]
   alias Doctrans.Chat.Session
   alias Doctrans.Documents
   alias Doctrans.Documents.{Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
+
+  # A run that has not produced its pages yet owns the whole document; there is
+  # no per-page work to replace until it has.
+  @queueing ~w(uploading queued extracting)
+  # `cancelled` belongs here for the same reason `error` does: recovering from a
+  # stop without deleting the document is the point of offering one.
+  @reprocessable ~w(completed error cancelled)
 
   @spec reprocess_document(Ecto.UUID.t(), keyword()) ::
           {:ok, Documents.Document.t()} | {:error, Doctrans.Errors.reason()}
@@ -27,7 +35,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
 
     validate_models!(opts)
 
-    if document.status not in ~w(completed error) || Run.active?(document.id),
+    if document.status not in @reprocessable || Run.active?(document.id),
       do: Repo.rollback(:already_processing)
 
     unless Run.source_available?(document), do: Repo.rollback(:original_upload_missing)
@@ -84,7 +92,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     current = Repo.get(Page, page.id) || Repo.rollback(:page_not_found)
     validate_models!(opts)
 
-    if document.status in ~w(uploading queued extracting) || Run.active?(document.id),
+    if document.status in @queueing || Run.active?(document.id),
       do: Repo.rollback(:already_processing)
 
     {:ok, reset} = Documents.reset_page_for_reprocessing(current)
@@ -97,6 +105,67 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     {:ok, document} = Documents.update_document_status(document, "processing")
     {document, updated}
   end
+
+  @doc """
+  Queues a fresh attempt for the document's failed pages, and only those.
+
+  One transaction and one eligibility check covers the batch: queueing the first
+  page makes `Run.active?/1` true, so a loop over `reprocess_page/2` would
+  refuse every page after it.
+  """
+  @spec retry_failed_pages(Ecto.UUID.t(), keyword()) ::
+          {:ok, non_neg_integer()} | {:error, Doctrans.Errors.reason()}
+  def retry_failed_pages(document_id, opts \\ []) do
+    transact(fn -> do_retry_failed_pages(document_id, opts) end) |> publish_retried()
+  end
+
+  defp do_retry_failed_pages(document_id, opts) do
+    document = Run.lock(document_id) || Repo.rollback(:document_not_found)
+    validate_models!(opts)
+
+    if document.status in @queueing || Run.active?(document.id),
+      do: Repo.rollback(:already_processing)
+
+    pages = failed_pages(document_id)
+    if pages == [], do: Repo.rollback(:nothing_to_retry)
+
+    choices = Run.choices(opts)
+    retried = Enum.map(pages, &retry_page(&1, document, choices))
+    {:ok, document} = Documents.update_document_status(document, "processing")
+    {document, retried}
+  end
+
+  # `Doctrans.Documents.Pages.failed_pages_query/1` assembles the same three
+  # clauses, but naming that module here would put this one over the dependency
+  # ceiling. The rule itself is not restated: `failed?/1` is the single
+  # definition both queries are built from.
+  defp failed_pages(document_id) do
+    from(p in Page,
+      where: p.document_id == ^document_id,
+      where: failed?(p),
+      order_by: p.page_number
+    )
+    |> Repo.all()
+  end
+
+  # The per-page half of `do_reset_page/2`, under the batch's single eligibility
+  # check. Purging the page's saved context is as required here as it is there:
+  # the chunks it quotes are discarded along with the content they described.
+  defp retry_page(page, document, choices) do
+    {:ok, reset} = Documents.reset_page_for_reprocessing(page)
+    _ = purge_page_context(document.id, page.id)
+    updated = request_models(reset, choices)
+    _ = insert!(LlmProcessingJob.new(page_job_args(page, updated, choices), priority: 1))
+    updated
+  end
+
+  defp publish_retried({:ok, {document, pages}}) do
+    _ = Topics.broadcast_document_updated(document)
+    Enum.each(pages, &Topics.broadcast_page_updated/1)
+    {:ok, length(pages)}
+  end
+
+  defp publish_retried(error), do: error
 
   defp request_models(page, choices) do
     page

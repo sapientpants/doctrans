@@ -239,12 +239,12 @@ msgstr "Titeln är obligatorisk och måste vara en sträng"
 msgid "Unsupported language: %{language}"
 msgstr "Språket stöds inte: %{language}"
 
-#: lib/doctrans_web/error_messages.ex:204
+#: lib/doctrans_web/error_messages.ex:218
 #, elixir-autogen, elixir-format
 msgid "Could not read uploaded file"
 msgstr "Kunde inte läsa den uppladdade filen"
 
-#: lib/doctrans_web/error_messages.ex:225
+#: lib/doctrans_web/error_messages.ex:239
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
 msgstr "Filen är för stor (%{size}MB, högst %{max}MB)"
@@ -299,17 +299,17 @@ msgstr "Läsningen av PDF-filen tog för lång tid innan extraheringen började.
 msgid "This PDF's pages are %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."
 msgstr "Sidorna i den här PDF-filen är %{width}x%{height} bildpunkter vid %{dpi} DPI, över gränsen på %{limit} bildpunkter. Sänk extraheringsupplösningen och försök igen."
 
-#: lib/doctrans_web/error_messages.ex:207
+#: lib/doctrans_web/error_messages.ex:221
 #, elixir-autogen, elixir-format
 msgid "Could not store the uploaded file"
 msgstr "Kunde inte spara den uppladdade filen"
 
-#: lib/doctrans_web/error_messages.ex:221
+#: lib/doctrans_web/error_messages.ex:235
 #, elixir-autogen, elixir-format
 msgid "The document could not be saved"
 msgstr "Dokumentet kunde inte sparas"
 
-#: lib/doctrans_web/error_messages.ex:210
+#: lib/doctrans_web/error_messages.ex:224
 #, elixir-autogen, elixir-format
 msgid "Could not start processing for this document"
 msgstr "Kunde inte starta bearbetningen av det här dokumentet"
@@ -319,7 +319,7 @@ msgstr "Kunde inte starta bearbetningen av det här dokumentet"
 msgid "Only PDF, Word, OpenDocument, and RTF documents are accepted"
 msgstr "Endast PDF-, Word-, OpenDocument- och RTF-dokument accepteras"
 
-#: lib/doctrans_web/error_messages.ex:216
+#: lib/doctrans_web/error_messages.ex:230
 #, elixir-autogen, elixir-format
 msgid "This file could not be uploaded. Please try again."
 msgstr "Den här filen kunde inte laddas upp. Försök igen."
@@ -338,3 +338,13 @@ msgstr "Modellserverns svar överskred gränsen på %{limit} byte och stoppades 
 #, elixir-autogen, elixir-format
 msgid "Source language is required and must be a string"
 msgstr "Källspråket är obligatoriskt och måste vara en sträng"
+
+#: lib/doctrans_web/error_messages.ex:212
+#, elixir-autogen, elixir-format
+msgid "No page of this document is waiting to be retried. Reload the page to see its current state."
+msgstr "Ingen sida i det här dokumentet väntar på ett nytt försök. Ladda om sidan för att se dess aktuella status."
+
+#: lib/doctrans_web/error_messages.ex:205
+#, elixir-autogen, elixir-format
+msgid "This document has already finished processing, so there is nothing left to stop."
+msgstr "Det här dokumentet är redan färdigbearbetat, så det finns inget kvar att stoppa."

@@ -28,7 +28,7 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
           | Documents.Document.t()
           | nil
         ) ::
-          :completed | :failed | :retrying | :incomplete | {:error, :obsolete_run}
+          :completed | :failed | :retrying | :incomplete | :cancelled | {:error, :obsolete_run}
   def check_document_completion(nil), do: :incomplete
 
   def check_document_completion(%Documents.Page{} = page) do
@@ -49,6 +49,12 @@ defmodule Doctrans.Processing.DocumentOrchestrator do
   end
 
   defp complete_locked_document(nil), do: :incomplete
+
+  # Cancellation is the user's decision, and a job that was already executing
+  # when it was taken still runs to completion. Reading the page states here
+  # would let that straggler report the document completed or failed, overturning
+  # a stop the user asked for and already saw take effect.
+  defp complete_locked_document(%{status: "cancelled"}), do: :cancelled
 
   defp complete_locked_document(document) do
     case Documents.completion_state(document.id) do

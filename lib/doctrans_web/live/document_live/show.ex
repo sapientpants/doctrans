@@ -5,7 +5,15 @@ defmodule DoctransWeb.DocumentLive.Show do
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Processing.Run
-  alias DoctransWeb.DocumentLive.{ChatSession, PageViewer, ReprocessModal}
+
+  alias DoctransWeb.DocumentLive.{
+    ChatComponents,
+    ChatSession,
+    PageViewer,
+    ReprocessModal,
+    StatusPanel
+  }
+
   alias DoctransWeb.ErrorMessages
 
   import DoctransWeb.DocumentLive.Components,
@@ -17,7 +25,7 @@ defmodule DoctransWeb.DocumentLive.Show do
     only: [zoom_controls: 1, navigation: 1, view_tabs: 1, content_panel_label: 1]
 
   import DoctransWeb.DocumentLive.ReprocessModal, only: [reprocess_modal: 1, can_reprocess?: 1]
-  import DoctransWeb.DocumentLive.ChatComponents
+  import DoctransWeb.DocumentLive.StatusPanel, only: [status_panel: 1]
 
   # Every event `ReprocessModal` owns. The modal is a function component, so the
   # events it declares arrive here and are forwarded verbatim.
@@ -29,6 +37,15 @@ defmodule DoctransWeb.DocumentLive.Show do
     retry_reprocess_models
     reprocess_page
     reprocess_document
+  )
+
+  # Every event `StatusPanel` owns, forwarded the same way. Each one is
+  # re-authorized there against a freshly read status, so forwarding verbatim
+  # costs this module no judgement about what is safe to run.
+  @status_panel_events ~w(
+    retry_indexing
+    retry_failed_pages
+    cancel_processing
   )
 
   # Every event `PageViewer` owns, forwarded the same way.
@@ -97,6 +114,7 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:search_query, nil)
       |> assign(:search_page, nil)
       |> ReprocessModal.init()
+      |> StatusPanel.init()
       |> ChatSession.init(document)
 
     {:ok, socket}
@@ -148,6 +166,10 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   def handle_event(event, params, socket) when event in @reprocess_events do
     ReprocessModal.handle_event(event, params, socket)
+  end
+
+  def handle_event(event, params, socket) when event in @status_panel_events do
+    StatusPanel.handle_event(event, params, socket)
   end
 
   # Chat event handlers
@@ -332,6 +354,7 @@ defmodule DoctransWeb.DocumentLive.Show do
       [] ->
         socket |> assign(:processing_progress, 0.0) |> assign(:failed_pages, [])
     end
+    |> StatusPanel.refresh()
   end
 
   # The document this viewer is on has gone: deleted in another tab, or already

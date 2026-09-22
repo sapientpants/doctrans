@@ -170,6 +170,28 @@ container environment, such as `OPENAI_API_KEY`, can be loaded from it.
 The document appears on the dashboard with a progress indicator. Click it to view completed pages while
 processing continues.
 
+### Processing and indexing status
+
+A document reports two pipelines separately, because they fail separately. **Translation** says whether the
+document is queued, running, retrying a page the job queue has scheduled again, failed, stopped or finished,
+and names the pages that failed. **Indexing** says how many of the extracted pages have been embedded: a
+document can be fully translated and not yet searchable, and a page whose embedding failed counts as
+outstanding rather than as indexed.
+
+Three targeted recovery actions appear only when they apply:
+
+- **Retry indexing** re-queues embedding for the extracted pages that are not indexed. It reruns neither
+  extraction nor translation, and only chunks still missing a vector are re-embedded, so recovering an
+  indexing failure costs nothing that the successful translation already paid for. It is also the only way
+  back for a page whose indexing was given up on -- startup recovery reads that as the revision's verdict and
+  deliberately will not re-queue it.
+- **Retry failed pages** resets and re-queues only the pages that failed, in one pass, leaving successful
+  pages and their translations untouched.
+- **Stop processing** cancels the document's queued work without deleting anything. Translated pages are
+  kept, the document is marked *Stopped*, and it can afterwards be reprocessed as a whole or page by page. A
+  job already running is out of the queue's reach and finishes on its own; the stopped state is what keeps
+  that straggler from reporting the document complete.
+
 ### Search
 
 Use the search input on the dashboard to find content across all documents. Search combines

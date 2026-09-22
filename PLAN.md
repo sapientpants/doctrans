@@ -3512,11 +3512,114 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   Full `mix precommit` green: 1465 tests, total coverage 92.8%, Credo strict clean at the unchanged
   threshold, Dialyzer clean.
 
-- [ ] **B03 · Processing and indexing status with targeted retry/cancellation.**
+- [x] **B03 · Processing and indexing status with targeted retry/cancellation.**
   Show queued/running/retry/error states, failed-page count, and index readiness separately.
   Offer targeted retries and cancellation without requiring document deletion.
   Dependencies: C03, R01, R02, R03, R06.
   Acceptance: users can diagnose and recover an indexing failure without rerunning successful translation.
+  Every fact this item needed was already in the database; none of it reached a user. `embedding_status`
+  has tracked index readiness per page since R01, and `Run.active?/1` and `retry_pending?/1` have read
+  Oban's states since C03 — but the first was consumed only as `embeddings_ready?/1`, a boolean gating the
+  chat panel, and the second only to decide whether a *reprocess* was allowed. The dashboard collapsed
+  everything into `document.status`, so "queued behind another document", "running", "waiting on a
+  scheduled retry" and "finished failing" rendered as one word, and an indexing failure rendered as
+  nothing at all. This item is mostly a read model and three actions.
+  **The two pipelines are reported apart because they fail apart.** `Doctrans.Documents.ProcessingStatus`
+  carries a content state and an index state, their counts, and the flags saying which actions are safe to
+  offer. The document row is authoritative for terminal states and Oban for live ones: only the row
+  survives a restart, and only the queue knows an errored document still has a retry coming.
+  `Doctrans.Processing.JobStates` does that reading in one query over `oban_jobs`, classifying each job
+  from its own row — `executing` is running, a waiting job that has already burned an attempt is retrying
+  — and collapsing a pipeline's jobs by `running > retrying > queued > idle`. A job executing on its
+  second attempt reports as running: the retry is how it got there, running is what it is doing.
+  Two of those rules are worth arguing with. An in-progress document with **no** Oban job is reported
+  `idle`, not running — that gap is exactly what startup recovery exists to repair, and dressing it up as
+  progress would hide the one state a user can act on by restarting. And an `error` document is `failed`
+  only when nothing of its own is live; while a job is queued, executing or scheduled to retry, the
+  activity is reported instead, because offering "retry failed pages" there promises something
+  `Run.active?/1` would refuse. A page whose embedding failed counts as **outstanding**, not as a separate
+  bucket netted out of the total: it is not indexed, and any other arithmetic reports the index as more
+  ready than it is. `indexable == 0` is `:none` rather than a zero count — "0 of 0 pages indexed" reads as
+  a stalled index when the truth is that extraction has produced nothing to index yet.
+  **Retrying indexing is the acceptance criterion, and it was already cheap** — `EmbeddingJob.enqueue_page/1`
+  existed and re-embeds only chunks still missing a vector. What was missing was a caller.
+  `Doctrans.Search.Reindex.retry_document/1` queues every page that is extracted and not indexed, one page
+  per transaction so a row that cannot be queued costs that page rather than the batch, re-reading the
+  predicate under the row lock so a page rewritten since selection is queued at the revision it now holds.
+  It touches `embedding_status` and nothing else; the acceptance test asserts `translation_status`,
+  `translated_markdown`, `original_markdown` and `content_revision` come back byte-identical and that no
+  `LlmProcessingJob` or `DocumentExtractionJob` was enqueued. A conflicting insert is not counted — an
+  active job already owns that page's revision and the stored failure is that job's to clear. This is also
+  the **only** way back for a revision whose indexing job was `cancelled`: `StartupRecovery` reads that
+  cancellation as the revision's verdict and deliberately refuses to re-queue it on every boot, which is
+  correct for a boot and leaves a user with nothing to click.
+  **Retrying failed pages could not be a loop over `reprocess_page/2`.** Queueing the first page makes
+  `Run.active?/1` true, so the second and every page after it would have been refused `:already_processing`.
+  `DocumentReprocessing.retry_failed_pages/2` does the batch in one transaction behind one eligibility
+  check, reusing that module's own per-page helpers rather than restating them — including the chat-context
+  purge, which is as required here as in `do_reset_page/2`: C04 established that leaving it answers the
+  next question from content that was just discarded.
+  **Cancellation is now a standalone action.** `Worker.cancel_document/1` already cancelled every queued
+  job across all four workers, scoped to one document, and was only ever called as the step before
+  `delete_document/1` — the coupling this item had to break. `Doctrans.Processing.Cancellation` calls it
+  unmodified, resets page stages left at `"processing"` back to `"pending"` (the job that owned the stage is
+  gone, and the stored value would show the viewer a spinner for work nobody is doing), and records a new
+  terminal document status, `cancelled`.
+  That status earned its place rather than being folded into `error`. Cancellation is an outcome, not a
+  failure: colouring it red sends the user looking for something to fix, and `error_message` could not have
+  carried the distinction because it is diagnostic storage that templates are forbidden to read
+  (`docs/CONTRIBUTING.md`). The column has no check constraint, so no migration was needed. It costs one
+  guard: `DocumentOrchestrator.complete_locked_document/1` now returns `:cancelled` for a cancelled
+  document instead of reading its pages, because `Oban.cancel_all_jobs` cannot reach an `executing` job and
+  that straggler would otherwise finish and report the document completed — overturning a stop the user
+  watched take effect. `reprocess_document/2` accepts `cancelled` alongside `completed` and `error`:
+  recovering from a stop without deleting the document is the point of offering one.
+  The panel rides `refresh_progress/1`, the debounced hook that already runs on mount and on every
+  `{:document_updated, _}` and `{:page_updated, _}`, so it follows both pipelines live with no new
+  subscription. Every action is re-authorized inside its handler against a freshly read status rather than
+  against the rendered markup — an event arrives over the socket whether or not its button was drawn, and
+  `Reindex.retry_document/1` has no refusal of its own, since re-queueing a ready index is legal and would
+  report "queued 0 pages" to someone who was offered no button.
+  Two gate consequences were paid rather than worked around. `DocumentReprocessing` could not alias
+  `Documents.Pages` for `failed_pages_query/1` without becoming its eleventh first-party dependency, so it
+  imports the `Page.failed?/1` macro that query is itself built from — the rule stays single-sourced, only
+  the three clauses are rebuilt. And `Show` went to eleven dependencies the moment `StatusPanel` joined it;
+  `ChatComponents` became an alias used at its single call site in the template instead of a module-wide
+  import, which makes the module body honest about what it actually uses.
+  One trap recorded for the next person writing a LiveView test against Oban: `:sys.replace_state` on the
+  view is not enough to put it in manual mode. `Oban.Config.get_engine/1` reads `self()` *and* `$callers`,
+  and the LiveView names the test process among its callers, so the test process must also be inside
+  `with_testing_mode(:manual, ...)` or the inline engine wins and a retry makes a real model call.
+  The gettext trap from B01 recurred exactly as documented: `--merge` fuzzy-filled four new strings from
+  their neighbours, rendering "Translation" as the German for *Translation Model*, "Search ready" as
+  "Suche", and "%{count} failed page" as "%{count} Seite" — dropping the word the sentence exists for.
+  Fuzzy entries render at runtime, so all four were shipped wrong text, not placeholders; every entry was
+  hand-translated across the ten non-source locales and de-fuzzed, Polish included with all three plural
+  forms.
+  Acceptance: `test/doctrans/search/reindex_test.exs` carries the named acceptance test above, plus
+  multi-page queueing, already-indexed and unextracted skips, a conflicting job not counted, a previously
+  cancelled job not blocking, and batch containment. `test/doctrans/processing/cancellation_test.exs`
+  covers the executing job left alone, the diagnostic cleared, mid-flight stages reset with content kept,
+  `:not_cancellable`, the orchestrator refusing to overturn a cancellation, and a cancelled document
+  reprocessing afterwards. `test/doctrans/processing/retry_failed_pages_test.exs` covers the multi-page
+  case the `Run.active?` trap would break, successful pages untouched, and the context purge.
+  `processing_status_test.exs` and `job_states_test.exs` cover both state machines including the
+  precedence rules and the two arguable ones above. `status_panel_test.exs` drives the UI end to end,
+  including each action refused server-side when its button was not rendered.
+  Browser-verified, because ExUnit cannot establish the responsive layout or that a real retry reaches a
+  real embedding server. Chromium at 400px rendered the acceptance case — translation `Completed`, indexing
+  `Indexing failed`, "2 of 3 pages indexed", and only `Retry indexing` offered — as stacked rows; clicking
+  it flashed "Queued 1 page for indexing" (the singular plural form), flipped the badge to `Queued`, and
+  withdrew the button while the job was live, after which the page carried a genuine vector with its
+  translation byte-identical. At 1280px the two rows sit side by side with the actions right-aligned.
+  `Stop processing` left the header badge `Stopped` in neutral rather than red, the document present, its
+  translations kept and the mid-flight page's stage back at `pending`. No CSP violation appeared; the only
+  console error was a 404 for the fixture's absent page image.
+  One incidental confirmation from that run: the first seeded index failure was repaired before the browser
+  ever saw it, because startup recovery's embeddings phase queued it at boot — R01 working as specified,
+  and the reason the failure had to be injected after boot to be photographed at all.
+  Full `mix precommit` green: 1542 tests, total coverage 92.7%, Credo strict clean at the unchanged
+  thresholds, Dialyzer clean with 0 unused filters, translations complete and non-fuzzy in all 11 locales.
 
 - [ ] **B04 · Model/settings readiness checks.**
   Validate model IDs, embedding dimensions, inference availability, and the processing destination before upload.
