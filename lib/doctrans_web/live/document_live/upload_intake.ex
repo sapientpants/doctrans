@@ -33,8 +33,11 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
 
   @typedoc """
   The direction one submission translates in, as two validated language codes.
+
+  A `nil` source is the picker left on "Detect automatically": nothing was chosen,
+  and the language is identified during processing instead.
   """
-  @type languages :: %{source: String.t(), target: String.t()}
+  @type languages :: %{source: String.t() | nil, target: String.t()}
 
   @typedoc """
   The outcome of starting one accepted upload: the document that is now queued for
@@ -152,6 +155,11 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   @doc """
   Validates the pair of language codes one submission was made with.
 
+  A blank source -- `nil`, or a string with nothing in it but whitespace -- is
+  "Detect automatically" rather than a mistake, and validates to a `nil` source:
+  processing identifies the language itself. The target has nothing to detect
+  and is still required.
+
   Both are checked before any file is consumed: a language the user has to fix
   is theirs to fix with the files still in the dialog, and reporting it after
   the files were stored would leave documents behind for a submission that
@@ -160,11 +168,28 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   @spec validate_languages(term(), term()) ::
           {:ok, languages()} | {:error, Doctrans.Errors.reason()}
   def validate_languages(source_language, target_language) do
-    with {:ok, source} <- Validation.validate_language(source_language),
+    with {:ok, source} <- validate_source(source_language),
          {:ok, target} <- Validation.validate_language(target_language) do
       {:ok, %{source: source, target: target}}
     end
   end
+
+  # The picker's "Detect automatically" posts the empty string, and a caller with
+  # no value at all hands over `nil`; both mean the same absence of a choice, and
+  # both validate to a `nil` source. The trim only decides whether there is a
+  # choice in there at all -- a real code goes to `Validation` as it arrived,
+  # which normalizes it itself.
+  defp validate_source(nil), do: {:ok, nil}
+
+  defp validate_source(source) when is_binary(source) do
+    if String.trim(source) == "" do
+      {:ok, nil}
+    else
+      Validation.validate_language(source)
+    end
+  end
+
+  defp validate_source(source), do: Validation.validate_language(source)
 
   @doc """
   Creates the document record for an accepted `consume_entry/2` result and queues it
@@ -206,6 +231,8 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
       id: document_id,
       title: title_from(filename),
       original_filename: filename,
+      # `nil` when the submission left the picker on "Detect automatically": the
+      # column is nullable, and processing resolves the language before it runs.
       source_language: languages.source,
       target_language: languages.target,
       status: "uploading"

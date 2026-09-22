@@ -114,17 +114,14 @@ defmodule Doctrans.ValidationTest do
       attrs = %{}
 
       assert {:error,
-              {:missing_required_fields,
-               [fields: "title, original_filename, target_language, source_language"]}} =
+              {:missing_required_fields, [fields: "title, original_filename, target_language"]}} =
                Validation.validate_document_attrs(attrs)
     end
 
     test "returns error when missing some required fields" do
       attrs = %{title: "Test"}
 
-      assert {:error,
-              {:missing_required_fields,
-               [fields: "original_filename, target_language, source_language"]}} =
+      assert {:error, {:missing_required_fields, [fields: "original_filename, target_language"]}} =
                Validation.validate_document_attrs(attrs)
     end
 

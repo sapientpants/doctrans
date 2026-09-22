@@ -227,8 +227,7 @@ defmodule Doctrans.DocumentsTest do
 
     test "returns error changeset with invalid attrs" do
       assert {:error,
-              {:missing_required_fields,
-               [fields: "title, original_filename, target_language, source_language"]}} =
+              {:missing_required_fields, [fields: "title, original_filename, target_language"]}} =
                Documents.create_document(%{})
     end
 

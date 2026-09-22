@@ -33,7 +33,12 @@ defmodule DoctransWeb.DocumentLive.Index do
       |> assign(:upload_failures, [])
       |> assign(:upload_pending, [])
       |> assign(:upload_started, 0)
-      |> assign(:source_language, defaults[:source_language] || "de")
+      # Starts on "Detect automatically", never on the configured language:
+      # `config :doctrans, :defaults, source_language` is no longer a default
+      # *choice*, it is only the fallback recorded when detection cannot identify
+      # the language, so starting the picker on it would put a guess in front of
+      # the user as though they had made it.
+      |> assign(:source_language, "")
       |> assign(:target_language, defaults[:target_language] || "en")
       |> assign(:sort_by, :inserted_at)
       |> assign(:sort_dir, :desc)

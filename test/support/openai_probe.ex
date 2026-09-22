@@ -48,6 +48,12 @@ defmodule Doctrans.Processing.OpenAIProbe do
   end
 
   @impl true
+  def detect_language(_markdown, opts) do
+    record(:detect_language, opts)
+    {:ok, "de"}
+  end
+
+  @impl true
   def available?, do: true
 
   @impl true

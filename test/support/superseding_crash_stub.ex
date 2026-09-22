@@ -31,6 +31,13 @@ defmodule Doctrans.Processing.SupersedingCrashStub do
     raise "translation crashed after the page was superseded"
   end
 
+  # The race under test is a crash in extraction or translation, not in
+  # detection -- which only runs for a document with no source language, and the
+  # fixtures set one. Delegating keeps this clause from being dead code with a
+  # permanent Dialyzer suppression attached to it.
+  @impl true
+  def detect_language(markdown, opts), do: OpenAIStub.detect_language(markdown, opts)
+
   @impl true
   def available?, do: OpenAIStub.available?()
 

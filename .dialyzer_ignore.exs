@@ -26,7 +26,7 @@
   #   caller path validates `:title` as a binary first. It is kept as a defensive
   #   fallback for a private pipeline; the alternative is a FunctionClauseError if the
   #   validation order ever changes. Re-decide at expiry: delete the clause or keep it.
-  {"lib/doctrans/validation.ex", :pattern_match_cov, 236},
+  {"lib/doctrans/validation.ex", :pattern_match_cov, 243},
 
   # owner: @sapientpants
   # expires: 2026-12-12
@@ -44,7 +44,7 @@
   # rationale: The stub implements `OpenAIBehaviour` by raising; terminating with an
   #   exception is the behaviour under test, so `no_return` is the correct typing of a
   #   correct function. Both raising callbacks are pinned by line.
-  {"test/support/openai_crash_stub.ex", :no_return, 19},
+  {"test/support/openai_crash_stub.ex", :no_return, 21},
 
   # owner: @sapientpants
   # expires: 2026-12-12
@@ -66,5 +66,5 @@
   # upstream: none
   # rationale: See the entry above — `translate/4` is the second raising callback of the
   #   same stub.
-  {"test/support/openai_crash_stub.ex", :no_return, 22}
+  {"test/support/openai_crash_stub.ex", :no_return, 24}
 ]

@@ -53,7 +53,7 @@ defmodule Doctrans.Documents.Document do
       :source_language,
       :error_message
     ])
-    |> validate_required([:title, :original_filename, :target_language, :source_language])
+    |> validate_required([:title, :original_filename, :target_language])
     |> validate_inclusion(:status, @statuses)
   end
 

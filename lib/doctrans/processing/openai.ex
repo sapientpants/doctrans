@@ -10,7 +10,7 @@ defmodule Doctrans.Processing.OpenAI do
   """
 
   alias Doctrans.Config.{Embedding, Inference, OpenAI}
-  alias Doctrans.Processing.{ApiFailure, RequestBounds, SSECollector}
+  alias Doctrans.Processing.{ApiFailure, Prompts, RequestBounds, SSECollector}
   alias Doctrans.Resilience.CircuitBreaker
 
   require Logger
@@ -72,16 +72,12 @@ defmodule Doctrans.Processing.OpenAI do
 
     encoded = Base.encode64(image_data)
 
-    text = build_extract_prompt(opts)
+    text = Prompts.extract(opts)
 
     [
       %{type: "text", text: text},
       %{type: "image_url", image_url: %{url: "data:#{mime_type};base64,#{encoded}"}}
     ]
-  end
-
-  defp build_extract_prompt(_opts) do
-    "Extract all text and formatting from this image as clean Markdown. Include all headings, paragraphs, lists, tables, and other formatting elements exactly as they appear. Do not omit or summarize any content."
   end
 
   @impl true
@@ -229,7 +225,7 @@ defmodule Doctrans.Processing.OpenAI do
 
   def translate(markdown, source_language, target_language, opts)
       when is_binary(markdown) and is_binary(source_language) and is_binary(target_language) do
-    prompt = build_translate_prompt(markdown, source_language, target_language)
+    prompt = Prompts.translate(markdown, source_language, target_language)
     opts = with_default_model(opts, OpenAI.translation_model())
 
     chat(
@@ -238,19 +234,21 @@ defmodule Doctrans.Processing.OpenAI do
     )
   end
 
-  defp build_translate_prompt(markdown, source_language, target_language) do
-    """
-    Translate the following text from #{source_language} to #{target_language}.
+  @impl true
+  @spec detect_language(String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
+  def detect_language(markdown, opts \\ [])
 
-    Return ONLY the translated text. Do NOT include any explanations, notes, or
-    metadata. Preserve all formatting, headers, lists, tables, and structure
-    exactly as it appears in the original. Maintain the same language style
-    (formal/informal) as the source.
+  def detect_language(markdown, opts) when is_binary(markdown) do
+    opts = with_default_model(opts, OpenAI.translation_model())
 
-    Text to translate:
-
-    #{markdown}
-    """
+    # The answer is two letters, so the cap is two letters' worth: a tight
+    # `max_tokens` is what keeps a chatty model from replying with an essay.
+    # The raw reply is returned as-is -- validating it belongs to the caller.
+    chat(
+      [%{role: "user", content: Prompts.detect_language(markdown)}],
+      opts ++ [max_tokens: 16, think: false]
+    )
   end
 
   defp clean_response(response) do

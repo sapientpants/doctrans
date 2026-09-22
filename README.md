@@ -258,9 +258,9 @@ config :doctrans, :pdf_extraction, dpi: 150
 # Document conversion timeout (for DOCX, DOC, ODT, RTF via LibreOffice)
 config :doctrans, :document_conversion, timeout: 120_000
 
-# Default language settings. These preselect the upload dialog's two language
-# pickers; the pair chosen there is stored on the document and is what every
-# translation, retry, and reprocess of that document uses.
+# Default language settings. :target_language preselects the target picker.
+# :source_language is only the fallback recorded when detection cannot identify
+# a document's language -- the source picker starts on "Detect automatically".
 config :doctrans, :defaults,
   source_language: "de",
   target_language: "en"
@@ -272,15 +272,26 @@ is the wall clock for the whole call, retries included, and `:max_response_bytes
 the chunk that crosses it rather than after the body is buffered. A page that hits either bound
 fails with a message naming the endpoint, and the finished pages around it are kept.
 
-The upload dialog selects both the source and the target language, and stores the pair on the
-document. `source_language` and `target_language` set which entries those two pickers start on —
-German (`de`) and English (`en`) out of the box — not what an existing document uses. Documents
-uploaded with different source languages therefore process correctly alongside each other, and a
-retry or reprocess reuses the languages the document was uploaded with rather than whatever the
-configuration says at the time.
+Each document carries its own source and target language, so uploads in different languages
+process correctly alongside each other.
 
-Documents that predate the per-document setting were migrated to the `source_language` configured
-when the migration ran, which is the language they were in fact translated from.
+The **target** language is chosen in the upload dialog and starts on `target_language` (`en`).
+
+The **source** language is normally detected. The dialog's source picker starts on *Detect
+automatically*, and the language is read from the document's own text during processing, then
+written to the document. Picking a real language instead pins it and skips detection, which is
+the escape hatch for the occasional document detection gets wrong.
+
+Detection runs **once per document** and the answer is stored. Every page translation then reads
+the stored value, so a retry or reprocess months later translates from the same language as the
+first attempt rather than re-deciding — and it does not follow a later change to the
+configuration. `source_language` (`de`) is no longer a default choice: it is only the fallback
+recorded when detection cannot tell, so a document always ends up with one stated source language
+rather than a silent gap.
+
+Documents that predate this were migrated to the `source_language` configured when the migration
+ran, which is the language they were in fact translated from — that history is recorded rather
+than re-detected, since it is what produced the text they already contain.
 
 ### Environment Variables
 

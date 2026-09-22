@@ -65,8 +65,7 @@ defmodule DoctransWeb.ErrorMessagesTest do
         assert {:error, "Sprachcode muss eine Zeichenkette sein"} =
                  translated(Validation.validate_language(nil))
 
-        assert {:error,
-                "Erforderliche Felder fehlen: original_filename, target_language, source_language"} =
+        assert {:error, "Erforderliche Felder fehlen: original_filename, target_language"} =
                  translated(Validation.validate_document_attrs(%{title: "Test"}))
 
         attrs = %{
@@ -91,12 +90,21 @@ defmodule DoctransWeb.ErrorMessagesTest do
                    })
                  )
 
+        # A nil source language is "detect it", not a mistake, so the malformed
+        # case has to be a value that could never be a language code.
+        assert {:ok, _} =
+                 Validation.validate_document_attrs(%{
+                   attrs
+                   | title: "Test",
+                     source_language: nil
+                 })
+
         assert {:error, "Quellsprache ist erforderlich und muss eine Zeichenkette sein"} =
                  translated(
                    Validation.validate_document_attrs(%{
                      attrs
                      | title: "Test",
-                       source_language: nil
+                       source_language: 123
                    })
                  )
       end)

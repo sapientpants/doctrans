@@ -192,10 +192,19 @@ defmodule DoctransWeb.DocumentLive.Components do
   @doc """
   Returns the translation direction of a document, as "Source → Target".
 
+  A document whose source language has not been identified yet -- one uploaded
+  with the picker left on "Detect automatically", before processing resolves it
+  -- has no left-hand side to name, so it reads as the target language alone:
+  exactly what the header showed before either side was recorded.
+
   The arrow is punctuation rather than a translatable message: it reads the same
   in every locale this interface is offered in, and the two names either side of
   it are already translated by `language_name/1`.
   """
+  def language_direction(%{source_language: nil} = document) do
+    language_name(document.target_language)
+  end
+
   def language_direction(document) do
     "#{language_name(document.source_language)} → #{language_name(document.target_language)}"
   end

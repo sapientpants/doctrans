@@ -16,6 +16,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Processing.DocumentOrchestrator
   alias Doctrans.Processing.Run
+  alias Doctrans.Processing.SourceLanguage
   alias Doctrans.Resilience.{Backoff, ErrorClassifier}
 
   @max_retries 3
@@ -263,10 +264,11 @@ defmodule Doctrans.Processing.LlmProcessor do
 
     document = Documents.get_document!(page.document_id)
     openai_opts = build_translation_opts(opts)
+    source_language = SourceLanguage.resolve(document, page.original_markdown)
 
     case openai_module().translate(
            page.original_markdown,
-           document.source_language,
+           source_language,
            document.target_language,
            openai_opts
          ) do

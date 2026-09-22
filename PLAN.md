@@ -3353,13 +3353,22 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   so mixed-language uploads and later retries remain reproducible. Migrate existing records deliberately.
   Acceptance: two documents with different source languages process concurrently with the correct choices.
   Evidence: `lib/doctrans/processing/llm_processor.ex:235`.
-  Implemented as a stored per-document choice; **detection was considered and rejected** for this item.
-  The item's own requirement is that a retry stay reproducible, and a detector that is not persisted
-  re-decides on every attempt — so detection would still have had to write its answer to the row, which
-  is the column built here. Detection can later fill that column in as a default without changing
-  anything downstream. Note the history: `source_language` existed until `e4bdfe0` removed it on the
-  reasoning that "the AI model detects it", after which the prompt was fed a single configured constant
-  instead. That constant is what this item removes.
+  Implemented as **detection with a manual override**, which is the item's "or" resolved rather than
+  chosen between: the language is detected from the document's own text and *stored*, and the upload
+  dialog's source picker — defaulting to "Detect automatically" — can pin one instead.
+  The first cut of this item shipped only the stored choice, with the picker defaulting to the configured
+  language. That was wrong, and the objection that killed it is worth recording: a control that defaults
+  to German and gets clicked past does not merely fail to help, it writes confidently wrong metadata onto
+  every document — worse than the app-wide constant it replaced, because it *looks* deliberate. Detection
+  is what makes the ignoring majority correct by default.
+  Storing the detected answer is what keeps both halves honest. The item requires a retry to stay
+  reproducible, and a detector that is not persisted re-decides on every attempt; so detection still has
+  to write to the row, and the row is still what every page reads. Detection fills the column, the user
+  may overwrite it, and nothing downstream can tell which happened.
+  Note the history, because this is the second time the claim has been made: `source_language` existed
+  until `e4bdfe0` removed it on the reasoning that "the AI model detects it" — but what replaced it was
+  not detection, it was a single configured constant fed to the prompt. This time the detection is real
+  and its answer is recorded.
   `source_language` mirrors `target_language` exactly, which is what keeps the change small: the language
   is never carried in Oban args or processing opts, it is read off the document record at the point of
   use. So every retry path — the in-process stage retry, the Oban job retry, `StartupRecovery`, and
@@ -3367,28 +3376,51 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   makes a retry reproducible. The one production line that mattered is
   `llm_processor.ex`'s `Application.get_env(:doctrans, :defaults, [])[:source_language] || "de"`, now
   `document.source_language`.
-  The column is `NOT NULL`, not nullable-with-a-config-fallback: a nil that falls back to mutable
-  configuration is the non-reproducibility this item exists to remove, so the schema refuses it.
-  `Doctrans.Validation` and the changeset require it symmetrically with the target, and
-  `Doctrans.Languages` — which validates both directions and populates both selects — had a moduledoc
-  that called itself "the translation target list"; it now says what it is.
+  The column is **nullable, and NULL carries meaning**: nobody chose a language and nothing has detected
+  one yet. `Doctrans.Validation` therefore treats a missing or nil source as a request rather than an
+  omission, while the target stays required — nothing downstream could work out what the user wanted from
+  a missing target. `Doctrans.Languages` — which validates both directions and populates both selects —
+  had a moduledoc that called itself "the translation target list"; it now says what it is.
   The migration backfills existing rows from the deployment's *configured* `:source_language` rather than
   a hardcoded `"de"`, because that setting is what those documents were in fact translated with;
   hardcoding would relabel every old document on a deployment that had changed it. The value is guarded
   against an allowlist frozen inside the migration — deliberately a copy of `Doctrans.Languages.supported/0`
   and not a call to it, since a migration must keep behaving the same forever while that module is free
-  to change — so what reaches the SQL is always one of a fixed known-safe set. `up/0` adds the column,
-  backfills, then applies `null: false`; `down/0` drops it, and the pair was verified by migrating,
-  rolling back, and migrating again.
+  to change — so what reaches the SQL is always one of a fixed known-safe set. Those documents are
+  deliberately backfilled rather than left to be re-detected: they were already translated, and the
+  configured language is what produced the text they contain, so recording it is the truthful history
+  where detecting a new one would relabel work already done. `down/0` drops the column, and the pair was
+  verified by migrating, rolling back, and migrating again.
   The upload dialog gained a second select (`#source-lang-select`) beside the target one, reusing the same
-  `language_options/1`; the two codes travel to `UploadIntake` as one `%{source: _, target: _}` map rather
-  than a fifth positional argument. The document header now reads `German → English` via a
-  `language_direction/1` helper — the arrow is punctuation, deliberately not a translatable message.
-  One trap worth recording: `mix gettext.extract --merge` fuzzy-matched both new strings against their
+  `language_options/1`; it offers "Detect automatically" as its first option and its default, posting the
+  empty string, and the target select does not offer it — there is nothing to detect about where you want
+  a document translated *to*. The two codes travel to `UploadIntake` as one `%{source: _, target: _}` map
+  rather than a fifth positional argument, where a nil source means detect. The document header reads
+  `German → English` via `language_direction/1`, and the target alone until detection has run — the arrow
+  is punctuation, deliberately not a translatable message.
+  Detection itself is `Doctrans.Processing.SourceLanguage`, a `detect_language/2` capability on the
+  inference client, and a prompt in the new `Doctrans.Processing.Prompts` (the prompts moved out of
+  `openai.ex`, which was five lines under the 500-line limit and had no room for another). Three details
+  earned their place. The prompt insists on the language the text *is written in*, not one it mentions —
+  a document about French written in German is `de`. The reply is treated as untrusted: an exact code
+  wins, otherwise every two-letter run is scanned and accepted only if exactly one distinct supported code
+  appears, because `it` and `no` are ordinary English words as well as Italian and Norwegian, and a
+  first-match rule reads "It is German" as Italian. And detection reads only the first 2,000 characters —
+  telling German from Dutch does not need the whole page.
+  The write is a conditional `UPDATE ... WHERE source_language IS NULL`, not a row lock: pages of one
+  document translate concurrently, so two can both find NULL and both detect, and every page then reads
+  back whatever value won so a document is never half translated from one language and half from another.
+  A lock would have been the obvious alternative and is the wrong one — holding it across a multi-second
+  inference call would stall every other page of the document behind it. A duplicate detection call is
+  cheap; a held lock is not. Detection failing is not a page failure: an unusable reply, an unreadable
+  page, or a failed call all record the configured fallback, so a document always ends up with one stated
+  source language rather than a silent gap. That fallback is now the *only* remaining role of
+  `config :doctrans, :defaults, source_language` — it no longer chooses anything for anyone.
+  One trap worth recording: `mix gettext.extract --merge` fuzzy-matched the new strings against their
   *target*-language siblings and auto-filled "Source Language" with "Zielsprache" — German for *Target*
   Language — in all 11 locales. Gettext renders fuzzy entries at runtime, so that is shipped wrong text,
-  not a placeholder; `scripts/check_translations.exs` is the gate that catches exactly this, and all 22
-  entries were translated by hand and de-fuzzed.
+  not a placeholder; `scripts/check_translations.exs` is the gate that catches exactly this, and every
+  entry was translated by hand and de-fuzzed.
   Acceptance: `test/doctrans/processing/source_language_test.exs` runs two documents with different source
   languages (`de` and `fr`) through `process_page/3` concurrently, parked on a barrier and released
   together so the two translations are genuinely in flight at once, and asserts each page persisted a
