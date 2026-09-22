@@ -3615,7 +3615,14 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   `test/doctrans/search/indexer_broadcast_test.exs` pins the announcement: both terminal writes reach a
   subscriber, the `"processing"` write does not, and a superseded run that wrote nothing announces
   nothing. Confirmed non-vacuous by running it against the unfixed indexer, where three of its four
-  cases fail.
+  cases fail. A second pass added the other half of that wire — the viewer re-rendering its index row
+  when an indexing run reports in — because both ends had been tested apart while the wire between them
+  had not, which is how the silence survived a full suite and a browser check. Confirmed non-vacuous by
+  unhooking `StatusPanel.refresh/1` from `refresh_progress/1`, which fails it.
+  The translation data was audited rather than trusted: parsing every locale's `.po` before and after
+  the branch reports 22 new default-domain messages and 2 new error-domain messages per locale with no
+  existing translation altered or dropped, and every new `en` entry empty so the source locale falls
+  back to its msgid.
   Browser-verified, because ExUnit cannot establish the responsive layout or that a real retry reaches a
   real embedding server. Chromium at 400px rendered the acceptance case — translation `Completed`, indexing
   `Indexing failed`, "2 of 3 pages indexed", and only `Retry indexing` offered — as stacked rows; clicking

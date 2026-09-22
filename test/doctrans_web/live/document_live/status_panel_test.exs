@@ -4,7 +4,7 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Page
+  alias Doctrans.Documents.{Page, Topics}
   alias Doctrans.Repo
 
   @content "#processing-status-content"
@@ -113,6 +113,30 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
 
       assert Documents.get_document(document.id).status == "completed"
       assert has_element?(view, "#flash-info")
+    end
+  end
+
+  # The half that escaped review: both ends of this were tested apart -- the
+  # indexer's broadcast and the panel's rendering -- while the wire between them
+  # was not, so a run that finished without announcing itself left the panel
+  # asserting "queued" and every test still passed.
+  describe "following indexing to its end" do
+    test "the panel stops saying queued once the run reports in", %{conn: conn} do
+      {document, page} = index_failure_fixture()
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      assert has_element?(view, ~s{#{@index}[data-index-state="failed"]})
+
+      indexed =
+        page |> Page.embedding_changeset(%{embedding_status: "completed"}) |> Repo.update!()
+
+      Topics.broadcast_page_updated(indexed)
+
+      # The viewer coalesces page updates behind a 100ms timer of its own, so the
+      # re-render is genuinely late rather than merely asynchronous.
+      Process.sleep(200)
+
+      assert render(view) =~ ~s(data-index-state="ready")
     end
   end
 
