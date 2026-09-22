@@ -18,7 +18,7 @@ defmodule Doctrans.Search.Indexer do
 
   import Ecto.Query
 
-  alias Doctrans.Documents.{Chunk, Page}
+  alias Doctrans.Documents.{Chunk, Page, Topics}
   alias Doctrans.Errors
   alias Doctrans.Repo
   alias Doctrans.Resilience.{CircuitBreaker, ErrorClassifier}
@@ -166,14 +166,33 @@ defmodule Doctrans.Search.Indexer do
       {:error, :stale_entry} ->
         stale(page)
 
-      {:ok, _page} ->
+      {:ok, indexed} ->
         Logger.info("Indexed #{attempted} of #{total} chunks on page #{page.id}")
-        :ok
+        publish(indexed)
     end
   end
 
   defp mark_page_errored(page) do
-    _ = fenced_update(Page.embedding_changeset(page, %{embedding_status: "error"}), page)
+    case fenced_update(Page.embedding_changeset(page, %{embedding_status: "error"}), page) do
+      {:ok, errored} -> publish(errored)
+      {:error, :stale_entry} -> :ok
+    end
+  end
+
+  # Only the terminal writes are announced, and only since B03 gave indexing a
+  # place in the interface: before it, no view read `embedding_status`, so a
+  # broadcast had no subscriber and the run stayed silent. A viewer that is told
+  # "queued" and never told anything else goes on claiming it long after the
+  # page was indexed.
+  #
+  # The `"processing"` write stays silent on purpose. A running job is already
+  # visible through its Oban row, so announcing it would add a broadcast per page
+  # to say what the queue already says.
+  #
+  # After the fence's transaction, never inside it: a subscriber that re-queries
+  # on this message must find the row it describes already committed.
+  defp publish(page) do
+    _ = Topics.broadcast_page_updated(page)
     :ok
   end
 

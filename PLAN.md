@@ -3574,6 +3574,12 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   that straggler would otherwise finish and report the document completed — overturning a stop the user
   watched take effect. `reprocess_document/2` accepts `cancelled` alongside `completed` and `error`:
   recovering from a stop without deleting the document is the point of offering one.
+  Displaying index state made one silence a defect. `Indexer` wrote `embedding_status` and announced
+  nothing, which was correct while no view read the column — and wrong the moment one did: a viewer told
+  "queued" was never told anything else, so it went on claiming it long after the page was indexed. Review
+  caught it; the two terminal writes now broadcast `{:page_updated, page}` after their fence commits. The
+  `"processing"` write stays silent, because a running job is already visible through its Oban row and
+  announcing it would spend a broadcast per page to repeat what the queue says.
   The panel rides `refresh_progress/1`, the debounced hook that already runs on mount and on every
   `{:document_updated, _}` and `{:page_updated, _}`, so it follows both pipelines live with no new
   subscription. Every action is re-authorized inside its handler against a freshly read status rather than
@@ -3606,6 +3612,10 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   `processing_status_test.exs` and `job_states_test.exs` cover both state machines including the
   precedence rules and the two arguable ones above. `status_panel_test.exs` drives the UI end to end,
   including each action refused server-side when its button was not rendered.
+  `test/doctrans/search/indexer_broadcast_test.exs` pins the announcement: both terminal writes reach a
+  subscriber, the `"processing"` write does not, and a superseded run that wrote nothing announces
+  nothing. Confirmed non-vacuous by running it against the unfixed indexer, where three of its four
+  cases fail.
   Browser-verified, because ExUnit cannot establish the responsive layout or that a real retry reaches a
   real embedding server. Chromium at 400px rendered the acceptance case — translation `Completed`, indexing
   `Indexing failed`, "2 of 3 pages indexed", and only `Retry indexing` offered — as stacked rows; clicking
