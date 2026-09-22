@@ -43,16 +43,27 @@ defmodule Doctrans.Processing.SourceLanguage do
   comes back. That is not always the value this call detected: pages of one
   document run concurrently, and the first of them to store a language wins for
   all of them.
+
+  A page with nothing on it is the exception: it is answered with the fallback
+  but records nothing, so a later page that does have text can still decide.
   """
   @spec resolve(Document.t(), String.t() | nil) :: String.t()
   def resolve(%Document{source_language: language}, _markdown) when is_binary(language),
     do: language
 
   def resolve(%Document{} = document, markdown) do
-    markdown
-    |> sample()
-    |> detect()
-    |> store(document)
+    sample = sample(markdown)
+
+    # Nothing legible on the page means nothing was learned, so nothing is
+    # recorded: storing here would stamp the fallback on the document
+    # permanently on the evidence of a page that had no evidence, and no later
+    # page would look again. The page itself loses nothing by it -- whitespace
+    # translates to whitespace whichever language it is called.
+    if blank?(sample) do
+      fallback()
+    else
+      sample |> ask_model() |> store(document)
+    end
   end
 
   # Allow OpenAI module to be configured for testing
@@ -63,11 +74,9 @@ defmodule Doctrans.Processing.SourceLanguage do
   defp sample(markdown) when is_binary(markdown), do: String.slice(markdown, 0, @sample_limit)
   defp sample(_markdown), do: ""
 
-  # A page that is blank, or an extraction that produced only whitespace, says
-  # nothing about the language. Asking anyway spends a call to learn that.
-  defp detect(sample) do
-    if String.trim(sample) == "", do: fallback(), else: ask_model(sample)
-  end
+  # An extraction that produced only whitespace says nothing about the language,
+  # and asking anyway spends a call to learn that.
+  defp blank?(sample), do: String.trim(sample) == ""
 
   defp ask_model(sample) do
     case openai_module().detect_language(sample, []) do

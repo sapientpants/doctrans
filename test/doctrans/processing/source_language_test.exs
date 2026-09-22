@@ -22,6 +22,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
   alias Doctrans.Documents
   alias Doctrans.Processing.LlmProcessor
   alias Doctrans.Processing.OpenAIProbe
+  alias Doctrans.Processing.SourceLanguage
   alias Doctrans.TestEnv
 
   describe "process_page/3 source language" do
@@ -199,6 +200,27 @@ defmodule Doctrans.Processing.SourceLanguageTest do
       translated = Documents.get_page!(page.id)
       assert translated.translation_status == "completed"
       assert translated.translated_markdown =~ "Translated pl to en"
+    end
+  end
+
+  describe "resolve/2 with nothing to read" do
+    test "a page with no text records nothing, leaving a later page to decide" do
+      TestEnv.put_env(:defaults, source_language: "pl", target_language: "en")
+      TestEnv.put_env(:openai_stub_detected_language, "fr")
+
+      document = document_fixture(%{source_language: nil, target_language: "en"})
+
+      # A page the extractor got only whitespace from. It is answered -- the
+      # caller needs a language to hand the translator -- but nothing is
+      # written, because nothing was read.
+      assert SourceLanguage.resolve(document, "   \n\n  ") == "pl"
+      assert Documents.get_document!(document.id).source_language == nil
+
+      # So the next page, which does have text, is still the one that decides.
+      # Were the blank page allowed to record the fallback, this would stay "pl"
+      # and no page would ever look again.
+      assert SourceLanguage.resolve(document, "Bonjour, ceci est un document.") == "fr"
+      assert Documents.get_document!(document.id).source_language == "fr"
     end
   end
 
