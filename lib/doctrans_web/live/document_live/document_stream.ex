@@ -6,8 +6,13 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
   their progress and keeping the `:documents` stream in the order PostgreSQL
   returned. The stream's order is tracked separately from the stream itself, in
   `:document_order`, because a LiveView stream is not enumerable and cannot be asked
-  where an item currently sits. The PubSub subscription that feeds it belongs to
-  `Index`, which holds a single one on the collection topic.
+  where an item currently sits.
+
+  The single PubSub subscription on the collection topic is taken out here too,
+  and released by `unsubscribe/0`: every message it delivers -- a document
+  created, updated or deleted, a page progressing -- is handled by calling back
+  into this module, so the subscription lives with the state it feeds rather
+  than one module away from it.
 
   Kept out of the LiveView module so that `Index` handles events and messages and does
   not also reach into the `Documents` context, in the same idiom as
@@ -17,18 +22,31 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
   import Phoenix.Component, only: [assign: 3]
 
   import Phoenix.LiveView,
-    only: [stream: 3, stream: 4, stream_delete: 3, stream_insert: 4]
+    only: [connected?: 1, stream: 3, stream: 4, stream_delete: 3, stream_insert: 4]
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
 
   @doc """
   Assigns the empty stream state. The list itself arrives from `refresh/1`.
+
+  Subscribes the connected socket to the collection topic. The disconnected
+  mount renders once and exits, so subscribing there would register a
+  subscription nothing ever delivers to and `unsubscribe/0` never balances.
   """
   def init(socket) do
+    _ = if connected?(socket), do: Topics.subscribe_documents()
+
     socket
     |> assign(:documents_count, 0)
     |> stream(:documents, [])
   end
+
+  @doc """
+  Releases the collection subscription, so a client process does not accumulate
+  one per visit.
+  """
+  def unsubscribe, do: Topics.unsubscribe_documents()
 
   @doc """
   Re-queries the document list and resets the stream.

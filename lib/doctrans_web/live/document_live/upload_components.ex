@@ -9,6 +9,7 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
   alias DoctransWeb.PrivacyCopy
 
   import DoctransWeb.DocumentLive.Components, only: [language_name: 1]
+  import DoctransWeb.DocumentLive.UploadReadiness, only: [readiness_notice: 1]
 
   @doc """
   Renders the upload modal dialog.
@@ -31,6 +32,11 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
     required: true,
     doc: "selector for the control that opened the dialog, owned by the caller"
 
+  attr :readiness, :any,
+    default: :idle,
+    doc:
+      "what the model settings check found, a `t:DoctransWeb.DocumentLive.UploadReadiness.state/0`"
+
   def upload_modal(assigns) do
     ~H"""
     <.dialog
@@ -46,6 +52,11 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
       <h3 id="upload-modal-title" class="font-bold text-lg mb-4">
         {gettext("Upload New Document")}
       </h3>
+
+      <%!-- Ahead of the picker rather than beside the submit button: what the
+            model servers cannot do is a reason to go and fix a setting, not a
+            last-moment warning on a decision already made. --%>
+      <.readiness_notice readiness={@readiness} />
 
       <form phx-submit="upload_document" phx-change="validate_upload" id="upload-form">
         <div class="form-control mb-4">
