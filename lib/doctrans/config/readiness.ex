@@ -32,11 +32,20 @@ defmodule Doctrans.Config.Readiness do
 
   ## Bounds
 
-  Both probes are bounded well under a user's patience: `list_models/0` carries
-  its own five-second per-attempt budget, and the embedding probe is given the
-  same explicitly, because `Doctrans.Config.Embedding.timeout/0` defaults to a
-  minute — a fine budget for a background indexing job and a terrible one for a
-  modal someone is sitting in front of.
+  Each probe gets a five-second receive window: `list_models/0` carries its own,
+  and the embedding probe is given the same explicitly, because
+  `Doctrans.Config.Embedding.timeout/0` defaults to a minute — a fine budget for
+  a background indexing job and a terrible one for a modal someone is sitting in
+  front of.
+
+  That window bounds one attempt, not the whole call. Both requests run under
+  `Doctrans.Processing.RequestBounds` with the inherited deadline, so a server
+  failing transiently is retried and a drip-feeding one can hold the check open
+  for far longer than the window suggests. Nothing waits on it — the dialog
+  stays usable and the upload is never gated — so what that costs is a
+  "checking" line that lingers. Bounding the total would mean threading a
+  deadline through `Doctrans.Processing.OpenAI.embed/2` and `list_models/0`,
+  which no other caller has asked for.
 
   `check/0` is total for the `{:error, _}` results its collaborators are
   specified to return, and deliberately does not trap anything else. A genuine

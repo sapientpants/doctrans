@@ -22,6 +22,8 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
   }
 
   alias Doctrans.TestEnv
+  alias DoctransWeb.DocumentLive.UploadReadiness
+  alias DoctransWeb.ErrorMessages
 
   # These tests wait on real tasks. Cap well under ExUnit's 60s default so a
   # regression that wedges the probe is reported in seconds rather than stalling
@@ -284,6 +286,28 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
 
       assert_receive {:embedding_opts, "readiness", _opts}, @async_timeout
       render_async(view, @async_timeout)
+    end
+  end
+
+  # `Doctrans.Errors.reason/0` is a tagged tuple *or* a bare atom, and every
+  # reason `check/0` builds today is the former. Rendered through the component
+  # directly, because no configuration makes the domain module produce the other
+  # one -- and a render that destructured the tuple inline would take the whole
+  # dashboard down the day one is added.
+  describe "a reason that is not a tagged tuple" do
+    test "renders as a message rather than raising" do
+      html =
+        render_component(&UploadReadiness.readiness_notice/1,
+          readiness: %{
+            ready?: false,
+            local?: true,
+            destination: "",
+            problems: [:models_unavailable]
+          }
+        )
+
+      assert html =~ "data-readiness-problem=\"models_unavailable\""
+      assert html =~ ErrorMessages.message(:models_unavailable)
     end
   end
 

@@ -135,9 +135,9 @@ defmodule DoctransWeb.DocumentLive.UploadReadiness do
                 works, and one heading cannot say that for all of them. --%>
           <ul class="mt-1 space-y-1">
             <li
-              :for={{code, _bindings} = problem <- @problems}
+              :for={problem <- @problems}
               class="text-sm"
-              data-readiness-problem={code}
+              data-readiness-problem={problem_code(problem)}
             >
               {ErrorMessages.message(problem)}
             </li>
@@ -151,4 +151,11 @@ defmodule DoctransWeb.DocumentLive.UploadReadiness do
   # Only a report has problems; the three atoms are states of the check itself.
   defp problems(%{problems: problems}), do: problems
   defp problems(_state), do: []
+
+  # A `t:Doctrans.Errors.reason/0` is a tagged tuple or a bare atom, and every
+  # reason this renders today is the former. Destructuring the tuple inline
+  # would make the bare atom a render crash rather than a rendered message,
+  # which is the wrong way for a dashboard to learn about a new reason.
+  defp problem_code({code, _bindings}) when is_atom(code), do: code
+  defp problem_code(code) when is_atom(code), do: code
 end
