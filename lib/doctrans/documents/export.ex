@@ -16,6 +16,16 @@ defmodule Doctrans.Documents.Export do
   UI is translated. A domain module also has no business reaching into
   `DoctransWeb.Gettext`.
 
+  ## What the file carries out of the app
+
+  Page content is model-extracted text, copied verbatim. In the viewer that same
+  text is rendered through `DoctransWeb.DocumentLive.MarkdownScrubber`, which is
+  the app's only layer in front of it; an export has no such layer and is not
+  meant to grow one, because stripping HTML out of a Markdown artifact would
+  corrupt legitimate content to defend a renderer this app does not own. The
+  export is a data file: whatever opens it afterwards is responsible for how it
+  chooses to render raw HTML, exactly as it would be for any other Markdown file.
+
   ## Why incomplete pages are still rendered
 
   The export mirrors the whole document rather than the subset that happened to

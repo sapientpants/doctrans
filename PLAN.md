@@ -3468,6 +3468,12 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   from the same classification that writes the per-page notes, so summary and body cannot drift. A page
   that completed with blank content gets its own note and counts as untranslated: the export has nothing
   of it to show, and calling it translated would overstate what is in the file.
+  Page content leaves the app **unscrubbed**, and that is deliberate. In the viewer the same text goes
+  through `MarkdownScrubber`, the only layer this app puts in front of model-extracted content; an export
+  has none, because stripping HTML out of a Markdown artifact would corrupt legitimate content in order to
+  defend a renderer this app does not own. The file is data, and whatever opens it owns how it renders raw
+  HTML — the same contract as any other Markdown file. The moduledoc states this so the next reader does
+  not have to infer it from the absence of a call.
   Provenance is a per-page line naming the models actually recorded, and it is **omitted** when the run
   captured none. "unknown" would read as a claim about the models; an absent line is honest about
   provenance that was never captured. The caveat that model names are processing-time aliases, which the
