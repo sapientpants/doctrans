@@ -227,6 +227,19 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       assert render(view) =~ "Spanish"
     end
 
+    # The export is a plain download served outside the live_session, so the
+    # href is the only thing tying the viewer to it -- there is no event to
+    # fall back on if it is wrong.
+    test "offers a download link to the Markdown export", %{conn: conn} do
+      doc = document_with_pages_fixture(%{}, 1)
+      {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
+
+      assert has_element?(
+               view,
+               "#export-markdown[href='/documents/#{doc.id}/export.md'][download]"
+             )
+    end
+
     test "back button navigates to index by default", %{conn: conn} do
       doc = document_with_pages_fixture(%{}, 1)
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")

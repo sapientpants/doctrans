@@ -3440,10 +3440,71 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   Full `mix precommit` green: 1421 tests, coverage above the 80% gate, Dialyzer clean with 0 unused
   filters.
 
-- [ ] **B02 · Export translated work.**
+- [x] **B02 · Export translated work.**
   Add Markdown download first, preserving page boundaries and provenance; consider formatted document exports
   after validating demand and output quality. There is no current user-facing export route.
   Acceptance: exported content matches completed pages and clearly identifies incomplete/failed pages.
+  Shipped as the Markdown download only. Formatted exports (DOCX, PDF) stay unbuilt deliberately: the item
+  makes them conditional on demand and on output quality, and neither has been measured yet. A download
+  control now sits in the document header, and `GET /documents/:id/export.md` serves the artifact.
+  The rendering is `Doctrans.Documents.Export`, and it is **pure**: it takes a document with its pages
+  loaded and returns a string, so it is tested without a database and served without a transaction. An
+  unloaded `:pages` association raises rather than quietly exporting a document with no pages — the same
+  stance `Progress.calculate/2` takes, and the difference between a loud bug and a silently empty file
+  a user might send to someone.
+  **The artifact is fixed English, independent of the interface locale.** This is the decision most worth
+  recording, because the app translates everything else. An export is a document, not interface chrome:
+  two people downloading the same document must get byte-identical files, and the file outlives the
+  session that produced it — once it is attached to an email nothing explains which locale rendered it.
+  Only the download button is translated. It also keeps a domain module out of `DoctransWeb.Gettext`,
+  which it has no business reaching into.
+  **The whole document is exported, not the part that succeeded.** A failed or untranslated page keeps its
+  `## Page N` heading and states *both* stage statuses (`Extraction: error. Translation: pending.`), so a
+  reader can tell a page that is missing from one that was blank to begin with, and an extraction failure
+  from a translation failure. Page numbers come from the row rather than from list position, because
+  reprocessing can leave gaps and the heading has to point at the page in the original PDF. What counts as
+  failed is `Doctrans.Documents.Page.failed_status?/1` and nothing else — the export must not invent a
+  second definition of failure for the dashboard to disagree with — and the header's counts are derived
+  from the same classification that writes the per-page notes, so summary and body cannot drift. A page
+  that completed with blank content gets its own note and counts as untranslated: the export has nothing
+  of it to show, and calling it translated would overstate what is in the file.
+  Provenance is a per-page line naming the models actually recorded, and it is **omitted** when the run
+  captured none. "unknown" would read as a claim about the models; an absent line is honest about
+  provenance that was never captured. The caveat that model names are processing-time aliases, which the
+  viewer already carries, is stated once in the header rather than under every page.
+  `filename/1` reuses `Doctrans.Validation.sanitize_filename_string/1` rather than growing a second
+  sanitizer, then strips the control characters that sanitizer maps rather than deletes (`\x7f` survives
+  it), collapses whitespace, caps the stem at 100 characters on a grapheme boundary, and falls back to
+  `document.md` when a title survives none of that — the string lands in a `Content-Disposition` header.
+  One upstream behaviour is worth knowing: `Plug.Conn.send_download/3` percent-encodes the filename inside
+  the *quoted* legacy parameter as well as in `filename*`, so a title with a space arrives as
+  `filename="Browser%20Check.md"; filename*=utf-8''Browser%20Check.md`. Browsers prefer `filename*` and
+  save the right name; a client honouring only the legacy parameter would not. That is Plug's encoding,
+  not this code's, and it is left alone rather than worked around.
+  The route sits outside the `live_session`: a download is a plain request/response and the artifact is
+  locale-independent, so none of the LiveView hooks apply to it. The controller looks the document up with
+  the nil-returning `get_document_with_pages/1`, which makes a malformed id and a missing row the same
+  404 — a hand-typed URL should not surface as a 500.
+  One gate consequence was paid rather than worked around, in the opposite direction to B01's. Routing the
+  export through `Doctrans.Documents` as a `defdelegate` — the first cut — put that module at 11
+  first-party dependencies against Credo's limit of 10. Raising `max_deps` inside a feature PR is exactly
+  how the module-size rule came to have two numbers (G15), so the threshold stayed where it is and the
+  controller names `Doctrans.Documents.Export` directly, which is what `DocumentLive.Show` and
+  `DocumentLive.Index` already do with `Doctrans.Documents.Topics`.
+  Acceptance: `test/doctrans/documents/export_test.exs` renders a mixed document — translated, failed,
+  pending and completed-but-blank pages — and asserts the page boundaries, each status note, and the
+  header counts agreeing with the body, plus sparse page numbers, CRLF content, a missing source language,
+  provenance with two, one and no models, and the filename cases (path separators, `..`, a null byte,
+  control characters, an over-long title, a title that sanitizes to nothing). It needs no database.
+  `test/doctrans_web/controllers/document_export_controller_test.exs` covers the response: content type,
+  attachment disposition, the body for completed and for failed/pending pages, a title that needs
+  sanitizing, an empty document, and 404 for both an unknown UUID and a non-UUID id.
+  Browser-verified, because ExUnit cannot establish that a real browser downloads rather than navigates:
+  Chromium clicked the header control, took a download event with the LiveView still connected and the URL
+  unchanged, and wrote the expected file; no CSP violation appeared, and the policy carries no `sandbox`
+  directive to inhibit one.
+  Full `mix precommit` green: 1465 tests, total coverage 92.8%, Credo strict clean at the unchanged
+  threshold, Dialyzer clean.
 
 - [ ] **B03 · Processing and indexing status with targeted retry/cancellation.**
   Show queued/running/retry/error states, failed-page count, and index readiness separately.

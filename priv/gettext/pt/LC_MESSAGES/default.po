@@ -179,7 +179,7 @@ msgid "Original Content"
 msgstr "Conteúdo original"
 
 #: lib/doctrans_web/live/document_live/page_viewer.ex:142
-#: lib/doctrans_web/live/document_live/show.html.heex:101
+#: lib/doctrans_web/live/document_live/show.html.heex:111
 #, elixir-autogen, elixir-format
 msgid "Original Page"
 msgstr "Página original"
@@ -250,7 +250,7 @@ msgstr "Pesquisar..."
 msgid "Searching..."
 msgstr "A pesquisar..."
 
-#: lib/doctrans_web/live/document_live/show.html.heex:136
+#: lib/doctrans_web/live/document_live/show.html.heex:146
 #, elixir-autogen, elixir-format
 msgid "Show Original"
 msgstr "Mostrar original"
@@ -357,7 +357,7 @@ msgid_plural "%{count} documents uploaded! Processing will begin shortly."
 msgstr[0] "Documento enviado! O processamento começará em breve."
 msgstr[1] "%{count} documentos enviados! O processamento começará em breve."
 
-#: lib/doctrans_web/live/document_live/show.html.heex:197
+#: lib/doctrans_web/live/document_live/show.html.heex:207
 #: lib/doctrans_web/live/document_live/upload_components.ex:53
 #, elixir-autogen, elixir-format
 msgid "Documents"
@@ -466,13 +466,13 @@ msgstr "Faça perguntas sobre este documento"
 
 #: lib/doctrans_web/live/document_live/chat_components.ex:46
 #: lib/doctrans_web/live/document_live/chat_components.ex:56
-#: lib/doctrans_web/live/document_live/show.html.heex:58
+#: lib/doctrans_web/live/document_live/show.html.heex:68
 #, elixir-autogen, elixir-format
 msgid "Chat"
 msgstr "Chat"
 
-#: lib/doctrans_web/live/document_live/show.html.heex:52
-#: lib/doctrans_web/live/document_live/show.html.heex:55
+#: lib/doctrans_web/live/document_live/show.html.heex:62
+#: lib/doctrans_web/live/document_live/show.html.heex:65
 #, elixir-autogen, elixir-format
 msgid "Chat with document"
 msgstr "Conversar com o documento"
@@ -569,7 +569,7 @@ msgstr "A conversa é guardada neste dispositivo. São mantidas as últimas 100 
 msgid "The last question has no saved answer. Send it again to retry."
 msgstr "A última pergunta não tem uma resposta guardada. Envie-a novamente para tentar de novo."
 
-#: lib/doctrans_web/live/document_live/show.html.heex:68
+#: lib/doctrans_web/live/document_live/show.html.heex:78
 #, elixir-autogen, elixir-format
 msgid "Document processing"
 msgstr "Processamento do documento"
@@ -581,7 +581,7 @@ msgstr "Documento na fila para novo processamento"
 
 #: lib/doctrans_web/error_messages.ex:196
 #: lib/doctrans_web/live/document_live/show.ex:378
-#: lib/doctrans_web/live/document_live/show.html.heex:81
+#: lib/doctrans_web/live/document_live/show.html.heex:91
 #, elixir-autogen, elixir-format
 msgid "Original upload unavailable. Re-upload this document to process it again."
 msgstr "O ficheiro original não está disponível. Carregue novamente o documento para voltar a processá-lo."
@@ -712,8 +712,8 @@ msgstr "Página"
 msgid "Remove %{file}"
 msgstr "Remover %{file}"
 
-#: lib/doctrans_web/live/document_live/show.html.heex:130
-#: lib/doctrans_web/live/document_live/show.html.heex:131
+#: lib/doctrans_web/live/document_live/show.html.heex:140
+#: lib/doctrans_web/live/document_live/show.html.heex:141
 #, elixir-autogen, elixir-format
 msgid "Reprocess page"
 msgstr "Voltar a processar a página"
@@ -853,3 +853,9 @@ msgstr "Língua de origem"
 #, elixir-autogen, elixir-format
 msgid "Detect automatically"
 msgstr "Detetar automaticamente"
+
+#: lib/doctrans_web/live/document_live/show.html.heex:32
+#: lib/doctrans_web/live/document_live/show.html.heex:33
+#, elixir-autogen, elixir-format
+msgid "Download translated Markdown"
+msgstr "Transferir o Markdown traduzido"
