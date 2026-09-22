@@ -151,6 +151,9 @@ defmodule DoctransWeb.DocumentLive.Components do
   def status_color("processing"), do: "badge-warning"
   def status_color("completed"), do: "badge-success"
   def status_color("error"), do: "badge-error"
+  # Neutral, not error: a stop the user asked for is an outcome, not a failure,
+  # and colouring it red would send them looking for something to fix.
+  def status_color("cancelled"), do: "badge-neutral"
   def status_color(_), do: "badge-ghost"
 
   @doc """
@@ -162,6 +165,7 @@ defmodule DoctransWeb.DocumentLive.Components do
   def status_text("processing"), do: gettext("Processing")
   def status_text("completed"), do: gettext("Completed")
   def status_text("error"), do: gettext("Error")
+  def status_text("cancelled"), do: gettext("Stopped")
   def status_text(_), do: gettext("Unknown")
 
   @doc """

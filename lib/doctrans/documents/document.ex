@@ -10,11 +10,12 @@ defmodule Doctrans.Documents.Document do
   - `processing` - Extracting markdown and translating pages
   - `completed` - All pages have been translated
   - `error` - An error occurred during processing
+  - `cancelled` - processing was stopped by the user; the document can be reprocessed
   """
   use Doctrans.Schema
   import Ecto.Changeset
 
-  @statuses ~w(uploading queued extracting processing completed error)
+  @statuses ~w(uploading queued extracting processing completed error cancelled)
 
   schema "documents" do
     field :title, :string

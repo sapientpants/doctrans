@@ -200,6 +200,20 @@ defmodule DoctransWeb.ErrorMessages do
 
   def message(:obsolete_run), do: gettext("The document has changed. Please try again.")
 
+  def message(:not_cancellable),
+    do:
+      dgettext(
+        "errors",
+        "This document has already finished processing, so there is nothing left to stop."
+      )
+
+  def message(:nothing_to_retry),
+    do:
+      dgettext(
+        "errors",
+        "No page of this document is waiting to be retried. Reload the page to see its current state."
+      )
+
   def message(:invalid_model), do: gettext("Invalid model selection")
   def message(:upload_unreadable), do: dgettext("errors", "Could not read uploaded file")
 
