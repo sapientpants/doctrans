@@ -14,6 +14,7 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
   Renders the upload modal dialog.
   """
   attr :uploads, :map, required: true
+  attr :source_language, :string, required: true
   attr :target_language, :string, required: true
 
   attr :failures, :list,
@@ -95,6 +96,20 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
             pending={@pending}
             started={@started}
           />
+        </div>
+
+        <div class="form-control mb-4">
+          <label for="source-lang-select" class="label">
+            <span class="label-text">{gettext("Source Language")}</span>
+          </label>
+          <select
+            name="source_language"
+            class="select select-bordered w-full"
+            id="source-lang-select"
+            phx-hook="EscapeStaysInSelect"
+          >
+            <.language_options selected={@source_language} detect_option={true} />
+          </select>
         </div>
 
         <div class="form-control mb-6">
@@ -211,10 +226,21 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
 
   attr :selected, :string, required: true
 
+  attr :detect_option, :boolean,
+    default: false,
+    doc: """
+    whether to offer "Detect automatically" ahead of the languages, as the empty
+    value. Only the source direction has anything to detect; the target is always
+    a choice the user has to make.
+    """
+
   defp language_options(assigns) do
-    # Codes come from the canonical translation-target list and names from
-    # `language_name/1`, so neither is spelled out twice. Sorting is by the
-    # translated name, so the order follows the interface language.
+    # Codes come from the canonical list of supported languages -- the same one
+    # either direction is picked from -- and names from `language_name/1`, so
+    # neither is spelled out twice. Sorting is by the translated name, so the
+    # order follows the interface language. The detect option is not part of that
+    # list and is not sorted into it: it is rendered ahead of the sorted names so
+    # it stays the first thing in the dropdown whatever the interface language.
     languages =
       Doctrans.Languages.supported()
       |> Enum.map(&{&1, language_name(&1)})
@@ -223,6 +249,9 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
     assigns = assign(assigns, :languages, languages)
 
     ~H"""
+    <option :if={@detect_option} value="" selected={@selected in [nil, ""]}>
+      {gettext("Detect automatically")}
+    </option>
     <option :for={{code, name} <- @languages} value={code} selected={code == @selected}>
       {name}
     </option>

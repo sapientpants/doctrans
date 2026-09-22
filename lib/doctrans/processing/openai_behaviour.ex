@@ -16,6 +16,9 @@ defmodule Doctrans.Processing.OpenAIBehaviour do
             ) ::
               {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
 
+  @callback detect_language(markdown :: String.t(), opts :: keyword()) ::
+              {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
+
   @callback available?() :: boolean()
 
   @callback list_models() :: {:ok, [String.t()]} | {:error, Doctrans.Errors.reason()}

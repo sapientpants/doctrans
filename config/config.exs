@@ -118,7 +118,16 @@ config :doctrans, Doctrans.Documents.SweeperWorker,
   interval_hours: 6,
   grace_period_hours: 24
 
-# Default language settings
+# Default language settings.
+#
+# :target_language preselects the upload dialog's target picker.
+#
+# :source_language is NOT a default choice -- the source picker starts on
+# "Detect automatically", and the language is read from the document's own text
+# during processing. This is only the fallback recorded when detection cannot
+# identify the language (unreadable text, or a reply naming nothing supported),
+# so that a document always ends up with one stated source language rather than
+# a silent gap.
 config :doctrans, :defaults,
   source_language: "de",
   target_language: "en"

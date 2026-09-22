@@ -223,6 +223,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
       Enum.into(opts, %{
         title: "Test Document",
         original_filename: "test.pdf",
+        source_language: "en",
         target_language: "de"
       })
 

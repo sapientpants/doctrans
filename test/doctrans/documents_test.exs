@@ -213,13 +213,15 @@ defmodule Doctrans.DocumentsTest do
       attrs = %{
         title: "New Document",
         original_filename: "new.pdf",
-        target_language: "de"
+        target_language: "de",
+        source_language: "en"
       }
 
       assert {:ok, %Document{} = doc} = Documents.create_document(attrs)
       assert doc.title == "New Document"
       assert doc.original_filename == "new.pdf"
       assert doc.target_language == "de"
+      assert doc.source_language == "en"
       assert doc.status == "uploading"
     end
 
@@ -234,6 +236,7 @@ defmodule Doctrans.DocumentsTest do
         title: "Test",
         original_filename: "test.pdf",
         target_language: "en",
+        source_language: "de",
         status: "invalid"
       }
 

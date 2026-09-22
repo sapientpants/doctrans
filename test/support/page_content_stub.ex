@@ -73,6 +73,9 @@ defmodule Doctrans.Processing.PageContentStub do
     do: {:ok, markdown |> page_number_from_markdown() |> translated_markdown()}
 
   @impl true
+  def detect_language(markdown, opts), do: OpenAIStub.detect_language(markdown, opts)
+
+  @impl true
   def available?, do: OpenAIStub.available?()
 
   @impl true

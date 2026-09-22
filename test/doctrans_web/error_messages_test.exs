@@ -68,7 +68,12 @@ defmodule DoctransWeb.ErrorMessagesTest do
         assert {:error, "Erforderliche Felder fehlen: original_filename, target_language"} =
                  translated(Validation.validate_document_attrs(%{title: "Test"}))
 
-        attrs = %{title: "", original_filename: "test.pdf", target_language: "de"}
+        attrs = %{
+          title: "",
+          original_filename: "test.pdf",
+          target_language: "de",
+          source_language: "en"
+        }
 
         assert {:error, "Titel darf nicht leer sein"} =
                  translated(Validation.validate_document_attrs(attrs))
@@ -84,9 +89,36 @@ defmodule DoctransWeb.ErrorMessagesTest do
                        target_language: nil
                    })
                  )
+
+        # A nil source language is "detect it", not a mistake, so the malformed
+        # case has to be a value that could never be a language code.
+        assert {:ok, _} =
+                 Validation.validate_document_attrs(%{
+                   attrs
+                   | title: "Test",
+                     source_language: nil
+                 })
+
+        assert {:error, "Quellsprache ist erforderlich und muss eine Zeichenkette sein"} =
+                 translated(
+                   Validation.validate_document_attrs(%{
+                     attrs
+                     | title: "Test",
+                       source_language: 123
+                   })
+                 )
       end)
 
       assert {:error, "Query too short"} = translated(Validation.validate_search_query(""))
+    end
+
+    test "every document attribute failure is translated in every locale" do
+      assert_translated_everywhere([
+        :empty_title,
+        :invalid_title,
+        :invalid_target_language,
+        :invalid_source_language
+      ])
     end
   end
 

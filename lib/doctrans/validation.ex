@@ -24,6 +24,7 @@ defmodule Doctrans.Validation do
     with {:ok, attrs} <- validate_required_fields(attrs, required_fields),
          {:ok, attrs} <- validate_title(attrs),
          {:ok, attrs} <- validate_target_language(attrs),
+         {:ok, attrs} <- validate_source_language(attrs),
          {:ok, attrs} <- sanitize_title(attrs),
          {:ok, attrs} <- sanitize_filename(attrs) do
       {:ok, attrs}
@@ -209,6 +210,23 @@ defmodule Doctrans.Validation do
 
   defp validate_target_language(_attrs),
     do: {:error, :invalid_target_language}
+
+  defp validate_source_language(%{source_language: language} = attrs) when is_binary(language) do
+    case validate_language(language) do
+      {:ok, _} -> {:ok, attrs}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # A missing or nil source language is a request, not an omission: it means
+  # "detect it from the document". The target language has no such reading --
+  # nothing downstream could work out what the user wanted -- so it stays
+  # required. Anything else present under the key is still a malformed value.
+  defp validate_source_language(%{source_language: nil} = attrs), do: {:ok, attrs}
+
+  defp validate_source_language(%{source_language: _}), do: {:error, :invalid_source_language}
+
+  defp validate_source_language(attrs), do: {:ok, attrs}
 
   defp sanitize_filename(%{original_filename: filename} = attrs) when is_binary(filename) do
     sanitized = sanitize_filename_string(filename)

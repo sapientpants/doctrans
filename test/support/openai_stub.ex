@@ -18,6 +18,12 @@ defmodule Doctrans.Processing.OpenAIStub do
       # Stub a custom model list (a non-list value stubs an error instead)
       Application.put_env(:doctrans, :openai_stub_models, ["my-model"])
 
+      # Stub the detected source language (defaults to "de")
+      Application.put_env(:doctrans, :openai_stub_detected_language, "fr")
+
+      # Simulate language detection error
+      Application.put_env(:doctrans, :openai_stub_detection_error, :circuit_open)
+
       # Reset to default behavior
       Application.delete_env(:doctrans, :openai_stub_extraction_error)
   """
@@ -41,9 +47,19 @@ defmodule Doctrans.Processing.OpenAIStub do
   @impl true
   def translate(markdown, source_language, target_language, opts \\ [])
 
-  def translate(markdown, _source_language, target_language, _opts) do
+  def translate(markdown, source_language, target_language, _opts) do
     case Application.get_env(:doctrans, :openai_stub_translation_error) do
-      nil -> {:ok, "# Translated to #{target_language}\n\n#{markdown}"}
+      nil -> {:ok, "# Translated #{source_language} to #{target_language}\n\n#{markdown}"}
+      error -> {:error, error}
+    end
+  end
+
+  @impl true
+  def detect_language(markdown, opts \\ [])
+
+  def detect_language(_markdown, _opts) do
+    case Application.get_env(:doctrans, :openai_stub_detection_error) do
+      nil -> {:ok, Application.get_env(:doctrans, :openai_stub_detected_language, "de")}
       error -> {:error, error}
     end
   end

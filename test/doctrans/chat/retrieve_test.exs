@@ -26,6 +26,7 @@ defmodule Doctrans.Chat.RetrieveTest do
       Documents.create_document(%{
         title: "Annual Report",
         original_filename: "report.pdf",
+        source_language: "en",
         target_language: "de"
       })
 

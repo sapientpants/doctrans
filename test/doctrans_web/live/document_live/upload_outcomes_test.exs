@@ -286,6 +286,29 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       assert has_element?(view, "#flash-info", "Document uploaded!")
       assert has_element?(view, "#documents-#{document.id}")
     end
+
+    test "keeps both languages the submission carried on the created document", %{conn: conn} do
+      view = open_upload_modal(conn)
+      add_file(view, "report.pdf", pdf_content())
+      submit_upload(view, %{source_language: "de", target_language: "en"})
+
+      [document] = Documents.list_documents()
+
+      assert document.source_language == "de"
+      assert document.target_language == "en"
+
+      # That pair is also what the form defaults to, so a source select the
+      # server never reads would look exactly the same. A second submission with
+      # a source the user had to pick tells the two apart.
+      view = open_upload_modal(conn)
+      add_file(view, "memo.pdf", pdf_content())
+      submit_upload(view, %{source_language: "fr", target_language: "es"})
+
+      memo = Enum.find(Documents.list_documents(), &(&1.original_filename == "memo.pdf"))
+
+      assert memo.source_language == "fr"
+      assert memo.target_language == "es"
+    end
   end
 
   describe "clearing reported failures" do
@@ -358,7 +381,10 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       {document_id, path} = stored_upload("original.txt")
 
       assert {:error, "notes.txt", {:unsupported_format, [format: ".txt"]}} =
-               UploadIntake.create_and_process({:ok, document_id, "notes.txt", path}, "en")
+               UploadIntake.create_and_process({:ok, document_id, "notes.txt", path}, %{
+                 source: "de",
+                 target: "en"
+               })
 
       assert Documents.list_documents() == []
       refute File.exists?(Documents.document_upload_dir(document_id))
@@ -368,7 +394,10 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       {document_id, path} = stored_upload("original.pdf")
 
       assert {:error, "_.pdf", :empty_title} =
-               UploadIntake.create_and_process({:ok, document_id, "_.pdf", path}, "en")
+               UploadIntake.create_and_process({:ok, document_id, "_.pdf", path}, %{
+                 source: "de",
+                 target: "en"
+               })
 
       assert Documents.list_documents() == []
       refute File.exists?(Documents.document_upload_dir(document_id))
@@ -385,7 +414,10 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       File.write!(path, pdf_content())
 
       assert {:error, "dupe.pdf", :upload_start_failed} =
-               UploadIntake.create_and_process({:ok, existing.id, "dupe.pdf", path}, "en")
+               UploadIntake.create_and_process({:ok, existing.id, "dupe.pdf", path}, %{
+                 source: "de",
+                 target: "en"
+               })
 
       # The insert never completed, so this call has no row to claim: cleanup takes
       # the directory it was handed and nothing else. Deleting whatever happens to
@@ -404,7 +436,7 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       assert {:error, "notes.pdf", :upload_start_failed} =
                UploadIntake.create_and_process(
                  {:ok, document_id, "notes.pdf", nil},
-                 "en"
+                 %{source: "de", target: "en"}
                )
 
       assert [kept] = Documents.list_documents()
@@ -454,8 +486,8 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
     render_upload(upload, name)
   end
 
-  defp submit_upload(view) do
-    view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
+  defp submit_upload(view, languages \\ %{target_language: "en"}) do
+    view |> form("#upload-form", languages) |> render_submit()
   end
 
   defp pdf_content, do: pdf_content(32)
