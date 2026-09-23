@@ -122,8 +122,8 @@ defmodule Doctrans.Processing.StartupRecovery do
   # settled. Nothing else revisits it: the page phase above finds no page to
   # resume, and a replayed page job that skips both stages used to return
   # without rechecking. This phase resolves those documents from the rows that
-  # are already saved — the states C03 defined — and so queues no work and makes
-  # no model request.
+  # are already saved — the states the page rows already carry — and so queues
+  # no work and makes no model request.
   #
   # It runs last on purpose. The page phase resets a failed page to `pending`
   # and queues a retry, which unsettles the document again; settling failures
@@ -233,7 +233,7 @@ defmodule Doctrans.Processing.StartupRecovery do
   # job an active one does not necessarily own the page's current work: a job
   # holding a superseded revision cancels without indexing anything. Matching the
   # revision as well is what stops such a job from suppressing recovery of the
-  # revision that replaced it — the failure R01 exists to close.
+  # revision that replaced it — the failure this clause exists to close.
   defp without_indexing_job(query) do
     worker = Oban.Worker.to_string(EmbeddingJob)
 

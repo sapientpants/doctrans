@@ -5,7 +5,7 @@ defmodule Doctrans.ProcessProbe do
   The tests that bound poppler, LibreOffice and `Subprocess` all need the same
   thing: the pid of a child the code under test is about to kill, and proof that
   it was reaped. The obvious way to get it — have the fake `echo $$` into a file
-  the test polls for — cannot be made reliable, and Q09 measured why. A launch
+  the test polls for — cannot be made reliable, and this is why. A launch
   can stall inside `dyld`, before the child's first line runs, and a deadline
   SIGKILLs the whole process group while it is still there; the write then never
   happens at all, so the polled condition is not slow to become true, it becomes
@@ -91,7 +91,7 @@ defmodule Doctrans.ProcessProbe do
   wants the profile path LibreOffice was handed. Only safe where the writer is
   not racing a deadline — the trailing newline is what distinguishes a finished
   write from a created-but-empty file, which is the distinction that made an
-  empty read pass for a real value before Q09.
+  empty read pass for a real value once before.
   """
   def await_file_line(path, description) do
     eventually_value(

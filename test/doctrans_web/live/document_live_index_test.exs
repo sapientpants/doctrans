@@ -468,7 +468,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     end
 
     # Page progress reaches the dashboard on the collection topic, which is the
-    # only subscription it holds since U11 dropped the per-document ones.
+    # only subscription it holds since the per-document ones were dropped.
     test "receives page updates via PubSub", %{conn: conn} do
       doc = document_with_pages_fixture(%{title: "Page Update Test", status: "processing"}, 2)
       other = document_with_pages_fixture(%{title: "Untouched", status: "processing"}, 2)
@@ -556,8 +556,8 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       end
     end
 
-    # The card used to go stale until something else refreshed it; since U11 the
-    # deletion is broadcast, so an open dashboard drops the card on its own. The
+    # The card used to go stale until something else refreshed it; the deletion
+    # is now broadcast, so an open dashboard drops the card on its own. The
     # defensive path this test used to cover -- clicking delete for an id the
     # dashboard no longer tracks -- is exercised by "repeated deletes and invalid
     # IDs are harmless" above, which drives the event directly.

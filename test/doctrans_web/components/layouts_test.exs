@@ -61,7 +61,7 @@ defmodule DoctransWeb.LayoutsTest do
     end
 
     test "connectivity notices render without the auto-dismiss hook" do
-      # Regression guard for U06: the hook used to remove these notices from the
+      # Regression guard: the hook used to remove these notices from the
       # DOM a few seconds after mount, leaving the `phx-disconnected` handlers
       # with no node to target once the socket actually dropped.
       document = render_flash_group()

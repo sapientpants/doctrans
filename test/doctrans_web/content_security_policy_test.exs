@@ -1,7 +1,7 @@
 defmodule DoctransWeb.ContentSecurityPolicyTest do
   use DoctransWeb.ConnCase, async: true
 
-  # U13. The policy used to be a literal map written inline in the `:browser`
+  # The policy used to be a literal map written inline in the `:browser`
   # pipeline; it is now rendered from a directive list shared with the dashboard
   # exception. That refactor is only safe if it changed nothing the browser
   # sees, so the expectations below are spelled out in full rather than derived
@@ -16,7 +16,7 @@ defmodule DoctransWeb.ContentSecurityPolicyTest do
 
   describe "base/0" do
     test "is byte for byte the policy the browser pipeline served before the refactor" do
-      # Copied from the pre-U13 router literal. If a directive is reordered,
+      # Copied from the router literal this replaced. If a directive is reordered,
       # renamed, or given a source, this is where that shows up -- it is a
       # change to what every response in the application carries.
       assert ContentSecurityPolicy.base() == @base

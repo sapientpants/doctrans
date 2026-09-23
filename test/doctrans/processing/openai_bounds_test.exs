@@ -1,6 +1,6 @@
 defmodule Doctrans.Processing.OpenAIBoundsTest do
   @moduledoc """
-  Tests the bounds Q06 put around the inference client: a total deadline that
+  Tests the bounds around the inference client: a total deadline that
   covers Req's retries, and a response size cap, on the non-streaming completion
   path and on the streaming one.
 

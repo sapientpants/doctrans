@@ -2,7 +2,7 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
   @moduledoc """
   Covers the announcement of an indexing run's outcome.
 
-  Until B03 no view read `embedding_status`, so the indexer wrote it silently and
+  Once, no view read `embedding_status`, so the indexer wrote it silently and
   nothing was wrong with that. Now the document viewer renders an indexing row,
   and a run that finishes without saying so leaves that row asserting whatever it
   last computed -- "queued", most visibly, for a page that has since been indexed.

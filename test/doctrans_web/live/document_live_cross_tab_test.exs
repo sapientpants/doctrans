@@ -1,13 +1,14 @@
 defmodule DoctransWeb.DocumentLive.CrossTabTest do
   @moduledoc """
-  The dashboard's half of U11: an upload, a deletion, or a status change made
-  anywhere reaches every dashboard that is already open, and the single
-  collection subscription that carries them does not grow with the document list.
+  The dashboard's half of the cross-tab broadcasts: an upload, a deletion, or a
+  status change made anywhere reaches every dashboard that is already open, and
+  the single collection subscription that carries them does not grow with the
+  document list.
 
   Every case here drives the real context function and lets the broadcast travel
   on its own. Sending `{:document_created, _}` straight to `view.pid` would prove
   only that a `handle_info/2` clause exists -- it would keep passing if nothing
-  ever broadcast, which is precisely the gap U11 closes.
+  ever broadcast, which is precisely the gap these cases close.
 
   The viewer's matching bound belongs here too: the deletion that can strand a
   `document:<id>` subscription is a cross-tab one, so "subscriptions remain

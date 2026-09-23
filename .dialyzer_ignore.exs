@@ -3,7 +3,7 @@
 # Every entry is a narrow `{file, warning_class, line}` key: when the code moves, the
 # filter stops matching and `--list-unused-filters` fails the gate, so a suppression
 # cannot outlive the line it was written for. File-level class mutes are forbidden —
-# they hide warnings nobody has looked at, which is how G02's two wrong diagnoses
+# they hide warnings nobody has looked at, which is how two wrong diagnoses once
 # survived. Always give the location as a bare line number: dialyxir 1.4.8 normalises a
 # warning's position to its line before matching filters, so a `{line, column}` filter
 # can never match (jeremyjh/dialyxir#584).

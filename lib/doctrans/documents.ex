@@ -182,7 +182,7 @@ defmodule Doctrans.Documents do
   # Reached through the page association rather than by naming `Chunk`, which this
   # module can no longer afford to alias: Credo's `ModuleDependencies` check caps a
   # module at `max_deps: 10` first-party dependencies (`.credo.exs`), and aliasing
-  # `Topics` for the U11 broadcasts put `Documents` exactly at the ceiling. Going
+  # `Topics` for the cross-tab broadcasts put `Documents` at the ceiling. Going
   # through `Page has_many :chunks` is equivalent -- same inner join, same three
   # predicates, same `exists?` -- so re-adding the alias would fail the build for
   # nothing.

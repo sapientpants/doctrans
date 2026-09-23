@@ -24,7 +24,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       assert_redirect(view, ~p"/")
     end
 
-    # U11 broadcasts deletions to the per-document topic this viewer subscribes to,
+    # Deletions are broadcast to the per-document topic this viewer subscribes to,
     # so a document deleted from the dashboard while it is open must fall back to
     # the not-found branch instead of rendering against a row that is gone.
     test "a deletion while the viewer is open renders the not-found branch", %{conn: conn} do

@@ -17,7 +17,7 @@ defmodule Doctrans.Search.ChunkerTest do
   @target_graphemes 2400
   @target_bytes 9600
 
-  # One token per script family Q04 names, so a generated document mixes byte
+  # One token per script family, so a generated document mixes byte
   # widths (1, 2, 3 and 4 bytes per codepoint), a grapheme cluster built from
   # joined codepoints, and a script that separates no words with spaces.
   @tokens ["word", "Ubermassig", "Übermäßig", "文書", "वाक्य", "👨‍👩‍👧‍👦"]
@@ -508,7 +508,7 @@ defmodule Doctrans.Search.ChunkerTest do
     test "offsets slice back out of the source across separators and scripts" do
       # The round-trip as a property over varied sources rather than one
       # fixture. Each is a single oversized paragraph, which is the region the
-      # span rewrite covers; grouped paragraphs are Q04, below.
+      # span rewrite covers; grouped paragraphs are covered below.
       sources = [
         words(2000),
         "Intro.\n\n" <> words(2000),
@@ -539,7 +539,7 @@ defmodule Doctrans.Search.ChunkerTest do
     end
 
     test "offsets slice back out of the source for grouped paragraphs" do
-      # The second half of Q04: the span covers the source's three newlines, and
+      # The grouped half: the span covers the source's three newlines, and
       # the content used to be rebuilt with two.
       source = "aaa bbb\n\n\nccc ddd\n\n\neee fff"
 
@@ -604,8 +604,8 @@ defmodule Doctrans.Search.ChunkerTest do
     # drops, duplicates or reorders whole paragraphs, and only a fixed source
     # said so before.
 
-    # C01's "retain every passage", as an invariant. Literal word-multiset
-    # equality -- what Q05 names -- does *not* hold: asserting it fails on 163
+    # "Retain every passage", as an invariant. Literal word-multiset
+    # equality does *not* hold: asserting it fails on 163
     # of 2,000 generated documents, shrinking to `String.duplicate("word。",
     # 481)`. A space-free run is one word to `word_count/1` however long it is,
     # and `Segments`' `@sentence_boundary` cuts after a full-width terminator on
@@ -723,12 +723,11 @@ defmodule Doctrans.Search.ChunkerTest do
 
   describe "content_for_embedding/2 invariants (properties)" do
     # What goes to the embedding server, against the same `document/0`
-    # generator and the same `max_runs: 50` bound as the properties above
-    # This is the embedded-versus-stored divergence surface from
-    # C01: the stored `content` is overlap-free and this is the only place the
-    # two are allowed to differ, so the shape of the difference is what is
-    # pinned -- the chunk's own content, whole, at the end, with at most a
-    # bounded prefix in front of it.
+    # generator and the same `max_runs: 50` bound as the properties above. This
+    # is the embedded-versus-stored divergence surface: the stored `content` is
+    # overlap-free and this is the only place the two are allowed to differ, so
+    # the shape of the difference is what is pinned -- the chunk's own content,
+    # whole, at the end, with at most a bounded prefix in front of it.
     #
     # The example it replaces was "content_for_embedding for chunk with short
     # previous chunk", which wrapped its body in `if length(chunks) > 1` and
@@ -814,7 +813,7 @@ defmodule Doctrans.Search.ChunkerTest do
     end
 
     test "the blank lines inside a grouped chunk survive into the overlap" do
-      # The same defect on the shape Q04 created: a grouped chunk's content is
+      # The same defect on the grouped shape: a grouped chunk's content is
       # the source span, so it carries the real `"\n\n\n"` between its
       # paragraphs, and rejoining its words flattened that to one space.
       chunks = Chunker.chunk("aaa\n\n\nbbb\n\n" <> words(300))

@@ -174,7 +174,7 @@ jobs:
       # network request at all, so running it unconditionally buys that guarantee for free.
       #
       # It is also the one step in this job that can reach a third party at all, which is
-      # why Q08 weighed it before adding it to a workflow that pins every `uses:` to a
+      # why it was weighed before adding it to a workflow that pins every `uses:` to a
       # commit SHA. The two halves are not equally protected: esbuild comes from
       # registry.npmjs.org with its npm signature verified against pinned public keys and a
       # sha512 integrity check over the tarball, while Tailwind is a plain GitHub release

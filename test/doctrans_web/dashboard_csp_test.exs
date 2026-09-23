@@ -1,7 +1,7 @@
 defmodule DoctransWeb.DashboardCspTest do
   use DoctransWeb.ConnCase, async: true
 
-  # U13. LiveDashboard's layout renders an inline `<script>` and its cards
+  # LiveDashboard's layout renders an inline `<script>` and its cards
   # render inline `<style>` blocks, both of which the application's
   # `script-src 'self'` / `style-src 'self'` refuses. The inline script is the
   # one that matters: it defines `window.LiveDashboard`, which the deferred
@@ -183,7 +183,7 @@ defmodule DoctransWeb.DashboardCspTest do
       # scoped to `/dev/dashboard` rather than to `/dev`, so a dev route added
       # later cannot inherit it just by being written in the same block. What
       # is asserted here is the application's own routes, whose shared pipeline
-      # the U13 refactor rewrote underneath them.
+      # the shared-pipeline refactor rewrote underneath them.
       for path <- paths do
         conn = get(conn, path)
 
