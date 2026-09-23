@@ -42,7 +42,7 @@ defmodule Doctrans.Search.ChunkerTest do
 
   # The same bound in bytes. `overlap_tail/1` is capped in both units because
   # one many-byte grapheme cluster passes the byte budget long before the
-  # grapheme one, and only the grapheme half was pinned before (PLAN.md Q05).
+  # grapheme one, and only the grapheme half was pinned before.
   @max_overlap_bytes 1602
 
   describe "chunk/1" do
@@ -308,7 +308,7 @@ defmodule Doctrans.Search.ChunkerTest do
 
   describe "oversized paragraphs" do
     test "a long paragraph after an introduction is split rather than emitted whole" do
-      # The probe PLAN.md S04 recorded: a two-word intro then a 2,000-word
+      # The probe that found this: a two-word intro then a 2,000-word
       # paragraph, which produced [2, 2000] against a 300-word target because a
       # paragraph was only ever split when nothing preceded it.
       text = "Short intro.\n\n" <> words(2000)
@@ -568,7 +568,7 @@ defmodule Doctrans.Search.ChunkerTest do
     # `end_offset > start_offset` on single-chunk inputs, which no offset
     # arithmetic can fail. What the offsets are for is locating the chunk in the
     # page, so that is what is asserted, over generated documents rather than
-    # one hand-written string (PLAN.md Q04).
+    # one hand-written string.
     property "every chunk slices back out of the source text" do
       # 50 runs rather than the default 100: a generated document runs about
       # 1 KB at the median, 31 KB at the 95th percentile and 68 KB at the
@@ -599,7 +599,7 @@ defmodule Doctrans.Search.ChunkerTest do
   describe "chunk/1 invariants (properties)" do
     # The invariants the fixtures above state only by example, as siblings of
     # the round-trip property over the same `document/0` generator and the same
-    # `max_runs: 50` bound (PLAN.md Q05). All three guard the three-way `cond`
+    # `max_runs: 50` bound. All three guard the three-way `cond`
     # in `accumulate_paragraph/3`: a branch that flushed the wrong accumulator
     # drops, duplicates or reorders whole paragraphs, and only a fixed source
     # said so before.
@@ -724,7 +724,7 @@ defmodule Doctrans.Search.ChunkerTest do
   describe "content_for_embedding/2 invariants (properties)" do
     # What goes to the embedding server, against the same `document/0`
     # generator and the same `max_runs: 50` bound as the properties above
-    # (PLAN.md Q05). This is the embedded-versus-stored divergence surface from
+    # This is the embedded-versus-stored divergence surface from
     # C01: the stored `content` is overlap-free and this is the only place the
     # two are allowed to differ, so the shape of the difference is what is
     # pinned -- the chunk's own content, whole, at the end, with at most a
@@ -863,7 +863,7 @@ defmodule Doctrans.Search.ChunkerTest do
   # `long_paragraph`, which takes the split branch instead. Without this shape
   # the branch was reached by no generated document at all -- deleting its
   # flush, so it drops what it has accumulated, left all four properties here
-  # passing (PLAN.md Q05).
+  # passing.
   defp medium_paragraph do
     gen all(
           token <- member_of(@tokens),

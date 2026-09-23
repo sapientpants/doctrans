@@ -381,7 +381,7 @@ defmodule Doctrans.ValidationTest do
 
     # Shrunk counterexamples from the property below, kept as examples so the two
     # clauses that matter stay pinned by a named input even if the generator is
-    # ever changed (PLAN.md Q05).
+    # ever changed.
     test "collapses a traversal prefix to underscores" do
       assert Validation.sanitize_filename_string("../") == "__"
       assert Validation.sanitize_filename_string("..\\") == "__"
@@ -392,7 +392,7 @@ defmodule Doctrans.ValidationTest do
       assert Validation.sanitize_filename_string("C:\\Windows\\system32") == "C__Windows_system32"
     end
 
-    # Regression, found by the property below (PLAN.md Q05): the NUL strip used to
+    # Regression, found by the property below: the NUL strip used to
     # run after the ".." replacement and closed up a ".." it never saw, so ".\0."
     # sanitized to ".." -- a filename resolving to the parent directory.
     test "a NUL between two dots cannot rebuild `..`" do
@@ -406,7 +406,7 @@ defmodule Doctrans.ValidationTest do
     # fragments concatenated at most six deep -- 7 bytes at the median and 76 at
     # the largest over a thousand draws -- and 50 draws already land a traversal
     # in 24% of them, a separator in 44% and invalid UTF-8 in 36%. The bound is
-    # what keeps pull-request latency predictable (PLAN.md Q05). The examples
+    # what keeps pull-request latency predictable. The examples
     # above state this by example and none of them states the containment clause,
     # which is the one that matters.
     property "the result is one component that cannot escape the directory it is joined onto" do

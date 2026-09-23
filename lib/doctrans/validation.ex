@@ -131,7 +131,7 @@ defmodule Doctrans.Validation do
     filename
     # Remove null bytes completely, and do it first: stripping them afterwards
     # closes up a ".." the replacement below never saw, so ".\0." came out as
-    # ".." -- a filename that resolves to the parent directory (PLAN.md Q05).
+    # ".." -- a filename that resolves to the parent directory.
     |> String.replace("\0", "")
     # Replace .. with _
     |> String.replace(~r/\.\./, "_")

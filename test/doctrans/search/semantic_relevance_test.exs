@@ -1,7 +1,7 @@
 defmodule Doctrans.Search.SemanticRelevanceTest do
   @moduledoc """
-  Covers the similarity floor the semantic half of global search ranks behind
-  (PLAN.md S03), and the consequences of putting it there: an unrelated query
+  Covers the similarity floor the semantic half of global search ranks behind,
+  and the consequences of putting it there: an unrelated query
   can now come back empty, a keyword match is untouched by it, and the count
   describes the same filtered set the page is drawn from.
 

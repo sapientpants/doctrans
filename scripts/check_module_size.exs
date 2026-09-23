@@ -89,7 +89,7 @@ defmodule ModuleSizeChecker do
       IO.ANSI.yellow() <>
         "Split these along a seam the code already has, rather than raising the limit.\n" <>
         "The limit was raised 500 -> 600 once before, inside a feature PR, to let that\n" <>
-        "feature land; moving it again is a decision that belongs in PLAN.md." <>
+        "feature land; moving it again is a decision to take on its own." <>
         IO.ANSI.reset()
     )
 

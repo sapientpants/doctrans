@@ -176,7 +176,7 @@ defmodule Doctrans.Search.Chunker do
   end
 
   # A paragraph over the target is split on its own, whether or not anything
-  # precedes it (PLAN.md S04). Whatever is accumulated is flushed first, so the
+  # precedes it. Whatever is accumulated is flushed first, so the
   # long paragraph starts a chunk rather than joining one.
   defp split_paragraph({para_text, para_start, _end}, {chunks, current_rev, _acc}, text) do
     split = Enum.reverse(Segments.split(para_text, para_start))
@@ -229,7 +229,7 @@ defmodule Doctrans.Search.Chunker do
   # lines and all, rather than the paragraphs rejoined on a separator the source
   # may never have had. That is what makes
   # `binary_part(text, start_offset, end_offset - start_offset)` return the
-  # content exactly (PLAN.md Q04).
+  # content exactly.
   defp finalize_paras(paras, text) do
     {_, start_offset, _} = List.first(paras)
     {_, _, end_offset} = List.last(paras)
@@ -259,7 +259,7 @@ defmodule Doctrans.Search.Chunker do
   # `include_captures` keeps the separators, so the tail is a byte suffix of the
   # chunk it came from rather than its words rebuilt on a separator the source
   # may never have had -- the same principle `finalize_paras/2` applies to a
-  # chunk's own content (PLAN.md Q04, Q05). Joining on a literal `" "` flattened
+  # chunk's own content. Joining on a literal `" "` flattened
   # every newline, tab and run of spaces inside the tail: `"a\nb"` was embedded
   # as `"a b"`, so what the embedding server saw was not text that appears
   # anywhere in the page.

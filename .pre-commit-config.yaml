@@ -169,7 +169,7 @@ repos:
         files: ^(lib/.*\.ex|scripts/check_module_size\.exs)$
 
       # 3.7. Compile-time dependency cycles. Architectural enforcement was assessed
-      # and Boundary rejected (PLAN.md G16): the violations it would catch do not
+      # and Boundary rejected: the violations it would catch do not
       # exist here, and it is an unmaintained compiler-tracer dependency with no
       # upper version bound. `mix xref` ships with Elixir, so it adds no
       # compatibility surface. A compile-connected cycle means a change to any
