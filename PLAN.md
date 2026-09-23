@@ -3638,9 +3638,59 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   Full `mix precommit` green: 1542 tests, total coverage 92.7%, Credo strict clean at the unchanged
   thresholds, Dialyzer clean with 0 unused filters, translations complete and non-fuzzy in all 11 locales.
 
-- [ ] **B04 · Model/settings readiness checks.**
+- [x] **B04 · Model/settings readiness checks.**
   Validate model IDs, embedding dimensions, inference availability, and the processing destination before upload.
   Acceptance: unavailable or incompatible models have specific remediation messages; credentials stay hidden.
+  `Doctrans.Config.Readiness.check/0` asks the configured servers directly — one model listing and one
+  one-word embedding — and returns a report: `ready?`, the locality and destination from
+  `Doctrans.Config.Inference`, and an ordered list of `Doctrans.Errors` reasons. Only the two models the
+  upload pipeline runs are checked; the chat model is not upload readiness. The single embedding probe
+  establishes availability and dimensional compatibility at once, because `Processing.OpenAI.embed/2`
+  already truncates a wider Matryoshka vector and rejects a narrower one, so a usable vector has proved
+  both — and the widths in `embedding_dimensions_too_small` come out of that failure rather than from a
+  constant, so the message cannot drift from the rule that produced it.
+  It is a report, not a gate. Queued work survives a model server that is down — startup recovery, Oban
+  retries and the circuit breakers all exist to resume it — so refusing the upload would throw away work
+  the pipeline can recover, while a check merely wrong about a working server would lock the user out of
+  their own application. The submit button stays enabled; only what the user is told changes.
+  The dialog runs it on each open rather than at mount: two HTTP calls per dashboard visit would be paid
+  by every reader, a result fetched at mount goes stale exactly when it matters, and re-checking per open
+  makes closing and reopening the dialog the retry, with no control to explain. A check that crashes
+  renders "could not check" rather than nothing, because nothing is what a ready configuration looks like
+  and the user would read a guarantee we never obtained.
+  Credentials: the module never composes, parses or inspects a URL. Every destination it names comes out
+  of `Inference`, which redacts userinfo and query before returning, and the API keys are never read.
+  The probe is given an explicit 5s timeout rather than inheriting `Config.Embedding.timeout/0`'s minute,
+  which is a fine budget for background indexing and a terrible one for a modal someone is sitting in
+  front of.
+  Acceptance: `test/doctrans/config/readiness_test.exs` covers each reason, both models missing in role
+  order, the chat model explicitly not checked, an unreadable endpoint named by its URL, the full
+  three-problem ordering, and two credential cases — including the shapes that survive nulling
+  `URI.userinfo` (`user:s3cret@llm.example.com:8000`, `llm:8000?api-key=s3cret`).
+  `test/doctrans_web/live/document_live/upload_readiness_test.exs` drives the dialog end to end: each
+  finding rendered as its own remediation line, the in-flight state held open on the embedding barrier,
+  a crashed check saying so instead of showing an all-clear, a file still submittable while problems are
+  showing, the probe made per open and never at mount, and no part of
+  `http://user:s3cret@remote.example:8000/v1?key=abc` reaching the dialog.
+  Asserting the 5s bound needed a new stub: every existing embedding stub discards `opts`, so a probe
+  that inherited the 60s indexing default would pass every assertion about its result and misbehave only
+  in front of a user.
+  Adding the module pushed `Index` past Credo's 10-dependency limit. The threshold stands; instead the
+  collection PubSub subscription moved into `DocumentStream`, where every message it delivers was already
+  being handled by calling back into that module. (Its first attempted fix — moving the privacy blocks
+  into `Components` — was reverted on measuring that the check counts only code references, not ones
+  inside a `~H` sigil, so it had bought nothing.)
+  The translation data was audited rather than trusted: parsing every locale's `.po` before and after
+  reports 9 new messages per locale (3 default-domain, 6 error-domain) with no existing translation
+  altered or dropped, nothing fuzzy, and every new entry filled in all ten non-source locales.
+  Browser-verified against a real model server, because ExUnit cannot establish the responsive layout or
+  that a live endpoint's model list produces the finding. Chromium at 400px rendered both missing models
+  as wrapped lines in one warning inside the dialog, and at 1280px the same block above the file picker;
+  the destination read `localhost` with no trace of the configured API key anywhere in the document, the
+  region carried `aria-live="polite"`, and `?lang=de` rendered the German remediation. No console error
+  and no CSP violation appeared.
+  Full `mix precommit` green: 1578 tests, total coverage 92.8%, `readiness.ex` at 100%, Credo strict clean
+  at the unchanged thresholds, Dialyzer clean, translations complete and non-fuzzy in all 11 locales.
 
 - [ ] **B05 · Backup/restore and portable runtime deployment.**
   Document and test consistent backups of the database, originals, generated files, and conversations.

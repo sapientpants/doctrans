@@ -239,12 +239,12 @@ msgstr "Titeln är obligatorisk och måste vara en sträng"
 msgid "Unsupported language: %{language}"
 msgstr "Språket stöds inte: %{language}"
 
-#: lib/doctrans_web/error_messages.ex:218
+#: lib/doctrans_web/error_messages.ex:278
 #, elixir-autogen, elixir-format
 msgid "Could not read uploaded file"
 msgstr "Kunde inte läsa den uppladdade filen"
 
-#: lib/doctrans_web/error_messages.ex:239
+#: lib/doctrans_web/error_messages.ex:299
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
 msgstr "Filen är för stor (%{size}MB, högst %{max}MB)"
@@ -299,17 +299,17 @@ msgstr "Läsningen av PDF-filen tog för lång tid innan extraheringen började.
 msgid "This PDF's pages are %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."
 msgstr "Sidorna i den här PDF-filen är %{width}x%{height} bildpunkter vid %{dpi} DPI, över gränsen på %{limit} bildpunkter. Sänk extraheringsupplösningen och försök igen."
 
-#: lib/doctrans_web/error_messages.ex:221
+#: lib/doctrans_web/error_messages.ex:281
 #, elixir-autogen, elixir-format
 msgid "Could not store the uploaded file"
 msgstr "Kunde inte spara den uppladdade filen"
 
-#: lib/doctrans_web/error_messages.ex:235
+#: lib/doctrans_web/error_messages.ex:295
 #, elixir-autogen, elixir-format
 msgid "The document could not be saved"
 msgstr "Dokumentet kunde inte sparas"
 
-#: lib/doctrans_web/error_messages.ex:224
+#: lib/doctrans_web/error_messages.ex:284
 #, elixir-autogen, elixir-format
 msgid "Could not start processing for this document"
 msgstr "Kunde inte starta bearbetningen av det här dokumentet"
@@ -319,7 +319,7 @@ msgstr "Kunde inte starta bearbetningen av det här dokumentet"
 msgid "Only PDF, Word, OpenDocument, and RTF documents are accepted"
 msgstr "Endast PDF-, Word-, OpenDocument- och RTF-dokument accepteras"
 
-#: lib/doctrans_web/error_messages.ex:230
+#: lib/doctrans_web/error_messages.ex:290
 #, elixir-autogen, elixir-format
 msgid "This file could not be uploaded. Please try again."
 msgstr "Den här filen kunde inte laddas upp. Försök igen."
@@ -348,3 +348,33 @@ msgstr "Ingen sida i det här dokumentet väntar på ett nytt försök. Ladda om
 #, elixir-autogen, elixir-format
 msgid "This document has already finished processing, so there is nothing left to stop."
 msgstr "Det här dokumentet är redan färdigbearbetat, så det finns inget kvar att stoppa."
+
+#: lib/doctrans_web/error_messages.ex:252
+#, elixir-autogen, elixir-format
+msgid "The embedding model %{model} is not available on %{destination}. Documents will still translate, but they cannot be searched until it is loaded there or the embedding model names one that server offers."
+msgstr "Embedding-modellen %{model} är inte tillgänglig på %{destination}. Dokument översätts fortfarande, men de går inte att söka i förrän den har lästs in där eller embedding-modellen anger en som den servern erbjuder."
+
+#: lib/doctrans_web/error_messages.ex:269
+#, elixir-autogen, elixir-format
+msgid "The embedding model %{model} returns %{actual} dimensions, but %{expected} are required. Choose an embedding model with at least %{expected} dimensions; until then documents translate but cannot be searched."
+msgstr "Embedding-modellen %{model} ger %{actual} dimensioner, men %{expected} krävs. Välj en embedding-modell med minst %{expected} dimensioner; till dess översätts dokument men går inte att söka i."
+
+#: lib/doctrans_web/error_messages.ex:261
+#, elixir-autogen, elixir-format
+msgid "The embedding server at %{destination} is not answering. Documents will still translate, but they cannot be searched until it is running."
+msgstr "Embedding-servern på %{destination} svarar inte. Dokument översätts fortfarande, men de går inte att söka i förrän den körs."
+
+#: lib/doctrans_web/error_messages.ex:232
+#, elixir-autogen, elixir-format
+msgid "The extraction model %{model} is not available on %{destination}. Load it there, or set the extraction model to one that server offers."
+msgstr "Extraheringsmodellen %{model} är inte tillgänglig på %{destination}. Läs in den där, eller välj en extraheringsmodell som den servern erbjuder."
+
+#: lib/doctrans_web/error_messages.ex:224
+#, elixir-autogen, elixir-format
+msgid "The model server at %{destination} is not answering. Start it before uploading, or documents will wait in the queue until it is running."
+msgstr "Modellservern på %{destination} svarar inte. Starta den innan du laddar upp, annars väntar dokumenten i kön tills den körs."
+
+#: lib/doctrans_web/error_messages.ex:241
+#, elixir-autogen, elixir-format
+msgid "The translation model %{model} is not available on %{destination}. Load it there, or set the translation model to one that server offers."
+msgstr "Översättningsmodellen %{model} är inte tillgänglig på %{destination}. Läs in den där, eller välj en översättningsmodell som den servern erbjuder."

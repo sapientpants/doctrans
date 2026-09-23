@@ -214,6 +214,66 @@ defmodule DoctransWeb.ErrorMessages do
         "No page of this document is waiting to be retried. Reload the page to see its current state."
       )
 
+  # Upload readiness (`Doctrans.Config.Readiness`). Each one names the setting to
+  # change and what stays broken until it is changed, because these are reported
+  # before anything has been uploaded: the user is deciding, not recovering.
+  # `%{destination}` is a host or a redacted URL from `Doctrans.Config.Inference`
+  # and never carries a credential.
+  def message({:inference_unavailable, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "The model server at %{destination} is not answering. Start it before uploading, or documents will wait in the queue until it is running.",
+        destination: binding(bindings, :destination)
+      )
+
+  def message({:extraction_model_unavailable, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "The extraction model %{model} is not available on %{destination}. Load it there, or set the extraction model to one that server offers.",
+        model: binding(bindings, :model),
+        destination: binding(bindings, :destination)
+      )
+
+  def message({:translation_model_unavailable, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "The translation model %{model} is not available on %{destination}. Load it there, or set the translation model to one that server offers.",
+        model: binding(bindings, :model),
+        destination: binding(bindings, :destination)
+      )
+
+  # Search is the only casualty of a broken embedding path, and saying so is what
+  # keeps this from reading as a reason to cancel the upload.
+  def message({:embedding_model_unavailable, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "The embedding model %{model} is not available on %{destination}. Documents will still translate, but they cannot be searched until it is loaded there or the embedding model names one that server offers.",
+        model: binding(bindings, :model),
+        destination: binding(bindings, :destination)
+      )
+
+  def message({:embedding_unavailable, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "The embedding server at %{destination} is not answering. Documents will still translate, but they cannot be searched until it is running.",
+        destination: binding(bindings, :destination)
+      )
+
+  def message({:embedding_dimensions_too_small, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "The embedding model %{model} returns %{actual} dimensions, but %{expected} are required. Choose an embedding model with at least %{expected} dimensions; until then documents translate but cannot be searched.",
+        model: binding(bindings, :model),
+        actual: binding(bindings, :actual),
+        expected: binding(bindings, :expected)
+      )
+
   def message(:invalid_model), do: gettext("Invalid model selection")
   def message(:upload_unreadable), do: dgettext("errors", "Could not read uploaded file")
 

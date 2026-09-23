@@ -3,11 +3,11 @@ defmodule DoctransWeb.DocumentLive.Index do
   use DoctransWeb, :live_view
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
   alias Doctrans.Processing.Worker
   alias DoctransWeb.DocumentLive.DocumentStream
   alias DoctransWeb.DocumentLive.UploadIntake
   alias DoctransWeb.DocumentLive.UploadOutcomes
+  alias DoctransWeb.DocumentLive.UploadReadiness
   alias DoctransWeb.ErrorMessages
   alias DoctransWeb.PrivacyCopy
 
@@ -42,6 +42,7 @@ defmodule DoctransWeb.DocumentLive.Index do
       |> assign(:target_language, defaults[:target_language] || "en")
       |> assign(:sort_by, :inserted_at)
       |> assign(:sort_dir, :desc)
+      |> UploadReadiness.init()
       |> DocumentStream.init()
       |> allow_upload(:document,
         accept: ~w(.pdf .docx .doc .odt .rtf),
@@ -51,8 +52,6 @@ defmodule DoctransWeb.DocumentLive.Index do
         max_file_size: UploadIntake.max_file_size()
       )
 
-    _ = if connected?(socket), do: Topics.subscribe_documents()
-
     {:ok, DocumentStream.refresh(socket)}
   end
 
@@ -61,9 +60,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def terminate(_reason, _socket) do
-    # Unsubscribe from the collection topic we registered for, so the client
-    # process doesn't accumulate subscriptions across visits.
-    Topics.unsubscribe_documents()
+    DocumentStream.unsubscribe()
     :ok
   end
 
@@ -236,6 +233,7 @@ defmodule DoctransWeb.DocumentLive.Index do
         failures={@upload_failures}
         pending={@upload_pending}
         started={@upload_started}
+        readiness={@readiness}
       />
     </Layouts.app>
     """
@@ -243,9 +241,19 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   # --- Upload modal ----------------------------------------------------------
 
+  # The check is started per open, not per mount: it costs two HTTP calls, only a
+  # user about to upload needs the answer, and reopening the dialog after fixing a
+  # setting is then the retry, with no control to explain.
   @impl true
-  def handle_event("show_upload_modal", _params, socket),
-    do: {:noreply, socket |> assign(:show_upload_modal, true) |> UploadOutcomes.clear()}
+  def handle_event("show_upload_modal", _params, socket) do
+    socket =
+      socket
+      |> assign(:show_upload_modal, true)
+      |> UploadOutcomes.clear()
+      |> UploadReadiness.check()
+
+    {:noreply, socket}
+  end
 
   @impl true
   def handle_event("hide_upload_modal", _params, socket),
@@ -392,6 +400,13 @@ defmodule DoctransWeb.DocumentLive.Index do
     else
       consumed
     end
+  end
+
+  # --- Upload readiness ------------------------------------------------------
+
+  @impl true
+  def handle_async(:upload_readiness, result, socket) do
+    {:noreply, UploadReadiness.resolve(socket, result)}
   end
 
   # --- PubSub: progress updates ----------------------------------------------
