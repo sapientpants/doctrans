@@ -11,6 +11,42 @@ config :doctrans, Doctrans.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 
+# Doctrans is a local, single-user app with no authentication, so the development
+# endpoint binds on loopback only. PHX_BIND_IP is the one explicit way to widen
+# that: PHX_BIND_IP=0.0.0.0 (or :: for IPv6) accepts connections on every
+# interface, which is what a container needs and what reaches the app from a
+# trusted LAN — you do so at your own risk, since there is no auth to pass.
+#
+# The binding deliberately no longer follows DATABASE_HOST. Pointing development
+# at a database on another host says nothing about who should be able to reach
+# the *app*, and deriving one from the other meant that changing where Postgres
+# lives silently published an unauthenticated app on every interface.
+#
+# The value has to be parsed here rather than passed through: Bandit types `:ip`
+# as `:inet.socket_address()` and hands it to `:gen_tcp.listen/2`, which exits
+# with :badarg on a binary, so a textual address stops the endpoint from ever
+# starting. `:inet.parse_address/1` takes a charlist and accepts IPv4 and IPv6
+# literals alike; it resolves no host names, which is why the error below says so.
+#
+# This repeats the same parse that `config/runtime.exs` performs for :prod, and
+# it has to: this file is evaluated before the project's own modules are
+# compiled, so it cannot call a shared helper module, and a release ships only
+# `config/runtime.exs`, so a sibling file pulled in with `Code.require_file/1`
+# would simply not be there. Removing the duplication breaks one side or the
+# other, so the two copies are kept deliberately in step instead.
+bind_ip_string = System.get_env("PHX_BIND_IP") || "127.0.0.1"
+
+bind_ip =
+  case :inet.parse_address(String.to_charlist(bind_ip_string)) do
+    {:ok, address} ->
+      address
+
+    {:error, _reason} ->
+      raise "PHX_BIND_IP must be an IPv4 or IPv6 address literal, got: #{bind_ip_string}. " <>
+              "Use 127.0.0.1 to bind on loopback, 0.0.0.0 (or :: for IPv6) to accept " <>
+              "connections on every interface. Host names are not resolved."
+  end
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #
@@ -18,10 +54,9 @@ config :doctrans, Doctrans.Repo,
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
 config :doctrans, DoctransWeb.Endpoint,
-  # Binding to loopback ipv4 address prevents access from other machines.
-  # When DATABASE_HOST is set (Docker), bind to all interfaces to allow access from host.
   http: [
-    ip: if(System.get_env("DATABASE_HOST"), do: {0, 0, 0, 0}, else: {127, 0, 0, 1}),
+    # Loopback unless PHX_BIND_IP says otherwise; see the note above.
+    ip: bind_ip,
     port: String.to_integer(System.get_env("PORT") || "4000")
   ],
   check_origin: false,

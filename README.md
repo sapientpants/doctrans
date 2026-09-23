@@ -175,7 +175,11 @@ has no authentication, so anything that can reach the port can read every docume
 container binds every interface *inside itself* and lets the published `127.0.0.1:4000` do the
 limiting (its database is published on 5433, so it does not collide with the development stack's
 5432), which makes republishing that port on another address the one deliberate act that exposes the
-application to a LAN — at your own risk. On a native run, `PHX_BIND_IP` is that same decision.
+application to a LAN — at your own risk. The development stack is arranged the same way: it sets
+`PHX_BIND_IP=0.0.0.0` in the container, where binding every interface reaches no further than the
+container itself, and the loopback publication outside it is again what limits who can connect. A
+native `mix phx.server` has no such wrapper around it, so it binds `127.0.0.1` and stays there
+until `PHX_BIND_IP` says otherwise — the database can live on another host without changing that.
 
 Set `PHX_HOST` to whatever the browser types. Phoenix compares the websocket handshake's `Origin`
 host against it, so a deployment reached by a name it does not advertise renders once and then never
@@ -207,9 +211,8 @@ source without printing either value. To use the file's API key, start with
 
 Tests follow the same loading rules; use `DOCTRANS_ENV_FILE` to select a separate
 test file when needed. Settings read before runtime configuration, such as `DATABASE_HOST`
-in dev/test and `PORT` in dev, must be exported in the process environment before starting Mix;
-the runtime `.env` loader is too late to affect them. Setting `DATABASE_HOST` in the process
-environment also makes the development endpoint bind to all interfaces.
+in dev/test and `PORT` and `PHX_BIND_IP` in dev, must be exported in the process environment
+before starting Mix; the runtime `.env` loader is too late to affect them.
 
 The checked-in Compose file sets literal environment values, so copying `.env` does not
 override those values. Edit `docker-compose.yml` or use a Compose override to change them.
@@ -382,7 +385,7 @@ than re-detected, since it is what produced the text they already contain.
 | `DATABASE_HOST` | `localhost` | PostgreSQL hostname (dev/test) |
 | `DATABASE_URL` | - | Full database URL (required in production) |
 | `PORT` | `4000` | Phoenix server port (dev/prod; tests use 4002) |
-| `PHX_BIND_IP` | `127.0.0.1` | Interface the production endpoint binds to (prod only). Must be an IPv4 or IPv6 address literal; host names are not resolved, and an unparseable value raises at startup naming the variable. Doctrans has no authentication, so it defaults to loopback; set `PHX_BIND_IP=0.0.0.0` to expose it to a trusted LAN at your own risk |
+| `PHX_BIND_IP` | `127.0.0.1` | Interface the endpoint binds to (dev and prod, with the same default and the same parsing in both). Must be an IPv4 or IPv6 address literal; host names are not resolved, and an unparseable or empty value raises at startup naming the variable. Doctrans has no authentication, so it defaults to loopback; set `PHX_BIND_IP=0.0.0.0` to expose it to a trusted LAN at your own risk. No other setting, `DATABASE_HOST` included, changes the binding |
 | `PHX_HOST` | `example.com` | Production host for URL generation (dev uses `localhost`). Must be the host the browser actually uses: Phoenix compares the LiveView socket's `Origin` host against it, so a mismatch renders the page once and then never connects |
 | `PHX_SCHEME` | `http` | Scheme the application advertises in generated URLs (prod only); use `https` behind a TLS terminator, which also advertises port 443 instead of `PORT`. The application itself always serves plain HTTP on `PORT`. Only the host is origin-checked, so this affects the addresses the app hands out, not whether the socket connects |
 | `PHX_SERVER` | unset | Set to `true` to enable the HTTP server when starting a release |

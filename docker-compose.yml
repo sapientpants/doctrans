@@ -27,6 +27,11 @@ services:
       OPENAI_HOST: http://host.docker.internal:8000
       PHX_HOST: localhost
       PORT: 4000
+      # Bind on all interfaces *inside the container*; the published port below
+      # is what actually limits reachability to this machine. Without this the
+      # endpoint would listen on the container's loopback only, where nothing
+      # outside the container — the port publication included — can reach it.
+      PHX_BIND_IP: "0.0.0.0"
     # Bind to loopback only: Doctrans is a local, single-user app with no
     # authentication, so it is not exposed to the LAN by default.
     ports:
