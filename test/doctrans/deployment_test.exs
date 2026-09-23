@@ -23,6 +23,22 @@ defmodule Doctrans.DeploymentTest do
 
   defp read(name), do: File.read!(Path.join(@root, name))
 
+  # Match every mapping that is only digits, dots and colons — which is the
+  # shape of a port entry and not of `host.docker.internal:host-gateway`, nor of
+  # a volume, both of which carry letters or slashes. Matching the address
+  # separately would miss `"4000:4000"`, the one that publishes on every
+  # interface, and that is the regression worth catching.
+  #
+  # The quotes have to be optional. `- 4000:4000` is valid Compose YAML — with no
+  # space after the colon it is a plain scalar, not a mapping — so a regex that
+  # required them would skip precisely the entry that publishes on every
+  # interface and leave the assertions below passing over it.
+  defp published_ports(compose) do
+    ~r/^\s*-\s*"?([\d.:]+)"?\s*$/m
+    |> Regex.scan(compose, capture: :all_but_first)
+    |> List.flatten()
+  end
+
   describe "the runtime deployment" do
     setup do
       %{compose: read("docker-compose.runtime.yml"), dockerfile: read("Dockerfile")}
@@ -62,14 +78,7 @@ defmodule Doctrans.DeploymentTest do
     end
 
     test "publishes every port on loopback only", %{compose: compose} do
-      # Match every mapping that is only digits, dots and colons — which is the
-      # shape of a port entry and not of `host.docker.internal:host-gateway`.
-      # Matching the address separately would miss `"4000:4000"`, the one that
-      # publishes on every interface, and that is the regression worth catching.
-      published =
-        ~r/^\s*-\s*"([\d.:]+)"/m
-        |> Regex.scan(compose, capture: :all_but_first)
-        |> List.flatten()
+      published = published_ports(compose)
 
       assert published != []
       assert Enum.all?(published, &String.starts_with?(&1, "127.0.0.1:"))
@@ -125,6 +134,23 @@ defmodule Doctrans.DeploymentTest do
     test "does not claim to be a deployment", %{compose: compose} do
       refute compose =~ "/app/bin/server"
       refute compose =~ "mix release"
+    end
+
+    test "states its container binding explicitly", %{compose: compose} do
+      # The endpoint has to listen on every interface *inside* the container for
+      # the loopback-published port to reach it. Saying so here keeps it out of
+      # `config/dev.exs`, where it was once inferred from DATABASE_HOST and so
+      # widened a developer's own binding as a side effect of moving Postgres.
+      assert compose =~ ~r/^\s*PHX_BIND_IP:\s*"0\.0\.0\.0"\s*$/m
+    end
+
+    test "publishes every port on loopback only", %{compose: compose} do
+      # Both services, and no bare `"4000:4000"`: the container binding above
+      # only stays safe while the publication is what limits reachability.
+      published = published_ports(compose)
+
+      assert length(published) == 2
+      assert Enum.all?(published, &String.starts_with?(&1, "127.0.0.1:"))
     end
   end
 end

@@ -3787,12 +3787,57 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   Credo strict clean at the unchanged thresholds, Dialyzer clean, translations complete and non-fuzzy
   in all 11 locales.
 
-- [ ] **B06 · Separate development network binding from database configuration.**
+- [x] **B06 · Separate development network binding from database configuration.**
   Development binds all interfaces whenever DATABASE_HOST exists. Introduce an explicit bind setting
   and set it deliberately in Compose so moving the database does not implicitly change application exposure.
   Acceptance: setting a remote database host alone leaves the application on loopback;
   Compose remains reachable through its loopback-published port. Do not introduce authentication.
   Evidence: `config/dev.exs:24`, `docker-compose.yml`.
+  Two unrelated questions were answered by one variable. `ip: if(System.get_env("DATABASE_HOST"), do:
+  {0, 0, 0, 0}, else: {127, 0, 0, 1})` read *where Postgres lives* and answered *who may reach the
+  app* — so a developer pointing development at a database on another machine published an
+  application with no authentication on every interface, having asked for nothing of the sort and
+  having been told nothing about it. The inference was not even reliable in the direction it was
+  written for: it fired for `DATABASE_HOST=localhost` as readily as for a container, because it tested
+  only that the variable was set.
+  The binding is now its own setting, `PHX_BIND_IP`, defaulting to `127.0.0.1` — the same name, the
+  same default and the same parse the :prod block has carried since B05, so an operator learns one
+  variable rather than one per environment. `DATABASE_HOST` keeps exactly one job, the Repo hostname.
+  The parse is duplicated rather than shared, deliberately and with the reason recorded beside it:
+  `config/dev.exs` is evaluated before this project's own modules are compiled, so it cannot call a
+  helper, and a release ships `config/runtime.exs` alone, so a sibling file pulled in with
+  `Code.require_file/1` would be missing from the one deployment that most needs the setting. It
+  parses with `:inet.parse_address/1` for the reason B05 found the hard way — Bandit types `:ip` as
+  `:inet.socket_address()` and hands it to `:gen_tcp.listen/2`, which exits `:badarg` on a binary —
+  and an unparseable or empty value raises naming the variable rather than failing inside a listener.
+  `docker-compose.yml` now states `PHX_BIND_IP: "0.0.0.0"` where it previously relied on the
+  inference, which is the same arrangement `docker-compose.runtime.yml` already documented: the
+  container binds every interface *inside itself*, where that reaches nothing, and the unchanged
+  `127.0.0.1:4000:4000` publication is what actually limits reachability to this machine. Making the
+  setting explicit is what keeps the development stack working while the default moves to loopback —
+  without it the endpoint would listen on the container's own loopback, which no published port can
+  reach. Exposure and database placement are now two decisions, and each is written where it is made.
+  Acceptance: `test/doctrans/dev_config_test.exs` reads `config/dev.exs` through `Config.Reader` — the
+  only coverage the setting gets, since `mix test` never evaluates that file — for the default as a
+  tuple, an IPv4 and an IPv6 literal, a rejected host name, `PORT`, and the criterion itself: a remote
+  `DATABASE_HOST` leaves the binding on loopback while still supplying the Repo hostname. Confirmed
+  non-vacuous by restoring the old line, which fails three of the six, the acceptance test reporting
+  `{0, 0, 0, 0}` where it requires `{127, 0, 0, 1}`. `deployment_test.exs` gained the development
+  stack's half of what it already asserted for the runtime one — the container binding stated rather
+  than inferred, and both published ports on loopback — each negative-tested by deleting the
+  `PHX_BIND_IP` line and by rewriting the publication to a bare `"4000:4000"`. Hoisting that scan
+  into a shared helper exposed a hole in the assertion it had been making all along: it matched only
+  *quoted* entries, and `- 4000:4000` is valid Compose YAML — with no space after the colon it is a
+  plain scalar, not a mapping — so the one publication worth catching was the one the regex skipped,
+  and `published != []` then passed over it. The quotes are now optional, verified by unquoting the
+  runtime stack's app port, which the assertion had been silently ignoring and now fails on.
+  The README's variable table no longer calls `PHX_BIND_IP` prod-only, and the sentence telling
+  readers that `DATABASE_HOST` widens the development binding is gone rather than reworded. In its
+  place `PHX_BIND_IP` joins `DATABASE_HOST` and `PORT` as a setting read before runtime configuration,
+  which is the practical catch: the `.env` loader runs too late for it in development, so it has to be
+  exported in the process environment. No user-visible strings changed, so no locale did.
+  Full `mix precommit` green: 1630 tests, total coverage 92.9%, Credo strict clean at the unchanged
+  thresholds, Dialyzer clean, translations complete and non-fuzzy in all 11 locales.
 
 ## Completion criteria
 
