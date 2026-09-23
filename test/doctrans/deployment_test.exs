@@ -24,11 +24,17 @@ defmodule Doctrans.DeploymentTest do
   defp read(name), do: File.read!(Path.join(@root, name))
 
   # Match every mapping that is only digits, dots and colons — which is the
-  # shape of a port entry and not of `host.docker.internal:host-gateway`.
-  # Matching the address separately would miss `"4000:4000"`, the one that
-  # publishes on every interface, and that is the regression worth catching.
+  # shape of a port entry and not of `host.docker.internal:host-gateway`, nor of
+  # a volume, both of which carry letters or slashes. Matching the address
+  # separately would miss `"4000:4000"`, the one that publishes on every
+  # interface, and that is the regression worth catching.
+  #
+  # The quotes have to be optional. `- 4000:4000` is valid Compose YAML — with no
+  # space after the colon it is a plain scalar, not a mapping — so a regex that
+  # required them would skip precisely the entry that publishes on every
+  # interface and leave the assertions below passing over it.
   defp published_ports(compose) do
-    ~r/^\s*-\s*"([\d.:]+)"/m
+    ~r/^\s*-\s*"?([\d.:]+)"?\s*$/m
     |> Regex.scan(compose, capture: :all_but_first)
     |> List.flatten()
   end

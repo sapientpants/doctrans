@@ -3825,13 +3825,18 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   `{0, 0, 0, 0}` where it requires `{127, 0, 0, 1}`. `deployment_test.exs` gained the development
   stack's half of what it already asserted for the runtime one — the container binding stated rather
   than inferred, and both published ports on loopback — each negative-tested by deleting the
-  `PHX_BIND_IP` line and by rewriting the publication to a bare `"4000:4000"`.
+  `PHX_BIND_IP` line and by rewriting the publication to a bare `"4000:4000"`. Hoisting that scan
+  into a shared helper exposed a hole in the assertion it had been making all along: it matched only
+  *quoted* entries, and `- 4000:4000` is valid Compose YAML — with no space after the colon it is a
+  plain scalar, not a mapping — so the one publication worth catching was the one the regex skipped,
+  and `published != []` then passed over it. The quotes are now optional, verified by unquoting the
+  runtime stack's app port, which the assertion had been silently ignoring and now fails on.
   The README's variable table no longer calls `PHX_BIND_IP` prod-only, and the sentence telling
   readers that `DATABASE_HOST` widens the development binding is gone rather than reworded. In its
   place `PHX_BIND_IP` joins `DATABASE_HOST` and `PORT` as a setting read before runtime configuration,
   which is the practical catch: the `.env` loader runs too late for it in development, so it has to be
   exported in the process environment. No user-visible strings changed, so no locale did.
-  Full `mix precommit` green: 1629 tests, total coverage 92.9%, Credo strict clean at the unchanged
+  Full `mix precommit` green: 1630 tests, total coverage 92.9%, Credo strict clean at the unchanged
   thresholds, Dialyzer clean, translations complete and non-fuzzy in all 11 locales.
 
 ## Completion criteria

@@ -65,6 +65,18 @@ defmodule Doctrans.DevConfigTest do
 
       assert_raise RuntimeError, ~r/PHX_BIND_IP.*localhost/s, fn -> endpoint(:http) end
     end
+
+    # `System.get_env/1 || default` treats "" as a value, so an explicitly empty
+    # setting does not fall back to loopback — it fails to parse. Refusing to
+    # start is the right answer either way, and the README says so; this pins it
+    # rather than leaving the documented behaviour to the shape of an `||`.
+    test "an explicitly empty value is rejected rather than falling back" do
+      System.put_env("PHX_BIND_IP", "")
+
+      assert_raise RuntimeError, ~r/PHX_BIND_IP must be an IPv4 or IPv6 address literal/, fn ->
+        endpoint(:http)
+      end
+    end
   end
 
   test "PORT still chooses the listening port" do
