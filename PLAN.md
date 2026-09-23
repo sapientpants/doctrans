@@ -3692,11 +3692,100 @@ worse than an absent one, because it is counted as evidence. Items G01–G19 are
   Full `mix precommit` green: 1578 tests, total coverage 92.8%, `readiness.ex` at 100%, Credo strict clean
   at the unchanged thresholds, Dialyzer clean, translations complete and non-fuzzy in all 11 locales.
 
-- [ ] **B05 · Backup/restore and portable runtime deployment.**
+- [x] **B05 · Backup/restore and portable runtime deployment.**
   Document and test consistent backups of the database, originals, generated files, and conversations.
   Validate restore into a different storage root; keep development Compose distinct from an optional
   reproducible runtime deployment. Dependency: R05.
   Acceptance: a restored document can be viewed, searched, chatted with, and reprocessed from its retained source.
+  A backup is two halves that nothing joins: a Postgres dump and a copy of the storage root, neither
+  recording anything about the other. `Doctrans.Backup.verify/0` is the join, and only the application
+  can compute it, because only it knows how a row's path is rebuilt from the current root. It is a
+  report, never a repair — safe to point at a restored volume before the application is allowed near
+  it — reaching the operator as `mix verify_restore` in a checkout and as `bin/verify_restore` in the
+  release, which is the deployment that needs it most because its state is in volumes nobody can
+  inspect by looking.
+  The two directions of disagreement are not symmetric, and that asymmetry is the whole design. A row
+  whose file is absent is unrecoverable: nothing invents a retained PDF back into existence. A file no
+  row owns is harmless, and the sweeper reclaims it. So `complete?` tracks missing alone, extras are
+  listed without failing anything, and the documented backup order follows from it — **dump the
+  database first, copy the files second**, because work landing in the window between the two halves
+  then appears as an orphan rather than as a dangling reference. Page-image losses are aggregated to
+  one reason per document: a library restored without its files would otherwise report a line per page
+  image ever rendered, which no operator reads. Paths are cited relative to the root, so two reports
+  are comparable across roots and a log never carries an absolute layout.
+  Restoring into a different root needed one fix rather than a migration. `pages.image_path` has been
+  root-relative since R05, but `oban_jobs.args["file_path"]` is absolute, and it was the only
+  filesystem path in the database that did not relocate: a queued extraction restored under a new root
+  named the old one and reported its source missing while the file sat under the new one. The recorded
+  path is now a hint — when it does not resolve, `Run.source_path/1` rebuilds it from the running
+  root. Present-file behaviour and the "no source anywhere" path are unchanged.
+  The portable deployment half had no artifact and two defects that made one impossible. `PHX_BIND_IP`
+  was passed to Bandit as a string, which types `:ip` as `:inet.socket_address()` and hands it to
+  `:gen_tcp.listen/2`; that exits `:badarg` on a binary, so the production endpoint could not start at
+  all, on its own default. It is now parsed with `:inet.parse_address/1`, IPv4 and IPv6 alike, and an
+  unparseable value raises naming the variable rather than failing inside a listener. The advertised
+  URL was hardcoded to https on 443 while the listener served plain HTTP on `PORT`, so every address
+  the app handed out — `Endpoint.url/0`, `url(~p"...")`, the line logged at boot — named somewhere that
+  does not exist; `PHX_SCHEME` (default `http`, advertising `PORT`; `https` advertising 443) restores
+  the behind-a-proxy case. The first diagnosis of that second defect was wrong and is recorded here
+  because the corrected one is what the code says: `check_origin: true` compares the `Origin` **host**
+  only (`Phoenix.Socket.Transport.origin_allowed?/4`), never the scheme or port, so the socket was
+  never at risk from the scheme — it is `PHX_HOST`, defaulting to `example.com`, that would refuse
+  every LiveView connection in a deployment reached as `localhost`. Confirmed against the running
+  image: origin `http://localhost:4000` and `https://localhost` both accepted, `http://evil.example`
+  rejected.
+  `Dockerfile` builds an OTP release in a multi-stage build and `docker-compose.runtime.yml` runs it,
+  deliberately apart from the development Compose: no source mount, non-root, migrations through
+  `bin/migrate` before `bin/server`, and both halves of the state in volumes named explicitly rather
+  than derived from the project, so the name an operator backs up is the name `docker volume ls`
+  prints. The runtime base is Debian trixie because the builder is — a release embeds ERTS linked
+  against the builder's glibc 2.41, and an older slim base fails at `bin/doctrans` with a link error.
+  Node is deliberately absent: there is no `assets/package.json`, and `:esbuild` and `:tailwind` fetch
+  standalone binaries, so npm never runs. `scripts/check_toolchain_pins.exs` now covers both
+  Dockerfiles and requires a digest on *every* `FROM`, the production runtime base included — a
+  runtime base that drifts is exactly as unreproducible as a builder that does. Negative-tested by
+  stripping the Debian digest, which fails it.
+  Acceptance: `test/doctrans/integration/backup_restore_test.exs` runs the real pipeline under one
+  root, copies the tree to a second, **deletes the first**, and then drives all four verbs against the
+  new root — the viewer rendering and the endpoint serving byte-identical page images with
+  `private, no-store` while retained originals still 404, a search returning the right page of the
+  restored document, the saved conversation coming back with its retrieved context and taking a new
+  turn, and a reprocess reading the retained source and writing fresh pages under the new root. Its
+  negative case restores the database without the retained original: still viewable, still chattable,
+  `{:error, :original_upload_missing}` on reprocess with the rollback whole — which is what makes the
+  documented ordering rule real rather than advisory. Confirmed non-vacuous by rewriting every
+  persisted `image_path` to the absolute path a root-unaware writer would have stored, which fails
+  three of the five; the chat and reprocess cases hold no path claim and are covered instead by
+  deleting the retained original, which flips the negative case.
+  `test/doctrans/backup_test.exs` covers each reason, the aggregation, deterministic ordering, an
+  orphan not failing a restore, a stray non-UUID entry, an unrendered page, a format whose original is
+  never retained, and an absent `documents/` directory. `runtime_config_test.exs` reads
+  `config/runtime.exs` through `Config.Reader` — the only coverage those operator-facing variables get,
+  since `mix test` never evaluates them — for the parsed default, explicit IPv4 and IPv6, both
+  rejections, and the advertised URL under each scheme. `deployment_test.exs` is a tripwire against the
+  two deployments converging: a bind mount appearing in the runtime file, a data volume disappearing, a
+  port published beyond loopback, the migration step vanishing from the start command, or an overlay
+  script losing its executable bit.
+  Verified by building and booting the image, because ExUnit establishes none of it: the release
+  assembles at 557 MB (81.5 MB of that the release itself, most of the rest LibreOffice), `bin/migrate`
+  applies every migration to a fresh database, `bin/server` logs Bandit listening on 4000 and answers
+  `curl` with 200, and inside the image the endpoint carries `ip: {127, 0, 0, 1}` as a tuple,
+  `upload_dir` is `/var/lib/doctrans` and writable by uid 1000, `pdftoppm`/`pdfinfo`/`soffice` all
+  resolve, and `:file.native_name_encoding()` is `:utf8` under `LANG=C.UTF-8`. CI gained a
+  `docker-release` job with its own cache scope that builds the image and then boots it through
+  `bin/doctrans eval`, so a `runtime.exs` that cannot produce a valid endpoint configuration fails
+  there rather than in a deployment. Two incidental findings are recorded in the Dockerfile itself:
+  ERTS prints an alarming `libsctp.so.1` warning on every boot unless the tiny `libsctp1` is
+  installed, and Compose interpolates the application's own `.env`, so `OPENAI_HOST` is set literally
+  rather than as a substitution that would silently point a container at itself.
+  No user-visible strings were added, so no locale changed: the report is an operator CLI, and putting
+  it through Gettext would translate text no UI ever renders.
+  Full `mix precommit` green: 1621 tests, total coverage 92.9%, `backup.ex` at 100% and `release.ex`
+  at 80.9% — the four uncovered lines are `verify_restore/0`'s `IO.puts`/`System.halt` shim, which
+  ends the VM and so cannot run in-process; the decision it wraps is split into `restore_status/0`
+  and tested in both directions, and the shim itself is what the release probe above exercised.
+  Credo strict clean at the unchanged thresholds, Dialyzer clean, translations complete and non-fuzzy
+  in all 11 locales.
 
 - [ ] **B06 · Separate development network binding from database configuration.**
   Development binds all interfaces whenever DATABASE_HOST exists. Introduce an explicit bind setting

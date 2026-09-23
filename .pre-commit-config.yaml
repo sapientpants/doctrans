@@ -131,14 +131,15 @@ repos:
 
       # 3.55. Toolchain pin agreement. mise.toml is authoritative; CI reads it
       # directly via erlef/setup-beam's `version-file`, but a Docker `FROM` line
-      # cannot, so this keeps Dockerfile.dev's restated version honest — and keeps
-      # its base image pinned by digest, since only the digest is immutable.
+      # cannot, so this keeps the restated version in Dockerfile.dev and Dockerfile
+      # honest — and keeps every base image in both, the production runtime base
+      # included, pinned by digest, since only the digest is immutable.
       - id: check-toolchain-pins
         name: Check toolchain pins match mise.toml
         entry: elixir scripts/check_toolchain_pins.exs
         language: system
         pass_filenames: false
-        files: ^(mise\.toml|Dockerfile\.dev|scripts/check_toolchain_pins\.exs)$
+        files: ^(mise\.toml|Dockerfile(\.dev)?|scripts/check_toolchain_pins\.exs)$
 
       # 3.57. GitHub Actions pin register. Every `uses:` must name an immutable
       # commit SHA with a version comment, and every checkout must set

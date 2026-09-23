@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+
+# Starts the release with the Phoenix endpoint listening. `config/runtime.exs`
+# only sets `server: true` when PHX_SERVER is present, so `bin/doctrans start`
+# on its own would boot the supervision tree and serve nothing.
+cd -P -- "$(dirname -- "$0")"
+PHX_SERVER=true exec ./doctrans start

@@ -124,7 +124,63 @@ The app connects to the inference server at `http://host.docker.internal:8000`. 
 listen on an interface reachable from the container. The `extra_hosts` directive in
 `docker-compose.yml` supplies the host-gateway mapping, including on Linux.
 The app and database ports are published on host loopback only. This Compose setup runs
-in development mode with source files mounted for hot reload.
+in development mode with source files mounted for hot reload; for a deployment rather than a
+development environment, use `docker-compose.runtime.yml` instead — see
+[Runtime deployment](#runtime-deployment).
+
+## Runtime deployment
+
+There are two Compose files and they are not interchangeable.
+
+`docker-compose.yml` with `Dockerfile.dev` is **development**. It bind-mounts your working tree, runs
+the Mix development server with hot reload, and keeps what it writes inside the repository — the
+storage root under `priv/static/uploads`, the database in a Compose volume. That is convenient and it
+is disposable: data that lives inside the build output is discarded by a version bump, a
+`mix release --overwrite`, or a rebuilt image.
+
+`docker-compose.runtime.yml` with `Dockerfile` is the **optional runtime deployment**. It builds a
+compiled `mix release` in a multi-stage build on a digest-pinned Debian base image, runs it as a
+non-root user with no source mounted, keeps the database and the storage root
+(`DOCTRANS_DATA_DIR=/var/lib/doctrans`) in named Docker volumes that survive an image rebuild, and
+runs `/app/bin/migrate` before `/app/bin/server` so a restarted deployment is migrated before it
+serves a request.
+
+A release refuses to start without `SECRET_KEY_BASE`. Generate one and keep it — changing it
+invalidates every signed cookie and LiveView session:
+
+```bash
+mix phx.gen.secret    # or, on a host without Elixir: openssl rand -base64 48
+```
+
+Compose reads `.env` from the project directory for variable substitution, so either put the value
+there or export it in the environment you run Compose from. The release image mounts no source, so
+that file is read by Compose rather than by the application's own `.env` loader. Then build and
+start:
+
+```bash
+docker compose -f docker-compose.runtime.yml up --build -d
+```
+
+Afterwards the data lives in the named volumes rather than in the repository. Both are named
+explicitly in the Compose file rather than left to its `<project>_<key>` prefixing, so `docker volume
+ls` shows them under exactly the names you back up with: `doctrans_runtime_data` for the storage root
+and `doctrans_runtime_pgdata` for the database. The file also sets `name: doctrans-runtime`, so this
+stack cannot be confused with the development one, which would otherwise share the project name the
+directory implies. An image rebuild keeps both volumes and `docker compose down -v` deletes them,
+which is the one command between you and an unrecoverable library — see
+[Backup and restore](#backup-and-restore).
+
+Both files publish on host loopback only, for the reason stated at the top of this README: Doctrans
+has no authentication, so anything that can reach the port can read every document. The runtime
+container binds every interface *inside itself* and lets the published `127.0.0.1:4000` do the
+limiting (its database is published on 5433, so it does not collide with the development stack's
+5432), which makes republishing that port on another address the one deliberate act that exposes the
+application to a LAN — at your own risk. On a native run, `PHX_BIND_IP` is that same decision.
+
+Set `PHX_HOST` to whatever the browser types. Phoenix compares the websocket handshake's `Origin`
+host against it, so a deployment reached by a name it does not advertise renders once and then never
+connects. Behind a TLS terminator, also set `PHX_SCHEME=https`, which is what the application
+advertises as its own address rather than what it listens on.
 
 ## Environment File
 
@@ -326,8 +382,9 @@ than re-detected, since it is what produced the text they already contain.
 | `DATABASE_HOST` | `localhost` | PostgreSQL hostname (dev/test) |
 | `DATABASE_URL` | - | Full database URL (required in production) |
 | `PORT` | `4000` | Phoenix server port (dev/prod; tests use 4002) |
-| `PHX_BIND_IP` | `127.0.0.1` | Interface the production endpoint binds to (prod only). Doctrans has no authentication, so it defaults to loopback; set `PHX_BIND_IP=0.0.0.0` to expose it to a trusted LAN at your own risk |
-| `PHX_HOST` | `example.com` | Production host for URL generation (dev uses `localhost`) |
+| `PHX_BIND_IP` | `127.0.0.1` | Interface the production endpoint binds to (prod only). Must be an IPv4 or IPv6 address literal; host names are not resolved, and an unparseable value raises at startup naming the variable. Doctrans has no authentication, so it defaults to loopback; set `PHX_BIND_IP=0.0.0.0` to expose it to a trusted LAN at your own risk |
+| `PHX_HOST` | `example.com` | Production host for URL generation (dev uses `localhost`). Must be the host the browser actually uses: Phoenix compares the LiveView socket's `Origin` host against it, so a mismatch renders the page once and then never connects |
+| `PHX_SCHEME` | `http` | Scheme the application advertises in generated URLs (prod only); use `https` behind a TLS terminator, which also advertises port 443 instead of `PORT`. The application itself always serves plain HTTP on `PORT`. Only the host is origin-checked, so this affects the addresses the app hands out, not whether the socket connects |
 | `PHX_SERVER` | unset | Set to `true` to enable the HTTP server when starting a release |
 | `SECRET_KEY_BASE` | - | Secret key for signing (required in production) |
 | `POOL_SIZE` | `10` | Production database connection pool size |
@@ -368,6 +425,147 @@ mkdir -p /var/lib/doctrans
 cp -a priv/static/uploads/. /var/lib/doctrans/
 DOCTRANS_DATA_DIR=/var/lib/doctrans mix phx.server
 ```
+
+## Backup and restore
+
+Two things hold state, and a backup that carries only one of them is not a backup.
+
+**The database** holds the documents and pages — including the extracted and translated Markdown,
+which is model output that nothing on disk reproduces — the chunks and embeddings behind search and
+chat, the saved conversations (`chat_sessions` and `messages`, with the retrieved context each answer
+was given), the processing-run bookkeeping, the Oban job queue, and `schema_migrations`.
+Conversations exist only here; there is no file on disk to copy for them.
+
+**The storage root** holds `documents/<id>/original.<ext>`, the retained upload, which is the only
+copy of your file the application keeps, and the generated page images under
+`documents/<id>/runs/<run-id>/pages/page-NN.png` (documents processed before runs existed keep theirs
+in `documents/<id>/pages/`). Where that root is, and why it should not be left at its default for
+anything you intend to keep, is covered above under [Storage root](#storage-root).
+
+Only the chunks and embeddings are cheap enough to rebuild rather than carry: `mix rechunk_documents`
+rebuilds them across the library and **Retry indexing** does one document, both at the cost of
+re-running the embedding model. Page images are *technically* derivable from the retained original,
+but only by reprocessing, which deletes every page row and re-runs extraction and translation — the
+Markdown goes with them. Back the page images up; they are data, not a cache.
+
+### Taking a backup
+
+`pg_dump` and a file copy are two snapshots taken at two different moments, so they cannot be made
+atomic while the application is running. Stopping it first is the honest advice: a stopped
+application writes nothing, and the two halves then describe the same instant.
+
+When it cannot be stopped, **dump the database first and copy the files second**. The two failure
+modes are not symmetric. A file with no row is an orphan: `Doctrans.Documents.Sweeper` reclaims it
+once it is past the grace period, and nothing is broken in the meantime. A row whose file was never
+copied is a dangling reference that nothing can repair — the page image 404s, and the retained
+original, being the only copy of the upload, is simply gone. Dumping first can only produce the
+recoverable kind.
+
+Run `mix verify_restore` after restoring, and also against the live system before taking a backup: it
+reports the storage root it checked, how many documents and pages it examined, every row whose
+retained source or page images are missing, and every entry under `documents/` that no row owns. It
+reports and never repairs, and only the missing direction fails it — an unowned file is what the
+sweeper is for. A backup taken from an installation that is already missing files restores exactly
+that.
+
+The runtime deployment carries no Mix, so the same check ships in the release as `bin/verify_restore`
+— which is the deployment that needs it most, since its state is in volumes rather than in a
+directory you can look at:
+
+```bash
+docker compose -f docker-compose.runtime.yml exec app /app/bin/verify_restore
+```
+
+**Development Compose.** PostgreSQL runs in a container and the host needs no client tools of its own
+— the `pgvector/pgvector:pg18` image ships `pg_dump` 18.1. The storage root sits in the working tree,
+because the source mount puts it there.
+
+```bash
+docker compose exec -T db pg_dump -U postgres -Fc doctrans_dev > doctrans.dump
+tar -czf doctrans-data.tar.gz -C priv/static uploads
+```
+
+Restoring is the same two steps with the application stopped, into a freshly created database:
+
+```bash
+docker compose stop app
+docker compose exec -T db dropdb -U postgres --if-exists doctrans_dev
+docker compose exec -T db createdb -U postgres doctrans_dev
+docker compose exec -T db pg_restore -U postgres -d doctrans_dev < doctrans.dump
+tar -xzf doctrans-data.tar.gz -C priv/static
+docker compose start app
+```
+
+**Runtime deployment.** It keeps its state in the `doctrans_prod` database and in two volumes named
+explicitly rather than derived from the project — `doctrans_runtime_data` for the storage root and
+`doctrans_runtime_pgdata` for the database — so that the name you back up is the name `docker volume
+ls` prints, and so the development stack's `doctrans_pgdata` cannot be mistaken for either. The
+storage root is a volume rather than a host directory, so it has to be copied out of the volume:
+
+```bash
+docker compose -f docker-compose.runtime.yml exec -T db pg_dump -U postgres -Fc doctrans_prod > doctrans.dump
+docker run --rm -v doctrans_runtime_data:/data -v "$PWD":/backup alpine \
+  tar -czf /backup/doctrans-data.tar.gz -C /data .
+```
+
+Restoring the files is the same throwaway container with the arguments reversed, while the
+application container is stopped:
+
+```bash
+docker run --rm -v doctrans_runtime_data:/data -v "$PWD":/backup alpine \
+  tar -xzf /backup/doctrans-data.tar.gz -C /data
+```
+
+**A native run.** The storage root is an ordinary directory, so `cp -a` is enough:
+
+```bash
+pg_dump -U postgres -Fc doctrans_dev > doctrans.dump
+cp -a /var/lib/doctrans/. /backups/doctrans-data/
+```
+
+**Not a backup: the database volume.** Both Compose files mount the database volume (`pgdata`,
+`doctrans_pgdata`) at `/var/lib/postgresql`, which is the live data directory with no WAL archiving
+or snapshot coordination configured around it. Tarring it while PostgreSQL is running copies a torn
+data directory that may refuse to start, or start with data missing. Dump the database instead, or
+stop the container and copy it then.
+
+**Version skew.** CI runs PostgreSQL 17 while Compose runs 18. `pg_restore` will not read an archive
+produced by a newer `pg_dump` than itself, so a dump taken from 18 does not go back into 17 — restore
+into the same major version or a newer one.
+
+### Restoring
+
+**Restore the database before the restored application's first boot.** Two mechanisms begin deleting
+files shortly after startup, and both treat the database as the authority on what should exist:
+
+- `Doctrans.Documents.Sweeper` deletes every `documents/<uuid>` directory that has no matching row and
+  whose modification time is older than the grace period (24 hours by default, configured under
+  `config :doctrans, Doctrans.Documents.SweeperWorker` in `config/config.exs`), and `SweeperWorker`
+  runs its first sweep one minute after boot. A restored tree keeps its original timestamps — `cp -a`
+  and `tar` both preserve them — so it is already past the grace period the moment it lands. Booting
+  against an empty or stale database therefore destroys the retained originals within a minute. If
+  the database will not be ready in time, set that `enabled: false` before the boot rather than
+  racing it.
+- Startup recovery re-queues interrupted work about five seconds after boot, and `RunCleanupJob` —
+  which the restored Oban queue may still be holding — deletes the run directories that disagree with
+  the `processing_run_id` in the restored row. A database snapshot *older* than the file tree
+  therefore removes the page images of the run the files actually describe.
+
+The target PostgreSQL must have pgvector available (both Compose files use `pgvector/pgvector:pg18`).
+The dump carries the extension, the `get_fts_config` function and the search-vector trigger, the
+trigger that invalidates page embeddings when content changes, and the HNSW index definitions, which
+PostgreSQL rebuilds during the restore — on a large library that is the slow part, and it needs no
+intervention.
+
+Then run `mix verify_restore` (or `bin/verify_restore` in the release) and open a document. A restore
+is good when a document can be viewed, searched, chatted with, and reprocessed from its retained
+source.
+
+**Restoring into a different storage root.** Supported, and unremarkable: page paths are stored
+relative to the root, so unpacking the tree in a new location and pointing `DOCTRANS_DATA_DIR` at it
+is the whole procedure — nothing in the database is rewritten. The constraints on the new location,
+and the copy itself, are the same as for moving an existing root under
+[Storage root](#storage-root).
 
 ## Development
 

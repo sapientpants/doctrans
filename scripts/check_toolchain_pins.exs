@@ -2,33 +2,37 @@
 # Toolchain Pin Checker
 # `mise.toml` is the single source of truth for the Elixir/OTP versions. CI reads it
 # directly (`erlef/setup-beam` with `version-file: mise.toml`), but a Docker `FROM`
-# line cannot, so `Dockerfile.dev` restates the version and this check keeps that
-# restatement honest. It also requires the base image to stay pinned by digest: the
-# tag is the readable half of the reference, but only the digest is immutable, and a
-# bump that drops it would otherwise pass unnoticed.
+# line cannot, so `Dockerfile.dev` and `Dockerfile` each restate the version and this
+# check keeps both restatements honest. It also requires *every* base image in both
+# files to stay pinned by digest — the builder and the production runtime base alike:
+# the tag is the readable half of the reference, but only the digest is immutable, and
+# a bump that drops it would otherwise pass unnoticed. A runtime base that drifts is
+# exactly as unreproducible as a builder that does.
 #
 # Usage: elixir scripts/check_toolchain_pins.exs
 #
-# Exit code: 1 if any pin disagrees with mise.toml, 0 otherwise
+# Exit code: 1 if any pin disagrees with mise.toml or is missing a digest, 0 otherwise
 
 defmodule ToolchainPinChecker do
   @mise_file "mise.toml"
-  @dockerfile "Dockerfile.dev"
+  @dockerfiles ["Dockerfile.dev", "Dockerfile"]
 
   def run do
     {elixir_version, otp_version} = read_mise_pins()
+    expected = expected_docker_tag(elixir_version, otp_version)
 
-    case check_dockerfile(elixir_version, otp_version) do
-      :ok ->
+    case Enum.find_value(@dockerfiles, &check_dockerfile(&1, expected)) do
+      nil ->
         IO.puts(
           IO.ANSI.green() <>
-            "Toolchain pins agree with #{@mise_file} (elixir #{elixir_version}, erlang #{otp_version})." <>
+            "Toolchain pins agree with #{@mise_file} (elixir #{elixir_version}, erlang #{otp_version}), " <>
+            "and every base image in #{Enum.join(@dockerfiles, ", ")} is digest-pinned." <>
             IO.ANSI.reset()
         )
 
         System.halt(0)
 
-      {:error, message} ->
+      message ->
         IO.puts(IO.ANSI.red() <> "Toolchain pin mismatch:" <> IO.ANSI.reset())
         IO.puts("")
         IO.puts("  " <> message)
@@ -54,31 +58,64 @@ defmodule ToolchainPinChecker do
     }
   end
 
-  # The reference is `elixir:<tag>@sha256:<digest>`. The tag can only express the OTP
-  # major (`-otp-29`), so the Elixir version is compared exactly and OTP only on its
-  # major; the digest is checked for presence and shape, since verifying which image
-  # it names needs a registry and this hook stays offline.
-  defp check_dockerfile(elixir_version, otp_version) do
-    reference = extract!(read_file!(@dockerfile), ~r/^FROM\s+elixir:(\S+)/m, "FROM elixir:")
-    expected = expected_docker_tag(elixir_version, otp_version)
+  # Returns the first problem found in `path`, or nil when every `FROM` is acceptable.
+  defp check_dockerfile(path, expected) do
+    references = base_references!(path)
 
-    case String.split(reference, "@", parts: 2) do
-      [^expected, digest] ->
-        check_digest(digest)
-
-      [^expected] ->
-        {:error, "#{@dockerfile} pins `elixir:#{expected}` by tag only; add an @sha256 digest"}
-
-      [tag | _] ->
-        {:error, "#{@dockerfile} pins `elixir:#{tag}`, expected `elixir:#{expected}`"}
+    # The version check below only fires on an `elixir:` reference, so a file that
+    # stopped using that base — a different registry, a different image — would
+    # pass in silence, which is the drift this script exists to prevent.
+    if Enum.any?(references, &String.starts_with?(&1, "elixir:")) do
+      Enum.find_value(references, &check_reference(path, &1, expected))
+    else
+      "#{path} has no `FROM elixir:` base to check against #{@mise_file}"
     end
   end
 
-  defp check_digest(digest) do
+  # The references a `FROM` names, minus the ones naming an earlier stage of the same
+  # file (`COPY --from=builder`'s counterpart): a stage name has no registry digest to
+  # pin and requiring one would be a false positive.
+  defp base_references!(path) do
+    contents = read_file!(path)
+
+    stages =
+      ~r/^FROM\s+\S+\s+AS\s+(\S+)/mi
+      |> Regex.scan(contents, capture: :all_but_first)
+      |> List.flatten()
+
+    references =
+      ~r/^FROM\s+(\S+)/mi
+      |> Regex.scan(contents, capture: :all_but_first)
+      |> List.flatten()
+      |> Enum.reject(&(&1 in stages))
+
+    if references == [], do: abort("no base image FROM instruction found in #{path}")
+
+    references
+  end
+
+  # A reference is `<image>:<tag>@sha256:<digest>`. The tag can only express the OTP
+  # major (`-otp-29`), so the Elixir version is compared exactly and OTP only on its
+  # major; the digest is checked for presence and shape, since verifying which image
+  # it names needs a registry and this hook stays offline.
+  defp check_reference(path, reference, expected) do
+    case String.split(reference, "@", parts: 2) do
+      [tagged, digest] -> check_tag(path, tagged, expected) || check_digest(path, digest)
+      [tagged] -> "#{path} pins `#{tagged}` by tag only; add an @sha256 digest"
+    end
+  end
+
+  defp check_tag(path, "elixir:" <> tag, expected) when tag != expected do
+    "#{path} pins `elixir:#{tag}`, expected `elixir:#{expected}`"
+  end
+
+  defp check_tag(_path, _tagged, _expected), do: nil
+
+  defp check_digest(path, digest) do
     if Regex.match?(~r/^sha256:[0-9a-f]{64}$/, digest) do
-      :ok
+      nil
     else
-      {:error, "#{@dockerfile} pins digest `#{digest}`, which is not a sha256:<64 hex> reference"}
+      "#{path} pins digest `#{digest}`, which is not a sha256:<64 hex> reference"
     end
   end
 

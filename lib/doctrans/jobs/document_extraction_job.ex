@@ -121,7 +121,22 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   defp source_path(document, args) do
     if document.processing_run_id,
       do: Run.source_path(document),
-      else: Map.get(args, "file_path") || Run.source_path(document)
+      else: recorded_path(args) || Run.source_path(document)
+  end
+
+  # The recorded `file_path` is absolute, and it is the one path in the database
+  # that does not relocate: a job queued under one storage root and restored
+  # under another still names the old root, and the document would report its
+  # source missing while the file sits under the new one. So the arg is a hint,
+  # not a requirement — when it does not resolve, fall back to the path
+  # `Run.source_path/1` rebuilds from the root the application is running with.
+  defp recorded_path(args) do
+    with path when is_binary(path) <- Map.get(args, "file_path"),
+         true <- File.regular?(path) do
+      path
+    else
+      _ -> nil
+    end
   end
 
   defp extract_from(document, path) do

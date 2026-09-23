@@ -12,6 +12,7 @@ defmodule Doctrans.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      releases: releases(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
       test_coverage: [tool: ExCoveralls],
@@ -62,6 +63,20 @@ defmodule Doctrans.MixProject do
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.html": :test
+      ]
+    ]
+  end
+
+  # The optional runtime deployment (Dockerfile, docker-compose.runtime.yml) ships
+  # an assembled release rather than a source checkout. `rel/overlays/` is copied
+  # into the release verbatim, which is where `bin/server` and `bin/migrate` come
+  # from; `include_executables_for: [:unix]` drops the Windows launchers the image
+  # would never run.
+  defp releases do
+    [
+      doctrans: [
+        include_executables_for: [:unix],
+        steps: [:assemble]
       ]
     ]
   end
