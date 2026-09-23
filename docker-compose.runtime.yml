@@ -41,6 +41,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    # Matches the app's policy. `depends_on` only orders a `compose up`; without
+    # this, a daemon or host restart brings the app back against a database that
+    # stays down, and the app restart-loops on a connection that never arrives.
+    restart: unless-stopped
 
   app:
     build:
@@ -75,7 +79,13 @@ services:
     # Migrations first, then the endpoint: the schema must be current before the
     # supervision tree starts querying it. `bin/migrate` exits non-zero on
     # failure, and `&&` stops the container rather than serving a stale schema.
-    command: sh -c "/app/bin/migrate && /app/bin/server"
+    #
+    # `exec` is load-bearing. Without it this `sh` stays PID 1 and the BEAM runs
+    # as its child, so the SIGTERM Docker sends on `stop` reaches the shell and
+    # never the application: no graceful shutdown, no draining, and a SIGKILL ten
+    # seconds later — while "stop the application first" is exactly what taking a
+    # consistent backup asks of an operator.
+    command: sh -c "/app/bin/migrate && exec /app/bin/server"
     depends_on:
       db:
         condition: service_healthy

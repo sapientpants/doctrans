@@ -60,7 +60,16 @@ defmodule ToolchainPinChecker do
 
   # Returns the first problem found in `path`, or nil when every `FROM` is acceptable.
   defp check_dockerfile(path, expected) do
-    Enum.find_value(base_references!(path), &check_reference(path, &1, expected))
+    references = base_references!(path)
+
+    # The version check below only fires on an `elixir:` reference, so a file that
+    # stopped using that base — a different registry, a different image — would
+    # pass in silence, which is the drift this script exists to prevent.
+    if Enum.any?(references, &String.starts_with?(&1, "elixir:")) do
+      Enum.find_value(references, &check_reference(path, &1, expected))
+    else
+      "#{path} has no `FROM elixir:` base to check against #{@mise_file}"
+    end
   end
 
   # The references a `FROM` names, minus the ones naming an earlier stage of the same

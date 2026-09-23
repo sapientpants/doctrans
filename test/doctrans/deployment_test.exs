@@ -62,10 +62,17 @@ defmodule Doctrans.DeploymentTest do
     end
 
     test "publishes every port on loopback only", %{compose: compose} do
-      published = Regex.scan(~r/^\s*-\s*"([\d.]+):\d+:\d+"/m, compose, capture: :all_but_first)
+      # Match every mapping that is only digits, dots and colons — which is the
+      # shape of a port entry and not of `host.docker.internal:host-gateway`.
+      # Matching the address separately would miss `"4000:4000"`, the one that
+      # publishes on every interface, and that is the regression worth catching.
+      published =
+        ~r/^\s*-\s*"([\d.:]+)"/m
+        |> Regex.scan(compose, capture: :all_but_first)
+        |> List.flatten()
 
       assert published != []
-      assert Enum.all?(published, &(&1 == ["127.0.0.1"]))
+      assert Enum.all?(published, &String.starts_with?(&1, "127.0.0.1:"))
     end
 
     test "refuses to start without a secret key base", %{compose: compose} do
@@ -73,9 +80,11 @@ defmodule Doctrans.DeploymentTest do
       assert compose =~ ~r/SECRET_KEY_BASE:\s*\$\{SECRET_KEY_BASE:\?/
     end
 
-    test "runs migrations before the server", %{compose: compose} do
+    test "runs migrations before the server, and execs it", %{compose: compose} do
+      # `exec` is not decoration: without it the wrapping shell stays PID 1 and
+      # the BEAM never receives the SIGTERM that a graceful stop depends on.
       assert [[migrate, server]] =
-               Regex.scan(~r{/app/bin/(migrate)\s*&&\s*/app/bin/(server)}, compose,
+               Regex.scan(~r{/app/bin/(migrate)\s*&&\s*exec\s+/app/bin/(server)}, compose,
                  capture: :all_but_first
                )
 
