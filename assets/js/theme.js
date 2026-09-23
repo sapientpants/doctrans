@@ -49,8 +49,8 @@ const asTheme = (value) => (THEMES.includes(value) ? value : SYSTEM)
 // to deny site data -- and there it throws rather than returning null. An
 // unhandled throw here would abort the rest of this file, which is where the
 // event listeners are registered, so the toggle would go dead in exactly the
-// way U10 set out to fix. Failing to persist costs the reader their choice on
-// the next load; failing to listen costs them the control entirely.
+// way this file exists to prevent. Failing to persist costs the reader their
+// choice on the next load; failing to listen costs them the control entirely.
 const readTheme = () => {
   try {
     return localStorage.getItem(STORAGE_KEY)

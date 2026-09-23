@@ -131,11 +131,11 @@ defmodule Doctrans.MixProject do
       {:mox, "~> 1.0", only: :test},
       {:bypass, "~> 2.1", only: :test},
       {:stream_data, "~> 1.4", only: [:dev, :test]},
-      # Mutation testing: pilot scope only (Q10). Never wired into precommit or CI.
+      # Mutation testing: pilot scope only. Never wired into precommit or CI.
       # Pin the minor — 0.x tool with 26 releases in a few months.
       # REVIEW BY 2026-12-21: this is a pilot, not a standing gate. Drop it unless
-      # someone is actively re-running it against processing/ or jobs/, which Q10
-      # records as the genuinely un-mutated surface.
+      # someone is actively re-running it against processing/ or jobs/, which is
+      # the genuinely un-mutated surface.
       {:muex, "~> 0.11.2", only: [:dev, :test], runtime: false}
     ]
   end

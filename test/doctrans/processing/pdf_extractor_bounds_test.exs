@@ -1,6 +1,6 @@
 defmodule Doctrans.Processing.PdfExtractorBoundsTest do
   @moduledoc """
-  Tests the bounds R04 put around poppler: deadlines, child cleanup, bounded
+  Tests the bounds around poppler: deadlines, child cleanup, bounded
   diagnostics, and the page and image limits.
 
   These tests run with `async: false` because they temporarily mutate the

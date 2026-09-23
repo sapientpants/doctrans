@@ -179,8 +179,8 @@ defmodule Doctrans.Search.Indexer do
     end
   end
 
-  # Only the terminal writes are announced, and only since B03 gave indexing a
-  # place in the interface: before it, no view read `embedding_status`, so a
+  # Only the terminal writes are announced, and only since indexing got a place
+  # in the interface: before that, no view read `embedding_status`, so a
   # broadcast had no subscriber and the run stayed silent. A viewer that is told
   # "queued" and never told anything else goes on claiming it long after the
   # page was indexed.

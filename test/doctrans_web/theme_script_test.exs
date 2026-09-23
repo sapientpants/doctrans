@@ -3,7 +3,7 @@ defmodule DoctransWeb.ThemeScriptTest do
 
   import Doctrans.Fixtures
 
-  # Regression guard for U10. Theme initialization used to be an inline
+  # Regression guard. Theme initialization used to be an inline
   # `<script>` in the root layout, which the router's own `script-src 'self'`
   # refuses, so nothing applied the saved theme and the toggle did nothing. The
   # behavior itself -- localStorage, the `storage` event, the paint timing -- is
@@ -96,12 +96,12 @@ defmodule DoctransWeb.ThemeScriptTest do
     end
 
     test "serves every asset it references", %{document: document} do
-      # Q08. Until the gate built the bundles this could not be asserted at all:
+      # Until the gate built the bundles this could not be asserted at all:
       # `priv/static/assets` is gitignored and neither CI nor pre-commit ever ran
       # `mix assets.build`, so deleting `priv/static/assets/js/theme.js` left the
       # whole suite green while a reader got a 404 on a render-blocking script --
       # which stalls the parser rather than quietly doing nothing, the reason
-      # U10 moved theme initialization into a bundle of its own. The hook
+      # theme initialization moved into a bundle of its own. The hook
       # `3.8. assets-build` in `.pre-commit-config.yaml` now runs ahead of hook
       # `6. mix-test-coverage`, and CI's separate `mix test --cover` step runs
       # after `pre-commit run --all-files`, so by the time this test executes the
@@ -110,7 +110,7 @@ defmodule DoctransWeb.ThemeScriptTest do
       # The consequence, stated plainly: `mix test` now depends on a prior
       # `mix assets.build`, which `mix setup` already runs. There is deliberately
       # no `File.exists?` guard and no tag excluded by default around this --
-      # either would restore exactly the silence Q08 closed.
+      # either would restore exactly the silence the gate closed.
       references =
         document
         |> LazyHTML.query("head script[src], head link[rel=stylesheet]")
@@ -120,10 +120,10 @@ defmodule DoctransWeb.ThemeScriptTest do
         |> Enum.filter(&String.starts_with?(&1, "/assets/"))
 
       # Named before they are fetched, so a query that matched nothing cannot
-      # leave the loop below iterating over an empty list and passing. Q05 is
-      # the cautionary tale: an assertion nothing could reach reads as green
-      # forever. Membership rather than equality, so a fourth asset is a reason
-      # to extend the loop and not a reason for this to fail.
+      # leave the loop below iterating over an empty list and passing: an
+      # assertion nothing could reach reads as green forever. Membership rather
+      # than equality, so a fourth asset is a reason to extend the loop and not
+      # a reason for this to fail.
       for expected <- ["/assets/js/theme.js", "/assets/css/app.css", "/assets/js/app.js"] do
         assert expected in references
       end
@@ -155,7 +155,7 @@ defmodule DoctransWeb.ThemeScriptTest do
       assert "js/theme.js" in args
       # Both entries share `--outdir`, which is what puts the output at the
       # `/assets/js/theme.js` the layout asks for. Whether that build has
-      # actually run is no longer left unchecked: Q08 put `mix assets.build`
+      # actually run is no longer left unchecked: the gate puts `mix assets.build`
       # into the gate ahead of the suite, and "serves every asset it
       # references" above fails if the emitted file is missing or empty. The
       # configuration is still pinned here so that the entry point and the path
@@ -212,7 +212,7 @@ defmodule DoctransWeb.ThemeScriptTest do
 
       # Storage throws rather than returning null when a browser is set to deny
       # site data. Unhandled, it would abort this file before the listeners
-      # below it are registered, which is the dead toggle U10 set out to fix.
+      # below it are registered, which is the dead toggle this guards against.
       assert code =~ ~r/try\s*\{/
       assert code =~ ~r/catch\s*\{/
     end
@@ -245,8 +245,8 @@ defmodule DoctransWeb.ThemeScriptTest do
 
   describe "the theme toggle" do
     test "is reachable from every page", %{conn: conn} do
-      # U12. The listener U10 restored is useless without a control that
-      # dispatches to it, and the toggle was rendered by no template at all.
+      # The restored listener is useless without a control that dispatches to
+      # it, and the toggle was rendered by no template at all.
       document = document_fixture()
 
       for path <- [~p"/", ~p"/search", ~p"/documents/#{document.id}"] do
@@ -313,7 +313,7 @@ defmodule DoctransWeb.ThemeScriptTest do
     end
 
     test "a stored value naming no theme is corrected rather than ignored" do
-      # The version U10 replaced could write `data-theme="undefined"` and leave
+      # The version this replaced could write `data-theme="undefined"` and leave
       # it in storage. Rejecting it on read is not enough on its own: an
       # early return would keep the bad entry forever, healing only if the
       # reader happened to click. Coercing it to "system" clears the key.

@@ -8,7 +8,7 @@ defmodule Doctrans.Jobs.Keys do
   everything the job reaches; that is what the `xref-cycles` gate catches.
 
   **This module must depend on nothing**, so that a caller can read a key at
-  compile time without joining a compile cycle. See PLAN.md G16.
+  compile time without joining a compile cycle.
   """
 
   @document_id "document_id"

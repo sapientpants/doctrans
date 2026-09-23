@@ -13,7 +13,7 @@ defmodule Doctrans.Search.Chunker.Segments do
   strings back together, and a chunk is always one contiguous span. That is what
   makes `binary_part(text, start_offset, end_offset - start_offset)` return a
   chunk's content exactly: the separators between segments are inside the span,
-  so nothing is reconstructed and nothing can drift (PLAN.md Q04). `Chunker`
+  so nothing is reconstructed and nothing can drift. `Chunker`
   groups whole paragraphs on the same principle, slicing the span from the
   first paragraph's start to the last one's end rather than rejoining them on a
   separator the source may not have, and measuring the gaps between them with
@@ -237,7 +237,7 @@ defmodule Doctrans.Search.Chunker.Segments do
   # 400 sentences so separated pack into chunks of up to 1,033 words against a
   # ceiling of 400, measured. This predates the span rewrite -- `Chunker` hit
   # the same mismatch on its paragraph gaps and now measures them exactly --
-  # and is handed to the Unicode-aware `word_count/1` item (PLAN.md Q04).
+  # and is handed to the Unicode-aware `word_count/1` item.
   defp gap_measure(_text, {_start, 0}), do: zero()
   defp gap_measure(text, {_start, len} = gap), do: {0, grapheme_count(slice(text, gap)), len}
 

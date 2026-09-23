@@ -98,6 +98,6 @@ config :doctrans, :pdf_extraction,
   max_image_bytes: 20_000_000
 
 # The dev-only routes are compiled into the test router as well, so the
-# dashboard's CSP nonce (U13) is covered where it actually renders rather than
+# dashboard's CSP nonce is covered where it actually renders rather than
 # only at the plug. This mirrors config/dev.exs; no other code reads the flag.
 config :doctrans, dev_routes: true

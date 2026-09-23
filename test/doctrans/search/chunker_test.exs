@@ -17,7 +17,7 @@ defmodule Doctrans.Search.ChunkerTest do
   @target_graphemes 2400
   @target_bytes 9600
 
-  # One token per script family Q04 names, so a generated document mixes byte
+  # One token per script family, so a generated document mixes byte
   # widths (1, 2, 3 and 4 bytes per codepoint), a grapheme cluster built from
   # joined codepoints, and a script that separates no words with spaces.
   @tokens ["word", "Ubermassig", "Übermäßig", "文書", "वाक्य", "👨‍👩‍👧‍👦"]
@@ -42,7 +42,7 @@ defmodule Doctrans.Search.ChunkerTest do
 
   # The same bound in bytes. `overlap_tail/1` is capped in both units because
   # one many-byte grapheme cluster passes the byte budget long before the
-  # grapheme one, and only the grapheme half was pinned before (PLAN.md Q05).
+  # grapheme one, and only the grapheme half was pinned before.
   @max_overlap_bytes 1602
 
   describe "chunk/1" do
@@ -308,7 +308,7 @@ defmodule Doctrans.Search.ChunkerTest do
 
   describe "oversized paragraphs" do
     test "a long paragraph after an introduction is split rather than emitted whole" do
-      # The probe PLAN.md S04 recorded: a two-word intro then a 2,000-word
+      # The probe that found this: a two-word intro then a 2,000-word
       # paragraph, which produced [2, 2000] against a 300-word target because a
       # paragraph was only ever split when nothing preceded it.
       text = "Short intro.\n\n" <> words(2000)
@@ -508,7 +508,7 @@ defmodule Doctrans.Search.ChunkerTest do
     test "offsets slice back out of the source across separators and scripts" do
       # The round-trip as a property over varied sources rather than one
       # fixture. Each is a single oversized paragraph, which is the region the
-      # span rewrite covers; grouped paragraphs are Q04, below.
+      # span rewrite covers; grouped paragraphs are covered below.
       sources = [
         words(2000),
         "Intro.\n\n" <> words(2000),
@@ -539,7 +539,7 @@ defmodule Doctrans.Search.ChunkerTest do
     end
 
     test "offsets slice back out of the source for grouped paragraphs" do
-      # The second half of Q04: the span covers the source's three newlines, and
+      # The grouped half: the span covers the source's three newlines, and
       # the content used to be rebuilt with two.
       source = "aaa bbb\n\n\nccc ddd\n\n\neee fff"
 
@@ -568,7 +568,7 @@ defmodule Doctrans.Search.ChunkerTest do
     # `end_offset > start_offset` on single-chunk inputs, which no offset
     # arithmetic can fail. What the offsets are for is locating the chunk in the
     # page, so that is what is asserted, over generated documents rather than
-    # one hand-written string (PLAN.md Q04).
+    # one hand-written string.
     property "every chunk slices back out of the source text" do
       # 50 runs rather than the default 100: a generated document runs about
       # 1 KB at the median, 31 KB at the 95th percentile and 68 KB at the
@@ -599,13 +599,13 @@ defmodule Doctrans.Search.ChunkerTest do
   describe "chunk/1 invariants (properties)" do
     # The invariants the fixtures above state only by example, as siblings of
     # the round-trip property over the same `document/0` generator and the same
-    # `max_runs: 50` bound (PLAN.md Q05). All three guard the three-way `cond`
+    # `max_runs: 50` bound. All three guard the three-way `cond`
     # in `accumulate_paragraph/3`: a branch that flushed the wrong accumulator
     # drops, duplicates or reorders whole paragraphs, and only a fixed source
     # said so before.
 
-    # C01's "retain every passage", as an invariant. Literal word-multiset
-    # equality -- what Q05 names -- does *not* hold: asserting it fails on 163
+    # "Retain every passage", as an invariant. Literal word-multiset
+    # equality does *not* hold: asserting it fails on 163
     # of 2,000 generated documents, shrinking to `String.duplicate("word。",
     # 481)`. A space-free run is one word to `word_count/1` however long it is,
     # and `Segments`' `@sentence_boundary` cuts after a full-width terminator on
@@ -723,12 +723,11 @@ defmodule Doctrans.Search.ChunkerTest do
 
   describe "content_for_embedding/2 invariants (properties)" do
     # What goes to the embedding server, against the same `document/0`
-    # generator and the same `max_runs: 50` bound as the properties above
-    # (PLAN.md Q05). This is the embedded-versus-stored divergence surface from
-    # C01: the stored `content` is overlap-free and this is the only place the
-    # two are allowed to differ, so the shape of the difference is what is
-    # pinned -- the chunk's own content, whole, at the end, with at most a
-    # bounded prefix in front of it.
+    # generator and the same `max_runs: 50` bound as the properties above. This
+    # is the embedded-versus-stored divergence surface: the stored `content` is
+    # overlap-free and this is the only place the two are allowed to differ, so
+    # the shape of the difference is what is pinned -- the chunk's own content,
+    # whole, at the end, with at most a bounded prefix in front of it.
     #
     # The example it replaces was "content_for_embedding for chunk with short
     # previous chunk", which wrapped its body in `if length(chunks) > 1` and
@@ -814,7 +813,7 @@ defmodule Doctrans.Search.ChunkerTest do
     end
 
     test "the blank lines inside a grouped chunk survive into the overlap" do
-      # The same defect on the shape Q04 created: a grouped chunk's content is
+      # The same defect on the grouped shape: a grouped chunk's content is
       # the source span, so it carries the real `"\n\n\n"` between its
       # paragraphs, and rejoining its words flattened that to one space.
       chunks = Chunker.chunk("aaa\n\n\nbbb\n\n" <> words(300))
@@ -863,7 +862,7 @@ defmodule Doctrans.Search.ChunkerTest do
   # `long_paragraph`, which takes the split branch instead. Without this shape
   # the branch was reached by no generated document at all -- deleting its
   # flush, so it drops what it has accumulated, left all four properties here
-  # passing (PLAN.md Q05).
+  # passing.
   defp medium_paragraph do
     gen all(
           token <- member_of(@tokens),

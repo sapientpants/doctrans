@@ -3,7 +3,7 @@
 #
 # What this measures, and what it does not. Credo's `Refactor.Nesting`,
 # `CyclomaticComplexity`, `ABCSize` and `ModuleDependencies` all run at Credo's default
-# thresholds (G11) and measure complexity and coupling directly. Line count measures
+# thresholds and measure complexity and coupling directly. Line count measures
 # neither. What it catches that none of them can is a module that has accumulated
 # several *simple* responsibilities: a file can hold a long template, a multi-stage
 # upload pipeline and a stream-ordering subsystem while every function in it stays
@@ -89,7 +89,7 @@ defmodule ModuleSizeChecker do
       IO.ANSI.yellow() <>
         "Split these along a seam the code already has, rather than raising the limit.\n" <>
         "The limit was raised 500 -> 600 once before, inside a feature PR, to let that\n" <>
-        "feature land; moving it again is a decision that belongs in PLAN.md." <>
+        "feature land; moving it again is a decision to take on its own." <>
         IO.ANSI.reset()
     )
 
