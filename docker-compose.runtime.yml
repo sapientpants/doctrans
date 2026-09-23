@@ -1,0 +1,95 @@
+# Optional runtime deployment: an assembled OTP release, not a dev checkout.
+#
+# `docker-compose.yml` is the development stack — it builds `Dockerfile.dev`,
+# bind-mounts this source tree into the container, and runs `mix phx.server`
+# with hot reload, so the code the container executes is whatever is on disk.
+# This file builds `Dockerfile` instead: a compiled release with no Mix, no
+# sources, and no bind mount, running as a non-root user. All state lives in two
+# named volumes — the database and the document store — which are the two halves
+# a backup has to carry; see "Backup and restore" in the README, and run
+# `/app/bin/verify_restore` in this container to check that they still agree.
+#
+#   docker compose -f docker-compose.runtime.yml up --build
+#
+# SECRET_KEY_BASE must be set in the environment (or in a `.env` beside this
+# file); everything else has a working default for a local, single-machine run.
+
+# Compose otherwise derives the project name from the directory, which is the
+# same `doctrans` the development stack uses — `up` would then try to reconcile
+# this file against the *running dev containers*. An explicit name keeps the two
+# stacks apart, and makes `doctrans-runtime-app-1` obvious in `docker ps`.
+name: doctrans-runtime
+
+services:
+  db:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: doctrans_prod
+    volumes:
+      # A distinct name from the development stack's `pgdata`, so the two never
+      # share state and so `docker volume ls` tells an operator taking a backup
+      # which volume belongs to which deployment.
+      - doctrans_runtime_pgdata:/var/lib/postgresql
+    # Bind to loopback only: Doctrans is a local, single-user app with no
+    # authentication, so the database should not be reachable from the LAN.
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: ecto://postgres:${POSTGRES_PASSWORD:-postgres}@db/doctrans_prod
+      # Fail at `compose up` with this message rather than at boot with a stack
+      # trace. Generate one with: mix phx.gen.secret
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE; generate one with mix phx.gen.secret}
+      # Set literally, not as `${OPENAI_HOST:-...}`: Compose interpolates from
+      # the `.env` beside this file, which is also the app's own env file, and
+      # the value an operator keeps there points at their *host* — inside the
+      # container `localhost` is the container. Edit this line, or use a compose
+      # override file, to reach an inference server somewhere else.
+      OPENAI_HOST: http://host.docker.internal:8000
+      PHX_HOST: localhost
+      PORT: "4000"
+      # Bind on all interfaces *inside the container*; the published port below
+      # is what actually limits reachability to this machine.
+      PHX_BIND_IP: "0.0.0.0"
+      # The volume below is mounted here, and the image already owns this path.
+      DOCTRANS_DATA_DIR: /var/lib/doctrans
+    volumes:
+      # Documents, page images and converted PDFs. Distinct from anything the
+      # development stack uses, and legible in `docker volume ls`.
+      - doctrans_runtime_data:/var/lib/doctrans
+    # Bind to loopback only: Doctrans is a local, single-user app with no
+    # authentication, so it is not exposed to the LAN by default.
+    ports:
+      - "127.0.0.1:4000:4000"
+    # Migrations first, then the endpoint: the schema must be current before the
+    # supervision tree starts querying it. `bin/migrate` exits non-zero on
+    # failure, and `&&` stops the container rather than serving a stale schema.
+    command: sh -c "/app/bin/migrate && /app/bin/server"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Allow access to an inference server running on the host machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+# Named explicitly rather than left to Compose's `<project>_<key>` prefixing, so
+# the two volumes an operator has to back up appear under exactly these names in
+# `docker volume ls` — and cannot be confused with the development stack's
+# `doctrans_pgdata`.
+volumes:
+  doctrans_runtime_pgdata:
+    name: doctrans_runtime_pgdata
+  doctrans_runtime_data:
+    name: doctrans_runtime_data

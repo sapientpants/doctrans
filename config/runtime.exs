@@ -96,12 +96,62 @@ if config_env() == :prod do
   # endpoint defaults to binding on loopback only. Set PHX_BIND_IP to
   # expose it to other interfaces, e.g. PHX_BIND_IP=0.0.0.0 to reach it
   # from a trusted LAN (you do so at your own risk: there is no auth).
-  bind_ip = System.get_env("PHX_BIND_IP") || "127.0.0.1"
+  #
+  # The value has to be parsed here rather than passed through: Bandit types
+  # `:ip` as `:inet.socket_address()` and hands it to `:gen_tcp.listen/2`, which
+  # exits with :badarg on a string, so a textual address stops the endpoint from
+  # ever starting. `:inet.parse_address/1` takes a charlist and accepts IPv4 and
+  # IPv6 literals alike; it resolves no host names, which is why the error below
+  # says so.
+  bind_ip_string = System.get_env("PHX_BIND_IP") || "127.0.0.1"
+
+  bind_ip =
+    case :inet.parse_address(String.to_charlist(bind_ip_string)) do
+      {:ok, address} ->
+        address
+
+      {:error, _reason} ->
+        raise "PHX_BIND_IP must be an IPv4 or IPv6 address literal, got: #{bind_ip_string}. " <>
+                "Use 127.0.0.1 to bind on loopback, 0.0.0.0 (or :: for IPv6) to accept " <>
+                "connections on every interface. Host names are not resolved."
+    end
+
+  # The advertised URL is the address this app reports as its own, and it has to
+  # describe what the deployment actually serves.
+  #
+  # Its `:host` is load-bearing: Phoenix's socket default is `check_origin: true`,
+  # which compares the websocket handshake's `Origin` *host* against this config
+  # (the scheme and port are not compared — see
+  # `Phoenix.Socket.Transport.origin_allowed?/4`). A wrong host therefore refuses
+  # every LiveView connection, and an all-LiveView app renders once and then goes
+  # dead, which is why PHX_HOST has to be set to whatever the browser types.
+  #
+  # The scheme and port are what the app hands out — `Endpoint.url/0`,
+  # `url(~p"...")`, the "Access ... at" line logged at boot. Hardcoding https on
+  # 443 while the listener speaks plain HTTP on PORT makes all of those name an
+  # address that does not exist. Serving HTTP directly is the default; PHX_SCHEME
+  # =https restores the behind-a-TLS-proxy case, where the proxy terminates on 443
+  # and this container still listens on PORT.
+  scheme = System.get_env("PHX_SCHEME") || "http"
+
+  url_port =
+    case scheme do
+      "http" ->
+        port
+
+      "https" ->
+        443
+
+      other ->
+        raise "PHX_SCHEME must be \"http\" or \"https\", got: #{other}. " <>
+                "Set it to https only when a TLS proxy terminates in front of this app; " <>
+                "the app itself always serves plain HTTP on PORT."
+    end
 
   config :doctrans, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :doctrans, DoctransWeb.Endpoint,
-    url: [host: host, port: 443, scheme: "https"],
+    url: [host: host, port: url_port, scheme: scheme],
     http: [
       # Bind on loopback by default (see PHX_BIND_IP above); exposing to a
       # trusted LAN requires an explicit PHX_BIND_IP.

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+# Checks that the database and the storage root still describe one library, and
+# exits non-zero when they do not. Run it after restoring this deployment's two
+# volumes, before letting the application write to them: a release carries no
+# Mix, so `mix verify_restore` is not available here.
+cd -P -- "$(dirname -- "$0")"
+exec ./doctrans eval "Doctrans.Release.verify_restore()"

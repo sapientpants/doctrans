@@ -3,7 +3,8 @@ defmodule Doctrans.RuntimeConfigTest do
   # root block it defines, so the operator-facing variable is otherwise untested.
   use ExUnit.Case, async: false
 
-  @env_keys ~w(DOCTRANS_DATA_DIR DATABASE_URL SECRET_KEY_BASE DOCTRANS_ENV_FILE)
+  @env_keys ~w(DOCTRANS_DATA_DIR DATABASE_URL SECRET_KEY_BASE DOCTRANS_ENV_FILE
+               PHX_BIND_IP PHX_SCHEME PORT)
 
   setup do
     previous = Map.new(@env_keys, &{&1, System.get_env(&1)})
@@ -21,15 +22,18 @@ defmodule Doctrans.RuntimeConfigTest do
       "DOCTRANS_ENV_FILE" => Path.join(System.tmp_dir!(), "missing-#{Uniq.UUID.uuid7()}.env")
     })
 
-    System.delete_env("DOCTRANS_DATA_DIR")
+    Enum.each(~w(DOCTRANS_DATA_DIR PHX_BIND_IP PHX_SCHEME PORT), &System.delete_env/1)
     :ok
   end
 
-  defp upload_dir(env) do
+  defp read_config(env) do
     Path.expand("../../config/runtime.exs", __DIR__)
     |> Config.Reader.read!(env: env)
-    |> get_in([:doctrans, :uploads, :upload_dir])
   end
+
+  defp upload_dir(env), do: get_in(read_config(env), [:doctrans, :uploads, :upload_dir])
+
+  defp endpoint(key), do: get_in(read_config(:prod), [:doctrans, DoctransWeb.Endpoint, key])
 
   test "an absolute DOCTRANS_DATA_DIR becomes the storage root" do
     System.put_env("DOCTRANS_DATA_DIR", "/srv/doctrans-data/")
@@ -66,5 +70,60 @@ defmodule Doctrans.RuntimeConfigTest do
     System.put_env("DOCTRANS_DATA_DIR", "")
 
     assert upload_dir(:test) == nil
+  end
+
+  # Bandit types `:ip` as `:inet.socket_address()` and hands it to
+  # `:gen_tcp.listen/2`, which exits with :badarg on a string. A textual address
+  # here is not a cosmetic problem: the endpoint never starts.
+  describe "PHX_BIND_IP" do
+    test "defaults to the loopback address as a tuple, not a string" do
+      assert endpoint(:http)[:ip] == {127, 0, 0, 1}
+    end
+
+    test "parses an explicit IPv4 literal" do
+      System.put_env("PHX_BIND_IP", "0.0.0.0")
+
+      assert endpoint(:http)[:ip] == {0, 0, 0, 0}
+    end
+
+    test "parses an IPv6 literal" do
+      System.put_env("PHX_BIND_IP", "::1")
+
+      assert endpoint(:http)[:ip] == {0, 0, 0, 0, 0, 0, 0, 1}
+    end
+
+    test "a value that is not an address literal is rejected by name" do
+      System.put_env("PHX_BIND_IP", "localhost")
+
+      assert_raise RuntimeError, ~r/PHX_BIND_IP.*localhost/s, fn -> endpoint(:http) end
+    end
+  end
+
+  # The advertised URL is what the app hands out as its own address, in
+  # `Endpoint.url/0` and in the line logged at boot. Hardcoding https on 443 in
+  # front of a listener that speaks plain HTTP on PORT names an address that
+  # does not exist.
+  describe "PHX_SCHEME" do
+    test "the advertised URL defaults to http on the listening port" do
+      System.put_env("PORT", "4321")
+
+      assert endpoint(:url)[:scheme] == "http"
+      assert endpoint(:url)[:port] == 4321
+    end
+
+    test "https advertises 443, for a TLS proxy terminating in front" do
+      System.put_env(%{"PHX_SCHEME" => "https", "PORT" => "4321"})
+
+      assert endpoint(:url)[:scheme] == "https"
+      assert endpoint(:url)[:port] == 443
+      # The listener itself still speaks plain HTTP behind the proxy.
+      assert endpoint(:http)[:port] == 4321
+    end
+
+    test "a scheme that is neither http nor https is rejected by name" do
+      System.put_env("PHX_SCHEME", "ftp")
+
+      assert_raise RuntimeError, ~r/PHX_SCHEME.*ftp/s, fn -> endpoint(:url) end
+    end
   end
 end

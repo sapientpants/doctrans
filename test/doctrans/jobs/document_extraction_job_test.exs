@@ -157,6 +157,37 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
     end
   end
 
+  describe "perform/1 with a file_path from another storage root" do
+    test "extracts from the retained original under the current root" do
+      document = document_fixture()
+      document_source_fixture(document)
+
+      # A job queued before a restore carries an absolute path into the root the
+      # application had then. The file is present under the root it has now, so
+      # the stale arg must not be what decides the document is unreadable.
+      stale_path =
+        Path.join([
+          System.tmp_dir!(),
+          "doctrans-old-root",
+          "documents",
+          document.id,
+          "original.pdf"
+        ])
+
+      refute File.regular?(stale_path)
+
+      assert :ok =
+               perform_job(DocumentExtractionJob, %{
+                 "document_id" => document.id,
+                 "file_path" => stale_path
+               })
+
+      reloaded = Doctrans.Documents.get_document_with_pages!(document.id)
+      refute reloaded.status == "error"
+      refute reloaded.pages == []
+    end
+  end
+
   describe "perform/1 without file_path (retry case)" do
     test "returns error when document not found" do
       fake_document_id = Uniq.UUID.uuid7()
