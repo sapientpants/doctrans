@@ -44,7 +44,6 @@ defmodule DoctransWeb.ConnCase do
 
   setup tags do
     Doctrans.DataCase.setup_sandbox(tags)
-    Process.put(:doctrans_conn_case_async, tags[:async] == true)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 
@@ -73,7 +72,7 @@ defmodule DoctransWeb.ConnCase do
   end
 
   def check_live_result!({:ok, %{module: DoctransWeb.DocumentLive.Index}, _html} = result) do
-    if Process.get(:doctrans_conn_case_async, false) do
+    if Doctrans.TestEnv.async?() do
       raise ArgumentError,
             "Dashboard LiveView tests must use async: false because PubSub is global"
     end
@@ -82,6 +81,25 @@ defmodule DoctransWeb.ConnCase do
   end
 
   def check_live_result!(result), do: result
+
+  @doc """
+  Puts the LiveView process itself into Oban's `:manual` testing mode.
+
+  `Oban.Testing.with_testing_mode/2` records the mode in the *calling* process's
+  dictionary, but a `render_submit/1` is handled in the LiveView process, and
+  that is the process which inserts the job -- so setting it in the test process
+  is what lets a submitted upload run its worker inline. `:sys.replace_state/2`
+  is only a way to run `Process.put/2` over there; the socket state is returned
+  unchanged, and the flag leaves with the view at the end of the test.
+  """
+  def put_oban_manual_mode(view) do
+    :sys.replace_state(view.pid, fn state ->
+      Process.put(:oban_testing, :manual)
+      state
+    end)
+
+    view
+  end
 
   @doc """
   Renders a single element, for assertions scoped to one claim on the page.

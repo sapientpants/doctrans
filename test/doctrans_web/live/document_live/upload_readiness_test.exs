@@ -275,10 +275,7 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
       assert has_element?(view, @problems)
       refute has_element?(view, "#start-translation-btn[disabled]")
 
-      :sys.replace_state(view.pid, fn state ->
-        Process.put(:oban_testing, :manual)
-        state
-      end)
+      put_oban_manual_mode(view)
 
       Oban.Testing.with_testing_mode(:manual, fn ->
         view |> form("#upload-form", %{target_language: "en"}) |> render_submit()

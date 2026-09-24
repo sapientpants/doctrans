@@ -73,6 +73,10 @@ defmodule Doctrans.DeploymentTest do
     volumes =
       Enum.flat_map(compose["services"], fn {_name, service} -> service["volumes"] || [] end)
 
+    # Without this, dropping `volumes:` altogether -- the regression that puts
+    # documents in the container's writable layer -- satisfies `Enum.all?/2`
+    # vacuously. `assert_loopback_ports!/1` guards the same way.
+    assert volumes != []
     assert Enum.all?(volumes, &(&1["type"] == "volume")), inspect(volumes)
   end
 

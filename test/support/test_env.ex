@@ -28,10 +28,18 @@ defmodule Doctrans.TestEnv do
   def record_async(tags), do: Process.put(@async_key, tags[:async] == true)
 
   @doc """
+  Whether the running test registered itself as `async: true`.
+
+  `nil` when no case template registered this process at all, which is what
+  `put_env/2` refuses on.
+  """
+  def async?, do: Process.get(@async_key)
+
+  @doc """
   Sets `:doctrans`'s `key` for the running test and restores it afterwards.
   """
   def put_env(key, value) do
-    registered = Process.get(@async_key)
+    registered = async?()
 
     if is_nil(registered) do
       raise ArgumentError,

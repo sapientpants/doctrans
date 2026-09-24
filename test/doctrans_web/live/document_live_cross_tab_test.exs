@@ -336,7 +336,7 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
 
   describe "the serial constraint this file documents" do
     test "the runtime guard rejects dashboard mounts through wrapped connections", %{conn: conn} do
-      Process.put(:doctrans_conn_case_async, true)
+      Doctrans.TestEnv.record_async(async: true)
 
       assert_raise ArgumentError, ~r/Dashboard LiveView tests must use async: false/, fn ->
         live(put_req_header(conn, "accept-language", "de"), ~p"/?lang=de")
@@ -345,7 +345,7 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
 
     test "the runtime guard rejects connected mounts and live navigation too", %{conn: conn} do
       rendered = get(conn, ~p"/")
-      Process.put(:doctrans_conn_case_async, true)
+      Doctrans.TestEnv.record_async(async: true)
 
       assert_raise ArgumentError, ~r/Dashboard LiveView tests must use async: false/, fn ->
         live(rendered)
