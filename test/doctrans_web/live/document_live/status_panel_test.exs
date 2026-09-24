@@ -123,6 +123,10 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
       # re-render is genuinely late rather than merely asynchronous.
       Process.sleep(200)
 
+      # The panel itself is asserted alongside the refutation: "no retry button"
+      # is also what a panel that failed to render says, and that is the one way
+      # this test could pass while reporting nothing.
+      assert has_element?(view, "#processing-status")
       refute has_element?(view, "#retry-indexing")
     end
   end
