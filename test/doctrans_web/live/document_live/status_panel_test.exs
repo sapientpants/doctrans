@@ -8,7 +8,6 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
   alias Doctrans.Repo
 
   @content "#processing-status-content"
-  @index "#processing-status-index"
 
   # Oban runs `testing: :inline`, so an insert executes the job then and there
   # and a retry would run a real model call. Both processes have to opt out:
@@ -57,7 +56,6 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
       assert has_element?(view, ~s{#{@content}[data-content-state="completed"]})
-      assert has_element?(view, ~s{#{@index}[data-index-state="failed"]})
       refute has_element?(view, "#processing-status-failed-pages")
 
       # Only the indexing half is recoverable here, and that is the whole point:
@@ -67,16 +65,7 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
       refute has_element?(view, "#cancel-processing")
     end
 
-    test "an unindexed document says so without claiming zero of zero", %{conn: conn} do
-      document = document_fixture(%{status: "queued", total_pages: 2})
-
-      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-
-      assert has_element?(view, ~s{#{@index}[data-index-state="none"]})
-      assert has_element?(view, "#processing-status-index-count")
-    end
-
-    test "a cancelled document renders its own badge rather than the unknown fallback", %{
+    test "a cancelled document reports the stop and keeps its way back", %{
       conn: conn
     } do
       document = document_fixture(%{status: "cancelled", total_pages: 1})
@@ -86,8 +75,6 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
       assert has_element?(view, ~s{#{@content}[data-content-state="cancelled"]})
-      assert has_element?(view, "header .badge-neutral")
-      refute has_element?(view, "header .badge", "Unknown")
 
       # Recovering from a stop must not require deleting the document, so the
       # whole-document reprocess stays available for a cancelled one.
@@ -119,13 +106,13 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
   # The half that escaped review: both ends of this were tested apart -- the
   # indexer's broadcast and the panel's rendering -- while the wire between them
   # was not, so a run that finished without announcing itself left the panel
-  # asserting "queued" and every test still passed.
+  # offering a recovery nothing needed and every test still passed.
   describe "following indexing to its end" do
-    test "the panel stops saying queued once the run reports in", %{conn: conn} do
+    test "the panel withdraws the retry once the run reports in", %{conn: conn} do
       {document, page} = index_failure_fixture()
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-      assert has_element?(view, ~s{#{@index}[data-index-state="failed"]})
+      assert has_element?(view, "#retry-indexing")
 
       indexed =
         page |> Page.embedding_changeset(%{embedding_status: "completed"}) |> Repo.update!()
@@ -136,7 +123,7 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
       # re-render is genuinely late rather than merely asynchronous.
       Process.sleep(200)
 
-      assert render(view) =~ ~s(data-index-state="ready")
+      refute has_element?(view, "#retry-indexing")
     end
   end
 
@@ -228,7 +215,6 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
       document = completed_document_with_embedding_fixture()
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-      assert has_element?(view, ~s{#{@index}[data-index-state="ready"]})
       refute has_element?(view, "#retry-indexing")
 
       queue_only(view, fn -> render_click(view, "retry_indexing", %{}) end)

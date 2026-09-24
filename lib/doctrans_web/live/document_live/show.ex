@@ -17,7 +17,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   alias DoctransWeb.ErrorMessages
 
   import DoctransWeb.DocumentLive.Components,
-    only: [status_color: 1, status_text: 1, language_direction: 1, processing_progress: 1]
+    only: [language_direction: 1, processing_progress: 1]
 
   import DoctransWeb.DocumentLive.ViewerComponents
 

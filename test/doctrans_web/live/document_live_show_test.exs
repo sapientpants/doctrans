@@ -213,11 +213,16 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       assert has_element?(view, "#zoom-out[disabled]")
     end
 
+    # The status panel is the only badge now that the header no longer repeats
+    # it, and it reports the pipeline rather than the column: a document marked
+    # processing with no job running for it is idle -- the gap startup recovery
+    # exists to repair -- not work in progress.
     test "displays document status badge", %{conn: conn} do
       doc = document_with_pages_fixture(%{status: "processing"}, 1)
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
-      assert has_element?(view, ".badge", "Processing")
+      assert has_element?(view, "#processing-status-content .badge")
+      assert has_element?(view, ~s{#processing-status-content[data-content-state="idle"]})
     end
 
     test "displays target language", %{conn: conn} do
