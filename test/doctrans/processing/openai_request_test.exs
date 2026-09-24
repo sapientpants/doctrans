@@ -14,6 +14,10 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     CircuitBreaker.reset(:openai_api)
     prev_openai = Application.get_env(:doctrans, :openai)
     prev_embedding = Application.get_env(:doctrans, :embedding)
+    prev_req = Application.fetch_env(:req, :default_options)
+    # Exercise the real retry path without spending seconds on backoff in tests
+    # whose assertions concern the resulting HTTP contract.
+    Req.default_options(Keyword.put(Req.default_options(), :retry_delay, 0))
     test_pid = self()
 
     bypass = Bypass.open()
@@ -41,6 +45,12 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       CircuitBreaker.reset(:openai_api)
       restore_env(:openai, prev_openai)
       restore_env(:embedding, prev_embedding)
+
+      case prev_req do
+        {:ok, value} -> Application.put_env(:req, :default_options, value)
+        :error -> Application.delete_env(:req, :default_options)
+      end
+
       Bypass.down(bypass)
     end)
 
@@ -97,6 +107,8 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
       test "counts one transient failure for #{@operation} despite HTTP retries", context do
         Bypass.stub(context.bypass, "POST", "/v1/chat/completions", fn conn ->
+          send(context.test_pid, :transient_http_request)
+
           conn
           |> Plug.Conn.put_resp_header("retry-after", "0")
           |> json(503, %{"error" => "unavailable"})
@@ -107,6 +119,8 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
         assert_received {:circuit_failure, :openai_api}
         refute_received {:circuit_failure, :openai_api}
+        assert_received :transient_http_request
+        assert_received :transient_http_request
       end
 
       test "does not count permanent failures for #{@operation}", context do
@@ -380,7 +394,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
                OpenAI.chat([%{role: "user", content: "x"}])
     end
 
-    test "returns error and melts fuse on non-200 status", %{bypass: bypass} do
+    test "reports the HTTP status when chat fails", %{bypass: bypass} do
       # stub (not expect): :transient retries POSTs on 5xx, so the route may hit multiple times
       Bypass.stub(bypass, "POST", "/v1/chat/completions", fn conn ->
         json(conn, 500, %{"error" => %{"finish_reason" => "stop", "message" => "boom"}})
@@ -501,10 +515,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 503, %{"error" => "unavailable"})
       end)
 
-      assert {:error, reason} = OpenAI.extract_markdown(path)
-      assert {code, bindings} = reason
-      assert code in [:http_error, :transport_error, :operation_failed]
-      assert is_list(bindings)
+      assert {:error, {:http_error, [status: 503]}} = OpenAI.extract_markdown(path)
     end
   end
 
@@ -516,6 +527,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       )
 
     File.write!(path, "fake-image-data")
+    on_exit(fn -> File.rm(path) end)
     path
   end
 
@@ -539,10 +551,16 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert request["model"] == "test-translation-model"
       assert request["max_tokens"] == 8192
       assert request["chat_template_kwargs"] == %{"enable_thinking" => false}
+      assert [%{"role" => "user", "content" => prompt}] = request["messages"]
+      assert prompt =~ "from de to en"
+      assert prompt =~ "Original text"
     end
 
-    test "honours explicit model override in translation", %{bypass: bypass} do
+    test "honours explicit model override in translation", %{bypass: bypass, test_pid: test_pid} do
       Bypass.expect(bypass, "POST", "/v1/chat/completions", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:translation_override_request, Jason.decode!(body)})
+
         json(conn, 200, %{
           "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "ok"}}]
         })
@@ -550,6 +568,8 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
       assert {:ok, "ok"} =
                OpenAI.translate("text", "de", "en", model: "my-translation-model")
+
+      assert_received {:translation_override_request, %{"model" => "my-translation-model"}}
     end
 
     test "propagates errors", %{bypass: bypass} do
@@ -557,10 +577,8 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 400, %{"error" => "bad request"})
       end)
 
-      assert {:error, reason} = OpenAI.translate("Original text", "de", "en")
-      assert {code, bindings} = reason
-      assert code in [:http_error, :transport_error, :operation_failed]
-      assert is_list(bindings)
+      assert {:error, {:http_error, [status: 400]}} =
+               OpenAI.translate("Original text", "de", "en")
     end
   end
 
@@ -597,14 +615,15 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert request["stream"] == true
     end
 
-    test "invokes on_delta as SSE data arrives in fragments", %{test_pid: test_pid} do
+    test "emits a delta before the server finishes the response", %{test_pid: test_pid} do
       payload =
         Jason.encode!(%{
           "choices" => [%{"delta" => %{"role" => "assistant", "content" => "hél"}}]
         })
 
-      # Split the JSON frame mid-line, inside the multibyte "é", so the
-      # collector's line buffer must reassemble across TCP segments
+      # Send fragments split inside "é"; TCP may coalesce these writes.
+      # SSECollectorTest proves reassembly, while this test proves delivery
+      # before the server sends the rest of the response.
       {offset, 2} = :binary.match(payload, "é")
       mid = offset + 1
 
@@ -635,14 +654,18 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
             "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n" <>
               "content-length: #{byte_size(body)}\r\n\r\n"
 
-          # nodelay is set on the socket, so each fragment is flushed as its
-          # own segment and the collector must reassemble the lines
-          :gen_tcp.send(sock, headers)
-          :gen_tcp.send(sock, frag1)
-          Process.sleep(50)
-          :gen_tcp.send(sock, frag2)
-          Process.sleep(50)
-          :gen_tcp.send(sock, frag3)
+          :ok = :gen_tcp.send(sock, headers)
+          :ok = :gen_tcp.send(sock, frag1)
+          :ok = :gen_tcp.send(sock, frag2)
+
+          # The second event cannot arrive until the test observed the first
+          # callback. Buffering the whole response therefore cannot pass.
+          receive do
+            :finish_stream -> :ok = :gen_tcp.send(sock, frag3)
+          after
+            10_000 -> raise "stream was not released"
+          end
+
           :gen_tcp.close(sock)
         end)
 
@@ -665,10 +688,14 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
       on_delta = fn piece -> send(test_pid, {:delta, piece}) end
 
-      assert {:ok, "héllo"} =
-               OpenAI.chat_stream([%{role: "user", content: "hi"}], on_delta)
+      client =
+        Task.async(fn -> OpenAI.chat_stream([%{role: "user", content: "hi"}], on_delta) end)
 
-      assert_receive {:delta, "hél"}
+      assert_receive {:delta, "hél"}, 5_000
+      assert Task.yield(client, 0) == nil
+      refute_received {:delta, "lo"}
+      send(server, :finish_stream)
+      assert {:ok, "héllo"} = Task.await(client, 5_000)
       assert_receive {:delta, "lo"}
     end
 
@@ -677,12 +704,8 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 404, %{"error" => "nope"})
       end)
 
-      assert {:error, reason} =
+      assert {:error, {:http_error, [status: 404]}} =
                OpenAI.chat_stream([%{role: "user", content: "hi"}], fn _ -> :ok end)
-
-      assert {code, bindings} = reason
-      assert code in [:http_error, :transport_error, :operation_failed]
-      assert is_list(bindings)
     end
 
     test "returns error on transport failure" do
@@ -694,12 +717,8 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         chat_model: "test-chat-model"
       )
 
-      assert {:error, reason} =
+      assert {:error, {:transport_error, [reason: :econnrefused]}} =
                OpenAI.chat_stream([%{role: "user", content: "hi"}], fn _ -> :ok end)
-
-      assert {code, bindings} = reason
-      assert code in [:http_error, :transport_error, :operation_failed]
-      assert is_list(bindings)
     end
   end
 
@@ -715,7 +734,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     end
 
     test "returns truncated embedding vector", %{bypass: bypass, test_pid: test_pid} do
-      vector = Enum.map(1..1500, fn _ -> 0.5 end)
+      vector = Enum.map(1..1500, &(&1 / 2))
 
       Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -724,7 +743,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:ok, result} = OpenAI.embed("some text")
-      assert length(Pgvector.to_list(result)) == 1024
+      assert Pgvector.to_list(result) == Enum.map(1..1024, &(&1 / 2))
 
       assert_receive {:embed_request, headers, body}
       assert {"authorization", "Bearer sk-embed-456"} in headers
@@ -755,7 +774,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:error, reason} = OpenAI.embed("text")
-      assert {:embedding_too_short, [expected: 1024, actual: _]} = reason
+      assert {:embedding_too_short, [expected: 1024, actual: 3]} = reason
     end
 
     test "returns error on non-200 status", %{bypass: bypass} do
@@ -764,10 +783,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 500, %{"error" => "boom"})
       end)
 
-      assert {:error, reason} = OpenAI.embed("text")
-      assert {code, bindings} = reason
-      assert code in [:http_error, :transport_error, :operation_failed]
-      assert is_list(bindings)
+      assert {:error, {:http_error, [status: 500]}} = OpenAI.embed("text")
     end
 
     test "returns error for invalid body", %{bypass: bypass} do
@@ -902,10 +918,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 500, %{"error" => "boom"})
       end)
 
-      assert {:error, reason} = OpenAI.list_models()
-      assert {code, bindings} = reason
-      assert code in [:http_error, :transport_error, :operation_failed]
-      assert is_list(bindings)
+      assert {:error, {:http_error, [status: 500]}} = OpenAI.list_models()
     end
 
     test "returns error for invalid body", %{bypass: bypass} do

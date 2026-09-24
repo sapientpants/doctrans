@@ -12,7 +12,7 @@ defmodule Doctrans.TestEnv do
   not just this one. That makes it safe only in an `async: false` test, and
   `put_env/2` raises in an async one rather than silently handing a concurrent
   test the wrong collaborator. The check reads a flag recorded per test by
-  `Doctrans.DataCase.setup_sandbox/1`.
+  `Doctrans.DataCase.setup_sandbox/1` or `Doctrans.EnvCase`.
   """
 
   import ExUnit.Callbacks, only: [on_exit: 1]
@@ -31,7 +31,14 @@ defmodule Doctrans.TestEnv do
   Sets `:doctrans`'s `key` for the running test and restores it afterwards.
   """
   def put_env(key, value) do
-    if Process.get(@async_key, false) do
+    registered = Process.get(@async_key)
+
+    if is_nil(registered) do
+      raise ArgumentError,
+            "use Doctrans.EnvCase, DataCase or ConnCase before overriding application env"
+    end
+
+    if registered do
       raise ArgumentError, """
       #{inspect(__MODULE__)}.put_env/2 was called from an async test.
 

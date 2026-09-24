@@ -409,10 +409,17 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
 
       StartupRecovery.run_batch({:pages, nil})
 
-      assert Enum.all?(
-               all_enqueued(worker: LlmProcessingJob),
-               &(&1.args["translation_model"] == "chosen-text")
-             )
+      jobs = all_enqueued(worker: LlmProcessingJob)
+      pages = Documents.list_pages(run.id)
+      assert length(jobs) == 3
+
+      assert Enum.sort(Enum.map(jobs, & &1.args["page_id"])) ==
+               Enum.sort(Enum.map(pages, & &1.id))
+
+      for job <- jobs do
+        assert job.args["translation_model"] == "chosen-text"
+        assert job.args["extraction_model"] == "chosen-vision"
+      end
     end)
   end
 

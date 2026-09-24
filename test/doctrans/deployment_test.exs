@@ -21,79 +21,126 @@ defmodule Doctrans.DeploymentTest do
   @root Path.expand("../..", __DIR__)
   @data_dir "/var/lib/doctrans"
 
+  setup_all do
+    %{
+      runtime_compose: compose!("docker-compose.runtime.yml"),
+      development_compose: compose!("docker-compose.yml"),
+      dockerfile: read("Dockerfile")
+    }
+  end
+
   defp read(name), do: File.read!(Path.join(@root, name))
 
-  # Match every mapping that is only digits, dots and colons — which is the
-  # shape of a port entry and not of `host.docker.internal:host-gateway`, nor of
-  # a volume, both of which carry letters or slashes. Matching the address
-  # separately would miss `"4000:4000"`, the one that publishes on every
-  # interface, and that is the regression worth catching.
-  #
-  # The quotes have to be optional. `- 4000:4000` is valid Compose YAML — with no
-  # space after the colon it is a plain scalar, not a mapping — so a regex that
-  # required them would skip precisely the entry that publishes on every
-  # interface and leave the assertions below passing over it.
-  defp published_ports(compose) do
-    ~r/^\s*-\s*"?([\d.:]+)"?\s*$/m
-    |> Regex.scan(compose, capture: :all_but_first)
-    |> List.flatten()
+  # Compose resolves all supported YAML spellings into the same model. This
+  # command only parses configuration: it needs the CLI, but never a daemon.
+  # Ignore the operator's .env and project overrides while inspecting the files.
+  defp compose(path, interpolate? \\ false) do
+    flags = if interpolate?, do: [], else: ["--no-interpolate"]
+
+    System.cmd(
+      "docker",
+      [
+        "compose",
+        "--env-file",
+        "/dev/null",
+        "--project-directory",
+        @root,
+        "-f",
+        Path.expand(path, @root),
+        "config",
+        "--format",
+        "json"
+      ] ++ flags,
+      env: [{"SECRET_KEY_BASE", nil}, {"COMPOSE_PROJECT_NAME", nil}, {"COMPOSE_FILE", nil}],
+      stderr_to_stdout: true
+    )
+  end
+
+  defp compose!(path) do
+    {output, status} = compose(path)
+    assert status == 0, "Compose could not parse #{path}: #{output}"
+    Jason.decode!(output)
+  end
+
+  defp assert_loopback_ports!(compose) do
+    ports = Enum.flat_map(compose["services"], fn {_name, service} -> service["ports"] || [] end)
+    assert ports != []
+    assert Enum.all?(ports, &(&1["host_ip"] in ["127.0.0.1", "::1"])), inspect(ports)
+    ports
+  end
+
+  defp assert_named_volumes!(compose) do
+    volumes =
+      Enum.flat_map(compose["services"], fn {_name, service} -> service["volumes"] || [] end)
+
+    assert Enum.all?(volumes, &(&1["type"] == "volume")), inspect(volumes)
+  end
+
+  defp assert_distinct_volume_names!(runtime, development) do
+    runtime_names = Enum.map(runtime["volumes"], fn {_key, volume} -> volume["name"] end)
+    development_names = Enum.map(development["volumes"], fn {_key, volume} -> volume["name"] end)
+    assert MapSet.disjoint?(MapSet.new(runtime_names), MapSet.new(development_names))
   end
 
   describe "the runtime deployment" do
-    setup do
-      %{compose: read("docker-compose.runtime.yml"), dockerfile: read("Dockerfile")}
-    end
+    setup %{runtime_compose: compose}, do: %{compose: compose}
 
     test "builds the release Dockerfile, not the development one", %{compose: compose} do
-      # The header comment names the development file to contrast with it, so
-      # look at the `build:` directive rather than at any mention.
-      assert compose =~ ~r/^\s*dockerfile:\s*Dockerfile\s*$/m
-      refute compose =~ ~r/^\s*dockerfile:\s*Dockerfile\.dev/m
+      assert compose["services"]["app"]["build"]["dockerfile"] == "Dockerfile"
     end
 
     test "mounts no source tree", %{compose: compose} do
-      # A bind mount is `- <host path>:<container path>`; a named volume's source
-      # is a bare identifier. Any host path here would shadow the release.
-      refute compose =~ ~r/^\s*-\s*["']?(\.|\/|~|\$\{?PWD)/m
+      assert_named_volumes!(compose)
     end
 
     test "persists the document store at the configured data root", %{compose: compose} do
-      assert compose =~ ~r/-\s*doctrans_runtime_data:#{@data_dir}\b/
-      assert compose =~ ~r/DOCTRANS_DATA_DIR:\s*#{@data_dir}\b/
+      app = compose["services"]["app"]
+      assert app["environment"]["DOCTRANS_DATA_DIR"] == @data_dir
+
+      assert Enum.any?(app["volumes"], fn volume ->
+               volume["type"] == "volume" and volume["source"] == "doctrans_runtime_data" and
+                 volume["target"] == @data_dir
+             end)
+
+      assert Enum.any?(compose["services"]["db"]["volumes"], fn volume ->
+               volume["type"] == "volume" and volume["source"] == "doctrans_runtime_pgdata" and
+                 volume["target"] == "/var/lib/postgresql"
+             end)
     end
 
     test "names a project and volumes that cannot collide with the development stack",
          %{compose: compose} do
-      development = read("docker-compose.yml")
+      development = compose!("docker-compose.yml")
 
       # Without an explicit project name both files derive `doctrans` from the
       # directory, and `up` would reconcile this file against the dev containers.
-      assert compose =~ ~r/^name:\s*doctrans-runtime\s*$/m
-      refute development =~ ~r/^name:/m
+      assert compose["name"] == "doctrans-runtime"
+      assert development["name"] != compose["name"]
+      assert_distinct_volume_names!(compose, development)
 
       for volume <- ~w(doctrans_runtime_pgdata doctrans_runtime_data) do
-        assert compose =~ volume
-        refute development =~ volume
+        assert compose["volumes"][volume]["name"] == volume
+        refute Map.has_key?(development["volumes"], volume)
       end
     end
 
     test "publishes every port on loopback only", %{compose: compose} do
-      published = published_ports(compose)
-
-      assert published != []
-      assert Enum.all?(published, &String.starts_with?(&1, "127.0.0.1:"))
+      assert length(assert_loopback_ports!(compose)) == 2
     end
 
-    test "refuses to start without a secret key base", %{compose: compose} do
-      # `:?` makes Compose abort with the message rather than boot without one.
-      assert compose =~ ~r/SECRET_KEY_BASE:\s*\$\{SECRET_KEY_BASE:\?/
+    test "refuses to resolve without a secret key base" do
+      {output, status} = compose("docker-compose.runtime.yml", true)
+      assert status != 0
+      assert output =~ "SECRET_KEY_BASE"
     end
 
     test "runs migrations before the server, and execs it", %{compose: compose} do
       # `exec` is not decoration: without it the wrapping shell stays PID 1 and
       # the BEAM never receives the SIGTERM that a graceful stop depends on.
       assert [[migrate, server]] =
-               Regex.scan(~r{/app/bin/(migrate)\s*&&\s*exec\s+/app/bin/(server)}, compose,
+               Regex.scan(
+                 ~r{/app/bin/(migrate)\s*&&\s*exec\s+/app/bin/(server)},
+                 compose["services"]["app"]["command"],
                  capture: :all_but_first
                )
 
@@ -113,7 +160,7 @@ defmodule Doctrans.DeploymentTest do
       end
     end
 
-    test "ships a release from a runtime stage that carries no build toolchain", %{
+    test "declares a release runtime stage and an unprivileged user", %{
       dockerfile: dockerfile
     } do
       assert dockerfile =~ "mix release"
@@ -124,16 +171,21 @@ defmodule Doctrans.DeploymentTest do
   end
 
   describe "the development stack" do
-    setup do: %{compose: read("docker-compose.yml")}
+    setup %{development_compose: compose}, do: %{compose: compose}
 
     test "still bind-mounts the source tree for hot reload", %{compose: compose} do
-      assert compose =~ ~r/^\s*-\s*\.:\/app\s*$/m
-      assert compose =~ "Dockerfile.dev"
+      app = compose["services"]["app"]
+      assert app["build"]["dockerfile"] == "Dockerfile.dev"
+
+      assert Enum.any?(app["volumes"], fn volume ->
+               volume["type"] == "bind" and volume["source"] == @root and
+                 volume["target"] == "/app"
+             end)
     end
 
     test "does not claim to be a deployment", %{compose: compose} do
-      refute compose =~ "/app/bin/server"
-      refute compose =~ "mix release"
+      refute inspect(compose["services"]["app"]["command"]) =~ "/app/bin/server"
+      refute inspect(compose["services"]["app"]["command"]) =~ "mix release"
     end
 
     test "states its container binding explicitly", %{compose: compose} do
@@ -141,16 +193,81 @@ defmodule Doctrans.DeploymentTest do
       # the loopback-published port to reach it. Saying so here keeps it out of
       # `config/dev.exs`, where it was once inferred from DATABASE_HOST and so
       # widened a developer's own binding as a side effect of moving Postgres.
-      assert compose =~ ~r/^\s*PHX_BIND_IP:\s*"0\.0\.0\.0"\s*$/m
+      assert compose["services"]["app"]["environment"]["PHX_BIND_IP"] == "0.0.0.0"
     end
 
     test "publishes every port on loopback only", %{compose: compose} do
       # Both services, and no bare `"4000:4000"`: the container binding above
       # only stays safe while the publication is what limits reachability.
-      published = published_ports(compose)
-
-      assert length(published) == 2
-      assert Enum.all?(published, &String.starts_with?(&1, "127.0.0.1:"))
+      assert length(assert_loopback_ports!(compose)) == 2
     end
+  end
+
+  @tag :tmp_dir
+  test "the port guard rejects exposed ports in every Compose spelling", %{tmp_dir: dir} do
+    for entry <- [
+          "4001:4001",
+          "'4001:4001'",
+          "\"4001:4001/tcp\"",
+          "target: 4001\n        published: '4001'\n        host_ip: 0.0.0.0"
+        ] do
+      path = Path.join(dir, "ports.yml")
+
+      File.write!(path, """
+      services:
+        app:
+          image: busybox
+          ports:
+            - "127.0.0.1:4000:4000"
+            - #{entry}
+      """)
+
+      parsed = compose!(path)
+      assert length(parsed["services"]["app"]["ports"]) == 2
+      assert_raise ExUnit.AssertionError, fn -> assert_loopback_ports!(parsed) end
+    end
+  end
+
+  @tag :tmp_dir
+  test "a different volume key cannot alias the runtime database volume", %{
+    tmp_dir: dir,
+    runtime_compose: runtime
+  } do
+    path = Path.join(dir, "volume-collision.yml")
+
+    File.write!(path, """
+    services:
+      db:
+        image: postgres
+        volumes:
+          - pgdata:/var/lib/postgresql
+    volumes:
+      pgdata:
+        name: doctrans_runtime_pgdata
+    """)
+
+    development = compose!(path)
+
+    assert_raise ExUnit.AssertionError, fn ->
+      assert_distinct_volume_names!(runtime, development)
+    end
+  end
+
+  @tag :tmp_dir
+  test "the volume guard rejects a long-form bind mount", %{tmp_dir: dir} do
+    path = Path.join(dir, "volumes.yml")
+
+    File.write!(path, """
+    services:
+      app:
+        image: busybox
+        volumes:
+          - type: bind
+            source: .
+            target: /app
+    """)
+
+    parsed = compose!(path)
+    assert_raise ExUnit.AssertionError, fn -> assert_named_volumes!(parsed) end
   end
 end

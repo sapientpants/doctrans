@@ -17,7 +17,6 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
 
   import Doctrans.Fixtures
   import ExUnit.CaptureLog
-  import Phoenix.LiveViewTest
 
   alias Doctrans.Documents.Pages
   alias Doctrans.Repo

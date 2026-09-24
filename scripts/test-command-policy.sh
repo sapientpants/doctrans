@@ -24,11 +24,12 @@ rules="$repo_root/.codex/dangerous-commands.rules"
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 mk_repo() { # dir branch
-  git init -q -b "$2" "$1"
-  git -C "$1" -c user.email=policy@test -c user.name=policy commit -q --allow-empty -m init
+  git init -q -b "$2" "$1" || return 1
+  git -C "$1" -c user.email=policy@test -c user.name=policy -c commit.gpgsign=false \
+    -c core.hooksPath=/dev/null commit -q --allow-empty -m init || return 1
 }
-mk_repo "$scratch/on-main" main
-mk_repo "$scratch/on-feature" feature
+mk_repo "$scratch/on-main" main || exit 1
+mk_repo "$scratch/on-feature" feature || exit 1
 
 pass=0; fail=0
 report() { # expected actual description
@@ -139,47 +140,19 @@ report allow "$(shell_policy 'echo "never run rm -rf /" >> notes.md')" 'quoted p
 report allow "$(shell_policy "$(printf 'git commit -F - <<%sEOF%s\nwhy rm -rf and git push --force are refused\nEOF' "'" "'")")" 'heredoc commit message naming the rules'
 
 echo
-if command -v node >/dev/null 2>&1 && [ -f "$repo_root/.pi/extensions/block-dangerous-commands.ts" ]; then
-  echo "layer 3: pi extension adapter"
-  cat > "$scratch/pi-check.mjs" <<'PICHECK'
-const ext = process.argv[2]
-const mod = await import(ext)
-let handler
-mod.default({ on: (evt, fn) => { if (evt === "tool_call") handler = fn } })
-if (!handler) { console.log("no-handler"); process.exit(0) }
-const ctx = { hasUI: false, ui: { notify() {} } }
-const cases = [
-  ["bash", { command: "git status" }],
-  ["bash", { command: "git clean -fd" }],
-  ["bash", { command: "rm -rf build" }],
-  ["bash", { command: "mix test" }],
-  ["powershell", { command: "Remove-Item -Recurse tmp" }],
-  ["read", { path: "lib/foo.ex" }],
-  ["bash", {}],
-]
-const out = []
-for (const [toolName, input] of cases) {
-  const r = await handler({ type: "tool_call", toolCallId: "t", toolName, input }, ctx)
-  out.push(r?.block ? "block" : "allow")
-}
-console.log(out.join(" "))
-PICHECK
-  # Node must be new enough to strip TypeScript types; older ones just fail the import.
-  pi_out=$(node "$scratch/pi-check.mjs" "$repo_root/.pi/extensions/block-dangerous-commands.ts" 2>/dev/null || echo "unavailable")
-  if [ "$pi_out" = unavailable ] || [ "$pi_out" = no-handler ]; then
-    echo "  skipped (node could not load the extension: $pi_out)"
-  else
-    set -- $pi_out
-    report allow "$1" 'pi: bash git status'
-    report block "$2" 'pi: bash git clean -fd'
-    report block "$3" 'pi: bash rm -rf build'
-    report allow "$4" 'pi: bash mix test'
-    report block "$5" 'pi: powershell Remove-Item -Recurse'
-    report allow "$6" 'pi: read tool is not gated'
-    report allow "$7" 'pi: bash call with no command'
-  fi
+if ! command -v node >/dev/null 2>&1; then
+  echo "layer 3: skipped (node is absent)"
+elif [ ! -f "$repo_root/scripts/fixtures/type-strip-probe.ts" ]; then
+  report pass fail 'TypeScript capability probe is missing'
+elif ! node "$repo_root/scripts/fixtures/type-strip-probe.ts" >/dev/null 2>&1; then
+  echo "layer 3: skipped (node cannot execute the known-good TypeScript probe)"
 else
-  echo "layer 3: skipped (node or the pi extension is absent)"
+  echo "layer 3: pi extension adapter"
+  if node --test "$repo_root/scripts/pi-adapter.test.mjs"; then
+    report pass pass 'pi adapter and harness failure cases'
+  else
+    report pass fail 'pi adapter and harness failure cases (see diagnostics above)'
+  fi
 fi
 
 echo

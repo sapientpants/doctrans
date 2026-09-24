@@ -1,95 +1,79 @@
 defmodule Doctrans.Chat.AgentGatherTest do
-  # Exercises the bounded gather-until-sufficient loop. async: false because it
-  # swaps the global :openai_module to drive the grader deterministically.
+  # Scripted grades and query-dependent vectors make each gathering step visible.
   use Doctrans.DataCase, async: false
 
-  alias Doctrans.Chat.Agent
+  alias Doctrans.Chat.{Agent, ContractProbe}
   alias Doctrans.Documents
   alias Doctrans.Repo
-
-  # FakeOpenAI that always grades the context "insufficient" with a refined query,
-  # forcing the refine loop to run to its bound; plans normally and streams a reply.
-  defmodule FakeOpenAI do
-    def chat(messages, _opts) do
-      content = messages |> List.last() |> Map.get(:content, "")
-
-      cond do
-        String.contains?(content, "Sufficient:") ->
-          {:ok, "Sufficient: no\nQuery 1: more detail"}
-
-        String.contains?(content, "Standalone:") ->
-          {:ok, "Standalone: #{content}\nQuery 1: a\nQuery 2: b"}
-
-        true ->
-          {:ok, "generic"}
-      end
-    end
-
-    def chat_stream(_messages, on_delta, _opts) do
-      on_delta.("Answer.")
-      {:ok, "Answer."}
-    end
-  end
+  alias Doctrans.TestEnv
 
   setup do
-    original = Application.get_env(:doctrans, :openai_module)
-    Application.put_env(:doctrans, :openai_module, FakeOpenAI)
-    on_exit(fn -> Application.put_env(:doctrans, :openai_module, original) end)
-    %{document: create_document_with_embeddings()}
+    document = Doctrans.Fixtures.document_fixture(%{status: "completed", total_pages: 2})
+    assets = indexed_page(document, 1, "Assets are 120 million euros.", 0.1)
+    liabilities = indexed_page(document, 2, "Liabilities are 75 million euros.", -0.1)
+    %{document: document, assets: assets, liabilities: liabilities}
   end
 
-  test "terminates (bounded) even when the grader always reports insufficient", %{
-    document: document
-  } do
-    test_pid = self()
-    on_event = fn event -> send(test_pid, {:event, event}) end
+  for {verdict, retrieval_rounds} <- [{"no", 2}, {"yes", 1}] do
+    @verdict verdict
+    @retrieval_rounds retrieval_rounds
 
-    assert {:ok, "Answer.", context} =
-             Agent.run(document, "assess the balance sheet", [], [], on_event)
+    test "gathers new context and makes #{@retrieval_rounds} refinements when the second grade is #{@verdict}",
+         %{
+           document: document,
+           assets: assets,
+           liabilities: liabilities
+         } do
+      probe =
+        start_supervised!(
+          {ContractProbe,
+           %{
+             owner: self(),
+             embeddings: %{"assets" => assets.embedding, "liabilities" => liabilities.embedding},
+             chat_responses: [
+               {:ok, "Standalone: assets"},
+               {:ok, "Sufficient: no\nQuery 1: liabilities"},
+               {:ok, "Sufficient: #{@verdict}\nQuery 1: liabilities"}
+             ]
+           }}
+        )
 
-    # Single-page fixture → dedup keeps the accumulated context at one chunk
-    # despite multiple retrieval rounds; the key assertion is that it terminates.
-    assert [_ | _] = context
+      TestEnv.put_env(:chat_contract_probe, probe)
+      TestEnv.put_env(:openai_module, ContractProbe)
+      TestEnv.put_env(:embedding_module, ContractProbe)
 
-    stages = for {:event, {:stage, stage}} = _m <- drain(), do: stage
-    assert :assessing in stages
-    assert :generating in stages
-  end
+      assert {:ok, "Answer.", context} =
+               Agent.run(document, "assess the balance sheet", [], [], fn _ -> :ok end)
 
-  defp drain(acc \\ []) do
-    receive do
-      msg -> drain([msg | acc])
-    after
-      0 -> Enum.reverse(acc)
+      assert Enum.sort(Enum.map(context, & &1.page_id)) == Enum.sort([assets.id, liabilities.id])
+      assert_received {:contract_embedding, "assets"}
+      for _ <- 1..@retrieval_rounds, do: assert_received({:contract_embedding, "liabilities"})
+      refute_received {:contract_embedding, _}
+
+      assert_received {:contract_chat, _planner_messages, _}
+      assert_received {:contract_chat, [%{content: initial_grade}], _}
+      assert initial_grade =~ assets.original_markdown
+      refute initial_grade =~ liabilities.original_markdown
+
+      assert_received {:contract_chat, [%{content: refined_grade}], _}
+      assert refined_grade =~ assets.original_markdown
+      assert refined_grade =~ liabilities.original_markdown
+      assert ContractProbe.remaining_responses(probe) == []
+
+      assert_received {:contract_generation, [%{role: "system", content: prompt} | _], _}
+      assert prompt =~ assets.original_markdown
+      assert prompt =~ liabilities.original_markdown
     end
   end
 
-  defp create_document_with_embeddings do
-    {:ok, document} =
-      Documents.create_document(%{
-        title: "Annual Report",
-        original_filename: "report.pdf",
-        source_language: "en",
-        target_language: "de",
-        status: "completed",
-        total_pages: 1
-      })
-
-    embedding = List.duplicate(0.1, 1024) |> Pgvector.new()
-
+  defp indexed_page(document, number, text, component) do
     Repo.insert!(%Documents.Page{
-      id: Ecto.UUID.generate(),
       document_id: document.id,
-      page_number: 1,
-      image_path: "documents/#{document.id}/pages/page_1.png",
-      original_markdown: "Total assets EUR 120m, equity EUR 45m.",
-      translated_markdown: "Bilanzsumme 120 Mio EUR, Eigenkapital 45 Mio EUR.",
+      page_number: number,
+      original_markdown: text,
       extraction_status: "completed",
-      translation_status: "completed",
       embedding_status: "completed",
-      embedding: embedding
+      embedding: Pgvector.new(List.duplicate(component, 1024))
     })
-
-    document
   end
 end

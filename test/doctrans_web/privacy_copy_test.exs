@@ -1,5 +1,5 @@
 defmodule DoctransWeb.PrivacyCopyTest do
-  use ExUnit.Case, async: false
+  use Doctrans.EnvCase, async: false
 
   alias Doctrans.TestEnv
   alias DoctransWeb.PrivacyCopy

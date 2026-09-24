@@ -1,5 +1,5 @@
 defmodule Doctrans.Config.InferenceTest do
-  use ExUnit.Case, async: false
+  use Doctrans.EnvCase, async: false
 
   alias Doctrans.Config.Inference
   alias Doctrans.TestEnv

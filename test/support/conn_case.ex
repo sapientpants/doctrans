@@ -27,15 +27,61 @@ defmodule DoctransWeb.ConnCase do
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest
-      import Phoenix.LiveViewTest
+
+      import Phoenix.LiveViewTest,
+        except: [
+          live: 1,
+          live: 2,
+          live: 3,
+          live_redirect: 2,
+          follow_redirect: 2,
+          follow_redirect: 3
+        ]
+
       import DoctransWeb.ConnCase
     end
   end
 
   setup tags do
     Doctrans.DataCase.setup_sandbox(tags)
+    Process.put(:doctrans_conn_case_async, tags[:async] == true)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  # Check the mounted module, not how the caller spelled a URL or built its
+  # connection. Dashboard PubSub is global even when SQL sandboxes are isolated.
+  defmacro live(conn, path \\ nil, opts \\ []) do
+    quote do
+      require Phoenix.LiveViewTest
+
+      Phoenix.LiveViewTest.live(unquote(conn), unquote(path), unquote(opts))
+      |> DoctransWeb.ConnCase.check_live_result!()
+    end
+  end
+
+  def live_redirect(view, opts) do
+    view |> Phoenix.LiveViewTest.live_redirect(opts) |> check_live_result!()
+  end
+
+  defmacro follow_redirect(reason, conn, to \\ nil) do
+    quote do
+      require Phoenix.LiveViewTest
+
+      Phoenix.LiveViewTest.follow_redirect(unquote(reason), unquote(conn), unquote(to))
+      |> DoctransWeb.ConnCase.check_live_result!()
+    end
+  end
+
+  def check_live_result!({:ok, %{module: DoctransWeb.DocumentLive.Index}, _html} = result) do
+    if Process.get(:doctrans_conn_case_async, false) do
+      raise ArgumentError,
+            "Dashboard LiveView tests must use async: false because PubSub is global"
+    end
+
+    result
+  end
+
+  def check_live_result!(result), do: result
 
   @doc """
   Renders a single element, for assertions scoped to one claim on the page.

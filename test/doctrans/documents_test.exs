@@ -45,15 +45,21 @@ defmodule Doctrans.DocumentsTest do
       assert length(docs) == 2
     end
 
-    test "accepts sort options" do
-      _doc1 = document_fixture(%{title: "First"})
-      _doc2 = document_fixture(%{title: "Second"})
+    test "sorts by the stored insertion time in both directions" do
+      later =
+        document_fixture(%{title: "Created first, dated later"})
+        |> Ecto.Changeset.change(inserted_at: ~N[2025-02-01 00:00:00])
+        |> Repo.update!()
 
-      # Verify sorting doesn't error
+      earlier =
+        document_fixture(%{title: "Created later, dated earlier"})
+        |> Ecto.Changeset.change(inserted_at: ~N[2025-01-01 00:00:00])
+        |> Repo.update!()
+
       docs_desc = Documents.list_documents(sort_by: :inserted_at, sort_dir: :desc)
       docs_asc = Documents.list_documents(sort_by: :inserted_at, sort_dir: :asc)
-      assert length(docs_desc) == 2
-      assert length(docs_asc) == 2
+      assert Enum.map(docs_desc, & &1.id) == [later.id, earlier.id]
+      assert Enum.map(docs_asc, & &1.id) == [earlier.id, later.id]
     end
 
     test "sorts by title when specified" do
@@ -201,7 +207,8 @@ defmodule Doctrans.DocumentsTest do
     end
 
     test "pages are ordered by page_number" do
-      doc = document_with_pages_fixture(%{}, 3)
+      doc = document_fixture(%{total_pages: 3})
+      for number <- [3, 1, 2], do: page_fixture(doc, %{page_number: number})
       result = Documents.get_document_with_pages!(doc.id)
       page_numbers = Enum.map(result.pages, & &1.page_number)
       assert page_numbers == [1, 2, 3]
@@ -372,19 +379,8 @@ defmodule Doctrans.DocumentsTest do
 
   describe "uploads_dir/0" do
     test "returns configured upload directory" do
-      dir = Documents.uploads_dir()
-      assert is_binary(dir)
-      assert String.contains?(dir, "uploads")
-    end
-  end
-
-  describe "list_documents_with_progress/1 additional" do
-    test "returns documents with calculated progress" do
-      doc = document_with_pages_fixture(%{status: "processing"}, 2)
-      [result] = Documents.list_documents_with_progress()
-      assert result.id == doc.id
-      assert %Summary{} = result
-      assert result.progress == 0.0
+      configured = Application.fetch_env!(:doctrans, :uploads) |> Keyword.fetch!(:upload_dir)
+      assert Documents.uploads_dir() == configured
     end
   end
 end

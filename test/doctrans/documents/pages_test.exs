@@ -63,7 +63,8 @@ defmodule Doctrans.Documents.PagesTest do
     end
 
     test "orders pages by page_number" do
-      doc = document_with_pages_fixture(%{}, 3)
+      doc = document_fixture(%{total_pages: 3})
+      for number <- [3, 1, 2], do: page_fixture(doc, %{page_number: number})
       pages = Pages.list_pages(doc.id)
       page_numbers = Enum.map(pages, & &1.page_number)
       assert page_numbers == [1, 2, 3]
@@ -363,23 +364,35 @@ defmodule Doctrans.Documents.PagesTest do
       {:ok, page} =
         Pages.update_page_extraction(page, %{
           extraction_status: "completed",
-          original_markdown: "# Test"
+          original_markdown: "# Test",
+          extraction_model: "recorded-extraction-model"
         })
 
       {:ok, page} =
         Pages.update_page_translation(page, %{
           translation_status: "completed",
-          translated_markdown: "# Translated"
+          translated_markdown: "# Translated",
+          translation_model: "recorded-translation-model"
         })
 
-      {:ok, page} =
-        Pages.update_page(page, %{
-          embedding: Pgvector.new(List.duplicate(0.5, 768)),
+      page =
+        page
+        |> Page.embedding_changeset(%{
+          embedding: Pgvector.new(List.duplicate(0.5, 1024)),
           embedding_status: "completed"
         })
+        |> Repo.update!()
+
+      before = Repo.get!(Page, page.id)
+      assert before.embedding != nil
+      assert before.embedding_status == "completed"
+      assert before.extraction_model == "recorded-extraction-model"
+      assert before.translation_model == "recorded-translation-model"
 
       # Reset for reprocessing
       {:ok, reset_page} = Pages.reset_page_for_reprocessing(page)
+      assert reset_page.id == page.id
+      reset_page = Repo.get!(Page, page.id)
 
       assert reset_page.extraction_status == "pending"
       assert reset_page.translation_status == "pending"
@@ -387,6 +400,10 @@ defmodule Doctrans.Documents.PagesTest do
       assert is_nil(reset_page.original_markdown)
       assert is_nil(reset_page.translated_markdown)
       assert is_nil(reset_page.embedding)
+      assert is_nil(reset_page.extraction_model)
+      assert is_nil(reset_page.translation_model)
+      refute reset_page.processing_generation == before.processing_generation
+      assert reset_page.content_revision > before.content_revision
     end
 
     test "resets page with error status" do

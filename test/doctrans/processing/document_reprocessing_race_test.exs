@@ -1,6 +1,7 @@
 defmodule Doctrans.Processing.DocumentReprocessingRaceTest do
   use ExUnit.Case, async: false
   import Ecto.Query
+  import Doctrans.ProcessProbe, only: [eventually: 2]
   alias Doctrans.{Documents, Repo}
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.{DocumentReprocessing, Run}
@@ -27,34 +28,48 @@ defmodule Doctrans.Processing.DocumentReprocessingRaceTest do
       end)
     end)
 
-    owner = self()
+    handler = {__MODULE__, make_ref()}
+    :telemetry.attach(handler, [:doctrans, :repo, :query], &__MODULE__.hold_lock/4, self())
+    on_exit(fn -> :telemetry.detach(handler) end)
 
-    tasks =
-      for _ <- 1..2 do
-        Task.async(fn ->
+    first = reprocess_task(document, true)
+    assert_receive {:ready, first_pid, first_backend}, 5_000
+    send(first_pid, :go)
+    assert_receive {:document_locked, ^first_pid}, 5_000
+
+    second = reprocess_task(document, false)
+    assert_receive {:ready, second_pid, second_backend}, 5_000
+    refute first_backend == second_backend
+    send(second_pid, :go)
+
+    try do
+      # Observe actual PostgreSQL contention, not just two runnable BEAM tasks.
+      # Without the document lock, the second request completes instead of
+      # waiting behind the first transaction at this boundary.
+      eventually(
+        fn ->
           Sandbox.unboxed_run(Repo, fn ->
-            Oban.Testing.with_testing_mode(:manual, fn ->
-              send(owner, {:ready, self()})
+            %{rows: [[blocked?]]} =
+              Repo.query!("SELECT $1::int = ANY(pg_blocking_pids($2::int))", [
+                first_backend,
+                second_backend
+              ])
 
-              receive do
-                :go -> DocumentReprocessing.reprocess_document(document.id)
-              end
-            end)
+            blocked?
           end)
-        end)
-      end
-
-    for _ <- tasks do
-      assert_receive {:ready, pid}, 5_000
-      send(pid, :go)
+        end,
+        "the second reprocess transaction to wait for the first document lock"
+      )
+    after
+      send(first_pid, :release_reprocess_lock)
     end
 
-    results = Task.await_many(tasks, 10_000)
-    assert Enum.count(results, &match?({:ok, _}, &1)) == 1
-    assert Enum.count(results, &(&1 == {:error, :already_processing})) == 1
+    assert [{:ok, admitted}, {:error, :already_processing}] =
+             Task.await_many([first, second], 10_000)
 
     Sandbox.unboxed_run(Repo, fn ->
       worker = Oban.Worker.to_string(DocumentExtractionJob)
+      assert Documents.get_document!(document.id).processing_run_id == admitted.processing_run_id
 
       assert Repo.aggregate(
                from(j in Oban.Job,
@@ -65,5 +80,39 @@ defmodule Doctrans.Processing.DocumentReprocessingRaceTest do
                :count
              ) == 1
     end)
+  end
+
+  defp reprocess_task(document, hold?) do
+    owner = self()
+
+    Task.async(fn ->
+      Sandbox.unboxed_run(Repo, fn ->
+        %{rows: [[backend]]} = Repo.query!("SELECT pg_backend_pid()")
+        Process.put(:hold_reprocess_lock, hold?)
+        send(owner, {:ready, self(), backend})
+
+        receive do
+          :go ->
+            Oban.Testing.with_testing_mode(:manual, fn ->
+              DocumentReprocessing.reprocess_document(document.id)
+            end)
+        after
+          10_000 -> raise "reprocess request was not started"
+        end
+      end)
+    end)
+  end
+
+  def hold_lock(_event, _measurements, metadata, owner) do
+    if Process.get(:hold_reprocess_lock) && String.contains?(metadata.query, "FOR UPDATE") do
+      Process.delete(:hold_reprocess_lock)
+      send(owner, {:document_locked, self()})
+
+      receive do
+        :release_reprocess_lock -> :ok
+      after
+        10_000 -> raise "document lock was not released"
+      end
+    end
   end
 end

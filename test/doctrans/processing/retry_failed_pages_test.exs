@@ -85,10 +85,15 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
           assert retried.requested_translation_model == "text-v2"
         end
 
-        assert Enum.all?(
-                 all_enqueued(worker: LlmProcessingJob),
-                 &(&1.args["extraction_model"] == "vision-v2")
-               )
+        jobs = all_enqueued(worker: LlmProcessingJob)
+
+        assert Enum.sort(Enum.map(jobs, & &1.args["page_id"])) ==
+                 Enum.sort(Enum.map(context.failed, & &1.id))
+
+        for job <- jobs do
+          assert job.args["extraction_model"] == "vision-v2"
+          assert job.args["translation_model"] == "text-v2"
+        end
       end)
     end
 

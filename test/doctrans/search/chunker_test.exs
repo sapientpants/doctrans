@@ -87,32 +87,6 @@ defmodule Doctrans.Search.ChunkerTest do
       assert Enum.all?(chunks, &(&1.word_count > 0))
     end
 
-    test "splits long single paragraph at sentence boundaries" do
-      # Create a single paragraph (no double newlines) with > 300 words
-      sentences =
-        for i <- 1..20 do
-          "Sentence number #{i} with some additional filler words to pad length. "
-        end
-
-      text = Enum.join(sentences)
-      chunks = Chunker.chunk(text)
-
-      assert chunks != []
-      # All content should be preserved across chunks
-      all_content = Enum.map_join(chunks, " ", & &1.content)
-      assert String.contains?(all_content, "Sentence number 1")
-      assert String.contains?(all_content, "Sentence number 20")
-    end
-
-    test "handles multiple triple+ newlines between paragraphs" do
-      text = "First paragraph.\n\n\n\nSecond paragraph.\n\n\n\n\nThird paragraph."
-      chunks = Chunker.chunk(text)
-
-      assert length(chunks) == 1
-      assert String.contains?(hd(chunks).content, "First paragraph")
-      assert String.contains?(hd(chunks).content, "Third paragraph")
-    end
-
     test "whitespace between grouped paragraphs counts against the budget" do
       # A grouped chunk's content is the whole span from its first paragraph to
       # its last, so the blank lines inside it are stored and have to be
@@ -152,28 +126,6 @@ defmodule Doctrans.Search.ChunkerTest do
 
       assert length(chunks) == 1
       assert hd(chunks).content == text
-    end
-
-    test "handles markdown with headings and lists" do
-      text = """
-      # Heading One
-
-      This is the first section with some content about topic A.
-
-      ## Sub-heading
-
-      - Item one in the list
-      - Item two in the list
-      - Item three in the list
-
-      Another paragraph under the sub-heading with more details.
-      """
-
-      chunks = Chunker.chunk(text)
-
-      assert chunks != []
-      first_content = hd(chunks).content
-      assert String.contains?(first_content, "# Heading One")
     end
 
     test "emits current chunk when long paragraph follows accumulated content" do

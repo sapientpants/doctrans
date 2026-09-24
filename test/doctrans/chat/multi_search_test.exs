@@ -3,7 +3,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
   import ExUnit.CaptureLog
 
-  alias Doctrans.Chat.MultiSearch
+  alias Doctrans.Chat.{ContractProbe, MultiSearch}
   alias Doctrans.Documents
   alias Doctrans.Search.EmbeddingErrorStub
   alias Doctrans.Search.EmbeddingExitStub
@@ -19,74 +19,72 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
     test "returns pages matching a single query" do
       document = create_document(status: "completed")
-      insert_page_with_embedding(document, 1)
-      insert_page_with_embedding(document, 2)
+      first = insert_page_with_embedding(document, 1)
+      second = insert_page_with_embedding(document, 2)
 
       assert {:ok, pages} = MultiSearch.search_with_queries(document.id, ["test query"])
 
-      assert pages != []
-      assert Enum.all?(pages, &Map.has_key?(&1, :page_number))
+      assert Enum.sort(Enum.map(pages, & &1.page_id)) == Enum.sort([first.id, second.id])
+      assert Enum.sort(Enum.map(pages, & &1.page_number)) == [1, 2]
     end
 
-    test "merges results from multiple queries via RRF" do
-      document = create_document(status: "completed")
-      insert_page_with_embedding(document, 1)
-      insert_page_with_embedding(document, 2)
-      insert_page_with_embedding(document, 3)
-
-      queries = ["first query", "second query", "third query"]
-
-      assert {:ok, pages} = MultiSearch.search_with_queries(document.id, queries, limit: 3)
-
-      assert length(pages) <= 3
-      # Each page should have an RRF score from merging
-      assert Enum.all?(pages, &Map.has_key?(&1, :rrf_score))
-    end
-
-    test "respects limit option" do
-      document = create_document(status: "completed")
-
-      for i <- 1..5, do: insert_page_with_embedding(document, i)
-
-      assert {:ok, pages} =
-               MultiSearch.search_with_queries(document.id, ["query 1", "query 2"], limit: 2)
-
-      assert length(pages) <= 2
-    end
-
-    test "retains distinct chunks per page and fuses only matching chunk ranks" do
+    test "fuses different query rankings, retains distinct chunks and limits the best matches" do
       document = create_document(status: "completed")
       first_page = insert_page_with_embedding(document, 1)
       second_page = insert_page_with_embedding(document, 2)
 
       chunks =
-        [{first_page, 0}, {first_page, 1}, {first_page, 2}, {second_page, 0}]
+        [
+          {first_page, 0, vector(0.8, 0.6)},
+          {first_page, 1, vector(0.7, -0.7)},
+          {first_page, 2, vector(0.6, -0.8)},
+          {second_page, 0, vector(0.0, 1.0)}
+        ]
         |> Enum.with_index()
-        |> Enum.map(fn {{page, chunk_index}, index} ->
+        |> Enum.map(fn {{page, chunk_index, embedding}, index} ->
           Repo.insert!(%Doctrans.Documents.Chunk{
             page_id: page.id,
             chunk_index: chunk_index,
             content: "Fact #{index}",
             translated_content: "Translated fact #{index}",
             embedding_status: "completed",
-            embedding: Pgvector.new([0.1 + index * 0.1 | List.duplicate(0.1, 1023)])
+            embedding: embedding
           })
         end)
 
-      queries = ["first query", "second query"]
-      assert {:ok, results} = MultiSearch.search_with_queries(document.id, queries, limit: 4)
-      assert Enum.map(results, & &1.chunk_id) == Enum.map(chunks, & &1.id)
+      probe =
+        start_supervised!(
+          {ContractProbe,
+           %{
+             owner: self(),
+             embeddings: %{"assets" => vector(1.0, 0.0), "liabilities" => vector(0.0, 1.0)}
+           }}
+        )
 
-      results
-      |> Enum.zip(chunks)
-      |> Enum.with_index(1)
-      |> Enum.each(fn {{result, chunk}, rank} ->
+      TestEnv.put_env(:chat_contract_probe, probe)
+      TestEnv.put_env(:embedding_module, ContractProbe)
+
+      # Assets ranks chunks 0, 1, 2 of the first page; liabilities ranks the
+      # second page, then chunk 0. Only chunk 0 receives two reciprocal ranks.
+      [shared, assets_only, lower_assets, liabilities_only] = chunks
+      expected = [shared, liabilities_only, assets_only, lower_assets]
+      scores = [1 / 61 + 1 / 62, 1 / 61, 1 / 62, 1 / 63]
+      queries = ["assets", "liabilities"]
+      assert {:ok, results} = MultiSearch.search_with_queries(document.id, queries, limit: 4)
+      assert Enum.map(results, & &1.chunk_id) == Enum.map(expected, & &1.id)
+      assert_received {:contract_embedding, "assets"}
+      assert_received {:contract_embedding, "liabilities"}
+
+      Enum.zip([results, expected, scores])
+      |> Enum.each(fn {result, chunk, score} ->
         assert result.page_id == chunk.page_id
         assert result.chunk_index == chunk.chunk_index
         assert result.original_markdown == chunk.content
         assert result.translated_markdown == nil
-        assert_in_delta result.rrf_score, 2 / (60 + rank), 1.0e-12
+        assert_in_delta result.rrf_score, score, 1.0e-12
       end)
+
+      assert_in_delta hd(results).similarity, 0.8, 1.0e-6
 
       assert {:ok, limited} = MultiSearch.search_with_queries(document.id, queries, limit: 2)
       assert limited == Enum.take(results, 2)
@@ -204,6 +202,8 @@ defmodule Doctrans.Chat.MultiSearchTest do
       assert {:ok, []} = MultiSearch.search_with_queries(document.id, ["q1", "q2"])
     end
   end
+
+  defp vector(first, second), do: Pgvector.new([first, second | List.duplicate(0.0, 1022)])
 
   # The suite runs at :warning, so the summary line an outage has to be visible
   # in is only readable with the level raised for the duration of the capture.

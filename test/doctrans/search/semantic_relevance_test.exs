@@ -25,6 +25,21 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
   @above 0.75
 
   describe "the semantic floor" do
+    test "retains a match just above the calibrated 0.55 floor and excludes one just below" do
+      below = searchable_page("A passage below the calibrated floor", "Below")
+      above = searchable_page("A passage above the calibrated floor", "Above")
+
+      # These map to exactly 0.548828125 and 0.55078125 with embedding_at/1,
+      # safely distinct in float32 while bracketing the documented threshold.
+      embed(below, 0.549)
+      embed(above, 0.551)
+
+      assert {:ok, %{results: [result], total_count: 1}} =
+               Search.search_with_count("Korallenriff")
+
+      assert result.page_id == above.id
+    end
+
     test "an unrelated query returns nothing rather than the corpus in rank order" do
       page = searchable_page("Grundlagen der Bilanzanalyse und Kennzahlen")
       embed(page, @below)

@@ -1,9 +1,9 @@
 defmodule DoctransWeb.LocaleTest do
-  use DoctransWeb.ConnCase, async: true
+  use DoctransWeb.ConnCase, async: false
 
   # End-to-end coverage of locale resolution: the plug resolves it, the session
   # carries it, the root layout announces it, and the LiveView mount speaks it.
-  # The Gettext locale is per-process, so nothing here leaks across async tests.
+  # Locale is process-local, but connected dashboard mounts subscribe to global PubSub.
 
   alias DoctransWeb.Locale
 

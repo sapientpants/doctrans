@@ -489,25 +489,28 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     refute log =~ "Model fetch"
   end
 
-  # An exit reason carries a stacktrace, and a frame can hold the Req struct the
-  # API key was built into. The inspect bounds are what keep it out of the log,
-  # so they are asserted rather than assumed.
-  test "a crash log cannot grow to hold the API key" do
-    key = "sk-" <> String.duplicate("s3cret", 40)
-    frame = {Req, :request, [%{headers: %{"authorization" => ["Bearer " <> key]}}], []}
-    reason = {%RuntimeError{message: String.duplicate("padding", 200)}, [frame, frame, frame]}
+  test "the application crash warning classifies the exception without its sensitive details" do
+    for secret <- ["sk-short-sentinel", "sk-" <> String.duplicate("s3cret", 100)] do
+      frame = {Req, :request, [%{headers: %{"authorization" => ["Bearer " <> secret]}}], []}
 
-    {_result, log} =
-      with_log(fn ->
-        ReprocessModal.handle_async(
-          :fetch_models,
-          {:exit, reason},
-          models_socket(show_reprocess_modal: true)
-        )
-      end)
+      reason =
+        {%RuntimeError{message: secret <> " https://user:password@host/?key=private"}, [frame]}
 
-    assert log =~ "Model fetch crashed"
-    refute log =~ key
+      {_result, log} =
+        with_log(fn ->
+          ReprocessModal.handle_async(
+            :fetch_models,
+            {:exit, reason},
+            models_socket(show_reprocess_modal: true)
+          )
+        end)
+
+      assert log =~ "Model fetch crashed: RuntimeError"
+
+      for sensitive <- ["sk-", "s3cret", "password", "private", "authorization"] do
+        refute log =~ sensitive
+      end
+    end
   end
 
   test "an ordinary fetch failure says what went wrong" do

@@ -1,6 +1,6 @@
 defmodule Doctrans.Integration.BackupRestoreTest do
   @moduledoc """
-  A backed-up document restored into a *different* storage root, driven through
+  A document's files moved into a *different* storage root, driven through
   all four things a restored document is supposed to still be good for: viewing,
   search, chat, and reprocessing from its retained source.
 
@@ -11,9 +11,10 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   root is configured at the time. None of them establishes that a document
   *written* under one absolute root is whole under another -- that no stage on
   the viewing, retrieval, chat or reprocessing paths kept a path from the root
-  it was created under. That is the whole of what restoring onto a new machine,
-  volume, or container does, so it is what happens here: the pipeline runs for
-  real under root A, the `documents/` tree is copied to root B, root A is then
+  it was created under. This isolates the storage-relocation part of restoring
+  onto a new machine, volume, or container; the database rows stay in place.
+  Processing uses stubbed PDF rendering and models under root A, the
+  `documents/` tree is copied to root B, root A is then
   deleted outright so nothing can be answered from it by accident, and every
   verb is driven against root B.
 
@@ -34,7 +35,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Jobs.DocumentExtractionJob
-  alias Doctrans.Processing.{DocumentReprocessing, PageContentStub, Run}
+  alias Doctrans.Processing.{DocumentReprocessing, OpenAIProbe, PageContentStub, Run}
   alias Doctrans.Search
   alias Doctrans.TestEnv
 
@@ -126,19 +127,34 @@ defmodule Doctrans.Integration.BackupRestoreTest do
       view |> element("header button[phx-click='toggle_chat']") |> render_click()
       assert has_element?(view, "#chat_messages-#{answer.id}")
 
-      # And a fresh question runs end to end against the restored index rather
-      # than only replaying what was already stored. The document-scoped
-      # retrieval the answer is built from is checked first, so a reply that
-      # came back with no context behind it would not read as a success.
+      # Record the actual answer request, so a canned reply without restored
+      # document context cannot satisfy this integration boundary.
+      TestEnv.put_env(:openai_module, OpenAIProbe)
+      TestEnv.put_env(:openai_probe_pid, self())
+
       assert {:ok, [_ | _] = hits} =
-               Search.search_in_document(document.id, PageContentStub.source_term(3))
+               Search.search_in_document(document.id, @follow_up)
 
       assert Enum.any?(hits, &(&1.page_number == 3))
 
       pending = Conversations.start_question(document.id, @follow_up)
-      assert {:ok, reply} = Chat.send_message(document, @follow_up, saved.history)
-      assert is_binary(reply) and reply != ""
-      assert {:ok, _} = Conversations.finish(pending, "assistant", reply, context)
+
+      assert {:ok, "probe response" = reply} =
+               Chat.send_message(document, @follow_up, saved.history)
+
+      assert_received {:chat_messages,
+                       [
+                         %{role: "system", content: prompt},
+                         %{role: "user", content: @question},
+                         %{role: "assistant", content: @answer},
+                         %{role: "user", content: @follow_up}
+                       ]}
+
+      assert prompt =~ @title
+      assert prompt =~ PageContentStub.source_term(3)
+      assert prompt =~ "Page 3"
+      assert {:ok, _} = Conversations.finish(pending, "assistant", reply, hits)
+      assert Enum.any?(Conversations.load(document.id).context, &(&1.page_number == 3))
 
       assert Conversations.load(document.id).history == [
                %{role: "user", content: @question},
@@ -223,8 +239,8 @@ defmodule Doctrans.Integration.BackupRestoreTest do
     :ok
   end
 
-  # Builds the document the way an operator's machine did: a real run of the
-  # pipeline, with only the models stubbed, under a storage root of its own.
+  # Runs orchestration, persistence and indexing with stubbed rendering and
+  # models under a storage root of its own.
   defp process_under_original_root(_context) do
     roots = prepare_roots()
     repoint(roots.previous_uploads, roots.original_root)

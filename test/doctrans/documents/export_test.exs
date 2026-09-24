@@ -19,13 +19,16 @@ defmodule Doctrans.Documents.ExportTest do
     end
 
     test "stamps the export with a truncated UTC timestamp" do
+      before = DateTime.utc_now() |> DateTime.truncate(:second)
       markdown = Export.markdown(document(pages: []))
+      after_export = DateTime.utc_now() |> DateTime.truncate(:second)
 
       [_line, stamp] = Regex.run(~r/- \*\*Exported:\*\* (\S+)$/m, markdown)
 
       assert {:ok, exported_at, 0} = DateTime.from_iso8601(stamp)
       assert exported_at.microsecond == {0, 0}
-      assert DateTime.diff(DateTime.utc_now(), exported_at) < 5
+      assert DateTime.compare(exported_at, before) in [:eq, :gt]
+      assert DateTime.compare(exported_at, after_export) in [:eq, :lt]
     end
 
     test "explains page boundaries and the meaning of model names" do

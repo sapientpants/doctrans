@@ -1,6 +1,5 @@
 defmodule DoctransWeb.DocumentLive.ReprocessingTest do
   use DoctransWeb.ConnCase, async: false
-  import Phoenix.LiveViewTest
   import Doctrans.Fixtures
   alias Doctrans.Documents
   alias Doctrans.Processing.Run

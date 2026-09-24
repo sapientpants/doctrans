@@ -216,12 +216,34 @@ defmodule Doctrans.SearchTest do
       assert {:ok, []} = Search.search("uniqueword99")
     end
 
-    test "returns empty list when page extraction not completed" do
-      document = document_fixture(%{status: "completed", title: "Test Doc"})
-      _page = page_fixture(document, %{page_number: 1})
+    for mode <- [:keyword, :semantic] do
+      @mode mode
 
-      # Page is created with pending extraction status
-      assert {:ok, []} = Search.search("anything")
+      test "excludes an otherwise matching #{@mode} page until extraction completes" do
+        document = document_fixture(%{status: "completed"})
+        query = "extractionfilterterm"
+        text = if @mode == :keyword, do: query, else: "A semantically indexed passage"
+        embedding = if @mode == :semantic, do: query_aligned_embedding(), else: nil
+
+        [completed, pending] =
+          for {number, status} <- [{1, "completed"}, {2, "pending"}] do
+            Repo.insert!(%Page{
+              document_id: document.id,
+              page_number: number,
+              original_markdown: text,
+              extraction_status: status,
+              embedding: embedding
+            })
+          end
+
+        assert {:ok, [result]} = Search.search(query)
+        assert result.page_id == completed.id
+
+        # The same text/vector becomes eligible when only its stage changes.
+        assert {:ok, _} = Pages.update_page_extraction(pending, %{extraction_status: "completed"})
+        assert {:ok, results} = Search.search(query)
+        assert Enum.sort(Enum.map(results, & &1.page_id)) == Enum.sort([completed.id, pending.id])
+      end
     end
 
     test "RRF ranks a page both halves found above a page only one half found" do

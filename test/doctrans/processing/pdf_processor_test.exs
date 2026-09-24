@@ -57,29 +57,25 @@ defmodule Doctrans.Processing.PdfProcessorTest do
     end
 
     test "extracts pages from PDF and creates page records" do
-      document = document_fixture(%{status: "extracting"})
-      pdf_path = create_temp_pdf()
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "extracting"})
+        pdf_path = create_temp_pdf()
+        assert :ok = PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
 
-      result = PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+        updated_doc = Documents.get_document_with_pages!(document.id)
+        assert updated_doc.total_pages == 3
+        assert Enum.map(updated_doc.pages, & &1.page_number) == [1, 2, 3]
 
-      assert result == :ok
+        for page <- updated_doc.pages do
+          assert File.regular?(Path.join(Documents.uploads_dir(), page.image_path))
+          assert page.extraction_status == "pending"
+        end
 
-      # Verify pages were created
-      updated_doc = Documents.get_document_with_pages!(document.id)
-      assert updated_doc.total_pages == 3
-      assert length(updated_doc.pages) == 3
+        assert Enum.sort(Enum.map(processing_jobs(), & &1.args["page_id"])) ==
+                 Enum.sort(Enum.map(updated_doc.pages, & &1.id))
 
-      # Verify page attributes
-      for page <- updated_doc.pages do
-        assert page.page_number > 0
-        assert page.image_path != nil
-        # Note: extraction_status may be "pending" or already "completed" if
-        # LLM processing started (happens immediately after first page extraction)
-        assert page.extraction_status in ["pending", "processing", "completed"]
-      end
-
-      # Original PDF is retained for full reprocessing
-      assert File.exists?(pdf_path)
+        assert File.regular?(pdf_path)
+      end)
     end
 
     test "resumes after a partial extraction failure without duplicating pages or jobs" do
@@ -218,8 +214,9 @@ defmodule Doctrans.Processing.PdfProcessorTest do
   end
 
   defp create_temp_pdf do
-    path = Path.join(System.tmp_dir!(), "test_#{:rand.uniform(100_000)}.pdf")
+    path = Path.join(System.tmp_dir!(), "test_#{System.unique_integer([:positive])}.pdf")
     File.write!(path, "fake pdf content")
+    on_exit(fn -> File.rm(path) end)
     path
   end
 end

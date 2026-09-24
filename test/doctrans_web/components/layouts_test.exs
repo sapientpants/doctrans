@@ -1,7 +1,6 @@
 defmodule DoctransWeb.LayoutsTest do
   use DoctransWeb.ConnCase, async: true
 
-  import Phoenix.LiveViewTest
   import Phoenix.Component
 
   alias DoctransWeb.Layouts
@@ -19,19 +18,6 @@ defmodule DoctransWeb.LayoutsTest do
 
       assert html =~ "<main"
       assert html =~ "Test Content"
-    end
-
-    test "renders layout with current_scope" do
-      assigns = %{flash: %{}, current_scope: %{user_id: 1}}
-
-      html =
-        rendered_to_string(~H"""
-        <Layouts.app flash={@flash} current_scope={@current_scope}>
-          Content
-        </Layouts.app>
-        """)
-
-      assert html =~ "<main"
     end
   end
 

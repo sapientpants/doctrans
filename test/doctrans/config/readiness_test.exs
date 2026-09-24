@@ -1,5 +1,5 @@
 defmodule Doctrans.Config.ReadinessTest do
-  use ExUnit.Case, async: false
+  use Doctrans.EnvCase, async: false
 
   alias Doctrans.Config.Readiness
 
