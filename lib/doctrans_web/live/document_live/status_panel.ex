@@ -1,12 +1,13 @@
 defmodule DoctransWeb.DocumentLive.StatusPanel do
   @moduledoc """
-  Processing and indexing state, and the targeted recovery actions for each.
+  Translation state, and the targeted recovery actions for both pipelines.
 
-  The two pipelines are rendered as two rows because they fail apart: a
-  document can be fully translated and unsearchable, and one badge covering
-  both would hide whichever is the problem. Each row carries its machine state
-  on a `data-` attribute so the assertion is on the state, not on prose that
-  every locale rewrites.
+  Only translation states itself in prose. Indexing is reported by its recovery
+  button alone: a steady "search ready" readout was chrome the whole time it was
+  right, and it counted only the pages extracted so far, so mid-run it called a
+  half-indexed document complete. The row carries its machine state on a
+  `data-` attribute so the assertion is on the state, not on prose that every
+  locale rewrites.
   """
   use DoctransWeb, :html
 
@@ -109,11 +110,11 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
     ~H"""
     <section
       id="processing-status"
-      aria-label={gettext("Processing and indexing status")}
+      aria-label={gettext("Processing status")}
       class="border-b border-base-300 bg-base-100 px-4 py-3"
     >
       <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
-        <div class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-6">
+        <div class="min-w-0 flex-1">
           <div
             id="processing-status-content"
             data-content-state={to_string(@status.content)}
@@ -146,24 +147,6 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
               {ErrorMessages.message(
                 {:pages_failed, [page_numbers: Enum.join(@status.failed_pages, ", ")]}
               )}
-            </p>
-          </div>
-
-          <div
-            id="processing-status-index"
-            data-index-state={to_string(@status.index)}
-            class="min-w-0 space-y-1 sm:border-l sm:border-base-300 sm:pl-6"
-          >
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-xs font-medium uppercase tracking-wide text-base-content/60">
-                {gettext("Indexing")}
-              </span>
-              <span class={["badge badge-sm", index_badge(@status.index)]}>
-                {index_label(@status.index)}
-              </span>
-            </div>
-            <p id="processing-status-index-count" class="text-xs text-base-content/70">
-              {index_count(@status)}
             </p>
           </div>
         </div>
@@ -222,20 +205,6 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
       "disabled:cursor-not-allowed disabled:opacity-40"
   end
 
-  # `:none` is not a zero count. "0 of 0 pages indexed" reads as a stalled index
-  # when the truth is that extraction has produced nothing to index yet.
-  defp index_count(%{index: :none}), do: gettext("Nothing to index yet")
-
-  defp index_count(%{indexing: indexing}) do
-    ngettext(
-      "%{indexed} of %{count} page indexed",
-      "%{indexed} of %{count} pages indexed",
-      indexing.indexable,
-      indexed: indexing.indexed,
-      count: indexing.indexable
-    )
-  end
-
   defp content_label(:idle), do: gettext("Idle")
   defp content_label(:queued), do: gettext("Queued")
   defp content_label(:running), do: gettext("Processing")
@@ -250,21 +219,4 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
   defp content_badge(:retrying), do: "badge-warning"
   defp content_badge(:queued), do: "badge-info"
   defp content_badge(_state), do: "badge-ghost"
-
-  defp index_label(:none), do: gettext("Nothing to index")
-  defp index_label(:queued), do: gettext("Queued")
-  defp index_label(:running), do: gettext("Indexing")
-  defp index_label(:retrying), do: gettext("Retrying")
-  defp index_label(:pending), do: gettext("Not indexed")
-  defp index_label(:partial), do: gettext("Partly indexed")
-  defp index_label(:failed), do: gettext("Indexing failed")
-  defp index_label(:ready), do: gettext("Search ready")
-
-  defp index_badge(:ready), do: "badge-success"
-  defp index_badge(:failed), do: "badge-error"
-  defp index_badge(:partial), do: "badge-warning"
-  defp index_badge(:running), do: "badge-warning"
-  defp index_badge(:retrying), do: "badge-warning"
-  defp index_badge(:queued), do: "badge-info"
-  defp index_badge(_state), do: "badge-ghost"
 end

@@ -13,9 +13,6 @@
           <div class="min-w-0">
             <h1 class="font-semibold text-lg break-words">{@document.title}</h1>
             <div class="flex flex-wrap items-center gap-2 text-sm text-base-content/70">
-              <span class={"badge badge-sm #{status_color(@document.status)}"}>
-                {status_text(@document.status)}
-              </span>
               <span :if={@document.total_pages}>
                 {language_direction(@document)}
               </span>
@@ -73,8 +70,8 @@
       </header>
 
       <%!-- Its own section rather than a wider condition on the progress bar below:
-            index readiness is a separate answer that outlives translation, and
-            the progress section deliberately disappears once a document is done. --%>
+            a failed page and its recovery outlive translation, and the progress
+            section deliberately disappears once a document is done. --%>
       <.status_panel status={@processing_status} />
 
       <section
@@ -158,7 +155,6 @@
               </label>
             </div>
           </div>
-          <.page_provenance page={@current_page} />
           <div class="flex-1 p-6 overflow-auto fitscreen:min-h-0">
             <.page_content page={@current_page} show_original={@show_original} />
           </div>

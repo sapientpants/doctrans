@@ -229,13 +229,12 @@ container environment, such as `OPENAI_API_KEY`, can be loaded from it.
 The document appears on the dashboard with a progress indicator. Click it to view completed pages while
 processing continues.
 
-### Processing and indexing status
+### Processing status
 
-A document reports two pipelines separately, because they fail separately. **Translation** says whether the
-document is queued, running, retrying a page the job queue has scheduled again, failed, stopped or finished,
-and names the pages that failed. **Indexing** says how many of the extracted pages have been embedded: a
-document can be fully translated and not yet searchable, and a page whose embedding failed counts as
-outstanding rather than as indexed.
+**Translation** says whether the document is queued, running, retrying a page the job queue has scheduled
+again, failed, stopped or finished, and names the pages that failed. Indexing has no readout of its own: a
+document can be fully translated and not yet searchable, but a steady count of embedded pages was chrome
+every moment it was right, so indexing speaks only through the recovery action below.
 
 Three targeted recovery actions appear only when they apply:
 
@@ -723,10 +722,9 @@ remains available when page images exist.
 
 A document cannot restart while extraction or page-processing jobs are active,
 including scheduled retries and suspended jobs. Let those jobs finish first.
-Model choices are saved for the run and preserved during recovery. Page details
-show the request model identifiers that produced the current extraction and
-translation; older results with no recorded model display **Unknown**. Model
-identifiers may be aliases and do not identify an immutable set of model weights.
+Model choices are saved for the run and preserved during recovery. The models a
+run used are recorded on each page but are not displayed: the identifiers are
+request aliases that name an endpoint, not an immutable set of model weights.
 
 ### Incomplete model output
 
