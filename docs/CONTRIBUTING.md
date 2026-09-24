@@ -39,6 +39,22 @@ finishing a change.
 
 ## Test coverage
 
+The test suite requires Node.js (the built-in test runner) and the Docker Compose
+CLI in addition to Elixir and the test database. Theme tests execute the actual
+JavaScript modules. Deployment tests use `docker compose config` to normalize
+ports and volumes; they do not start containers or require a Docker daemon, and
+they ignore the operator's `.env` file. The policy adapter checks in
+`scripts/test-command-policy.sh` additionally need Node's TypeScript support;
+unsupported runtimes are explicitly reported as skipped.
+
+Test one observable contract per scenario. Establish fixture preconditions,
+assert identities and persisted outcomes, and use barriers for concurrency.
+When replacing weak assertions, verify that a deliberate regression is rejected.
+Tests changing application settings must be synchronous and use
+`Doctrans.TestEnv.put_env/2` for restoration. Use `Doctrans.EnvCase` for these
+tests when no database is needed; DataCase and ConnCase already register the
+same isolation check.
+
 The quality gate is defined once, in `.pre-commit-config.yaml`. `mix precommit` is
 a thin wrapper around `pre-commit run --all-files`, and CI invokes the same command,
 so the local and CI check sets cannot drift apart. Add or change a check there, not

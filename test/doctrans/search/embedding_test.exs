@@ -1,45 +1,80 @@
 defmodule Doctrans.Search.EmbeddingTest do
-  use ExUnit.Case, async: true
+  use Doctrans.EnvCase, async: false
 
   alias Doctrans.Search.Embedding
+  alias Doctrans.TestEnv
 
-  describe "generate/2" do
-    test "returns {:ok, nil} for nil text" do
-      assert {:ok, nil} = Embedding.generate(nil, [])
+  setup do
+    bypass = Bypass.open()
+
+    TestEnv.put_env(:embedding,
+      base_url: "http://localhost:#{bypass.port}",
+      model: "configured-embedding-model",
+      api_key: nil
+    )
+
+    %{bypass: bypass}
+  end
+
+  test "nil and empty inputs return no vector without requesting an embedding", %{bypass: bypass} do
+    owner = self()
+
+    Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
+      send(owner, :unexpected_embedding_request)
+      json(conn, 400, %{"error" => "empty input"})
+    end)
+
+    for text <- [nil, ""] do
+      assert Embedding.generate(text) == {:ok, nil}
+      assert Embedding.generate(text, model: "unused") == {:ok, nil}
     end
 
-    test "returns {:ok, nil} for empty string" do
-      assert {:ok, nil} = Embedding.generate("", [])
-    end
+    refute_received :unexpected_embedding_request
+  end
 
-    test "returns {:ok, nil} with default opts for nil" do
-      assert {:ok, nil} = Embedding.generate(nil)
-    end
+  test "returns the server's vector for the supplied text and configured model", %{bypass: bypass} do
+    values = Enum.map(1..1024, &(&1 / 1024))
 
-    test "returns {:ok, nil} with default opts for empty string" do
-      assert {:ok, nil} = Embedding.generate("")
-    end
+    Bypass.expect_once(bypass, "POST", "/v1/embeddings", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
 
-    test "returns error or result for non-empty text" do
-      # This test exercises the code path for non-empty text
-      # In CI without the API server, this will return an error
-      # Locally with the API server, this will return a valid embedding
-      result = Embedding.generate("test text")
+      assert Jason.decode!(body) == %{
+               "input" => "source passage",
+               "model" => "configured-embedding-model"
+             }
 
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
-    end
+      json(conn, 200, %{"data" => [%{"embedding" => values}]})
+    end)
 
-    test "accepts custom model option" do
-      # Test that options are passed through
-      result = Embedding.generate("test", model: "nonexistent-model")
+    assert {:ok, vector} = Embedding.generate("source passage")
+    assert Pgvector.to_list(vector) == values
+  end
 
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
-    end
+  test "forwards an explicit model override", %{bypass: bypass} do
+    values = List.duplicate(0.25, 1024)
 
-    test "accepts custom timeout option" do
-      result = Embedding.generate("test", timeout: 1000)
+    Bypass.expect_once(bypass, "POST", "/v1/embeddings", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert Jason.decode!(body) == %{"input" => "custom passage", "model" => "custom-model"}
+      json(conn, 200, %{"data" => [%{"embedding" => values}]})
+    end)
 
-      assert match?({:ok, _}, result) or match?({:error, _}, result)
-    end
+    assert {:ok, vector} = Embedding.generate("custom passage", model: "custom-model")
+    assert Pgvector.to_list(vector) == values
+  end
+
+  @tag :capture_log
+  test "preserves the API's permanent failure", %{bypass: bypass} do
+    Bypass.expect_once(bypass, "POST", "/v1/embeddings", fn conn ->
+      json(conn, 401, %{"error" => "unauthorized"})
+    end)
+
+    assert Embedding.generate("rejected passage") == {:error, {:http_error, [status: 401]}}
+  end
+
+  defp json(conn, status, body) do
+    conn
+    |> Plug.Conn.put_resp_content_type("application/json")
+    |> Plug.Conn.resp(status, Jason.encode!(body))
   end
 end

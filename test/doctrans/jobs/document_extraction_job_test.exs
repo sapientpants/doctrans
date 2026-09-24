@@ -2,9 +2,13 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
   use Doctrans.DataCase
   use Oban.Testing, repo: Doctrans.Repo
 
+  alias Doctrans.Documents
+  alias Doctrans.Documents.Topics
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.MissingConverterStub
   alias Doctrans.Processing.PdfExtractorFailingStub
+  alias Doctrans.Processing.RetryDocumentConverterStub
+  alias Doctrans.TestEnv
 
   import Doctrans.Fixtures
 
@@ -95,14 +99,11 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
 
       fail_with(:pdf_command_timeout)
 
-      result =
-        perform_job(DocumentExtractionJob, %{
-          "document_id" => document.id,
-          "file_path" => path
-        })
-
-      # A timeout can come out differently next time, so it stays retryable.
-      assert match?({:error, _reason}, result)
+      assert {:error, {:pdf_extraction_failed, [reason: :pdf_command_timeout]}} =
+               perform_job(DocumentExtractionJob, %{
+                 "document_id" => document.id,
+                 "file_path" => path
+               })
     end
 
     defp names_failure?(reason, tag) when is_atom(reason), do: reason == tag
@@ -141,19 +142,22 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
   end
 
   describe "perform/1 with file_path" do
-    test "attempts to extract document with document_id and file_path" do
+    test "reports a missing source and publishes the document error" do
       document = document_fixture()
+      Topics.subscribe_document(document.id)
 
-      # Will attempt extraction and fail because file doesn't exist
-      # The extraction process handles this gracefully
-      result =
-        perform_job(DocumentExtractionJob, %{
-          "document_id" => document.id,
-          "file_path" => "/nonexistent/path.pdf"
-        })
+      assert {:error, :document_file_not_found} =
+               perform_job(DocumentExtractionJob, %{
+                 "document_id" => document.id,
+                 "file_path" => "/nonexistent/path.pdf"
+               })
 
-      # Result depends on how the extraction handles missing files
-      assert result == :ok or match?({:error, _}, result)
+      saved = Documents.get_document!(document.id)
+      assert saved.status == "error"
+      assert saved.error_message == ":document_file_not_found"
+      assert_received {:document_updated, %{id: id, status: "error"}}
+      assert id == document.id
+      assert Documents.list_pages(document.id) == []
     end
   end
 
@@ -182,9 +186,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
                  "file_path" => stale_path
                })
 
-      reloaded = Doctrans.Documents.get_document_with_pages!(document.id)
-      refute reloaded.status == "error"
-      refute reloaded.pages == []
+      assert_completed_extraction(document)
     end
   end
 
@@ -199,46 +201,45 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
     test "returns error when document file not found" do
       document = document_fixture()
 
-      result = perform_job(DocumentExtractionJob, %{"document_id" => document.id})
-      # Document exists but file doesn't
-      assert {:error, _} = result
+      assert {:error, :document_file_not_found} =
+               perform_job(DocumentExtractionJob, %{"document_id" => document.id})
     end
 
-    test "attempts extraction when file exists" do
+    test "extracts the retained PDF when the retry has no recorded path" do
       document = document_fixture()
+      pdf_path = document_source_fixture(document)
 
-      # Create the document directory and a dummy file
-      upload_dir = Doctrans.Documents.document_upload_dir(document.id)
-      File.mkdir_p!(upload_dir)
-      pdf_path = Path.join(upload_dir, "original.pdf")
-      File.write!(pdf_path, "fake pdf content")
-
-      result = perform_job(DocumentExtractionJob, %{"document_id" => document.id})
-
-      # Cleanup
-      File.rm_rf!(upload_dir)
-
-      # Result depends on how extraction handles the file
-      assert result == :ok or match?({:error, _}, result)
+      assert :ok = perform_job(DocumentExtractionJob, %{"document_id" => document.id})
+      assert_completed_extraction(document)
+      assert File.regular?(pdf_path)
     end
 
     test "finds document with original extension when pdf doesn't exist" do
       document = document_fixture(%{original_filename: "test.docx"})
 
-      # Create the document directory with a docx file
-      upload_dir = Doctrans.Documents.document_upload_dir(document.id)
-      File.mkdir_p!(upload_dir)
-      docx_path = Path.join(upload_dir, "original.docx")
-      File.write!(docx_path, "fake docx content")
+      docx_path = document_source_fixture(document, "retained office input")
+      TestEnv.put_env(:document_converter_module, RetryDocumentConverterStub)
 
-      result = perform_job(DocumentExtractionJob, %{"document_id" => document.id})
+      assert :ok = perform_job(DocumentExtractionJob, %{"document_id" => document.id})
+      assert_completed_extraction(document)
 
-      # Cleanup
-      File.rm_rf!(upload_dir)
+      pdf_path = docx_path |> Path.dirname() |> Path.join("original.pdf")
+      assert File.read!(pdf_path) == "retained office input"
 
-      # Result depends on LibreOffice availability. Where it is missing the job
-      # cancels rather than erroring: no number of retries installs it.
-      assert result == :ok or match?({:error, _}, result) or match?({:cancel, _}, result)
+      assert File.read!(docx_path) == "retained office input"
+    end
+  end
+
+  defp assert_completed_extraction(document) do
+    saved = Documents.get_document_with_pages!(document.id)
+    assert saved.status == "completed"
+    assert saved.total_pages == 3
+    assert Enum.map(saved.pages, & &1.page_number) == [1, 2, 3]
+
+    for page <- saved.pages do
+      assert page.extraction_status == "completed"
+      assert page.translation_status == "completed"
+      assert File.regular?(Path.join(Documents.uploads_dir(), page.image_path))
     end
   end
 end

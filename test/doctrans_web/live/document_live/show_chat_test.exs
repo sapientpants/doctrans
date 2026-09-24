@@ -2,7 +2,6 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   use DoctransWeb.ConnCase, async: true
 
   import Doctrans.Fixtures
-  import Phoenix.LiveViewTest
 
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
@@ -408,6 +407,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       # Chat input should still be present (no error, just ignored)
       assert has_element?(view, "#chat-input")
+      assert_no_chat_turn(view, document)
     end
 
     test "whitespace-only message is not submitted", %{conn: conn, document: document} do
@@ -423,6 +423,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       # Chat input should still be present
       assert has_element?(view, "#chat-input")
+      assert_no_chat_turn(view, document)
     end
   end
 
@@ -559,6 +560,15 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   end
 
   # Helper functions
+
+  defp assert_no_chat_turn(view, document) do
+    assert Conversations.load(document.id).messages == []
+    refute has_element?(view, "#chat-streaming")
+    assigns = :sys.get_state(view.pid).socket.assigns
+    refute assigns.chat_loading
+    assert assigns.chat_task_ref == nil
+    assert assigns.chat_task_pid == nil
+  end
 
   # A chat turn is an `async_nolink` task, which `render_async/2` does not cover,
   # so this waits on the task itself rather than on a render. Nothing holds the

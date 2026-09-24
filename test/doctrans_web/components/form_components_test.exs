@@ -1,8 +1,6 @@
 defmodule DoctransWeb.FormComponentsTest do
   use DoctransWeb.ConnCase, async: true
 
-  import Phoenix.LiveViewTest
-
   alias DoctransWeb.FormComponents
 
   describe "input/1" do
@@ -92,6 +90,16 @@ defmodule DoctransWeb.FormComponentsTest do
 
       assert html =~ ~s(type="checkbox")
       assert html =~ ~s(name="accept")
+      document = LazyHTML.from_fragment(html)
+
+      assert LazyHTML.attribute(LazyHTML.query(document, "input[type=checkbox]"), "checked") == [
+               ""
+             ]
+
+      assert LazyHTML.attribute(
+               LazyHTML.query(document, "input[type=hidden][name=accept]"),
+               "value"
+             ) == ["false"]
     end
 
     test "renders checkbox with label" do
@@ -105,6 +113,13 @@ defmodule DoctransWeb.FormComponentsTest do
         })
 
       assert html =~ "Accept Terms"
+      document = LazyHTML.from_fragment(html)
+      assert LazyHTML.attribute(LazyHTML.query(document, "input[type=checkbox]"), "checked") == []
+
+      assert LazyHTML.attribute(
+               LazyHTML.query(document, "input[type=hidden][name=accept]"),
+               "value"
+             ) == ["false"]
     end
   end
 
@@ -123,6 +138,12 @@ defmodule DoctransWeb.FormComponentsTest do
       assert html =~ ~s(name="country")
       assert html =~ "US"
       assert html =~ "UK"
+      document = LazyHTML.from_fragment(html)
+
+      assert LazyHTML.attribute(
+               LazyHTML.query(document, "select[name=country] option[selected]"),
+               "value"
+             ) == ["us"]
     end
 
     test "renders select with prompt" do

@@ -1,30 +1,8 @@
 defmodule Doctrans.Chat.QueryExpanderTest do
-  use ExUnit.Case, async: false
+  use Doctrans.EnvCase, async: false
 
-  alias Doctrans.Chat.QueryExpander
-
-  # Test-only OpenAI module returning a planner response configured via :openai_stub_chat_error.
-  defmodule FakeOpenAI do
-    def chat(_messages, _opts) do
-      case Application.get_env(:doctrans, :planner_fake_response) do
-        {:error, reason} -> {:error, reason}
-        response when is_binary(response) -> {:ok, response}
-        _ -> {:ok, ""}
-      end
-    end
-  end
-
-  setup do
-    original = Application.get_env(:doctrans, :openai_module)
-    Application.put_env(:doctrans, :openai_module, FakeOpenAI)
-
-    on_exit(fn ->
-      Application.put_env(:doctrans, :openai_module, original)
-      Application.delete_env(:doctrans, :planner_fake_response)
-    end)
-
-    :ok
-  end
+  alias Doctrans.Chat.{ContractProbe, QueryExpander}
+  alias Doctrans.TestEnv
 
   describe "expand/3" do
     test "plans multiple targeted queries even without chat history" do
@@ -35,20 +13,30 @@ defmodule Doctrans.Chat.QueryExpanderTest do
       Query 3: cash and liquidity
       """
 
-      Application.put_env(:doctrans, :planner_fake_response, response)
+      respond_with({:ok, response})
 
       {standalone, queries} =
         QueryExpander.expand("assess the balance sheet", [])
 
       assert standalone == "What is the assessed quality of the balance sheet?"
-      # Standalone + 3 decomposed sub-queries.
-      assert length(queries) == 4
-      assert "total liabilities and debt" in queries
-      assert "cash and liquidity" in queries
+
+      assert queries == [
+               standalone,
+               "total assets and equity",
+               "total liabilities and debt",
+               "cash and liquidity"
+             ]
+
+      assert_received {:contract_chat, [%{role: "user", content: prompt}], _}
+      assert prompt =~ "User's question: assess the balance sheet"
     end
 
     test "reformulates using chat history and plans sub-queries" do
       history = [
+        %{role: "user", content: "Old topic outside the history window"},
+        %{role: "assistant", content: "Old answer outside the history window"},
+        %{role: "user", content: "Describe the report."},
+        %{role: "assistant", content: "It is about our research."},
         %{role: "user", content: "What are the main themes?"},
         %{role: "assistant", content: "The main themes are X, Y, and Z."}
       ]
@@ -59,12 +47,21 @@ defmodule Doctrans.Chat.QueryExpanderTest do
       Query 2: examples of Y
       """
 
-      Application.put_env(:doctrans, :planner_fake_response, response)
+      respond_with({:ok, response})
 
       {standalone, queries} = QueryExpander.expand("Tell me more about Y", history)
 
       assert standalone == "Tell me more about theme Y."
-      assert length(queries) >= 2
+      assert queries == [standalone, "details about Y", "examples of Y"]
+
+      assert_received {:contract_chat, [%{role: "user", content: prompt}], _}
+
+      assert prompt =~
+               "User: Describe the report.\nAssistant: It is about our research.\nUser: What are the main themes?\nAssistant: The main themes are X, Y, and Z."
+
+      assert prompt =~ "User's message: Tell me more about Y"
+      refute prompt =~ "Old topic outside the history window"
+      refute prompt =~ "Old answer outside the history window"
     end
 
     test "caps the number of queries" do
@@ -75,23 +72,46 @@ defmodule Doctrans.Chat.QueryExpanderTest do
       Query 3: q3
       Query 4: q4
       Query 5: q5
+      Query 6: q6
+      Query 7: q7
       """
 
-      Application.put_env(:doctrans, :planner_fake_response, response)
+      respond_with({:ok, response})
 
       {_standalone, queries} = QueryExpander.expand("something", [])
 
-      # Standalone + 5 sub-queries = 6, at the cap.
-      assert length(queries) == 6
+      assert queries == ["q0", "q1", "q2", "q3", "q4", "q5"]
+    end
+
+    test "removes duplicate and empty sub-queries without dropping the standalone question" do
+      respond_with(
+        {:ok,
+         """
+         Standalone: shared question
+         Query 1: shared question
+         Query 2:
+         Query 3: another fact
+         Query 4: another fact
+         """}
+      )
+
+      assert QueryExpander.expand("original question", []) ==
+               {"shared question", ["shared question", "another fact"]}
     end
 
     test "falls back to the original question on LLM error" do
-      Application.put_env(:doctrans, :planner_fake_response, {:error, :timeout})
+      respond_with({:error, :timeout})
 
       {standalone, queries} = QueryExpander.expand("What about chapter 2?", [])
 
       assert standalone == "What about chapter 2?"
       assert queries == ["What about chapter 2?"]
     end
+  end
+
+  defp respond_with(response) do
+    probe = start_supervised!({ContractProbe, %{owner: self(), chat_responses: [response]}})
+    TestEnv.put_env(:chat_contract_probe, probe)
+    TestEnv.put_env(:openai_module, ContractProbe)
   end
 end

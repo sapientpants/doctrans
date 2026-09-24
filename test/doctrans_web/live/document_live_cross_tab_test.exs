@@ -335,31 +335,31 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
   end
 
   describe "the serial constraint this file documents" do
-    test "no test file that mounts the dashboard runs async" do
-      offenders =
-        "test/**/*_test.exs"
-        |> Path.wildcard()
-        |> Enum.filter(fn path ->
-          source = File.read!(path)
+    test "the runtime guard rejects dashboard mounts through wrapped connections", %{conn: conn} do
+      Doctrans.TestEnv.record_async(async: true)
 
-          String.contains?(source, ~s|live(conn, ~p"/")|) and
-            Regex.match?(~r/^\s*use\s+\S+,\s+async:\s+true/m, source)
-        end)
+      assert_raise ArgumentError, ~r/Dashboard LiveView tests must use async: false/, fn ->
+        live(put_req_header(conn, "accept-language", "de"), ~p"/?lang=de")
+      end
+    end
 
-      assert offenders == [],
-             """
-             These files mount the dashboard under `async: true`:
+    test "the runtime guard rejects connected mounts and live navigation too", %{conn: conn} do
+      rendered = get(conn, ~p"/")
+      Doctrans.TestEnv.record_async(async: true)
 
-             #{Enum.map_join(offenders, "\n", &"  - #{&1}")}
+      assert_raise ArgumentError, ~r/Dashboard LiveView tests must use async: false/, fn ->
+        live(rendered)
+      end
 
-             `Index` subscribes to the process-global "documents" topic. The Ecto
-             SQL sandbox isolates the database but not PubSub, so a document
-             fixture or a page broadcast from any file running concurrently lands
-             in these dashboards, sets the coalescing timer and races whatever
-             they assert. The moduledoc at the top of this file has the long
-             version. Add `async: false`, or mount something other than the
-             dashboard.
-             """
+      {:ok, search, _} = live(conn, ~p"/search")
+
+      assert_raise ArgumentError, ~r/Dashboard LiveView tests must use async: false/, fn ->
+        live_redirect(search, to: ~p"/")
+      end
+
+      assert_raise ArgumentError, ~r/Dashboard LiveView tests must use async: false/, fn ->
+        follow_redirect({:error, {:live_redirect, %{to: ~p"/"}}}, conn)
+      end
     end
   end
 

@@ -7,9 +7,9 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
   chunking, the hybrid statement. What nothing covered is the seam: that the
   text extraction wrote is the text translation received, that the text indexing
   embedded is the text the page holds, and that a query for a term only one page
-  carries comes back naming *that* page's id, number and image. Every stage runs
-  for real here; only the model calls are stubbed, and they are stubbed with
-  per-page answers so a result cannot be right by accident.
+  carries comes back naming *that* page's id, number and image. PDF rendering
+  and model calls are stubbed; orchestration, persistence, indexing and retrieval
+  run together. Per-page answers and recorded embedding inputs distinguish pages.
 
   Async: `:openai_module` is application-global while the pipeline runs.
   """
@@ -22,12 +22,15 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.PageContentStub
   alias Doctrans.Search
+  alias Doctrans.Search.EmbeddingProbe
   alias Doctrans.TestEnv
 
   @title "Jahresabschluss 2025"
 
   setup do
     TestEnv.put_env(:openai_module, PageContentStub)
+    TestEnv.put_env(:embedding_module, EmbeddingProbe)
+    TestEnv.put_env(:embedding_probe_pid, self())
 
     document =
       document_fixture(%{
@@ -43,12 +46,18 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
     assert {:ok, _job} = DocumentExtractionJob.enqueue_document(document.id, path)
 
     document = Documents.get_document_with_pages!(document.id)
-    %{document: document, pages: Enum.sort_by(document.pages, & &1.page_number)}
+
+    %{
+      document: document,
+      pages: Enum.sort_by(document.pages, & &1.page_number),
+      embedding_inputs: embedding_inputs()
+    }
   end
 
   test "the pipeline carries each page's own text through every stage", %{
     document: document,
-    pages: pages
+    pages: pages,
+    embedding_inputs: embedding_inputs
   } do
     assert document.status == "completed"
     assert document.total_pages == 3
@@ -62,6 +71,11 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
       assert page.translated_markdown == PageContentStub.translated_markdown(page.page_number)
       refute is_nil(page.embedding)
     end
+
+    page_ids = Enum.map(pages, & &1.id)
+    chunks = from(c in Chunk, where: c.page_id in ^page_ids) |> Repo.all()
+    expected_inputs = Enum.map(pages, & &1.original_markdown) ++ Enum.map(chunks, & &1.content)
+    assert Enum.frequencies(embedding_inputs) == Enum.frequencies(expected_inputs)
   end
 
   test "a source term only one page carries retrieves that page", %{
@@ -141,6 +155,14 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
       assert result.page_id == chunk.page_id
       assert result.original_markdown == chunk.content
       assert {result.page_number, result.content_revision} == Map.fetch!(numbers, result.page_id)
+    end
+  end
+
+  defp embedding_inputs(inputs \\ []) do
+    receive do
+      {:embedded, input} -> embedding_inputs([input | inputs])
+    after
+      0 -> Enum.reverse(inputs)
     end
   end
 end

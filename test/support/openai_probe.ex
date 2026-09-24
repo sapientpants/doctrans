@@ -16,8 +16,9 @@ defmodule Doctrans.Processing.OpenAIProbe do
   @behaviour Doctrans.Processing.OpenAIBehaviour
 
   @impl true
-  def chat(_messages, opts) do
+  def chat(messages, opts) do
     record(:chat, opts)
+    record(:chat_messages, messages)
     {:ok, "probe response"}
   end
 

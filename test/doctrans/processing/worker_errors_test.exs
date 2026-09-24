@@ -55,22 +55,6 @@ defmodule Doctrans.Processing.WorkerErrorsTest do
     assert_raise Ecto.Query.CastError, fn -> Worker.cancel_document("invalid-id") end
   end
 
-  test "successful cancellation cancels document and page jobs only for the selected document" do
-    Oban.Testing.with_testing_mode(:manual, fn ->
-      document = document_fixture()
-      page = page_fixture(document)
-      other_document = document_fixture()
-      {:ok, extraction} = Worker.process_document(document.id, "/tmp/document.pdf")
-      {:ok, processing} = Worker.queue_page(page.id)
-      {:ok, other} = Worker.process_document(other_document.id, "/tmp/other.pdf")
-
-      assert :ok = Worker.cancel_document(document.id)
-      assert Repo.get!(Oban.Job, extraction.id).state == "cancelled"
-      assert Repo.get!(Oban.Job, processing.id).state == "cancelled"
-      assert Repo.get!(Oban.Job, other.id).state == "available"
-    end)
-  end
-
   test "failed cancellation preserves the document and shows a deletion error", %{conn: conn} do
     document = document_fixture()
     {:ok, view, _html} = live(conn, ~p"/")

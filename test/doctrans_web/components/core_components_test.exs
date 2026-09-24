@@ -1,7 +1,6 @@
 defmodule DoctransWeb.CoreComponentsTest do
   use DoctransWeb.ConnCase, async: true
 
-  import Phoenix.LiveViewTest
   import Phoenix.Component
 
   alias DoctransWeb.CoreComponents
@@ -307,40 +306,43 @@ defmodule DoctransWeb.CoreComponentsTest do
   end
 
   describe "JS commands" do
-    test "show returns JS struct" do
+    test "show targets the requested element" do
       result = CoreComponents.show("#modal")
-      assert %JS{} = result
+      assert %JS{ops: [["show", %{to: "#modal"}]]} = result
     end
 
-    test "hide returns JS struct" do
+    test "hide targets the requested element" do
       result = CoreComponents.hide("#modal")
-      assert %JS{} = result
+      assert %JS{ops: [["hide", %{to: "#modal"}]]} = result
     end
 
     test "show with existing JS struct" do
       js = JS.push("event")
       result = CoreComponents.show(js, "#modal")
-      assert %JS{} = result
+      assert %JS{ops: [["push", %{event: "event"}], ["show", %{to: "#modal"}]]} = result
     end
 
     test "hide with existing JS struct" do
       js = JS.push("event")
       result = CoreComponents.hide(js, "#modal")
-      assert %JS{} = result
+      assert %JS{ops: [["push", %{event: "event"}], ["hide", %{to: "#modal"}]]} = result
     end
   end
 
   describe "translate_error/1" do
     test "translates error message" do
-      result = CoreComponents.translate_error({"is required", []})
-      assert is_binary(result)
+      Gettext.with_locale(DoctransWeb.Gettext, "de", fn ->
+        assert CoreComponents.translate_error({"can't be blank", []}) == "darf nicht leer sein"
+      end)
     end
 
     test "translates error with count" do
-      result =
-        CoreComponents.translate_error({"should be at least %{count} characters", [count: 5]})
-
-      assert is_binary(result)
+      Gettext.with_locale(DoctransWeb.Gettext, "de", fn ->
+        assert CoreComponents.translate_error(
+                 {"should be at least %{count} character(s)", [count: 5]}
+               ) ==
+                 "sollte mindestens 5 Zeichen sein"
+      end)
     end
   end
 
@@ -349,8 +351,7 @@ defmodule DoctransWeb.CoreComponentsTest do
       errors = [name: {"is required", []}, email: {"is invalid", []}]
       result = CoreComponents.translate_errors(errors, :name)
 
-      assert is_list(result)
-      assert length(result) == 1
+      assert result == ["is required"]
     end
 
     test "returns empty list for field without errors" do

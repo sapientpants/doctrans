@@ -12,6 +12,7 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
   and the collaborators the probe runs against.
   """
   use DoctransWeb.ConnCase, async: false
+  use Oban.Testing, repo: Doctrans.Repo
 
   import ExUnit.CaptureLog
 
@@ -21,6 +22,8 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
     EmbeddingOptsStub
   }
 
+  alias Doctrans.Documents
+  alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.TestEnv
   alias DoctransWeb.DocumentLive.UploadReadiness
   alias DoctransWeb.ErrorMessages
@@ -203,22 +206,32 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
         end)
 
       # This module's own line, isolated from the `Task` supervisor's crash
-      # report on the same exit -- that report is written by OTP, dumps the
-      # reason in full, and is not this module's to bound.
+      # report on the same exit -- that report is written by OTP and can include
+      # the original reason. This assertion concerns our application's warning.
       warning =
         log
         |> String.split("\n")
         |> Enum.find("", &(&1 =~ "Readiness check crashed"))
 
-      assert warning =~ "Readiness check crashed"
-
-      # The exit reason carries a 1024-float vector. Eleven consecutive floats
-      # would mean the `limit:` bound was dropped and the warning is now a dump.
-      refute warning =~ String.duplicate("0.1, ", 11)
+      assert warning =~ "Readiness check crashed: unexpected task failure"
+      refute warning =~ "0.1"
     end
   end
 
   describe "credentials" do
+    test "the application's crash warning omits short secrets and retains the exception type" do
+      socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, readiness: :checking}}
+
+      reason =
+        {%RuntimeError{message: "sk-short-secret https://user:password@host/?key=private"}, []}
+
+      {updated, log} = with_log(fn -> UploadReadiness.resolve(socket, {:exit, reason}) end)
+
+      assert updated.assigns.readiness == :unavailable
+      assert log =~ "Readiness check crashed: RuntimeError"
+      for secret <- ["sk-short-secret", "password", "private"], do: refute(log =~ secret)
+    end
+
     test "no part of a credential-bearing endpoint reaches the dialog", %{conn: conn} do
       configure(
         chat_url: "http://user:s3cret@remote.example:8000/v1?key=abc",
@@ -261,6 +274,23 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
 
       assert has_element?(view, @problems)
       refute has_element?(view, "#start-translation-btn[disabled]")
+
+      put_oban_manual_mode(view)
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
+
+        assert [document] = Documents.list_documents()
+        directory = Documents.document_upload_dir(document.id)
+        on_exit(fn -> File.rm_rf!(directory) end)
+
+        assert File.read!(Path.join(directory, "original.pdf")) ==
+                 "%PDF-1.7\n" <> String.duplicate("x", 2_000)
+
+        assert_enqueued(worker: DocumentExtractionJob, args: %{document_id: document.id})
+        assert has_element?(view, "#documents-#{document.id}")
+        refute has_element?(view, "#upload-modal")
+      end)
     end
   end
 

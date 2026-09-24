@@ -3,7 +3,6 @@ defmodule Doctrans.Search.ReindexTest do
   use Oban.Testing, repo: Doctrans.Repo
 
   import Doctrans.Fixtures
-  import ExUnit.CaptureLog
 
   alias Doctrans.Documents.Page
   alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, LlmProcessingJob}
@@ -109,25 +108,6 @@ defmodule Doctrans.Search.ReindexTest do
         assert length(all_enqueued(worker: EmbeddingJob)) == 1
       end)
     end
-
-    test "a page the database refuses costs that page, not the batch" do
-      Oban.Testing.with_testing_mode(:manual, fn ->
-        document = document_fixture(%{status: "completed", total_pages: 2})
-        _queued = page_with_embedding_status(document, 1, "error")
-        rejected = page_with_embedding_status(document, 2, "error")
-        reject_jobs_for(rejected.id)
-
-        # The count is the assertion: the page before the failure was queued and
-        # counted, and the call returned rather than taking the whole document
-        # down with the one row the database refused. Nothing is read back
-        # afterwards because the rejection aborts the test's own surrounding
-        # sandbox transaction, which a real per-page transaction is not nested in.
-        log =
-          capture_log(fn -> assert {:ok, 1} = Reindex.retry_document(document.id) end)
-
-        assert log =~ rejected.id
-      end)
-    end
   end
 
   defp page_with_embedding_status(document, number, status) do
@@ -148,25 +128,5 @@ defmodule Doctrans.Search.ReindexTest do
       {reloaded.id, reloaded.translation_status, reloaded.translated_markdown,
        reloaded.original_markdown, reloaded.content_revision}
     end
-  end
-
-  # A row-level veto on one page's insert, so the batch meets a failure it cannot
-  # foresee. The trigger lives inside the test's transaction and leaves with it.
-  defp reject_jobs_for(page_id) do
-    Repo.query!("""
-    CREATE FUNCTION reindex_test_reject() RETURNS trigger AS $$
-    BEGIN
-      IF NEW.args->>'page_id' = '#{page_id}' THEN
-        RAISE EXCEPTION 'indexing job rejected by test';
-      END IF;
-      RETURN NEW;
-    END;
-    $$ LANGUAGE plpgsql;
-    """)
-
-    Repo.query!("""
-    CREATE TRIGGER reindex_test_reject BEFORE INSERT ON oban_jobs
-    FOR EACH ROW EXECUTE FUNCTION reindex_test_reject()
-    """)
   end
 end

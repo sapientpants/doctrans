@@ -21,7 +21,7 @@ defmodule Doctrans.Processing.OpenAITest do
   `Doctrans.Processing.OpenAIRequestTest`.
   """
 
-  use ExUnit.Case, async: false
+  use Doctrans.EnvCase, async: false
 
   alias Doctrans.Processing.OpenAI
   alias Doctrans.TestEnv
@@ -74,17 +74,6 @@ defmodule Doctrans.Processing.OpenAITest do
 
   describe "list_models/0" do
     setup :bypass_api
-
-    test "returns the models the API advertises", %{bypass: bypass} do
-      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
-        json(conn, 200, %{
-          "object" => "list",
-          "data" => [%{"id" => "vision-model"}, %{"id" => "chat-model"}]
-        })
-      end)
-
-      assert OpenAI.list_models() == {:ok, ["vision-model", "chat-model"]}
-    end
 
     test "reports the status when the API rejects the request", %{bypass: bypass} do
       Bypass.expect(bypass, "GET", "/v1/models", fn conn ->

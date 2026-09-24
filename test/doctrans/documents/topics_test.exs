@@ -10,14 +10,6 @@ defmodule Doctrans.Documents.TopicsTest do
   # down. Every assertion pins the document it expects, so a `{:document_created,
   # _}` from a fixture in a concurrently running file cannot satisfy one.
   describe "PubSub functions" do
-    test "subscribe_documents/0 subscribes to documents topic" do
-      assert :ok = Topics.subscribe_documents()
-    end
-
-    test "subscribe_document/1 subscribes to document topic" do
-      assert :ok = Topics.subscribe_document("test-id")
-    end
-
     test "broadcast_document_updated/1 broadcasts to subscribers" do
       doc = %Document{id: Ecto.UUID.generate()}
       Topics.subscribe_document(doc.id)

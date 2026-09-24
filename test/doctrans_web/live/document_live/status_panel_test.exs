@@ -119,9 +119,14 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
 
       Topics.broadcast_page_updated(indexed)
 
-      # The viewer coalesces page updates behind a 100ms timer of its own, so the
-      # re-render is genuinely late rather than merely asynchronous.
-      Process.sleep(200)
+      # Observe the real timer-driven refresh, allowing scheduler delay without
+      # making a fixed sleep part of every successful run.
+      Doctrans.ProcessProbe.eventually(
+        fn ->
+          has_element?(view, "#processing-status") and not has_element?(view, "#retry-indexing")
+        end,
+        "indexing completion to remove the retry control"
+      )
 
       # The panel itself is asserted alongside the refutation: "no retry button"
       # is also what a panel that failed to render says, and that is the one way

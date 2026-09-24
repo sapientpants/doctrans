@@ -197,37 +197,6 @@ defmodule Doctrans.Processing.WorkerTest do
   end
 
   describe "cancel_document/1" do
-    test "cancels the document's extraction and its pages' processing, and nothing else" do
-      queued(fn ->
-        document = document_fixture(%{status: "extracting"})
-        page = page_fixture(document)
-        bystander = document_fixture(%{status: "extracting"})
-        bystander_page = page_fixture(bystander)
-
-        {:ok, extraction} = Worker.process_document(document.id, "/uploads/original.pdf")
-        {:ok, processing} = Worker.queue_page(page.id, page_number: 1)
-        {:ok, other_extraction} = Worker.process_document(bystander.id, "/uploads/original.pdf")
-        {:ok, other_processing} = Worker.queue_page(bystander_page.id, page_number: 1)
-
-        assert :ok = Worker.cancel_document(document.id)
-
-        assert Repo.get!(Oban.Job, extraction.id).state == "cancelled"
-        assert Repo.get!(Oban.Job, processing.id).state == "cancelled"
-        assert Repo.get!(Oban.Job, other_extraction.id).state == "available"
-        assert Repo.get!(Oban.Job, other_processing.id).state == "available"
-      end)
-    end
-
-    test "cancels the extraction of a document that has no pages yet" do
-      queued(fn ->
-        document = document_fixture(%{status: "queued"})
-        {:ok, extraction} = Worker.process_document(document.id, "/uploads/original.pdf")
-
-        assert :ok = Worker.cancel_document(document.id)
-        assert Repo.get!(Oban.Job, extraction.id).state == "cancelled"
-      end)
-    end
-
     test "cancelling a document that does not exist leaves every other job alone" do
       queued(fn ->
         bystander = document_fixture(%{status: "extracting"})

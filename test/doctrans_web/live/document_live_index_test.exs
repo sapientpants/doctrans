@@ -309,20 +309,39 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     end
 
     test "sort dropdown changes order", %{conn: conn} do
-      _doc1 = document_fixture(%{title: "Alpha"})
-      _doc2 = document_fixture(%{title: "Beta"})
+      older = document_fixture(%{title: "Zebra"})
+      newer = document_fixture(%{title: "Alpha"})
+
+      for {document, timestamp} <- [
+            {older, ~N[2020-01-01 12:00:00]},
+            {newer, ~N[2021-01-01 12:00:00]}
+          ] do
+        document |> Ecto.Changeset.change(inserted_at: timestamp) |> Doctrans.Repo.update!()
+      end
 
       {:ok, view, _html} = live(conn, ~p"/")
 
-      # Click sort by title A-Z
-      view
-      |> element("button[phx-click='sort'][phx-value-field='title'][phx-value-dir='asc']")
-      |> render_click()
+      for {field, direction, expected} <- [
+            {"title", "desc", [older.id, newer.id]},
+            {"title", "asc", [newer.id, older.id]},
+            {"inserted_at", "asc", [older.id, newer.id]},
+            {"inserted_at", "desc", [newer.id, older.id]}
+          ] do
+        view
+        |> element(
+          "button[phx-click='sort'][phx-value-field='#{field}'][phx-value-dir='#{direction}']"
+        )
+        |> render_click()
 
-      # Verify both documents still show
-      html = render(view)
-      assert html =~ "Alpha"
-      assert html =~ "Beta"
+        ids =
+          view
+          |> render()
+          |> LazyHTML.from_fragment()
+          |> LazyHTML.query("#documents > div")
+          |> LazyHTML.attribute("id")
+
+        assert ids == Enum.map(expected, &"documents-#{&1}")
+      end
     end
 
     test "has search form", %{conn: conn} do
@@ -378,13 +397,6 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       assert html =~ "French"
     end
 
-    test "displays document thumbnail when page image exists", %{conn: conn} do
-      _doc = document_with_pages_fixture(%{title: "With Thumbnail"}, 1)
-      {:ok, _view, html} = live(conn, ~p"/")
-
-      assert html =~ "With Thumbnail"
-    end
-
     test "document card links to document show page", %{conn: conn} do
       doc = document_fixture(%{title: "Linked Doc"})
       {:ok, view, _html} = live(conn, ~p"/")
@@ -399,51 +411,6 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       html = render(view)
       assert html =~ ~s(action="/search")
       assert html =~ ~s(method="get")
-    end
-
-    test "sort by newest shows documents in order", %{conn: conn} do
-      _doc1 = document_fixture(%{title: "First"})
-      _doc2 = document_fixture(%{title: "Second"})
-
-      {:ok, view, _html} = live(conn, ~p"/")
-
-      view
-      |> element("button[phx-click='sort'][phx-value-field='inserted_at'][phx-value-dir='desc']")
-      |> render_click()
-
-      html = render(view)
-      assert html =~ "First"
-      assert html =~ "Second"
-    end
-
-    test "sort by oldest shows documents in reverse order", %{conn: conn} do
-      _doc1 = document_fixture(%{title: "First"})
-      _doc2 = document_fixture(%{title: "Second"})
-
-      {:ok, view, _html} = live(conn, ~p"/")
-
-      view
-      |> element("button[phx-click='sort'][phx-value-field='inserted_at'][phx-value-dir='asc']")
-      |> render_click()
-
-      html = render(view)
-      assert html =~ "First"
-      assert html =~ "Second"
-    end
-
-    test "sort by Z-A shows documents in descending title order", %{conn: conn} do
-      _doc1 = document_fixture(%{title: "Alpha"})
-      _doc2 = document_fixture(%{title: "Zebra"})
-
-      {:ok, view, _html} = live(conn, ~p"/")
-
-      view
-      |> element("button[phx-click='sort'][phx-value-field='title'][phx-value-dir='desc']")
-      |> render_click()
-
-      html = render(view)
-      assert html =~ "Alpha"
-      assert html =~ "Zebra"
     end
 
     test "shows progress bar for extracting documents", %{conn: conn} do
@@ -496,9 +463,8 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       |> element("#upload-form")
       |> render_change(%{"target_language" => "fr"})
 
-      html = render(view)
-      # Verify the select has French selected
-      assert html =~ "French"
+      assert has_element?(view, "#target-lang-select option[value='fr'][selected]")
+      refute has_element?(view, "#target-lang-select option[value='en'][selected]")
     end
 
     test "handles unknown PubSub messages gracefully", %{conn: conn} do
@@ -513,25 +479,36 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
 
     test "cancel_upload removes pending upload", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/")
-
-      # Open upload modal
       view |> element("#upload-document-btn") |> render_click()
 
-      # Upload a file
-      file =
-        file_input(view, "#upload-form", :document, [
-          %{
-            name: "test.pdf",
-            content: "fake pdf content",
-            type: "application/pdf"
-          }
-        ])
+      for name <- ["removed.pdf", "retained.pdf"] do
+        upload =
+          file_input(view, "#upload-form", :document, [
+            %{name: name, content: "%PDF-1.7\nretained source bytes", type: "application/pdf"}
+          ])
 
-      # Render the file input
-      render_upload(file, "test.pdf")
+        render_upload(upload, name)
+      end
 
-      # Modal should still be open
+      view
+      |> element("button[phx-click=cancel_upload][aria-label*='removed.pdf']")
+      |> render_click()
+
+      refute has_element?(view, "button[phx-click=cancel_upload][aria-label*='removed.pdf']")
+      assert has_element?(view, "button[phx-click=cancel_upload][aria-label*='retained.pdf']")
       assert has_element?(view, "#upload-modal")
+
+      put_oban_manual_mode(view)
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
+      end)
+
+      assert [document] = Documents.list_documents()
+      directory = Documents.document_upload_dir(document.id)
+      on_exit(fn -> File.rm_rf!(directory) end)
+      assert document.original_filename == "retained.pdf"
+      assert File.read!(Path.join(directory, "original.pdf")) == "%PDF-1.7\nretained source bytes"
     end
 
     test "repeated deletes and invalid IDs are harmless", %{conn: conn} do

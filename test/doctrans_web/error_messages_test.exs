@@ -112,8 +112,8 @@ defmodule DoctransWeb.ErrorMessagesTest do
       assert {:error, "Query too short"} = translated(Validation.validate_search_query(""))
     end
 
-    test "every document attribute failure is translated in every locale" do
-      assert_translated_everywhere([
+    test "document attribute failures have specific messages with resolved bindings in every locale" do
+      assert_specific_messages_everywhere([
         :empty_title,
         :invalid_title,
         :invalid_target_language,
@@ -138,7 +138,7 @@ defmodule DoctransWeb.ErrorMessagesTest do
       end)
     end
 
-    test "every extraction bound is translated in every locale" do
+    test "extraction bounds have specific messages with resolved bindings in every locale" do
       reasons = [
         :pdf_command_timeout,
         :pdfinfo_timeout,
@@ -150,15 +150,15 @@ defmodule DoctransWeb.ErrorMessagesTest do
         {:poppler_not_found, [command: "pdftoppm"]}
       ]
 
-      assert_translated_everywhere(reasons)
+      assert_specific_messages_everywhere(reasons)
     end
 
-    test "every retrieval outage is translated in every locale" do
+    test "retrieval outages have specific messages with resolved bindings in every locale" do
       # Both spellings: `Doctrans.Chat.retrieve/4` returns the tagged tuple, and
       # the bare atom is what the tuple clause delegates to. Without a clause of
       # its own the tuple would fall through to the generic message and nothing
       # else in the suite would notice.
-      assert_translated_everywhere([
+      assert_specific_messages_everywhere([
         :retrieval_unavailable,
         {:retrieval_unavailable, [reason: :circuit_open]},
         {:retrieval_unavailable, [reason: :database_error]}
@@ -207,14 +207,12 @@ defmodule DoctransWeb.ErrorMessagesTest do
     end
   end
 
-  # Looping the known locales rather than a hand-picked subset: a msgid left
-  # untranslated, or a typo'd placeholder, only shows up in the locale that has
-  # it.
-  defp assert_translated_everywhere(reasons) do
-    generic = ErrorMessages.message(:unknown)
-
+  # Catalog completeness and placeholder parity belong to check_translations.exs.
+  # Here the runtime mapping must select a specific message in the active locale.
+  defp assert_specific_messages_everywhere(reasons) do
     for locale <- Gettext.known_locales(DoctransWeb.Gettext), reason <- reasons do
       Gettext.with_locale(DoctransWeb.Gettext, locale, fn ->
+        generic = ErrorMessages.message(:unknown)
         message = ErrorMessages.message(reason)
 
         assert message != generic,

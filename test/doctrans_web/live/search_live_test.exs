@@ -2,7 +2,6 @@ defmodule DoctransWeb.SearchLiveTest do
   use DoctransWeb.ConnCase, async: true
 
   import Doctrans.Fixtures
-  import Phoenix.LiveViewTest
 
   alias Doctrans.Documents
 

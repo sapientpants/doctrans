@@ -75,9 +75,7 @@ defmodule DoctransWeb.DocumentLive.UploadReadiness do
   def resolve(socket, {:ok, report}), do: assign(socket, :readiness, report)
 
   def resolve(socket, {:exit, reason}) do
-    # Bounded: an exit reason carries a stacktrace whose frames can hold the
-    # request struct, endpoint URL and API key included.
-    Logger.warning("Readiness check crashed: #{inspect(reason, limit: 10, printable_limit: 256)}")
+    Logger.warning("Readiness check crashed: #{DoctransWeb.AsyncFailure.summary(reason)}")
 
     assign(socket, :readiness, :unavailable)
   end

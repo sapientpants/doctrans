@@ -178,9 +178,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   end
 
   def handle_async(:fetch_models, {:exit, reason}, socket) do
-    # Bounded: an exit reason carries a stacktrace whose frames can hold the
-    # request struct, headers and API key included.
-    Logger.warning("Model fetch crashed: #{inspect(reason, limit: 10, printable_limit: 256)}")
+    Logger.warning("Model fetch crashed: #{DoctransWeb.AsyncFailure.summary(reason)}")
 
     if socket.assigns.show_reprocess_modal do
       {:noreply, models_unavailable(socket)}

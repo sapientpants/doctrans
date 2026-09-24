@@ -117,13 +117,20 @@ defmodule Doctrans.Processing.SubprocessTest do
   end
 
   test "removes an environment variable on request", %{dir: dir} do
-    System.put_env("DOCTRANS_TEST_REMOVED", "present")
-    on_exit(fn -> System.delete_env("DOCTRANS_TEST_REMOVED") end)
+    previous = System.get_env("LANG")
+    System.put_env("LANG", "C")
 
-    command = script(dir, "#!/bin/sh\necho \"[${DOCTRANS_TEST_REMOVED}]\"\n")
+    on_exit(fn ->
+      if previous, do: System.put_env("LANG", previous), else: System.delete_env("LANG")
+    end)
+
+    command = script(dir, "#!/bin/sh\necho \"[${LANG}]\"\n")
+
+    # LANG is normally inherited, so the explicit removal must do the work.
+    assert {:ok, {"[C]\n", 0}} = Subprocess.run(command, [], timeout: 10_000)
 
     assert {:ok, {"[]\n", 0}} =
-             Subprocess.run(command, [], timeout: 10_000, env: [{"DOCTRANS_TEST_REMOVED", false}])
+             Subprocess.run(command, [], timeout: 10_000, env: [{"LANG", false}])
   end
 
   test "passes only allowlisted variables to the child", %{dir: dir} do
@@ -137,38 +144,64 @@ defmodule Doctrans.Processing.SubprocessTest do
     assert {:ok, {"[]\n", 0}} = Subprocess.run(command, [], timeout: 10_000)
   end
 
-  test "a clean exit does not signal a process group that may have been reused", %{dir: dir} do
-    # A command that exits on its own has already been reaped, so its group id is
-    # free; killing it anyway is what :kill_on_exit opts back into.
-    command = script(dir, "#!/bin/sh\nexit 0\n")
+  for kill_on_exit <- [false, true] do
+    @kill_on_exit kill_on_exit
 
-    assert {:ok, {"", 0}} = Subprocess.run(command, [], timeout: 10_000)
-    assert {:ok, {"", 0}} = Subprocess.run(command, [], timeout: 10_000, kill_on_exit: true)
-  end
+    test "clean exit signals surviving children only when kill_on_exit is #{kill_on_exit}", %{
+      dir: dir
+    } do
+      pid_file = Path.join(dir, "grandchild")
+      release = Path.join(dir, "release-launcher")
 
-  test "kill_on_exit reaps children a launcher leaves behind", %{dir: dir} do
-    pid_file = Path.join(dir, "grandchild")
+      launcher =
+        script(dir, """
+        #!/bin/sh
+        /bin/sleep 30 </dev/null >/dev/null 2>&1 &
+        echo $! > "#{pid_file}"
+        while [ ! -f "#{release}" ]; do /bin/sleep 0.02; done
+        exit 0
+        """)
 
-    launcher =
-      script(dir, """
-      #!/bin/sh
-      # Redirected the way a daemonising launcher detaches: while a descendant
-      # still holds the output pipe, the port reports no exit status at all, so
-      # this is the only shape in which the clean-exit path is even reached.
-      /bin/sleep 98765 >/dev/null 2>&1 &
-      echo $! > "#{pid_file}"
-      exit 0
-      """)
+      task =
+        Task.async(fn ->
+          Subprocess.run(launcher, [], timeout: 10_000, kill_on_exit: @kill_on_exit)
+        end)
 
-    assert {:ok, {"", 0}} = Subprocess.run(launcher, [], timeout: 10_000, kill_on_exit: true)
+      grandchild = await_file_line(pid_file, "the launcher to record its grandchild's pid")
 
-    grandchild = await_file_line(pid_file, "the launcher to record its grandchild's pid")
-    eventually(fn -> process_gone?(grandchild) end, "grandchild #{grandchild} to be reaped")
+      on_exit(fn ->
+        environment = for {name, _value} <- System.get_env(), do: {name, nil}
+
+        unless process_gone?(grandchild),
+          do:
+            System.cmd("/bin/kill", ["-KILL", grandchild],
+              env: environment,
+              stderr_to_stdout: true
+            )
+      end)
+
+      refute process_gone?(grandchild), "the control child must be alive before launcher exit"
+      File.touch!(release)
+      assert {:ok, {"", 0}} = Task.await(task, 15_000)
+
+      if @kill_on_exit do
+        eventually(fn -> process_gone?(grandchild) end, "grandchild #{grandchild} to be reaped")
+      else
+        refute process_gone?(grandchild),
+               "default cleanup must not signal the exited launcher's group"
+      end
+    end
   end
 
   test "removes credentials from the child environment", %{dir: dir} do
+    previous = System.get_env("OPENAI_API_KEY")
     System.put_env("OPENAI_API_KEY", "sk-test-should-not-leak")
-    on_exit(fn -> System.delete_env("OPENAI_API_KEY") end)
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env("OPENAI_API_KEY", previous),
+        else: System.delete_env("OPENAI_API_KEY")
+    end)
 
     command = script(dir, "#!/bin/sh\necho \"key=[${OPENAI_API_KEY}] path=[${PATH:+set}]\"\n")
 
