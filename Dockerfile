@@ -16,7 +16,7 @@
 # multi-architecture index (amd64/arm64), so it resolves on CI runners and Apple
 # silicon alike, and the version must stay in step with `mise.toml` —
 # `scripts/check_toolchain_pins.exs` enforces that.
-FROM elixir:1.20.4-otp-29@sha256:321ba13236f0831aa0ea6501e3bab9df0ed26188ba8863a53126057f8a933d71 AS builder
+FROM elixir:1.20.4-otp-29@sha256:86ff0019e9f70662462d7394406e8dee03ea399fe11825708614b2a5ce5368aa AS builder
 
 # `git` is required because a Hex dependency may resolve to a git ref;
 # `build-essential` because several deps compile NIFs or a port driver.
