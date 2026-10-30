@@ -71,7 +71,7 @@ RUN mix release
 # The builder is Debian 13 "trixie" (glibc 2.41), so the runtime base must be
 # trixie too — an older slim base would fail at `bin/doctrans` with a
 # `GLIBC_2.4x not found` link error. Digest-pinned for the same reason as above.
-FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS runtime
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS runtime
 
 # Only what the release actually needs at runtime:
 #   - ca-certificates, openssl: TLS from :ssl, for the OpenAI-compatible endpoint
