@@ -259,6 +259,9 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
 
   attr :content, :string, default: nil
 
+  # The HTML comes from MarkdownHelpers.render_markdown/2, which sanitizes before
+  # returning; scripts/check_raw_call_sites.exs pins this as a registered raw/1 site.
+  # sobelow_skip ["XSS.Raw"]
   defp markdown_content(assigns) do
     # Chat answers separate lines with single newlines; render them as hard breaks
     # so the layout is preserved instead of collapsing into run-on text.

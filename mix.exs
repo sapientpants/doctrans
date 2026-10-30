@@ -117,7 +117,7 @@ defmodule Doctrans.MixProject do
       {:dns_cluster, "~> 0.3.0"},
       {:bandit, "~> 1.5"},
       {:uniq, "~> 0.6"},
-      {:mdex, "~> 0.13"},
+      {:mdex, "~> 0.14"},
       {:html_sanitize_ex, "~> 1.5"},
       {:pgvector, "~> 0.3"},
       {:oban, "~> 2.20"},
@@ -136,7 +136,7 @@ defmodule Doctrans.MixProject do
       # REVIEW BY 2026-12-21: this is a pilot, not a standing gate. Drop it unless
       # someone is actively re-running it against processing/ or jobs/, which is
       # the genuinely un-mutated surface.
-      {:muex, "~> 0.11.2", only: [:dev, :test], runtime: false}
+      {:muex, "~> 0.12.0", only: [:dev, :test], runtime: false}
     ]
   end
 
