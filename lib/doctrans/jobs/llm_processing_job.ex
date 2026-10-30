@@ -96,11 +96,13 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
 
   # Oban persists JSON with string keys; the processor expects keyword options.
   defp processor_opts(args, generation) do
-    for key <- [:extraction_model, :translation_model],
-        model = Map.get(args, Atom.to_string(key)),
-        not is_nil(model),
-        into: [generation: generation],
-        do: {key, model}
+    models =
+      for key <- [:extraction_model, :translation_model],
+          model = Map.get(args, Atom.to_string(key)),
+          not is_nil(model),
+          do: {key, model}
+
+    Keyword.put(models, :generation, generation)
   end
 
   # The processor owns no retry loop, so the retry series the dashboard charts
