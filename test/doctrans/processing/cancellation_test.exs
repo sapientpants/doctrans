@@ -7,7 +7,7 @@ defmodule Doctrans.Processing.CancellationTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
-  alias Doctrans.Processing.{Cancellation, Completion, DocumentReprocessing}
+  alias Doctrans.Processing.{Cancellation, Completion, DocumentReprocessing, Run}
 
   @moduletag :postgres
 
@@ -19,7 +19,7 @@ defmodule Doctrans.Processing.CancellationTest do
         :ok = Topics.subscribe_document(document.id)
 
         queued =
-          for state <- ~w(available scheduled retryable) do
+          for state <- ~w(available scheduled retryable suspended) do
             insert_job(LlmProcessingJob, %{"page_id" => page.id}, state)
           end
 
@@ -41,6 +41,28 @@ defmodule Doctrans.Processing.CancellationTest do
 
         assert Repo.get!(Oban.Job, executing.id).state == "executing"
         assert_received {:document_updated, %Document{status: "cancelled"}}
+      end)
+    end
+
+    # Regression: the cancel path once listed three cancellable states while every
+    # other predicate counted `suspended` as active, so a suspended job blocked
+    # reprocessing yet survived cancellation.
+    test "cancels a suspended job of either shape" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "processing", total_pages: 1})
+        page = page_fixture(document, %{page_number: 1})
+
+        extraction =
+          insert_job(DocumentExtractionJob, %{"document_id" => document.id}, "suspended")
+
+        processing = insert_job(LlmProcessingJob, %{"page_id" => page.id}, "suspended")
+
+        assert Run.active?(document.id)
+        assert {:ok, %Document{status: "cancelled"}} = Cancellation.cancel_document(document.id)
+
+        assert Repo.get!(Oban.Job, extraction.id).state == "cancelled"
+        assert Repo.get!(Oban.Job, processing.id).state == "cancelled"
+        refute Run.active?(document.id)
       end)
     end
 
@@ -136,7 +158,10 @@ defmodule Doctrans.Processing.CancellationTest do
         other_document = document_fixture()
         other_page = page_fixture(other_document)
 
-        for state <- ~w(available scheduled retryable executing completed discarded cancelled) do
+        states =
+          ~w(available scheduled retryable suspended executing completed discarded cancelled)
+
+        for state <- states do
           # Literal keys also cover jobs persisted before the shared key definitions.
           extraction = insert_job(DocumentExtractionJob, %{"document_id" => document.id}, state)
 
@@ -151,7 +176,9 @@ defmodule Doctrans.Processing.CancellationTest do
             insert_job(DocumentExtractionJob, %{"document_id" => other_document.id}, state)
 
           assert :ok = Cancellation.cancel_jobs(document.id)
-          expected = if state in ~w(available scheduled retryable), do: "cancelled", else: state
+
+          expected =
+            if state in ~w(available scheduled retryable suspended), do: "cancelled", else: state
 
           for job <- [extraction | processing] do
             assert Repo.get!(Oban.Job, job.id).state == expected
