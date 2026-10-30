@@ -321,12 +321,6 @@ config :doctrans, :circuit_breakers,
   openai_api: [strategy: {:standard, 5, 60_000}, refresh: 30_000],
   embedding_api: [strategy: {:standard, 3, 30_000}, refresh: 15_000]
 
-# Retry configuration for exponential backoff
-config :doctrans, :retry,
-  max_attempts: 3,
-  base_delay_ms: 2_000,
-  max_delay_ms: 30_000
-
 # Upload settings. The storage root is deliberately absent: it resolves at
 # runtime to priv/static/uploads of the running application, and
 # DOCTRANS_DATA_DIR replaces it.
