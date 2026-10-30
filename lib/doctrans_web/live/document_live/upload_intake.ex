@@ -16,7 +16,7 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
 
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
-  alias Doctrans.Processing.Worker
+  alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Validation
 
   require Logger
@@ -299,7 +299,7 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   end
 
   defp enqueue(document, pdf_path, original_filename) do
-    case Worker.process_document(document.id, pdf_path) do
+    case DocumentExtractionJob.enqueue_document(document.id, pdf_path) do
       {:ok, _job} ->
         :ok
 

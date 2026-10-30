@@ -14,7 +14,7 @@ defmodule Doctrans.Processing.StartupRecovery do
 
   alias Doctrans.Documents.{Document, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, Keys, LlmProcessingJob}
-  alias Doctrans.Processing.{DocumentOrchestrator, Run}
+  alias Doctrans.Processing.{Completion, Run}
   alias Doctrans.Repo
 
   @batch_size 50
@@ -164,12 +164,12 @@ defmodule Doctrans.Processing.StartupRecovery do
   # whole pass from the first phase, and the inconsistency this phase exists to
   # heal is durable, so an uncontained row would be replayed on every restart.
   #
-  # Only the database errors are caught, matching `Worker.queue_status/0`. The
-  # orchestrator's `{:ok, _} =` matches are self-consistent under the document
+  # Only the database errors are caught, matching `Cancellation.cancel_jobs/1`.
+  # `Completion`'s `{:ok, _} =` matches are self-consistent under the document
   # lock it holds, so a MatchError from there would be a logic bug worth
   # surfacing rather than a row worth skipping.
   defp reconcile_completion(row) do
-    _ = DocumentOrchestrator.check_document_completion(row.id)
+    _ = Completion.check_document_completion(row.id)
     :ok
   rescue
     error in [Ecto.NoResultsError, Postgrex.Error, DBConnection.ConnectionError] ->

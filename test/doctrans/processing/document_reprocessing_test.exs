@@ -6,7 +6,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Chunk, Page}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
-  alias Doctrans.Processing.{DocumentOrchestrator, DocumentReprocessing, Run, StartupRecovery}
+  alias Doctrans.Processing.{Completion, DocumentReprocessing, Run, StartupRecovery}
 
   setup do
     for {key, value} <- [
@@ -131,7 +131,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       end
 
       assert :completed =
-               DocumentOrchestrator.check_document_completion(run.id)
+               Completion.check_document_completion(run.id)
 
       # Simulate rescue after page jobs finished but extraction was not acknowledged.
       Repo.update_all(from(j in Oban.Job), set: [state: "completed"])
@@ -211,7 +211,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       end
 
       # Settled pages with a discarded failure are a terminal partial failure.
-      assert :failed = DocumentOrchestrator.check_document_completion(run.id)
+      assert :failed = Completion.check_document_completion(run.id)
       assert Documents.get_document!(run.id).status == "error"
       assert Documents.get_document!(run.id).error_message == failed.error_message
 

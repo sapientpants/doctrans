@@ -43,7 +43,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       assert has_element?(view, "#document-not-found")
     end
 
-    # `Worker.cancel_document/1` does not stop an Oban job that is already
+    # `Cancellation.cancel_jobs/1` does not stop an Oban job that is already
     # executing, so a job working on the deleted document can still broadcast on
     # `document:<id>` after `{:document_deleted, _}` has emptied the assign.
     test "a document update arriving after the deletion leaves the viewer standing", %{conn: conn} do

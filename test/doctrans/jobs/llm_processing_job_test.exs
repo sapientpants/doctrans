@@ -6,10 +6,61 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Pages
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{OpenAICrashStub, OpenAIProbe, StartupRecovery, Worker}
+  alias Doctrans.Processing.{OpenAICrashStub, OpenAIProbe, StartupRecovery}
   alias Oban.Engines.Basic
 
   import Doctrans.Fixtures
+
+  describe "enqueue_page/2" do
+    test "queues the page at the ordinary priority with its generation and model" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "processing"})
+        page = page_fixture(document, %{page_number: 4})
+
+        assert {:ok, job} = LlmProcessingJob.enqueue_page(page, extraction_model: "vision")
+
+        assert job.queue == "llm_processing"
+        assert job.priority == 2
+
+        assert job.args == %{
+                 "page_id" => page.id,
+                 "page_number" => 4,
+                 "generation" => page.processing_generation,
+                 "extraction_model" => "vision"
+               }
+      end)
+    end
+
+    test "carries no model keys when the run made no choice" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "processing"})
+        page = page_fixture(document, %{page_number: 7})
+
+        assert {:ok, job} = LlmProcessingJob.enqueue_page(page)
+
+        assert job.args == %{
+                 "page_id" => page.id,
+                 "page_number" => 7,
+                 "generation" => page.processing_generation
+               }
+      end)
+    end
+
+    test "queueing a page twice returns the job already queued for it" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "processing"})
+        page = page_fixture(document)
+
+        {:ok, first} = LlmProcessingJob.enqueue_page(page)
+        {:ok, second} = LlmProcessingJob.enqueue_page(page)
+
+        # Uniqueness on :page_id is what keeps one page from being processed twice.
+        assert second.id == first.id
+        assert second.conflict?
+        assert [_only] = all_enqueued(worker: LlmProcessingJob)
+      end)
+    end
+  end
 
   describe "persisted model selections" do
     setup do
@@ -36,8 +87,18 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
         Oban.Testing.with_testing_mode(:manual, fn ->
           document = document_fixture(%{total_pages: 1, status: "completed"})
           page = completed_page_fixture(document)
-          assert {:ok, _} = Pages.reset_page_for_reprocessing(page)
-          assert {:ok, job} = Worker.queue_page_reprocess(page.id, @opts)
+          assert {:ok, page} = Pages.reset_page_for_reprocessing(page)
+
+          # The shape `DocumentReprocessing` persists for a page-level retry.
+          assert {:ok, job} =
+                   page
+                   |> LlmProcessingJob.page_args(
+                     page.processing_generation,
+                     LlmProcessingJob.model_args(@opts)
+                   )
+                   |> LlmProcessingJob.new(priority: 1)
+                   |> Oban.insert()
+
           persisted = Repo.get!(Oban.Job, job.id)
 
           for {key, model} <- @opts do
@@ -70,7 +131,7 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
       Oban.Testing.with_testing_mode(:manual, fn ->
         document = document_fixture(%{total_pages: 1})
         page = page_fixture(document)
-        assert {:ok, _} = Worker.queue_page(page.id, page_number: 1)
+        assert {:ok, _} = LlmProcessingJob.enqueue_page(page)
         assert %{success: 1, failure: 0} = Oban.drain_queue(queue: :llm_processing)
         vision = OpenAI.vision_model()
         translation = OpenAI.translation_model()

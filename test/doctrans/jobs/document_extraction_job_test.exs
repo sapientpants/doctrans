@@ -12,6 +12,61 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
 
   import Doctrans.Fixtures
 
+  # The suite runs Oban `testing: :inline`, which executes each job at insert and
+  # leaves a settled row behind. These cases assert on what was *queued*, so they
+  # insert in manual mode instead.
+  describe "enqueue_document/2" do
+    test "queues extraction and stamps the run the job belongs to" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "queued"})
+        path = "/uploads/#{document.id}/original.pdf"
+
+        assert {:ok, job} = DocumentExtractionJob.enqueue_document(document.id, path)
+
+        stamped = Documents.get_document!(document.id)
+        assert stamped.source_extension == ".pdf"
+        assert stamped.processing_run_id != nil
+
+        assert job.queue == "pdf_extraction"
+        assert job.state == "available"
+
+        assert job.args == %{
+                 "document_id" => document.id,
+                 "run_id" => stamped.processing_run_id,
+                 "file_path" => path
+               }
+      end)
+    end
+
+    test "refuses a document that does not exist and queues nothing" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        assert {:error, :document_not_found} =
+                 DocumentExtractionJob.enqueue_document(
+                   Ecto.UUID.generate(),
+                   "/uploads/original.pdf"
+                 )
+
+        assert all_enqueued(worker: DocumentExtractionJob) == []
+      end)
+    end
+
+    test "refuses an extension that is not a supported source format, changing nothing" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture()
+
+        assert {:error, {:unsupported_format, [format: ".txt"]}} =
+                 DocumentExtractionJob.enqueue_document(document.id, "/uploads/original.txt")
+
+        # The whole enqueue is one transaction, so the refusal rolls back the
+        # extension and run it had already written.
+        untouched = Documents.get_document!(document.id)
+        assert untouched.source_extension == nil
+        assert untouched.processing_run_id == nil
+        assert all_enqueued(worker: DocumentExtractionJob) == []
+      end)
+    end
+  end
+
   describe "timeout/1" do
     test "bounds the job, and follows configuration" do
       job = %Oban.Job{args: %{}}

@@ -3,13 +3,13 @@ defmodule Doctrans.Processing.PdfProcessorTest do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.DocumentOrchestrator
+  alias Doctrans.Processing.Completion
   alias Doctrans.Processing.PdfProcessor
 
   import Doctrans.Fixtures
 
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{ResumablePdfExtractorStub, Worker}
+  alias Doctrans.Processing.ResumablePdfExtractorStub
 
   describe "extract_document/3" do
     test "waits for all expected pages when processing catches up with PDF extraction" do
@@ -37,20 +37,20 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         assert [first_page] = Documents.list_pages(document.id)
         complete_page(first_page)
 
-        assert DocumentOrchestrator.check_document_completion(document.id) == :incomplete
+        assert Completion.check_document_completion(document.id) == :incomplete
         assert Documents.get_document!(document.id).status == "processing"
         refute_received {:document_updated, %{status: "completed"}}
 
         send(task.pid, :resume_pdf)
         assert Task.await(task) == :ok
         assert length(Documents.list_pages(document.id)) == 3
-        assert DocumentOrchestrator.check_document_completion(document.id) == :incomplete
+        assert Completion.check_document_completion(document.id) == :incomplete
 
         for page <- Documents.list_pages(document.id), page.page_number > 1 do
           complete_page(page)
         end
 
-        assert DocumentOrchestrator.check_document_completion(document.id) == :completed
+        assert Completion.check_document_completion(document.id) == :completed
         assert Documents.get_document!(document.id).status == "completed"
         assert_received {:document_updated, %{status: "completed"}}
       end)
@@ -164,7 +164,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
       Oban.Testing.with_testing_mode(:manual, fn ->
         document = document_fixture(%{status: "extracting"})
         page = page_fixture(document, %{extraction_status: "processing"})
-        {:ok, job} = Worker.queue_page(page.id, page_number: 1)
+        {:ok, job} = LlmProcessingJob.enqueue_page(page)
         job |> Ecto.Changeset.change(state: "retryable", attempt: 1) |> Repo.update!()
 
         assert :ok =

@@ -29,41 +29,6 @@ defmodule Doctrans.Processing.WorkerCallbacksTest do
     %{worker: worker}
   end
 
-  describe "handle_call/3" do
-    test "answers :status with the counts of the jobs actually queued", %{worker: worker} do
-      Oban.Testing.with_testing_mode(:manual, fn ->
-        document = document_fixture()
-        first = page_fixture(document, %{page_number: 1})
-        second = page_fixture(document, %{page_number: 2})
-        {:ok, _extraction} = Worker.process_document(document.id, "/tmp/document.pdf")
-        {:ok, _processing} = Worker.queue_page(first.id, page_number: 1)
-        {:ok, _reprocessing} = Worker.queue_page_reprocess(second.id, translation_model: "custom")
-
-        assert GenServer.call(worker, :status) == %{
-                 pdf_extraction: 1,
-                 llm_processing: 2,
-                 embedding_generation: 0,
-                 health_check: 0
-               }
-      end)
-    end
-  end
-
-  describe "handle_cast/2" do
-    test "ignores an unexpected cast and keeps answering", %{worker: worker} do
-      :ok = GenServer.cast(worker, {:unexpected, :message})
-
-      # The cast is handled before the call behind it, so a crash on the
-      # unmatched message would surface as an exit here rather than a reply.
-      assert GenServer.call(worker, :status) == %{
-               pdf_extraction: 0,
-               llm_processing: 0,
-               embedding_generation: 0,
-               health_check: 0
-             }
-    end
-  end
-
   describe "handle_info/2" do
     test "the final recovery batch settles the document it reconciles", %{worker: worker} do
       # A crash between the last page write and the document update leaves this
@@ -73,25 +38,24 @@ defmodule Doctrans.Processing.WorkerCallbacksTest do
 
       send(worker, {:recover_batch, {:completion, nil}})
 
-      # Answered only after the batch message ahead of it in the mailbox, and
-      # the zero counts are the phase's other promise: it queues no work.
-      assert %{llm_processing: 0, pdf_extraction: 0} = GenServer.call(worker, :status)
+      # Answered only after the batch message ahead of it in the mailbox.
+      assert %{batch_interval_ms: _} = :sys.get_state(worker)
       assert Documents.get_document!(document.id).status == "completed"
 
-      # The batch the worker just ran was the last phase and returned :done, so
-      # it scheduled no follow-up to land after this test ends.
+      # The phase queues no work, and the batch the worker just ran was the last
+      # phase and returned :done, so it scheduled no follow-up to land after
+      # this test ends.
+      assert Repo.aggregate(Oban.Job, :count) == 0
       assert StartupRecovery.run_batch({:completion, nil}) == :done
     end
 
     test "ignores an unexpected message and keeps answering", %{worker: worker} do
       send(worker, {:unexpected, :message})
 
-      assert GenServer.call(worker, :status) == %{
-               pdf_extraction: 0,
-               llm_processing: 0,
-               embedding_generation: 0,
-               health_check: 0
-             }
+      # The message is handled before the call behind it, so a crash on the
+      # unmatched message would surface as an exit here rather than a reply.
+      assert %{batch_interval_ms: _} = :sys.get_state(worker)
+      assert Process.alive?(worker)
     end
   end
 end

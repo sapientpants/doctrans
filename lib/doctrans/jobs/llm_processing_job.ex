@@ -47,6 +47,24 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
     )
   end
 
+  @doc """
+  Queues a freshly extracted page for processing at the ordinary priority.
+
+  The page's own `processing_generation` is the guard a replayed job checks
+  against, so the caller passes the page it just read rather than an id. The
+  options are the run's model choices (`Run.model_opts/1`). Uniqueness on
+  `page_id` returns the job already queued for the page instead of a second one.
+  """
+  @spec enqueue_page(Documents.Page.t(), keyword()) ::
+          {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
+  def enqueue_page(%Documents.Page{} = page, opts \\ []) do
+    page
+    |> page_args(page.processing_generation, model_args(opts))
+    |> new(priority: 2)
+    |> Oban.insert()
+    |> Doctrans.Errors.result()
+  end
+
   @impl true
   def perform(%Oban.Job{args: %{@page_id_key => page_id} = args} = job) do
     # Oban persists JSON with string keys; the processor expects keyword options.

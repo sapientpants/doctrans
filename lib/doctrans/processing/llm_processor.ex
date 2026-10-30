@@ -14,7 +14,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Jobs.EmbeddingJob
-  alias Doctrans.Processing.DocumentOrchestrator
+  alias Doctrans.Processing.Completion
   alias Doctrans.Processing.Run
   alias Doctrans.Processing.SourceLanguage
   alias Doctrans.Resilience.{Backoff, ErrorClassifier}
@@ -95,7 +95,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   # advances on an `original_markdown` change or an extraction leaving
   # "completed", and `processing_generation` only on a reprocess.
   defp reconcile_document(page) do
-    _ = DocumentOrchestrator.check_document_completion(page)
+    _ = Completion.check_document_completion(page)
     :ok
   end
 
@@ -145,9 +145,9 @@ defmodule Doctrans.Processing.LlmProcessor do
     )
 
     # Update document status to "processing" when page extraction starts (if not already processing).
-    # This is safe to call for every page - DocumentOrchestrator only updates if status
+    # This is safe to call for every page - Completion only updates if status
     # is in a pre-processing state (uploading, extracting, queued).
-    :ok = DocumentOrchestrator.update_document_status_to_processing(page)
+    :ok = Completion.update_document_status_to_processing(page)
 
     {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "processing"})
     Topics.broadcast_page_updated(page)

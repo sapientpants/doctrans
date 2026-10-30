@@ -361,7 +361,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   # gone by the time a `{:document_updated, _}` made us re-read it.
   #
   # A turn in flight has to be stopped here rather than when its result lands.
-  # `Worker.cancel_document/1` cancels Oban jobs and never reaches a task this
+  # `Cancellation.cancel_jobs/1` cancels Oban jobs and never reaches a task this
   # LiveView spawned, and the task is `async_nolink`, so nothing else will: left
   # alone it runs the whole agent pipeline -- several LLM calls, up to a 300s
   # receive timeout each -- to produce an answer with nowhere to go. Every landing
