@@ -4,6 +4,12 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
 
   This job handles both extraction and translation of page content
   using vision and text models.
+
+  The retry schedule is Oban's: `Doctrans.Processing.LlmProcessor` calls each
+  model once per attempt and reports a transient failure as `{:error, _}` for
+  Oban to back off and retry, or a permanent one as `{:cancel, _}` so that no
+  attempt is spent repeating it. `max_attempts` therefore bounds the model calls
+  a page can cost, and no attempt sleeps while holding the queue's single slot.
   """
 
   use Oban.Worker,
@@ -14,6 +20,8 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
       keys: [:page_id],
       states: [:available, :scheduled, :executing, :retryable, :suspended]
     ]
+
+  require Logger
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
@@ -67,41 +75,85 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
 
   @impl true
   def perform(%Oban.Job{args: %{@page_id_key => page_id} = args} = job) do
-    # Oban persists JSON with string keys; the processor expects keyword options.
-    opts =
-      for key <- [:extraction_model, :translation_model],
-          model = Map.get(args, Atom.to_string(key)),
-          not is_nil(model),
-          do: {key, model}
-
     generation = Map.get(args, "generation")
 
     try do
-      LlmProcessor.process_page(page_id, MapSet.new(), Keyword.put(opts, :generation, generation))
+      LlmProcessor.process_page(page_id, MapSet.new(), processor_opts(args, generation))
     catch
       # A crash returns no result, so settle here: Oban discards the job after
       # the last attempt and nothing else would move the document off
       # "processing" until the next startup recovery pass.
       kind, reason ->
-        _ = settle_exhausted_job(job, page_id, generation, {:error, crash_reason(kind, reason)})
+        _ = settle(job, page_id, generation, {:error, crash_reason(kind, reason)})
         :erlang.raise(kind, reason, __STACKTRACE__)
     else
       result ->
-        _ = settle_exhausted_job(job, page_id, generation, result)
+        _ = report_retry(result, job, page_id)
+        _ = settle(job, page_id, generation, result)
         result
     end
   end
 
-  defp settle_exhausted_job(job, page_id, generation, result) do
-    if match?({:error, _}, result) and job.attempt >= job.max_attempts,
-      do: publish_final_error(page_id, generation, result),
-      else: :ok
+  # Oban persists JSON with string keys; the processor expects keyword options.
+  defp processor_opts(args, generation) do
+    models =
+      for key <- [:extraction_model, :translation_model],
+          model = Map.get(args, Atom.to_string(key)),
+          not is_nil(model),
+          do: {key, model}
+
+    Keyword.put(models, :generation, generation)
+  end
+
+  # The processor owns no retry loop, so the retry series the dashboard charts
+  # (`type: :extraction` and `:translation`, alongside `:embedding`) is emitted
+  # from the layer that does own it — here. A `{:cancel, _}` is not a retry and
+  # reports nothing, just as a permanent error never did.
+  defp report_retry({:error, {code, _bindings}}, %Oban.Job{} = job, page_id)
+       when code in [:page_extraction_failed, :page_translation_failed] do
+    type = stage(code)
+
+    if job.attempt >= job.max_attempts do
+      Logger.error("#{type} exhausted #{job.max_attempts} attempts for page #{page_id}")
+
+      :telemetry.execute(
+        [:doctrans, :retry, :exhausted],
+        %{count: 1},
+        %{type: type, page_id: page_id}
+      )
+    else
+      :telemetry.execute(
+        [:doctrans, :retry, :attempt],
+        %{count: 1},
+        %{type: type, page_id: page_id, attempt: job.attempt}
+      )
+    end
+  end
+
+  defp report_retry(_outcome, _job, _page_id), do: :ok
+
+  defp stage(:page_extraction_failed), do: :extraction
+  defp stage(:page_translation_failed), do: :translation
+
+  # A failure is final when Oban will not run the job again: a cancel, or an
+  # error on the last attempt. Only then does the document learn of it.
+  defp settle(job, page_id, generation, result) do
+    case result do
+      {:cancel, reason} ->
+        publish_final_error(page_id, generation, reason)
+
+      {:error, reason} when job.attempt >= job.max_attempts ->
+        publish_final_error(page_id, generation, reason)
+
+      _ ->
+        :ok
+    end
   end
 
   defp crash_reason(kind, reason),
     do: {:operation_failed, [reason: Exception.format(kind, reason)]}
 
-  defp publish_final_error(page_id, generation, {:error, reason}) do
+  defp publish_final_error(page_id, generation, reason) do
     case Documents.get_page(page_id) do
       %{processing_generation: ^generation} = page ->
         Run.with_page(page, fn _ ->

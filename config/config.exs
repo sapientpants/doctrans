@@ -49,12 +49,6 @@ config :doctrans, :circuit_breakers,
     refresh: 15_000
   ]
 
-# Retry configuration for exponential backoff
-config :doctrans, :retry,
-  max_attempts: 3,
-  base_delay_ms: 2_000,
-  max_delay_ms: 30_000
-
 # File upload configuration
 #
 # The storage root is deliberately absent: `Doctrans.Config.Uploads.upload_dir/0`

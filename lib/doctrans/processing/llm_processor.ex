@@ -5,6 +5,12 @@ defmodule Doctrans.Processing.LlmProcessor do
   Performs markdown extraction and translation using an OpenAI-compatible API models.
   Each page is processed independently: first extraction, then translation.
 
+  This module adds no retry loop of its own: a transient failure is reported to
+  the caller — `Doctrans.Jobs.LlmProcessingJob`, which owns the retry schedule —
+  and a failure that retrying cannot fix is reported as `{:cancel, reason}` so it
+  is not retried at all. A stage that fails is marked errored on the page, which
+  is what lets the next attempt resume at that stage rather than from the start.
+
   Errors remain structured across background processes. The web layer translates
   them using the viewing process's locale.
   """
@@ -13,23 +19,17 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
+  alias Doctrans.Errors
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Processing.Completion
   alias Doctrans.Processing.Run
   alias Doctrans.Processing.SourceLanguage
-  alias Doctrans.Resilience.{Backoff, ErrorClassifier}
+  alias Doctrans.Resilience.ErrorClassifier
 
-  @max_retries 3
+  @typedoc "What the caller should do next: nothing, retry, or stop retrying."
+  @type outcome :: :ok | {:error, Errors.reason()} | {:cancel, Errors.reason()}
 
-  defp retry_config do
-    config = Application.get_env(:doctrans, :retry, [])
-
-    %{
-      max_attempts: Keyword.get(config, :max_attempts, @max_retries),
-      base_delay_ms: Keyword.get(config, :base_delay_ms, 2_000),
-      max_delay_ms: Keyword.get(config, :max_delay_ms, 30_000)
-    }
-  end
+  @typep stage :: :extraction | :translation
 
   # Allow OpenAI module to be configured for testing
   defp openai_module do
@@ -39,22 +39,25 @@ defmodule Doctrans.Processing.LlmProcessor do
   @doc """
   Processes a single page through the LLM pipeline (extraction + translation).
 
-  Returns `:ok` or `{:error, reason}`.
+  Returns `:ok`, `{:error, reason}` when the failed stage is worth another
+  attempt, or `{:cancel, reason}` when it is not — a permanent model error, or
+  a page that no longer exists.
 
   ## Options
 
   - `:extraction_model` - Override the default extraction model
   - `:translation_model` - Override the default translation model
+  - `:generation` - The page generation this run was queued for; a page that
+    has moved on is skipped
   """
-  @spec process_page(Ecto.UUID.t(), MapSet.t(Ecto.UUID.t()), keyword()) ::
-          :ok | {:error, Doctrans.Errors.reason()}
+  @spec process_page(Ecto.UUID.t(), MapSet.t(Ecto.UUID.t()), keyword()) :: outcome()
   def process_page(page_id, cancelled_documents, opts \\ []) do
     generation = Keyword.fetch(opts, :generation)
     opts = Map.to_list(Run.choices(opts))
 
     case Documents.get_page(page_id) do
       nil ->
-        {:error, :page_not_found}
+        {:cancel, :page_not_found}
 
       page ->
         if MapSet.member?(cancelled_documents, page.document_id) ||
@@ -102,7 +105,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   # A retried or rescued Oban job may have left a stage processing or errored.
   defp maybe_extract(%{extraction_status: status} = page, opts)
        when status in ["pending", "processing", "error"] do
-    process_page_extraction(page, 0, opts)
+    extract(page, opts)
   end
 
   defp maybe_extract(%{extraction_status: status} = page, _opts) do
@@ -121,7 +124,7 @@ defmodule Doctrans.Processing.LlmProcessor do
        )
        when status in ["pending", "processing", "error"] and is_binary(markdown) and
               markdown != "" do
-    process_page_translation(page, 0, opts)
+    translate(page, opts)
   end
 
   defp maybe_translate(
@@ -139,7 +142,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   defp maybe_translate(_page, _opts), do: :ok
 
-  defp process_page_extraction(page, retry_count, opts) do
+  defp extract(page, opts) do
     Logger.info(
       "Extracting markdown for page #{page.page_number} of document #{page.document_id}"
     )
@@ -153,9 +156,8 @@ defmodule Doctrans.Processing.LlmProcessor do
     Topics.broadcast_page_updated(page)
 
     image_path = Path.join(Documents.uploads_dir(), page.image_path)
-    openai_opts = build_extraction_opts(opts)
 
-    case openai_module().extract_markdown(image_path, openai_opts) do
+    case openai_module().extract_markdown(image_path, model_opts(opts, :extraction_model)) do
       {:ok, markdown} ->
         {:ok, page} =
           Documents.update_page_extraction(page, %{
@@ -169,7 +171,7 @@ defmodule Doctrans.Processing.LlmProcessor do
         :ok
 
       {:error, reason} ->
-        handle_extraction_error(page, reason, retry_count, opts)
+        fail_stage(page, :extraction, reason)
     end
   end
 
@@ -187,90 +189,20 @@ defmodule Doctrans.Processing.LlmProcessor do
     end
   end
 
-  defp build_extraction_opts(opts) do
-    case Keyword.get(opts, :extraction_model) do
-      nil -> []
-      model -> [model: model]
-    end
-  end
-
-  defp handle_extraction_error(page, reason, retry_count, opts) do
-    config = retry_config()
-    classification = ErrorClassifier.classify(reason)
-
-    cond do
-      # Circuit breaker is open - don't retry
-      reason == :circuit_open ->
-        Logger.error("Circuit breaker open, not retrying extraction for page #{page.page_number}")
-        mark_extraction_failed(page, reason)
-
-      # Permanent error - don't retry
-      classification == :permanent ->
-        Logger.error(
-          "Permanent error for page #{page.page_number}, not retrying: #{inspect(reason)}"
-        )
-
-        mark_extraction_failed(page, reason)
-
-      # Retryable error and we have retries left
-      retry_count < config.max_attempts ->
-        delay =
-          Backoff.calculate(retry_count,
-            base: config.base_delay_ms,
-            max: config.max_delay_ms
-          )
-
-        Logger.warning(
-          "Extraction failed for page #{page.page_number}, retrying in #{delay}ms (#{retry_count + 1}/#{config.max_attempts})"
-        )
-
-        :telemetry.execute(
-          [:doctrans, :retry, :attempt],
-          %{count: 1, delay_ms: delay},
-          %{type: :extraction, page_id: page.id, attempt: retry_count + 1}
-        )
-
-        Process.sleep(delay)
-        process_page_extraction(page, retry_count + 1, opts)
-
-      # Max retries exceeded
-      true ->
-        Logger.error(
-          "Extraction failed for page #{page.page_number} after #{config.max_attempts} retries: #{inspect(reason)}"
-        )
-
-        :telemetry.execute(
-          [:doctrans, :retry, :exhausted],
-          %{count: 1},
-          %{type: :extraction, page_id: page.id}
-        )
-
-        mark_extraction_failed(page, reason)
-    end
-  end
-
-  defp mark_extraction_failed(page, reason) do
-    {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
-    Topics.broadcast_page_updated(page)
-
-    {:error, {:page_extraction_failed, [page_number: page.page_number, reason: reason]}}
-  end
-
-  defp process_page_translation(page, retry_count, opts) do
+  defp translate(page, opts) do
     Logger.info("Translating page #{page.page_number} of document #{page.document_id}")
 
     {:ok, page} = Documents.update_page_translation(page, %{translation_status: "processing"})
     Topics.broadcast_page_updated(page)
 
     document = Documents.get_document!(page.document_id)
-    openai_opts = build_translation_opts(opts)
     source_language = SourceLanguage.resolve(document, page.original_markdown)
 
     case openai_module().translate(
            page.original_markdown,
            source_language,
            document.target_language,
-           openai_opts
+           model_opts(opts, :translation_model)
          ) do
       {:ok, translated} ->
         {:ok, page} =
@@ -285,79 +217,54 @@ defmodule Doctrans.Processing.LlmProcessor do
         :ok
 
       {:error, reason} ->
-        handle_translation_error(page, reason, retry_count, opts)
+        fail_stage(page, :translation, reason)
     end
   end
 
-  defp build_translation_opts(opts) do
-    case Keyword.get(opts, :translation_model) do
+  defp model_opts(opts, key) do
+    case Keyword.get(opts, key) do
       nil -> []
       model -> [model: model]
     end
   end
 
-  defp handle_translation_error(page, reason, retry_count, opts) do
-    config = retry_config()
-    classification = ErrorClassifier.classify(reason)
+  # Marks the stage errored and tells the caller whether to try again. An open
+  # circuit breaker is unclassified and so retried: the breaker closes on its
+  # own, and Oban's backoff is the wait for it that this module used to sleep
+  # through. A permanent error is given up on at once — every attempt would pay
+  # for the same model call and get the same answer.
+  @spec fail_stage(Documents.Page.t(), stage(), term()) ::
+          {:error, Errors.reason()} | {:cancel, Errors.reason()}
+  defp fail_stage(page, stage, reason) do
+    {:ok, page} = mark_stage_errored(page, stage)
+    Topics.broadcast_page_updated(page)
 
-    cond do
-      # Circuit breaker is open - don't retry
-      reason == :circuit_open ->
-        Logger.error(
-          "Circuit breaker open, not retrying translation for page #{page.page_number}"
-        )
+    failure = {failure_code(stage), [page_number: page.page_number, reason: reason]}
 
-        mark_translation_failed(page, reason)
+    if ErrorClassifier.retryable?(reason) do
+      Logger.warning(
+        "#{stage_name(stage)} failed for page #{page.page_number}, leaving the retry to the job: #{inspect(reason)}"
+      )
 
-      # Permanent error - don't retry
-      classification == :permanent ->
-        Logger.error(
-          "Permanent error for page #{page.page_number}, not retrying: #{inspect(reason)}"
-        )
+      {:error, failure}
+    else
+      Logger.error(
+        "Permanent #{stage} error for page #{page.page_number}, not retrying: #{inspect(reason)}"
+      )
 
-        mark_translation_failed(page, reason)
-
-      # Retryable error and we have retries left
-      retry_count < config.max_attempts ->
-        delay =
-          Backoff.calculate(retry_count,
-            base: config.base_delay_ms,
-            max: config.max_delay_ms
-          )
-
-        Logger.warning(
-          "Translation failed for page #{page.page_number}, retrying in #{delay}ms (#{retry_count + 1}/#{config.max_attempts})"
-        )
-
-        :telemetry.execute(
-          [:doctrans, :retry, :attempt],
-          %{count: 1, delay_ms: delay},
-          %{type: :translation, page_id: page.id, attempt: retry_count + 1}
-        )
-
-        Process.sleep(delay)
-        process_page_translation(page, retry_count + 1, opts)
-
-      # Max retries exceeded
-      true ->
-        Logger.error(
-          "Translation failed for page #{page.page_number} after #{config.max_attempts} retries: #{inspect(reason)}"
-        )
-
-        :telemetry.execute(
-          [:doctrans, :retry, :exhausted],
-          %{count: 1},
-          %{type: :translation, page_id: page.id}
-        )
-
-        mark_translation_failed(page, reason)
+      {:cancel, failure}
     end
   end
 
-  defp mark_translation_failed(page, reason) do
-    {:ok, page} = Documents.update_page_translation(page, %{translation_status: "error"})
-    Topics.broadcast_page_updated(page)
+  defp mark_stage_errored(page, :extraction),
+    do: Documents.update_page_extraction(page, %{extraction_status: "error"})
 
-    {:error, {:page_translation_failed, [page_number: page.page_number, reason: reason]}}
-  end
+  defp mark_stage_errored(page, :translation),
+    do: Documents.update_page_translation(page, %{translation_status: "error"})
+
+  defp failure_code(:extraction), do: :page_extraction_failed
+  defp failure_code(:translation), do: :page_translation_failed
+
+  defp stage_name(:extraction), do: "Extraction"
+  defp stage_name(:translation), do: "Translation"
 end
