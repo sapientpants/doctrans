@@ -83,7 +83,9 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
         |> Plug.Conn.resp(200, Jason.encode!(%{"choices" => [@choice]}))
       end)
 
-      assert {:error, {stage_error, bindings}} = LlmProcessor.process_page(page.id, MapSet.new())
+      # Replaying the request would buy the same truncated output again, so the
+      # run tells the job to stop rather than to retry.
+      assert {:cancel, {stage_error, bindings}} = LlmProcessor.process_page(page.id, MapSet.new())
 
       assert stage_error ==
                if(@stage == :extraction,

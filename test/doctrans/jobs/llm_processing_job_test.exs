@@ -145,8 +145,9 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
     test "handles non-existent page" do
       fake_page_id = Uniq.UUID.uuid7()
 
+      # A page that is gone will not come back, so the job is not worth retrying.
       result = perform_job(LlmProcessingJob, %{"page_id" => fake_page_id})
-      assert {:error, :page_not_found} = result
+      assert {:cancel, :page_not_found} = result
     end
 
     test "a crash on the last attempt still settles the document" do

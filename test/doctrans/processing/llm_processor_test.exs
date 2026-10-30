@@ -66,12 +66,12 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       assert updated_page.translated_markdown != nil
     end
 
-    test "returns error for non-existent page" do
+    test "cancels for a non-existent page" do
       fake_id = Ecto.UUID.generate()
 
       result = LlmProcessor.process_page(fake_id, MapSet.new())
 
-      assert {:error, :page_not_found} = result
+      assert {:cancel, :page_not_found} = result
     end
   end
 
@@ -118,7 +118,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
 
       result = LlmProcessor.process_page(page.id, MapSet.new())
 
-      assert {:error, _} = result
+      assert {:cancel, _} = result
 
       updated_page = Documents.get_page!(page.id)
       assert updated_page.extraction_status == "error"
@@ -168,7 +168,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
 
       result = LlmProcessor.process_page(page.id, MapSet.new())
 
-      assert {:error, _} = result
+      assert {:cancel, _} = result
 
       updated_page = Documents.get_page!(page.id)
       assert updated_page.extraction_status == "completed"

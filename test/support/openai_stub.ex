@@ -26,6 +26,13 @@ defmodule Doctrans.Processing.OpenAIStub do
 
       # Reset to default behavior
       Application.delete_env(:doctrans, :openai_stub_extraction_error)
+
+  A test that needs to know how many model calls a run made — the stub answers
+  every call the same way, so the result alone cannot tell one call from three —
+  can have each extraction and translation call reported to it:
+
+      Application.put_env(:doctrans, :openai_stub_pid, self())
+      assert_received {:openai_stub_call, :extract_markdown}
   """
 
   @behaviour Doctrans.Processing.OpenAIBehaviour
@@ -34,6 +41,8 @@ defmodule Doctrans.Processing.OpenAIStub do
   def extract_markdown(image_path, opts \\ [])
 
   def extract_markdown(_image_path, _opts) do
+    record(:extract_markdown)
+
     case Application.get_env(:doctrans, :openai_stub_extraction_error) do
       nil ->
         {:ok,
@@ -48,6 +57,8 @@ defmodule Doctrans.Processing.OpenAIStub do
   def translate(markdown, source_language, target_language, opts \\ [])
 
   def translate(markdown, source_language, target_language, _opts) do
+    record(:translate)
+
     case Application.get_env(:doctrans, :openai_stub_translation_error) do
       nil -> {:ok, "# Translated #{source_language} to #{target_language}\n\n#{markdown}"}
       error -> {:error, error}
@@ -141,5 +152,12 @@ defmodule Doctrans.Processing.OpenAIStub do
     # Return a vector of 1024 dimensions (truncated from native 4096)
     vector = Enum.map(1..1024, fn _i -> :rand.uniform() * 2 - 1 end)
     {:ok, vector}
+  end
+
+  defp record(function) do
+    case Application.get_env(:doctrans, :openai_stub_pid) do
+      pid when is_pid(pid) -> send(pid, {:openai_stub_call, function})
+      _ -> :ok
+    end
   end
 end
