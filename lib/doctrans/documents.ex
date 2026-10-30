@@ -155,18 +155,6 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
-  Lists documents that need processing (status is "processing" or "queued").
-  Used by Worker for startup recovery.
-  """
-  @spec list_incomplete_documents() :: [Document.t()]
-  def list_incomplete_documents do
-    Document
-    |> where([d], d.status in ["processing", "queued"])
-    |> order_by([d], asc: d.inserted_at)
-    |> Repo.all()
-  end
-
-  @doc """
   Returns true when the document has embeddings ready to answer questions.
 
   Prefers chunk-level embeddings and falls back to page-level ones, which is the

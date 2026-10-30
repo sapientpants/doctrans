@@ -7,7 +7,7 @@ defmodule Doctrans.Processing.CancellationTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
-  alias Doctrans.Processing.{Cancellation, DocumentOrchestrator, DocumentReprocessing}
+  alias Doctrans.Processing.{Cancellation, Completion, DocumentReprocessing}
 
   @moduletag :postgres
 
@@ -109,7 +109,7 @@ defmodule Doctrans.Processing.CancellationTest do
 
         # The job that was executing when the user cancelled finishes and asks
         # for the document to be settled; every page reads as a success.
-        assert :cancelled = DocumentOrchestrator.check_document_completion(document.id)
+        assert :cancelled = Completion.check_document_completion(document.id)
         assert Repo.get!(Document, document.id).status == "cancelled"
       end)
     end
@@ -124,6 +124,79 @@ defmodule Doctrans.Processing.CancellationTest do
         assert {:ok, run} = DocumentReprocessing.reprocess_document(document.id)
         assert run.status == "queued"
         assert [_job] = all_enqueued(worker: DocumentExtractionJob)
+      end)
+    end
+  end
+
+  describe "cancel_jobs/1" do
+    test "cancels all pending states while preserving running, terminal, and unrelated jobs" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture()
+        pages = for number <- 1..2, do: page_fixture(document, %{page_number: number})
+        other_document = document_fixture()
+        other_page = page_fixture(other_document)
+
+        for state <- ~w(available scheduled retryable executing completed discarded cancelled) do
+          # Literal keys also cover jobs persisted before the shared key definitions.
+          extraction = insert_job(DocumentExtractionJob, %{"document_id" => document.id}, state)
+
+          processing =
+            Enum.map(pages, fn page ->
+              insert_job(LlmProcessingJob, %{"page_id" => page.id}, state)
+            end)
+
+          other = insert_job(LlmProcessingJob, %{"page_id" => other_page.id}, state)
+
+          unrelated =
+            insert_job(DocumentExtractionJob, %{"document_id" => other_document.id}, state)
+
+          assert :ok = Cancellation.cancel_jobs(document.id)
+          expected = if state in ~w(available scheduled retryable), do: "cancelled", else: state
+
+          for job <- [extraction | processing] do
+            assert Repo.get!(Oban.Job, job.id).state == expected
+          end
+
+          assert Repo.get!(Oban.Job, other.id).state == state
+          assert Repo.get!(Oban.Job, unrelated.id).state == state
+        end
+      end)
+    end
+
+    test "cancels extraction without pages and page jobs queued at either priority" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture()
+
+        {:ok, extraction} =
+          DocumentExtractionJob.enqueue_document(document.id, "/tmp/document.pdf")
+
+        assert :ok = Cancellation.cancel_jobs(document.id)
+        assert Repo.get!(Oban.Job, extraction.id).state == "cancelled"
+
+        page = page_fixture(document)
+        {:ok, processing} = LlmProcessingJob.enqueue_page(page)
+
+        {:ok, reprocessing} =
+          page
+          |> LlmProcessingJob.page_args(page.processing_generation, %{"extraction_model" => "x"})
+          |> LlmProcessingJob.new(priority: 1)
+          |> Oban.insert()
+
+        assert :ok = Cancellation.cancel_jobs(document.id)
+        assert Repo.get!(Oban.Job, processing.id).state == "cancelled"
+        assert Repo.get!(Oban.Job, reprocessing.id).state == "cancelled"
+      end)
+    end
+
+    test "cancelling a document that does not exist leaves every other job alone" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        bystander = document_fixture(%{status: "extracting"})
+
+        {:ok, untouched} =
+          DocumentExtractionJob.enqueue_document(bystander.id, "/uploads/original.pdf")
+
+        assert :ok = Cancellation.cancel_jobs(Ecto.UUID.generate())
+        assert Repo.get!(Oban.Job, untouched.id).state == "available"
       end)
     end
   end

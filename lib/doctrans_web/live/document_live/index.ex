@@ -3,7 +3,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   use DoctransWeb, :live_view
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.Worker
+  alias Doctrans.Processing.Cancellation
   alias DoctransWeb.DocumentLive.DocumentStream
   alias DoctransWeb.DocumentLive.UploadIntake
   alias DoctransWeb.DocumentLive.UploadOutcomes
@@ -340,7 +340,7 @@ defmodule DoctransWeb.DocumentLive.Index do
   defp delete_existing_document(nil), do: :ok
 
   defp delete_existing_document(document) do
-    with :ok <- Worker.cancel_document(document.id),
+    with :ok <- Cancellation.cancel_jobs(document.id),
          {:ok, _} <- Documents.delete_document(document) do
       :ok
     end

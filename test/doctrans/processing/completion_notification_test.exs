@@ -3,7 +3,7 @@ defmodule Doctrans.Processing.CompletionNotificationTest do
 
   alias Doctrans.{Documents, Repo}
   alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.DocumentOrchestrator
+  alias Doctrans.Processing.Completion
   alias DoctransWeb.DocumentLive.Show
   alias Ecto.Adapters.SQL.Sandbox
 
@@ -35,7 +35,7 @@ defmodule Doctrans.Processing.CompletionNotificationTest do
       Task.async(fn ->
         Sandbox.unboxed_run(Repo, fn ->
           Process.put(:hold_review_commit, true)
-          DocumentOrchestrator.check_document_completion(page)
+          Completion.check_document_completion(page)
         end)
       end)
 

@@ -1,46 +1,21 @@
-defmodule Doctrans.Processing.WorkerErrorsTest do
+defmodule Doctrans.Processing.CancellationErrorsTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.Worker
+  alias Doctrans.Processing.Cancellation
   alias Doctrans.Repo
 
   import Doctrans.Fixtures
   import ExUnit.CaptureLog
 
-  test "status logs database failures before returning zero counts" do
-    log =
-      capture_log(fn ->
-        with_unavailable_table("oban_jobs", fn ->
-          assert Worker.status() == %{
-                   pdf_extraction: 0,
-                   llm_processing: 0,
-                   embedding_generation: 0,
-                   health_check: 0
-                 }
-        end)
-      end)
-
-    assert log =~ "Failed to read Oban queue status"
-    assert log =~ "oban_jobs"
-  end
-
-  test "status propagates unexpected runtime errors" do
-    config = Application.fetch_env!(:doctrans, Oban)
-    Application.put_env(:doctrans, Oban, Keyword.put(config, :repo, __MODULE__))
-    on_exit(fn -> Application.put_env(:doctrans, Oban, config) end)
-
-    assert_raise RuntimeError, "unexpected aggregate bug", &Worker.status/0
-  end
-
-  test "cancellation logs and returns the database exception" do
+  test "cancel_jobs logs and returns the database exception" do
     document = document_fixture()
 
     log =
       capture_log(fn ->
         with_unavailable_table("pages", fn ->
           assert {:error, {:database_error, [reason: %Postgrex.Error{} = error]}} =
-                   Worker.cancel_document(document.id)
+                   Cancellation.cancel_jobs(document.id)
 
           assert error.postgres.code == :undefined_table
         end)
@@ -51,8 +26,8 @@ defmodule Doctrans.Processing.WorkerErrorsTest do
     assert Documents.get_document!(document.id)
   end
 
-  test "cancellation propagates invalid query arguments" do
-    assert_raise Ecto.Query.CastError, fn -> Worker.cancel_document("invalid-id") end
+  test "cancel_jobs propagates invalid query arguments" do
+    assert_raise Ecto.Query.CastError, fn -> Cancellation.cancel_jobs("invalid-id") end
   end
 
   test "failed cancellation preserves the document and shows a deletion error", %{conn: conn} do
@@ -73,9 +48,6 @@ defmodule Doctrans.Processing.WorkerErrorsTest do
 
     assert Documents.get_document!(document.id)
   end
-
-  # Used as the configured status repository to simulate a programming error.
-  def aggregate(_query, :count, :id), do: raise("unexpected aggregate bug")
 
   defp with_unavailable_table(table, fun) do
     Repo.query!("ALTER TABLE #{table} RENAME TO unavailable_#{table}")

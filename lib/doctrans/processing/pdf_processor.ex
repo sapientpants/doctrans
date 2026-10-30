@@ -17,7 +17,8 @@ defmodule Doctrans.Processing.PdfProcessor do
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.{DocumentOrchestrator, Run, Worker}
+  alias Doctrans.Jobs.LlmProcessingJob
+  alias Doctrans.Processing.{Completion, Run}
 
   # Allow PdfExtractor module to be configured for testing
   defp pdf_extractor_module do
@@ -171,7 +172,7 @@ defmodule Doctrans.Processing.PdfProcessor do
     with {:ok, current} <- result do
       _ = Topics.broadcast_document_updated(current)
       # Guard completion separately, without publishing inside the extraction transaction.
-      case DocumentOrchestrator.check_document_completion(current) do
+      case Completion.check_document_completion(current) do
         {:error, _} = error -> error
         _ -> :ok
       end
@@ -190,7 +191,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp queue_page_for_processing(page, document) do
     Logger.info("Queueing page #{page.page_number} for LLM processing")
     # Oban uniqueness preserves any active job, including its retry state.
-    case Worker.queue_page(page.id, [page_number: page.page_number] ++ Run.model_opts(document)) do
+    case LlmProcessingJob.enqueue_page(page, Run.model_opts(document)) do
       {:ok, _job} -> :ok
       {:error, reason} -> {:error, reason}
     end
