@@ -136,7 +136,7 @@ defmodule Doctrans.MixProject do
       # REVIEW BY 2026-12-21: this is a pilot, not a standing gate. Drop it unless
       # someone is actively re-running it against processing/ or jobs/, which is
       # the genuinely un-mutated surface.
-      {:muex, "~> 0.11.2", only: [:dev, :test], runtime: false}
+      {:muex, "~> 0.12.0", only: [:dev, :test], runtime: false}
     ]
   end
 
