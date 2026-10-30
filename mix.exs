@@ -18,13 +18,13 @@ defmodule Doctrans.MixProject do
       test_coverage: [tool: ExCoveralls],
       hex: [
         # cowlib reaches the project only through :bypass (test-only); production
-        # serves with Bandit, not Cowboy, so these are not reachable at runtime.
-        # Upstream has published no fixed cowlib version as of 2026-09-12.
-        # REVIEW BY 2026-12-12: drop these once a fixed cowlib ships.
+        # serves with Bandit, not Cowboy, so this is not reachable at runtime.
+        # cowlib 2.21.0 fixed CVE-2026-43971 and CVE-2026-43969; CVE-2026-43966
+        # (response splitting in cow_http_struct_hd) has no fixed release as of
+        # 2026-10-30.
+        # REVIEW BY 2026-12-30: drop this once a fixed cowlib ships.
         ignore_advisories: [
-          "CVE-2026-43971",
-          "CVE-2026-43966",
-          "CVE-2026-43969"
+          "CVE-2026-43966"
         ]
       ],
       preferred_cli_env: [
