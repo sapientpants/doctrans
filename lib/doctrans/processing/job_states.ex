@@ -20,17 +20,9 @@ defmodule Doctrans.Processing.JobStates do
 
   import Ecto.Query
 
-  alias Doctrans.Documents.Page
-  alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, Keys, LlmProcessingJob}
+  alias Doctrans.Jobs.{EmbeddingJob, LlmProcessingJob}
+  alias Doctrans.Processing.JobQuery
   alias Doctrans.Repo
-
-  @active ~w(available scheduled executing retryable suspended)
-  @waiting ~w(available scheduled retryable suspended)
-
-  # Read from `Keys` rather than written out: the argument key is one fact, and
-  # a literal here would drift silently from the job that writes it.
-  @document_id_arg "?->>'#{Keys.document_id()}'"
-  @page_id_arg "?->>'#{Keys.page_id()}'"
 
   @rank %{idle: 0, queued: 1, retrying: 2, running: 3}
 
@@ -44,7 +36,8 @@ defmodule Doctrans.Processing.JobStates do
     index_worker = Oban.Worker.to_string(EmbeddingJob)
 
     document_id
-    |> active_jobs(index_worker)
+    |> JobQuery.document_work_query([LlmProcessingJob, EmbeddingJob])
+    |> select([j], {j.worker, j.state, j.attempt})
     |> Repo.all()
     |> Enum.reduce(%{content: :idle, index: :idle}, fn {worker, state, attempt}, acc ->
       pipeline = if worker == index_worker, do: :index, else: :content
@@ -52,26 +45,11 @@ defmodule Doctrans.Processing.JobStates do
     end)
   end
 
-  # One query for both pipelines: the alternative is three round trips whose
-  # results are read as a single instant anyway. Page ids are cast to text
-  # because `args->>'page_id'` is text, not uuid.
-  defp active_jobs(document_id, index_worker) do
-    page_ids = from p in Page, where: p.document_id == ^document_id, select: type(p.id, :string)
-    page_workers = [Oban.Worker.to_string(LlmProcessingJob), index_worker]
-
-    from(j in Oban.Job,
-      where: j.state in ^@active,
-      where:
-        (j.worker == ^Oban.Worker.to_string(DocumentExtractionJob) and
-           fragment(@document_id_arg, j.args) == ^document_id) or
-          (j.worker in ^page_workers and
-             fragment(@page_id_arg, j.args) in subquery(page_ids)),
-      select: {j.worker, j.state, j.attempt}
-    )
-  end
-
+  # The query returns active jobs only, so a job that is not executing is
+  # waiting in one of `JobQuery.waiting_states/0`; the attempt count then says
+  # whether it is waiting for its first run or for a retry.
   defp classify("executing", _attempt), do: :running
-  defp classify(state, attempt) when attempt > 0 and state in @waiting, do: :retrying
+  defp classify(_state, attempt) when attempt > 0, do: :retrying
   defp classify(_state, _attempt), do: :queued
 
   defp strongest(current, candidate),

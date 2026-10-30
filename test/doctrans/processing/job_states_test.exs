@@ -71,6 +71,15 @@ defmodule Doctrans.Processing.JobStatesTest do
     assert %{content: :retrying} = JobStates.for_document(document.id)
   end
 
+  test "a suspended job is queued until it has burned an attempt", %{document: document} = ctx do
+    [first, second] = ctx.document.pages
+    stage_page_job(first, state: "suspended")
+    assert %{content: :queued} = JobStates.for_document(document.id)
+
+    stage_page_job(second, state: "suspended", attempt: 1)
+    assert %{content: :retrying} = JobStates.for_document(document.id)
+  end
+
   test "running outranks retrying and queued", %{document: document} = ctx do
     [first, second] = ctx.document.pages
     stage_page_job(first, state: "retryable", attempt: 2)

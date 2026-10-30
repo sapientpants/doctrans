@@ -13,12 +13,11 @@ defmodule Doctrans.Processing.StartupRecovery do
   import Doctrans.Documents.Page, only: [settled?: 1]
 
   alias Doctrans.Documents.{Document, Page, Topics}
-  alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, Keys, LlmProcessingJob}
-  alias Doctrans.Processing.{Completion, Run}
+  alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, LlmProcessingJob}
+  alias Doctrans.Processing.{Completion, JobQuery, Run}
   alias Doctrans.Repo
 
   @batch_size 50
-  @active_states ~w(available scheduled executing retryable suspended)
   # A cancelled indexing job reported that the revision it held cannot be indexed
   # as it stands. Re-queueing that same revision on every boot would repeat the
   # failure and the API calls it costs, so a cancelled run settles the revision;
@@ -26,10 +25,6 @@ defmodule Doctrans.Processing.StartupRecovery do
   # retries (`discarded`) are deliberately not settled: those failures were
   # classified retryable, and a restart is a fair new attempt.
   @settled_states ~w(cancelled)
-  @indexing_owned_states @active_states ++ @settled_states
-  @document_id_match "?->>'#{Keys.document_id()}' = ?::text"
-  @page_id_match "?->>'#{Keys.page_id()}' = ?::text"
-  @revision_match "?->>'#{Keys.revision()}' = ?::text"
 
   @typedoc "Where the next batch resumes: a phase with the last id handled, or :done."
   @type cursor ::
@@ -44,20 +39,16 @@ defmodule Doctrans.Processing.StartupRecovery do
   def run_batch(cursor \\ {:documents, nil})
 
   def run_batch({:documents, after_id}) do
-    worker = Oban.Worker.to_string(DocumentExtractionJob)
+    active_extraction =
+      parent_document_id()
+      |> JobQuery.document_jobs_query(worker: DocumentExtractionJob)
+      |> select(1)
 
     rows =
       from(d in Document,
         as: :document,
         where: d.status in ["queued", "extracting"],
-        where:
-          not exists(
-            from(j in Oban.Job,
-              where: j.worker == ^worker and j.state in ^@active_states,
-              where: fragment(@document_id_match, j.args, parent_as(:document).id),
-              select: 1
-            )
-          ),
+        where: not exists(active_extraction),
         select: %{id: d.id}
       )
       |> fetch_batch(after_id)
@@ -235,36 +226,29 @@ defmodule Doctrans.Processing.StartupRecovery do
   # revision as well is what stops such a job from suppressing recovery of the
   # revision that replaced it — the failure this clause exists to close.
   defp without_indexing_job(query) do
-    worker = Oban.Worker.to_string(EmbeddingJob)
+    owned =
+      parent_page_id()
+      |> JobQuery.page_jobs_query(
+        worker: EmbeddingJob,
+        states: JobQuery.active_states() ++ @settled_states,
+        revision: dynamic(type(parent_as(:page).content_revision, :string))
+      )
+      |> select(1)
 
-    from(p in query,
-      where:
-        not exists(
-          from(j in Oban.Job,
-            where: j.worker == ^worker and j.state in ^@indexing_owned_states,
-            where: fragment(@page_id_match, j.args, parent_as(:page).id),
-            where: fragment(@revision_match, j.args, parent_as(:page).content_revision),
-            select: 1
-          )
-        )
-    )
+    from(p in query, where: not exists(owned))
   end
 
   # A page already owned by an active job of `module` is that job's to finish.
   defp without_active_job(query, module) do
-    worker = Oban.Worker.to_string(module)
+    active = parent_page_id() |> JobQuery.page_jobs_query(worker: module) |> select(1)
 
-    from(p in query,
-      where:
-        not exists(
-          from(j in Oban.Job,
-            where: j.worker == ^worker and j.state in ^@active_states,
-            where: fragment(@page_id_match, j.args, parent_as(:page).id),
-            select: 1
-          )
-        )
-    )
+    from(p in query, where: not exists(active))
   end
+
+  # Correlated selectors: the job's text argument against the id of the row the
+  # enclosing query is currently looking at.
+  defp parent_document_id, do: dynamic(type(parent_as(:document).id, :string))
+  defp parent_page_id, do: dynamic(type(parent_as(:page).id, :string))
 
   defp fetch_batch(query, nil) do
     query |> order_by([row], asc: row.id) |> limit(@batch_size) |> Repo.all()

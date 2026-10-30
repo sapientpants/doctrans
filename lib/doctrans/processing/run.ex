@@ -4,25 +4,21 @@ defmodule Doctrans.Processing.Run do
   alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Page, Pages}
-  alias Doctrans.Jobs.{DocumentExtractionJob, Keys, LlmProcessingJob}
+  alias Doctrans.Jobs.{Keys, LlmProcessingJob}
+  alias Doctrans.Processing.JobQuery
   alias Doctrans.Repo
 
-  @active ~w(available scheduled executing retryable suspended)
-  @document_id_arg "?->>'#{Keys.document_id()}'"
-  @page_id_arg "?->>'#{Keys.page_id()}'"
+  @doc """
+  True while an extraction or LLM job of the document can still run.
 
+  Indexing jobs are not counted: `EmbeddingJob` cancels itself when the
+  revision it holds is superseded, so it never owns the content a reprocess
+  would replace.
+  """
   @spec active?(Ecto.UUID.t()) :: boolean()
   def active?(document_id) do
-    page_ids = from p in Page, where: p.document_id == ^document_id, select: type(p.id, :string)
-
-    from(j in Oban.Job,
-      where: j.state in ^@active,
-      where:
-        (j.worker == ^Oban.Worker.to_string(DocumentExtractionJob) and
-           fragment(@document_id_arg, j.args) == ^document_id) or
-          (j.worker == ^Oban.Worker.to_string(LlmProcessingJob) and
-             fragment(@page_id_arg, j.args) in subquery(page_ids))
-    )
+    document_id
+    |> JobQuery.document_work_query([LlmProcessingJob])
     |> Repo.exists?()
   end
 
@@ -39,11 +35,8 @@ defmodule Doctrans.Processing.Run do
       |> Pages.failed_pages_query()
       |> select([p], type(p.id, :string))
 
-    from(j in Oban.Job,
-      where: j.state in ^@active,
-      where: j.worker == ^Oban.Worker.to_string(LlmProcessingJob),
-      where: fragment(@page_id_arg, j.args) in subquery(failed_page_ids)
-    )
+    failed_page_ids
+    |> JobQuery.page_jobs_query(worker: LlmProcessingJob)
     |> Repo.exists?()
   end
 
