@@ -39,6 +39,15 @@ defmodule Doctrans.Processing.JobQueryTest do
       assert "suspended" in JobQuery.active_states()
       assert JobQuery.waiting_states() == JobQuery.active_states() -- ["executing"]
     end
+
+    # The list is written out rather than derived, so pin it to Oban's own: a
+    # state Oban adds would otherwise be neither active nor settled here.
+    test "active states are every Oban state that is not settled" do
+      oban_states = Oban.Job.states() |> Enum.map(&Atom.to_string/1) |> Enum.sort()
+      settled = ~w(completed discarded cancelled)
+
+      assert Enum.sort(JobQuery.active_states() ++ settled) == oban_states
+    end
   end
 
   describe "document_jobs_query/2" do
