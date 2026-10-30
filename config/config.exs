@@ -198,7 +198,7 @@ config :doctrans, DoctransWeb.Endpoint,
 # before the first paint, which the deferred app bundle is too late for. Both
 # entries write to the same outdir under their own basenames.
 config :esbuild,
-  version: "0.25.4",
+  version: "0.28.2",
   doctrans: [
     args:
       ~w(js/app.js js/theme.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
@@ -208,7 +208,7 @@ config :esbuild,
 
 # Configure tailwind (the version is required)
 config :tailwind,
-  version: "4.1.7",
+  version: "4.3.3",
   doctrans: [
     args: ~w(
       --input=assets/css/app.css

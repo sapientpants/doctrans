@@ -82,7 +82,7 @@ Download models through oMLX's model management UI or place them in its model di
 The Doctrans defaults in `config/config.exs` are:
 
 | Purpose | Model |
-|---------|-------|
+| ------- | ----- |
 | Vision / OCR | `mlx-community/Qwen3.5-9B-MLX-4bit` |
 | Translation and chat | `mlx-community/Qwen3.6-35B-A3B-4bit` |
 | Embeddings | `mlx-community/Qwen3-Embedding-8B-4bit-DWQ` |
@@ -376,7 +376,7 @@ than re-detected, since it is what produced the text they already contain.
 ### Environment Variables
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+| -------- | ------- | ----------- |
 | `OPENAI_HOST` | `http://localhost:8000` | Shared API base URL, without `/v1` or a trailing slash |
 | `OPENAI_API_KEY` | unset | Bearer API key for both AI and embedding requests |
 | `DOCTRANS_ENV_FILE` | `.env` | Environment file path, relative to the working directory or absolute |
