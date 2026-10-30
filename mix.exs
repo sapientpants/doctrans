@@ -18,13 +18,13 @@ defmodule Doctrans.MixProject do
       test_coverage: [tool: ExCoveralls],
       hex: [
         # cowlib reaches the project only through :bypass (test-only); production
-        # serves with Bandit, not Cowboy, so these are not reachable at runtime.
-        # Upstream has published no fixed cowlib version as of 2026-09-12.
-        # REVIEW BY 2026-12-12: drop these once a fixed cowlib ships.
+        # serves with Bandit, not Cowboy, so this is not reachable at runtime.
+        # cowlib 2.21.0 fixed CVE-2026-43971 and CVE-2026-43969; CVE-2026-43966
+        # (response splitting in cow_http_struct_hd) has no fixed release as of
+        # 2026-10-30.
+        # REVIEW BY 2026-12-30: drop this once a fixed cowlib ships.
         ignore_advisories: [
-          "CVE-2026-43971",
-          "CVE-2026-43966",
-          "CVE-2026-43969"
+          "CVE-2026-43966"
         ]
       ],
       preferred_cli_env: [
@@ -117,7 +117,7 @@ defmodule Doctrans.MixProject do
       {:dns_cluster, "~> 0.3.0"},
       {:bandit, "~> 1.5"},
       {:uniq, "~> 0.6"},
-      {:mdex, "~> 0.13"},
+      {:mdex, "~> 0.14"},
       {:html_sanitize_ex, "~> 1.5"},
       {:pgvector, "~> 0.3"},
       {:oban, "~> 2.20"},
@@ -136,7 +136,7 @@ defmodule Doctrans.MixProject do
       # REVIEW BY 2026-12-21: this is a pilot, not a standing gate. Drop it unless
       # someone is actively re-running it against processing/ or jobs/, which is
       # the genuinely un-mutated surface.
-      {:muex, "~> 0.11.2", only: [:dev, :test], runtime: false}
+      {:muex, "~> 0.12.0", only: [:dev, :test], runtime: false}
     ]
   end
 

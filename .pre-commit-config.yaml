@@ -4,6 +4,9 @@
 
 default_language_version:
   python: python3
+  # Pinned: nodeenv otherwise resolves "latest" to a pre-release tag such as
+  # 27.0.0-alpha and crashes while parsing it, so no node hook can install.
+  node: '26.13.0'
 
 default_install_hook_types:
   - pre-commit
@@ -12,7 +15,7 @@ default_install_hook_types:
 repos:
   # Conventional commit message validation (scope required)
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.6.0
+    rev: v4.5.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
@@ -20,7 +23,7 @@ repos:
 
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       # Security and safety checks (fast)
       - id: detect-private-key
@@ -59,7 +62,7 @@ repos:
 
   # YAML linting
   - repo: https://github.com/adrienverge/yamllint
-    rev: v1.35.1
+    rev: v1.38.0
     hooks:
       - id: yamllint
         name: Lint YAML files
@@ -68,14 +71,14 @@ repos:
 
   # Markdown linting
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.15.0
+    rev: v0.24.0
     hooks:
       - id: markdownlint-cli2
         name: Lint Markdown files
 
   # GitHub Actions workflow validation
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.29.4
+    rev: 0.39.0
     hooks:
       - id: check-github-workflows
         name: Validate GitHub Actions workflows

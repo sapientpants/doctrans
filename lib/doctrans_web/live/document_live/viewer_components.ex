@@ -98,6 +98,9 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
 
   attr :content, :string, default: nil
 
+  # The HTML comes from MarkdownHelpers.render_markdown/2, which sanitizes before
+  # returning; scripts/check_raw_call_sites.exs pins this as a registered raw/1 site.
+  # sobelow_skip ["XSS.Raw"]
   def markdown_content(assigns) do
     html = render_markdown(assigns.content || "")
     assigns = assign(assigns, :html, html)
