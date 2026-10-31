@@ -54,46 +54,89 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
   attr :show_original, :boolean, required: true
 
   def page_content(assigns) do
+    assigns = assign(assigns, :state, page_state(assigns.page, assigns.show_original))
+
     ~H"""
-    <div
-      :if={@page && @page.extraction_status == "processing"}
-      class="flex flex-col items-center justify-center h-64"
-    >
-      <span class="loading loading-spinner loading-lg text-primary"></span>
-      <p class="mt-4 text-base-content/70">{gettext("Extracting text from page...")}</p>
-    </div>
-    <div
-      :if={
-        @page && !@show_original && @page.extraction_status == "completed" &&
-          @page.translation_status == "processing"
-      }
-      class="flex flex-col items-center justify-center h-64"
-    >
-      <span class="loading loading-spinner loading-lg text-primary"></span>
-      <p class="mt-4 text-base-content/70">{gettext("Translating content...")}</p>
-    </div>
-    <div
-      :if={@page && @page.extraction_status == "pending"}
-      class="flex flex-col items-center justify-center h-64 text-base-content/50"
-    >
-      <.icon name="hero-clock" class="w-16 h-16" />
-      <p class="mt-4">{gettext("Waiting to process...")}</p>
-    </div>
-    <div
-      :if={@page && (@page.extraction_status == "error" || @page.translation_status == "error")}
-      class="flex flex-col items-center justify-center h-64 text-error"
-    >
-      <.icon name="hero-exclamation-triangle" class="w-16 h-16" />
-      <p class="mt-4">{gettext("An error occurred processing this page")}</p>
-    </div>
-    <div :if={@page && show_content?(@page, @show_original)} class="markdown markdown-sm">
-      <.markdown_content content={get_content(@page, @show_original)} />
-    </div>
-    <div :if={!@page} class="flex flex-col items-center justify-center h-64 text-base-content/50">
-      <.icon name="hero-document-text" class="w-16 h-16" />
-      <p class="mt-4">{gettext("No page selected")}</p>
+    <div id="page-content" data-page-state={@state}>
+      <%= case @state do %>
+        <% :no_page -> %>
+          <div class="flex flex-col items-center justify-center h-64 text-base-content/50">
+            <.icon name="hero-document-text" class="w-16 h-16" />
+            <p class="mt-4">{gettext("No page selected")}</p>
+          </div>
+        <% :pending -> %>
+          <div class="flex flex-col items-center justify-center h-64 text-base-content/50">
+            <.icon name="hero-clock" class="w-16 h-16" />
+            <p class="mt-4">{gettext("Waiting to process...")}</p>
+          </div>
+        <% :extracting -> %>
+          <div class="flex flex-col items-center justify-center h-64">
+            <span class="loading loading-spinner loading-lg text-primary"></span>
+            <p class="mt-4 text-base-content/70">{gettext("Extracting text from page...")}</p>
+          </div>
+        <% :waiting_translation -> %>
+          <div class="flex flex-col items-center justify-center h-64 text-base-content/50">
+            <.icon name="hero-clock" class="w-16 h-16" />
+            <p class="mt-4">{gettext("Waiting to process...")}</p>
+          </div>
+        <% :translating -> %>
+          <div class="flex flex-col items-center justify-center h-64">
+            <span class="loading loading-spinner loading-lg text-primary"></span>
+            <p class="mt-4 text-base-content/70">{gettext("Translating content...")}</p>
+          </div>
+        <% :error -> %>
+          <div class="flex flex-col items-center justify-center h-64 text-error">
+            <.icon name="hero-exclamation-triangle" class="w-16 h-16" />
+            <p class="mt-4">{gettext("An error occurred processing this page")}</p>
+          </div>
+        <% :content -> %>
+          <div class="markdown markdown-sm">
+            <.markdown_content content={get_content(@page, @show_original)} />
+          </div>
+      <% end %>
     </div>
     """
+  end
+
+  @doc """
+  Collapses a page's two pipeline statuses and the original/translated toggle
+  into the single state the content panel renders.
+
+  The states are mutually exclusive and exhaustive over the four pipeline
+  statuses (`pending | processing | completed | error`), so exactly one block
+  renders for any page:
+
+    * `:no_page` - nothing selected
+    * `:pending` / `:extracting` / `:error` - extraction has not produced text yet
+    * `:content` - extraction finished and the original is shown, or the
+      translation finished and the translation is shown
+    * `:waiting_translation` / `:translating` / `:error` - the translation is
+      shown but has not finished
+
+  A translation failure does not hide the original: with the toggle on
+  "original", a page whose extraction completed always renders its text.
+  """
+  @spec page_state(map() | nil, boolean()) ::
+          :no_page
+          | :pending
+          | :extracting
+          | :waiting_translation
+          | :translating
+          | :error
+          | :content
+  def page_state(nil, _show_original), do: :no_page
+  def page_state(%{extraction_status: "pending"}, _show_original), do: :pending
+  def page_state(%{extraction_status: "processing"}, _show_original), do: :extracting
+  def page_state(%{extraction_status: "error"}, _show_original), do: :error
+  def page_state(%{extraction_status: "completed"}, true), do: :content
+
+  def page_state(%{extraction_status: "completed", translation_status: status}, false) do
+    case status do
+      "pending" -> :waiting_translation
+      "processing" -> :translating
+      "error" -> :error
+      "completed" -> :content
+    end
   end
 
   attr :content, :string, default: nil
@@ -107,14 +150,6 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
     # No wrapper element: the rendered blocks must be direct children of the
     # `.markdown` container so its edge-margin rules (`.markdown > :first-child`) match.
     ~H"{raw(@html)}"
-  end
-
-  defp show_content?(page, show_original) do
-    if show_original do
-      page.extraction_status == "completed" && page.original_markdown
-    else
-      page.translation_status == "completed" && page.translated_markdown
-    end
   end
 
   defp get_content(page, true), do: page.original_markdown
