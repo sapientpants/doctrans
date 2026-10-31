@@ -74,9 +74,10 @@ end
 # starting. `:inet.parse_address/1` takes a charlist and accepts IPv4 and IPv6
 # literals alike; it resolves no host names, which is why the error below says so.
 #
-# It is parsed here rather than in a helper module because this file is the
-# only configuration a release ships, and in development it is evaluated before
-# the project's own modules are compiled.
+# The parse stays inline rather than in a helper module. This file runs after
+# compilation (it calls `Doctrans.EnvLoader.load/0` above), so a helper would be
+# reachable; but the parse is one `case`, nothing else needs it, and keeping it
+# beside the variable it reads shows how that variable is interpreted.
 if config_env() != :test do
   bind_ip_string = System.get_env("PHX_BIND_IP") || "127.0.0.1"
 
