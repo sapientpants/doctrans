@@ -1,9 +1,11 @@
 defmodule Doctrans.Processing.LlmProcessorTest do
+  # `async: false`: the retry telemetry the error-handling cases refute is
+  # VM-global, so a concurrent test's retries would reach the observer here.
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Pages
-  alias Doctrans.Processing.LlmProcessor
+  alias Doctrans.Processing.{LlmProcessor, OpenAIMock}
 
   import Doctrans.Fixtures
 
@@ -78,12 +80,6 @@ defmodule Doctrans.Processing.LlmProcessorTest do
   describe "extraction error handling" do
     setup do
       attach_retry_observer()
-
-      on_exit(fn ->
-        Application.delete_env(:doctrans, :openai_stub_extraction_error)
-        Application.delete_env(:doctrans, :openai_stub_translation_error)
-      end)
-
       :ok
     end
 
@@ -95,7 +91,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       setup_image_file(page)
 
       # Configure stub to return circuit open error
-      Application.put_env(:doctrans, :openai_stub_extraction_error, :circuit_open)
+      fail_extraction(:circuit_open)
 
       result = LlmProcessor.process_page(page.id, MapSet.new())
 
@@ -114,7 +110,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       setup_image_file(page)
 
       # Configure stub to return permanent error (404)
-      Application.put_env(:doctrans, :openai_stub_extraction_error, "HTTP 404: Model not found")
+      fail_extraction("HTTP 404: Model not found")
 
       result = LlmProcessor.process_page(page.id, MapSet.new())
 
@@ -129,12 +125,6 @@ defmodule Doctrans.Processing.LlmProcessorTest do
   describe "translation error handling" do
     setup do
       attach_retry_observer()
-
-      on_exit(fn ->
-        Application.delete_env(:doctrans, :openai_stub_extraction_error)
-        Application.delete_env(:doctrans, :openai_stub_translation_error)
-      end)
-
       :ok
     end
 
@@ -145,7 +135,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       setup_image_file(page)
 
       # Configure stub: extraction succeeds, translation fails
-      Application.put_env(:doctrans, :openai_stub_translation_error, :circuit_open)
+      fail_translation(:circuit_open)
 
       result = LlmProcessor.process_page(page.id, MapSet.new())
 
@@ -164,7 +154,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       setup_image_file(page)
 
       # Configure stub: extraction succeeds, translation returns permanent error
-      Application.put_env(:doctrans, :openai_stub_translation_error, "HTTP 400: Invalid request")
+      fail_translation("HTTP 400: Invalid request")
 
       result = LlmProcessor.process_page(page.id, MapSet.new())
 
@@ -175,6 +165,16 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       assert updated_page.translation_status == "error"
       refute_received {:retry_event, _}
     end
+  end
+
+  defp fail_extraction(reason) do
+    Mox.stub(OpenAIMock, :extract_markdown, fn _image_path, _opts -> {:error, reason} end)
+  end
+
+  defp fail_translation(reason) do
+    Mox.stub(OpenAIMock, :translate, fn _markdown, _source, _target, _opts ->
+      {:error, reason}
+    end)
   end
 
   defp attach_retry_observer do

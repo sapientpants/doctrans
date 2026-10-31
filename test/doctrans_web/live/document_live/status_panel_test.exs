@@ -1,5 +1,5 @@
 defmodule DoctransWeb.DocumentLive.StatusPanelTest do
-  use DoctransWeb.ConnCase, async: false
+  use DoctransWeb.ConnCase, async: true
 
   import Doctrans.Fixtures
 

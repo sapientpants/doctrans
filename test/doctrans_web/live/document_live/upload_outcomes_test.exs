@@ -1,7 +1,11 @@
 defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
+  # Sync: the tests mount the dashboard, whose PubSub is global, and override the
+  # global `:uploads` application env.
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
+  alias Doctrans.Processing.PdfExtractorMock
+  alias Doctrans.TestEnv
   alias DoctransWeb.DocumentLive.UploadIntake
 
   import Doctrans.Fixtures
@@ -9,23 +13,18 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
   @moduletag :capture_log
 
   setup do
-    previous_uploads = Application.fetch_env!(:doctrans, :uploads)
-    previous_extractor = Application.fetch_env!(:doctrans, :pdf_extractor_module)
     directory = Path.join(System.tmp_dir!(), "upload-outcomes-#{Uniq.UUID.uuid7()}")
     File.mkdir_p!(directory)
 
-    Application.put_env(:doctrans, :uploads,
+    TestEnv.put_env(:uploads,
       upload_dir: directory,
       max_file_size: 100_000
     )
 
-    Application.put_env(:doctrans, :pdf_extractor_module, Doctrans.UploadPathExtractorStub)
+    # Keep the uploaded original on disk rather than extracting it.
+    Mox.stub(PdfExtractorMock, :get_page_count, fn _path -> {:error, :invalid_pdf} end)
 
-    on_exit(fn ->
-      Application.put_env(:doctrans, :uploads, previous_uploads)
-      Application.put_env(:doctrans, :pdf_extractor_module, previous_extractor)
-      File.rm_rf!(directory)
-    end)
+    on_exit(fn -> File.rm_rf!(directory) end)
 
     %{directory: directory}
   end
@@ -124,7 +123,7 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       blocker = Path.join(directory, "not-a-directory")
       File.write!(blocker, "")
 
-      Application.put_env(:doctrans, :uploads,
+      TestEnv.put_env(:uploads,
         upload_dir: Path.join(blocker, "uploads"),
         max_file_size: 100_000
       )
@@ -154,7 +153,7 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       conn: conn,
       directory: directory
     } do
-      Application.put_env(:doctrans, :uploads,
+      TestEnv.put_env(:uploads,
         upload_dir: directory,
         max_file_size: 1_000_000
       )

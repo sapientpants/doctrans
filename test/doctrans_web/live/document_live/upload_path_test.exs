@@ -1,21 +1,16 @@
 defmodule DoctransWeb.DocumentLive.UploadPathTest do
+  # Sync: every test mounts the dashboard, whose PubSub is global.
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.Run
+  alias Doctrans.Processing.{PdfExtractorMock, Run}
 
   @moduletag :capture_log
 
   setup do
-    previous = Application.fetch_env!(:doctrans, :pdf_extractor_module)
-
-    Application.put_env(
-      :doctrans,
-      :pdf_extractor_module,
-      Doctrans.UploadPathExtractorStub
-    )
-
-    on_exit(fn -> Application.put_env(:doctrans, :pdf_extractor_module, previous) end)
+    # Keep the uploaded original on disk for the containment assertions.
+    Mox.stub(PdfExtractorMock, :get_page_count, fn _path -> {:error, :invalid_pdf} end)
+    :ok
   end
 
   for filename <- [

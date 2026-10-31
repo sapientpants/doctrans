@@ -5,16 +5,14 @@ defmodule Doctrans.StorageRootTest do
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
   alias Doctrans.Resilience.HealthCheck
+  alias Doctrans.TestEnv
 
   setup do
     previous = Application.fetch_env!(:doctrans, :uploads)
     root = Path.join(System.tmp_dir!(), "doctrans-root-#{Uniq.UUID.uuid7()}")
-    Application.put_env(:doctrans, :uploads, Keyword.put(previous, :upload_dir, root))
+    TestEnv.put_env(:uploads, Keyword.put(previous, :upload_dir, root))
 
-    on_exit(fn ->
-      Application.put_env(:doctrans, :uploads, previous)
-      File.rm_rf!(root)
-    end)
+    on_exit(fn -> File.rm_rf!(root) end)
 
     {:ok, root: root}
   end
@@ -65,7 +63,7 @@ defmodule Doctrans.StorageRootTest do
     # new location: pointing at the real default would write into live storage.
     moved = Path.join(System.tmp_dir!(), "doctrans-moved-#{Uniq.UUID.uuid7()}")
     on_exit(fn -> File.rm_rf!(moved) end)
-    Application.put_env(:doctrans, :uploads, upload_dir: moved, max_file_size: 1)
+    TestEnv.put_env(:uploads, upload_dir: moved, max_file_size: 1)
 
     refute File.exists?(Path.join([moved, directory, "pages", "page-01.png"]))
     assert get(build_conn(), "/uploads/#{directory}/pages/page-01.png").status == 404
@@ -74,14 +72,14 @@ defmodule Doctrans.StorageRootTest do
   test "a storage root inside the served static directory is rejected at startup" do
     for segment <- ["images", "assets"] do
       root = Path.join([Application.app_dir(:doctrans, "priv/static"), segment, "data"])
-      Application.put_env(:doctrans, :uploads, upload_dir: root, max_file_size: 1)
+      TestEnv.put_env(:uploads, upload_dir: root, max_file_size: 1)
 
       assert_raise ArgumentError, ~r/statically served directory/, &Uploads.validate_root!/0
     end
   end
 
   test "the default root is accepted even though it sits under priv/static" do
-    Application.put_env(:doctrans, :uploads, max_file_size: 1)
+    TestEnv.put_env(:uploads, max_file_size: 1)
 
     assert Uploads.validate_root!() == Application.app_dir(:doctrans, "priv/static/uploads")
   end
@@ -91,7 +89,7 @@ defmodule Doctrans.StorageRootTest do
     File.chmod!(root, 0o500)
     on_exit(fn -> File.chmod(root, 0o700) end)
 
-    Application.put_env(:doctrans, :uploads,
+    TestEnv.put_env(:uploads,
       upload_dir: Path.join(root, "nested"),
       max_file_size: 1
     )

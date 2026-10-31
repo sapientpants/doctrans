@@ -11,26 +11,26 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
   and model calls are stubbed; orchestration, persistence, indexing and retrieval
   run together. Per-page answers and recorded embedding inputs distinguish pages.
 
-  Async: `:openai_module` is application-global while the pipeline runs.
+  The page-content model and the recording embedder are installed on the mocks
+  per test, and Oban runs the pipeline inline in the test process, so the file
+  runs concurrently with the rest of the suite.
   """
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
 
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Chunk
   alias Doctrans.Jobs.DocumentExtractionJob
-  alias Doctrans.Processing.PageContentStub
+  alias Doctrans.Processing.{OpenAIMock, PageContentStub}
   alias Doctrans.Search
-  alias Doctrans.Search.EmbeddingProbe
-  alias Doctrans.TestEnv
+  alias Doctrans.Search.EmbeddingMocks
 
   @title "Jahresabschluss 2025"
 
   setup do
-    TestEnv.put_env(:openai_module, PageContentStub)
-    TestEnv.put_env(:embedding_module, EmbeddingProbe)
-    TestEnv.put_env(:embedding_probe_pid, self())
+    Mox.stub_with(OpenAIMock, PageContentStub)
+    EmbeddingMocks.observe()
 
     document =
       document_fixture(%{
@@ -160,7 +160,7 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
 
   defp embedding_inputs(inputs \\ []) do
     receive do
-      {:embedded, input} -> embedding_inputs([input | inputs])
+      {:embedding_call, input, _opts} -> embedding_inputs([input | inputs])
     after
       0 -> Enum.reverse(inputs)
     end

@@ -9,27 +9,21 @@ defmodule Doctrans.Processing.DocumentConverterTest do
   which execs the file directly, so every fake must carry a `#!/bin/sh`
   shebang (a shebang-less script would fail with ENOEXEC, port exit 8).
   """
-  use ExUnit.Case, async: false
+  use Doctrans.EnvCase, async: false
 
   import Doctrans.ProcessProbe
 
   alias Doctrans.Processing.DocumentConverter
+  alias Doctrans.TestEnv
 
   setup do
-    original_config = Application.get_env(:doctrans, :document_conversion, [])
     original_path = System.get_env("PATH")
-
-    on_exit(fn ->
-      Application.put_env(:doctrans, :document_conversion, original_config)
-      System.put_env("PATH", original_path)
-    end)
+    on_exit(fn -> System.put_env("PATH", original_path) end)
 
     %{original_path: original_path}
   end
 
-  defp put_config(config) do
-    Application.put_env(:doctrans, :document_conversion, config)
-  end
+  defp put_config(config), do: TestEnv.put_env(:document_conversion, config)
 
   # Temporarily replaces $PATH so find_on_path/1 only sees what the test
   # sets up. Restored by the on_exit callback in setup/1.

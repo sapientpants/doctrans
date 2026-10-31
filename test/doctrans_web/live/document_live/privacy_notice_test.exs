@@ -1,4 +1,6 @@
 defmodule DoctransWeb.DocumentLive.PrivacyNoticeTest do
+  # Sync: every test mounts the dashboard, whose PubSub is global, and overrides
+  # the global `:openai` and `:embedding` application env.
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.TestEnv

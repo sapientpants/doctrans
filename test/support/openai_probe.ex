@@ -1,74 +1,64 @@
 defmodule Doctrans.Processing.OpenAIProbe do
   @moduledoc """
-  Mock implementation of OpenAIBehaviour that records the options of every
-  call, for tests asserting per-stage behaviour (e.g. the thinking toggle).
+  An `OpenAIMock` stub that records the options of every call, for tests
+  asserting per-stage behaviour (e.g. the thinking toggle).
 
-  Point it at a recording process with:
-
-      Application.put_env(:doctrans, :openai_probe_pid, self())
-
-  Each call sends `{function, opts}` to that process and returns a canned
-  successful response. `translate/4` additionally sends
+  `install/0` stubs every callback on `Doctrans.Processing.OpenAIMock` for the
+  running test. Each call sends `{function, opts}` to the test process and
+  returns a canned successful response; `chat/2` also sends
+  `{:chat_messages, messages}`, and `translate/4` additionally sends
   `{:translate_languages, {source_language, target_language}}`, so a test can
   assert which languages a document was actually translated between.
   """
 
-  @behaviour Doctrans.Processing.OpenAIBehaviour
+  import Mox
 
-  @impl true
-  def chat(messages, opts) do
-    record(:chat, opts)
-    record(:chat_messages, messages)
-    {:ok, "probe response"}
+  alias Doctrans.Processing.OpenAIMock
+
+  @doc """
+  Records every `OpenAIMock` call to the calling test process.
+  """
+  def install do
+    owner = self()
+
+    stub(OpenAIMock, :chat, fn messages, opts ->
+      record(owner, :chat, opts)
+      record(owner, :chat_messages, messages)
+      {:ok, "probe response"}
+    end)
+
+    stub(OpenAIMock, :chat_stream, fn _messages, on_delta, opts ->
+      record(owner, :chat_stream, opts)
+
+      response = "probe stream"
+      [first, rest] = [String.slice(response, 0, 5), String.slice(response, 5..-1//1)]
+      on_delta.(first)
+      on_delta.(rest)
+
+      {:ok, response}
+    end)
+
+    stub(OpenAIMock, :extract_markdown, fn _image_path, opts ->
+      record(owner, :extract_markdown, opts)
+      {:ok, "# Probe markdown"}
+    end)
+
+    stub(OpenAIMock, :translate, fn _markdown, source_language, target_language, opts ->
+      record(owner, :translate, opts)
+      record(owner, :translate_languages, {source_language, target_language})
+      {:ok, "probe translation #{target_language}"}
+    end)
+
+    stub(OpenAIMock, :detect_language, fn _markdown, opts ->
+      record(owner, :detect_language, opts)
+      {:ok, "de"}
+    end)
+
+    stub(OpenAIMock, :available?, fn -> true end)
+    stub(OpenAIMock, :list_models, fn -> {:ok, ["probe-model"]} end)
+
+    :ok
   end
 
-  @impl true
-  def chat_stream(_messages, on_delta, opts) do
-    record(:chat_stream, opts)
-
-    response = "probe stream"
-
-    [first, rest] = [String.slice(response, 0, 5), String.slice(response, 5..-1//1)]
-    on_delta.(first)
-    on_delta.(rest)
-
-    {:ok, response}
-  end
-
-  @impl true
-  def extract_markdown(_image_path, opts) do
-    record(:extract_markdown, opts)
-    {:ok, "# Probe markdown"}
-  end
-
-  @impl true
-  def translate(_markdown, source_language, target_language, opts) do
-    record(:translate, opts)
-    record(:translate_languages, {source_language, target_language})
-    {:ok, "probe translation #{target_language}"}
-  end
-
-  @impl true
-  def detect_language(_markdown, opts) do
-    record(:detect_language, opts)
-    {:ok, "de"}
-  end
-
-  @impl true
-  def available?, do: true
-
-  @impl true
-  def list_models, do: {:ok, ["probe-model"]}
-
-  def embed(_text, _opts), do: {:ok, List.duplicate(0.1, 1024)}
-
-  defp record(function, opts) do
-    case Application.get_env(:doctrans, :openai_probe_pid) do
-      nil ->
-        :ok
-
-      pid when is_pid(pid) ->
-        send(pid, {function, opts})
-    end
-  end
+  defp record(owner, function, payload), do: send(owner, {function, payload})
 end

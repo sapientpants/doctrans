@@ -1,5 +1,5 @@
 defmodule Doctrans.Processing.PdfProcessorTest do
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
@@ -13,9 +13,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
 
   describe "extract_document/3" do
     test "waits for all expected pages when processing catches up with PDF extraction" do
-      original = Application.fetch_env!(:doctrans, :pdf_extractor_module)
-      Application.put_env(:doctrans, :pdf_extractor_module, ResumablePdfExtractorStub)
-      on_exit(fn -> Application.put_env(:doctrans, :pdf_extractor_module, original) end)
+      ResumablePdfExtractorStub.install()
 
       Oban.Testing.with_testing_mode(:manual, fn ->
         document = document_fixture(%{status: "processing"})
@@ -79,9 +77,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
     end
 
     test "resumes after a partial extraction failure without duplicating pages or jobs" do
-      original = Application.fetch_env!(:doctrans, :pdf_extractor_module)
-      Application.put_env(:doctrans, :pdf_extractor_module, ResumablePdfExtractorStub)
-      on_exit(fn -> Application.put_env(:doctrans, :pdf_extractor_module, original) end)
+      ResumablePdfExtractorStub.install()
 
       Oban.Testing.with_testing_mode(:manual, fn ->
         document = document_fixture(%{status: "extracting"})

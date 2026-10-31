@@ -4,14 +4,14 @@ defmodule Doctrans.Processing.SourceLanguageTest do
   uploader did not pick one, and that translation reads it off the document
   being processed rather than off an app-wide default.
 
-  The translator `config/test.exs` installs, `Doctrans.Processing.OpenAIStub`,
+  The default translator stub, `Doctrans.Processing.OpenAIStub`,
   echoes the pair it was called with into the markdown it returns, so the
   language a page was actually translated *from* survives on that page's row.
   Asserting on the persisted `translated_markdown` keys the evidence to the page
   rather than to the order two concurrent runs happen to report in.
 
-  `async: false`: the translator is selected through global application env, and
-  the retry test overrides `:defaults` the same way.
+  `async: false`: the retry and fallback tests override `:defaults` through
+  global application env. The translator itself is a per-test Mox stub.
   """
 
   use Doctrans.DataCase, async: false
@@ -20,9 +20,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
   import ExUnit.CaptureLog
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.LlmProcessor
-  alias Doctrans.Processing.OpenAIProbe
-  alias Doctrans.Processing.SourceLanguage
+  alias Doctrans.Processing.{LlmProcessor, OpenAIMock, OpenAIProbe, SourceLanguage}
   alias Doctrans.TestEnv
 
   describe "process_page/3 source language" do
@@ -105,7 +103,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
 
   describe "process_page/3 source language detection" do
     test "detects the language of a document that has none and translates from it" do
-      TestEnv.put_env(:openai_stub_detected_language, "fr")
+      detect("fr")
 
       {document, page} = staged_page(%{source_language: nil, target_language: "en"})
 
@@ -121,7 +119,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
     end
 
     test "a language the uploader picked is never replaced by a detected one" do
-      TestEnv.put_env(:openai_stub_detected_language, "fr")
+      detect("fr")
 
       {document, page} = staged_page(%{source_language: "nl", target_language: "en"})
 
@@ -135,7 +133,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
     end
 
     test "a document is detected once, and its later pages reuse the recorded answer" do
-      TestEnv.put_env(:openai_stub_detected_language, "fr")
+      detect("fr")
 
       {document, [first, second]} =
         staged_pages(%{source_language: nil, target_language: "en"}, 2)
@@ -148,8 +146,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
       # it receives, so a second detection would show up as a
       # `{:detect_language, _}` message ahead of the translation it precedes --
       # which is what makes "no second call" an assertion rather than a hope.
-      TestEnv.put_env(:openai_probe_pid, self())
-      TestEnv.put_env(:openai_module, OpenAIProbe)
+      OpenAIProbe.install()
 
       assert :ok = LlmProcessor.process_page(second.id, MapSet.new())
 
@@ -169,7 +166,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
       # neither; "xx" is not a language this app translates. Both are worth
       # less than the fallback, and neither may be taken at its word.
       for reply <- ["It is de", "xx"] do
-        TestEnv.put_env(:openai_stub_detected_language, reply)
+        detect(reply)
 
         {document, page} = staged_page(%{source_language: nil, target_language: "en"})
 
@@ -186,7 +183,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
 
     test "a failed detection records the fallback and the page is still translated" do
       TestEnv.put_env(:defaults, source_language: "pl", target_language: "en")
-      TestEnv.put_env(:openai_stub_detection_error, :circuit_open)
+      Mox.stub(OpenAIMock, :detect_language, fn _markdown, _opts -> {:error, :circuit_open} end)
 
       {document, page} = staged_page(%{source_language: nil, target_language: "en"})
 
@@ -206,7 +203,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
   describe "resolve/2 with nothing to read" do
     test "a page with no text records nothing, leaving a later page to decide" do
       TestEnv.put_env(:defaults, source_language: "pl", target_language: "en")
-      TestEnv.put_env(:openai_stub_detected_language, "fr")
+      detect("fr")
 
       document = document_fixture(%{source_language: nil, target_language: "en"})
 
@@ -222,6 +219,11 @@ defmodule Doctrans.Processing.SourceLanguageTest do
       assert SourceLanguage.resolve(document, "Bonjour, ceci est un document.") == "fr"
       assert Documents.get_document!(document.id).source_language == "fr"
     end
+  end
+
+  # Makes the model answer every detection with `reply`.
+  defp detect(reply) do
+    Mox.stub(OpenAIMock, :detect_language, fn _markdown, _opts -> {:ok, reply} end)
   end
 
   # A one-page document staged for a full run: the extraction stage reads a real

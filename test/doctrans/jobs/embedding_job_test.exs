@@ -1,13 +1,12 @@
 defmodule Doctrans.Jobs.EmbeddingJobTest do
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
 
   import Doctrans.Fixtures
 
   alias Doctrans.Documents.{Chunk, Page, Pages}
   alias Doctrans.Jobs.EmbeddingJob
-  alias Doctrans.Search.{EmbeddingErrorStub, EmbeddingMock}
-  alias Doctrans.TestEnv
+  alias Doctrans.Search.EmbeddingMocks
 
   # Three paragraphs of 200 words chunk into three chunks, each carrying exactly
   # one marker: the 50-word overlap between neighbours is filler. That makes a
@@ -138,11 +137,11 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
       page = extracted_page("Transient failure")
       args = EmbeddingJob.page_args(page)
 
-      use_embedding_module(EmbeddingErrorStub)
+      EmbeddingMocks.fail()
       assert {:error, :timeout} = perform_job(EmbeddingJob, args)
       assert Repo.get!(Page, page.id).embedding_status == "error"
 
-      use_embedding_module(EmbeddingMock)
+      EmbeddingMocks.succeed()
       assert :ok = perform_job(EmbeddingJob, args)
       assert Repo.get!(Page, page.id).embedding_status == "completed"
       assert [%Chunk{embedding_status: "completed"}] = chunks_of(page)
@@ -150,8 +149,7 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
 
     test "cancels a permanent failure instead of retrying it" do
       page = extracted_page("Permanent failure")
-      use_embedding_module(EmbeddingErrorStub)
-      use_error_reason({:http_error, 400})
+      EmbeddingMocks.fail({:http_error, 400})
 
       assert {:cancel, {:http_error, [status: 400]}} =
                perform_job(EmbeddingJob, EmbeddingJob.page_args(page))
@@ -161,8 +159,7 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
 
     test "keeps the chunks that succeeded when one of them fails" do
       page = extracted_page(multi_chunk_markdown())
-      use_embedding_module(EmbeddingErrorStub)
-      use_error_plan([{"BETA", :timeout}])
+      EmbeddingMocks.fail_matching([{"BETA", :timeout}])
 
       assert {:error, :timeout} = perform_job(EmbeddingJob, EmbeddingJob.page_args(page))
       assert Repo.get!(Page, page.id).embedding_status == "error"
@@ -176,19 +173,17 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
 
     test "retries a page whose failures are not all permanent" do
       page = extracted_page(multi_chunk_markdown())
-      use_embedding_module(EmbeddingErrorStub)
 
       # The permanent failure comes first. Classifying the page on whichever
       # chunk failed first would cancel the job and strand the transient one.
-      use_error_plan([{"ALPHA", {:http_error, 400}}, {"BETA", :timeout}])
+      EmbeddingMocks.fail_matching([{"ALPHA", {:http_error, 400}}, {"BETA", :timeout}])
 
       assert {:error, :timeout} = perform_job(EmbeddingJob, EmbeddingJob.page_args(page))
     end
 
     test "cancels a page only when every failure on it is permanent" do
       page = extracted_page(multi_chunk_markdown())
-      use_embedding_module(EmbeddingErrorStub)
-      use_error_plan(Enum.map(@markers, &{&1, {:http_error, 400}}))
+      EmbeddingMocks.fail_matching(Enum.map(@markers, &{&1, {:http_error, 400}}))
 
       assert {:cancel, {:http_error, [status: 400]}} =
                perform_job(EmbeddingJob, EmbeddingJob.page_args(page))
@@ -198,15 +193,13 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
       page = extracted_page(multi_chunk_markdown())
       args = EmbeddingJob.page_args(page)
 
-      use_embedding_module(EmbeddingErrorStub)
-      use_error_plan([{"BETA", :timeout}])
+      EmbeddingMocks.fail_matching([{"BETA", :timeout}])
       assert {:error, :timeout} = perform_job(EmbeddingJob, args)
       assert [_, %Chunk{embedding: nil}, _] = chunks_of(page)
 
-      # An empty plan fails nothing, so the second attempt is free to record
-      # exactly which inputs it sends.
-      use_error_plan([])
-      observe_embedding_calls()
+      # The observing stub fails nothing, so the second attempt is free to
+      # record exactly which inputs it sends.
+      EmbeddingMocks.observe()
       assert :ok = perform_job(EmbeddingJob, args)
 
       assert [chunk_call, page_call] = embedding_calls()
@@ -223,10 +216,9 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
 
     test "does not mark a page indexed when its page-level vector was not written" do
       page = extracted_page(multi_chunk_markdown())
-      use_embedding_module(EmbeddingErrorStub)
 
       # Only the page-level call carries every marker at once.
-      use_error_plan([{@markers, :timeout}])
+      EmbeddingMocks.fail_matching([{@markers, :timeout}])
 
       assert {:error, :timeout} = perform_job(EmbeddingJob, EmbeddingJob.page_args(page))
 
@@ -245,14 +237,14 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
   describe "retry lifecycle" do
     test "a reported failure leaves the job retryable and a cancel settles it" do
       Oban.Testing.with_testing_mode(:manual, fn ->
-        use_embedding_module(EmbeddingErrorStub)
+        EmbeddingMocks.fail()
 
         transient = extracted_page("Drained transient")
         assert {:ok, _} = EmbeddingJob.enqueue_page(transient)
         drain()
         assert job_state(transient) == "retryable"
 
-        use_error_reason({:http_error, 400})
+        EmbeddingMocks.fail({:http_error, 400})
         permanent = extracted_page("Drained permanent")
         assert {:ok, _} = EmbeddingJob.enqueue_page(permanent)
         drain()
@@ -263,14 +255,22 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
     test "reports retries on the embedding series the dashboard charts" do
       page = extracted_page("Retry telemetry")
       args = EmbeddingJob.page_args(page)
-      use_embedding_module(EmbeddingErrorStub)
+      EmbeddingMocks.fail()
       attach_retry_telemetry()
 
+      # Telemetry is VM-global, so a concurrent test's embedding retries reach
+      # this handler too: match this test's page, not just the series.
+      page_id = page.id
+
       assert {:error, :timeout} = perform_job(EmbeddingJob, args, attempt: 1, max_attempts: 5)
-      assert_received {:retry_event, [:doctrans, :retry, :attempt], %{type: :embedding}}
+
+      assert_received {:retry_event, [:doctrans, :retry, :attempt],
+                       %{type: :embedding, page_id: ^page_id}}
 
       assert {:error, :timeout} = perform_job(EmbeddingJob, args, attempt: 5, max_attempts: 5)
-      assert_received {:retry_event, [:doctrans, :retry, :exhausted], %{type: :embedding}}
+
+      assert_received {:retry_event, [:doctrans, :retry, :exhausted],
+                       %{type: :embedding, page_id: ^page_id}}
     end
   end
 
@@ -301,29 +301,13 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
     |> Map.fetch!(:state)
   end
 
-  defp use_embedding_module(module) do
-    put_test_env(:embedding_module, module)
-  end
-
-  defp use_error_reason(reason) do
-    put_test_env(:embedding_error_reason, reason)
-  end
-
-  defp use_error_plan(plan) do
-    put_test_env(:embedding_error_plan, plan)
-  end
-
-  defp observe_embedding_calls do
-    put_test_env(:embedding_call_observer, self())
-  end
-
   defp embedding_calls do
     Enum.reverse(collect_embedding_calls([]))
   end
 
   defp collect_embedding_calls(acc) do
     receive do
-      {:embedding_call, text} -> collect_embedding_calls([text | acc])
+      {:embedding_call, text, _opts} -> collect_embedding_calls([text | acc])
     after
       0 -> acc
     end
@@ -345,6 +329,4 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
 
     on_exit(fn -> :telemetry.detach(handler) end)
   end
-
-  defp put_test_env(key, value), do: TestEnv.put_env(key, value)
 end

@@ -29,7 +29,7 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
   alias Doctrans.Documents.Document
   alias Doctrans.Documents.Topics
   alias Doctrans.Repo
-  alias Doctrans.TestEnv
+  alias Doctrans.Search.EmbeddingMocks
   alias DoctransWeb.DocumentLive.Index
   alias DoctransWeb.DocumentLive.Show
 
@@ -414,11 +414,7 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
 
   # Parks the embedding stub on `text` until this test releases it, so a chat
   # turn can be observed mid-flight.
-  defp install_barrier(text) do
-    barrier = make_ref()
-    TestEnv.put_env(:embedding_stub_barrier, {text, self(), barrier})
-    barrier
-  end
+  defp install_barrier(text), do: EmbeddingMocks.hold(text)
 
   defp insert_without_broadcast(title) do
     Repo.insert!(%Document{

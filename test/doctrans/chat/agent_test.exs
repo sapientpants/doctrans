@@ -1,13 +1,13 @@
 defmodule Doctrans.Chat.AgentTest do
-  # These cases configure the model and embedder for the whole test VM.
-  use Doctrans.DataCase, async: false
+  # Each test installs its own model and embedder on the mocks; chat's search
+  # tasks run under `Doctrans.TaskSupervisor`, which carries `$callers`.
+  use Doctrans.DataCase, async: true
 
   alias Doctrans.Chat
   alias Doctrans.Chat.{Agent, ContractProbe}
   alias Doctrans.Documents
-  alias Doctrans.Processing.OpenAIProbe
+  alias Doctrans.Processing.{OpenAIMock, OpenAIProbe}
   alias Doctrans.Repo
-  alias Doctrans.TestEnv
 
   describe "run/5" do
     setup do
@@ -145,7 +145,10 @@ defmodule Doctrans.Chat.AgentTest do
     end
 
     test "surfaces generation errors", %{document: document} do
-      TestEnv.put_env(:openai_stub_chat_error, "boom")
+      # The planner and grader both fall back on a model error; only the
+      # streamed generation surfaces it, so both calls fail here.
+      Mox.stub(OpenAIMock, :chat, fn _messages, _opts -> {:error, "boom"} end)
+      Mox.stub(OpenAIMock, :chat_stream, fn _messages, _on_delta, _opts -> {:error, "boom"} end)
 
       assert {:error, "boom"} =
                Agent.run(document, "What is this about?", [], [], fn _ -> :ok end)
@@ -154,16 +157,7 @@ defmodule Doctrans.Chat.AgentTest do
     test "generates the final answer with thinking enabled, planning steps without", %{
       document: document
     } do
-      test_pid = self()
-      original_module = Application.get_env(:doctrans, :openai_module)
-
-      Application.put_env(:doctrans, :openai_module, OpenAIProbe)
-      Application.put_env(:doctrans, :openai_probe_pid, test_pid)
-
-      on_exit(fn ->
-        Application.put_env(:doctrans, :openai_module, original_module)
-        Application.delete_env(:doctrans, :openai_probe_pid)
-      end)
+      OpenAIProbe.install()
 
       noop = fn _ -> :ok end
 
@@ -179,12 +173,12 @@ defmodule Doctrans.Chat.AgentTest do
     end
   end
 
+  # Scripts the model's replies. With `embeddings`, the probe also answers each
+  # query with its vector; without, the default embedding stub stays in place.
   defp model_probe(responses, embeddings \\ nil) do
     state = %{owner: self(), chat_responses: responses, embeddings: embeddings || %{}}
     probe = start_supervised!({ContractProbe, state})
-    TestEnv.put_env(:chat_contract_probe, probe)
-    TestEnv.put_env(:openai_module, ContractProbe)
-    if embeddings, do: TestEnv.put_env(:embedding_module, ContractProbe)
+    ContractProbe.install(probe)
     probe
   end
 

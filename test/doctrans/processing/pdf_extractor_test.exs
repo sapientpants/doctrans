@@ -14,11 +14,11 @@ defmodule Doctrans.Processing.PdfExtractorTest do
   `available?/0` and the rest of the failure shapes — timeouts, the page, pixel
   and image-size limits, executable resolution — are covered deterministically
   in `Doctrans.Processing.PdfExtractorBoundsTest`, which pins poppler to fakes
-  it controls. They need `Application.put_env/3`, so they cannot live in this
-  async file.
+  it controls. They override the application environment through
+  `Doctrans.TestEnv`, so they cannot live in this async file.
   """
 
-  use ExUnit.Case, async: true
+  use Doctrans.EnvCase, async: true
 
   alias Doctrans.Processing.PdfExtractor
 

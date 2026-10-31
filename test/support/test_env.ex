@@ -2,9 +2,10 @@ defmodule Doctrans.TestEnv do
   @moduledoc """
   Scopes an `Application` env override to the lifetime of one test.
 
-  Swapping a module or a flag in the application environment is how this suite
-  drives configurable collaborators, and every such swap has to be undone or it
-  leaks into the next test. This restores the previous value — including the
+  Changing a setting in the application environment is how this suite drives
+  the code that reads configuration (collaborator modules are Mox mocks and need
+  no override; see `Doctrans.Mocks`), and every such change has to be undone or
+  it leaks into the next test. This restores the previous value — including the
   absence of one — when the test exits.
 
   It scopes the override in *time*, not in space: `Application.put_env/3` is
@@ -37,8 +38,27 @@ defmodule Doctrans.TestEnv do
 
   @doc """
   Sets `:doctrans`'s `key` for the running test and restores it afterwards.
+
+  A test may override the same key more than once: `on_exit` callbacks run in
+  reverse registration order, so the restores unwind to the value that stood
+  before the first override.
   """
   def put_env(key, value) do
+    override(key, fn -> Application.put_env(:doctrans, key, value) end)
+  end
+
+  @doc """
+  Removes `:doctrans`'s `key` for the running test and restores it afterwards.
+
+  For a test of what the code does when a setting is absent: `put_env(key, nil)`
+  is not the same thing, because `Application.get_env/3` returns the `nil` it
+  finds rather than the default.
+  """
+  def delete_env(key) do
+    override(key, fn -> Application.delete_env(:doctrans, key) end)
+  end
+
+  defp override(key, change) do
     registered = async?()
 
     if is_nil(registered) do
@@ -60,7 +80,7 @@ defmodule Doctrans.TestEnv do
     end
 
     previous = Application.fetch_env(:doctrans, key)
-    Application.put_env(:doctrans, key, value)
+    change.()
 
     on_exit(fn ->
       case previous do

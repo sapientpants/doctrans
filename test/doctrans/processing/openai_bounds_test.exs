@@ -13,13 +13,14 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
   `async: false`: the `:doctrans` application environment is mutated and
   restored, and the `:openai_api` fuse is shared.
   """
-  use ExUnit.Case, async: false
+  use Doctrans.EnvCase, async: false
 
   # A cut-off endpoint is an error path, and `ApiFailure` logs every one of them.
   @moduletag :capture_log
 
   alias Doctrans.Processing.OpenAI
   alias Doctrans.Resilience.{CircuitBreaker, ErrorClassifier}
+  alias Doctrans.TestEnv
   alias DoctransWeb.ErrorMessages
 
   # Small enough that a misbehaving endpoint is caught in well under a second,
@@ -39,16 +40,7 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
 
   setup do
     CircuitBreaker.reset(:openai_api)
-    previous = Application.get_env(:doctrans, :openai)
-
-    on_exit(fn ->
-      CircuitBreaker.reset(:openai_api)
-
-      if previous,
-        do: Application.put_env(:doctrans, :openai, previous),
-        else: Application.delete_env(:doctrans, :openai)
-    end)
-
+    on_exit(fn -> CircuitBreaker.reset(:openai_api) end)
     :ok
   end
 
@@ -159,7 +151,7 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
   end
 
   defp configure(port) do
-    Application.put_env(:doctrans, :openai,
+    TestEnv.put_env(:openai,
       base_url: "http://127.0.0.1:#{port}",
       api_key: nil,
       chat_model: "test-chat-model",

@@ -1,5 +1,6 @@
 defmodule Doctrans.EnvLoaderTest do
-  use ExUnit.Case, async: false
+  # `async: false`: the OS environment it sets is shared by the whole VM.
+  use Doctrans.EnvCase, async: false
 
   import ExUnit.CaptureLog
 

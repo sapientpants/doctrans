@@ -1,20 +1,20 @@
 defmodule DoctransWeb.DocumentLive.ConfigTest do
+  # Sync: the test overrides the global `:openai` application env.
   use DoctransWeb.ConnCase, async: false
 
   import Doctrans.Fixtures
 
+  alias Doctrans.TestEnv
+
   test "reprocess selections use configured vision and translation models", %{conn: conn} do
-    previous = Application.fetch_env!(:doctrans, :openai)
     bypass = Bypass.open()
 
-    Application.put_env(:doctrans, :openai,
+    TestEnv.put_env(:openai,
       base_url: "http://localhost:#{bypass.port}",
       vision_model: "custom-vision",
       chat_model: "custom-chat",
       translation_model: "custom-translation"
     )
-
-    on_exit(fn -> Application.put_env(:doctrans, :openai, previous) end)
 
     Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
       conn

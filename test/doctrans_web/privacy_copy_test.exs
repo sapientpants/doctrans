@@ -1,4 +1,5 @@
 defmodule DoctransWeb.PrivacyCopyTest do
+  # Sync: every test overrides the global `:openai` and `:embedding` application env.
   use Doctrans.EnvCase, async: false
 
   alias Doctrans.TestEnv

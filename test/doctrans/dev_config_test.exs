@@ -3,7 +3,9 @@ defmodule Doctrans.DevConfigTest do
   # interface the development endpoint listens on — the one setting that decides
   # whether an app with no authentication is reachable from the LAN — is
   # otherwise untested.
-  use ExUnit.Case, async: false
+  #
+  # `async: false`: the OS environment it sets is shared by the whole VM.
+  use Doctrans.EnvCase, async: false
 
   @env_keys ~w(PHX_BIND_IP DATABASE_HOST PORT)
 

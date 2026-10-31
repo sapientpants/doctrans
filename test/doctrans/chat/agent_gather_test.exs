@@ -1,11 +1,12 @@
 defmodule Doctrans.Chat.AgentGatherTest do
   # Scripted grades and query-dependent vectors make each gathering step visible.
-  use Doctrans.DataCase, async: false
+  # The probe is installed on the mocks for this test alone, and chat's search
+  # tasks run under `Doctrans.TaskSupervisor`, which carries `$callers`.
+  use Doctrans.DataCase, async: true
 
   alias Doctrans.Chat.{Agent, ContractProbe}
   alias Doctrans.Documents
   alias Doctrans.Repo
-  alias Doctrans.TestEnv
 
   setup do
     document = Doctrans.Fixtures.document_fixture(%{status: "completed", total_pages: 2})
@@ -38,9 +39,7 @@ defmodule Doctrans.Chat.AgentGatherTest do
            }}
         )
 
-      TestEnv.put_env(:chat_contract_probe, probe)
-      TestEnv.put_env(:openai_module, ContractProbe)
-      TestEnv.put_env(:embedding_module, ContractProbe)
+      ContractProbe.install(probe)
 
       assert {:ok, "Answer.", context} =
                Agent.run(document, "assess the balance sheet", [], [], fn _ -> :ok end)

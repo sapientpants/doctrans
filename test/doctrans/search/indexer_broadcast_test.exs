@@ -8,13 +8,12 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
   last computed -- "queued", most visibly, for a page that has since been indexed.
   These drive both terminal writes and pin the one write that stays silent.
   """
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
 
   import Doctrans.Fixtures
 
   alias Doctrans.Documents.{Page, Topics}
-  alias Doctrans.Search.{EmbeddingErrorStub, EmbeddingMock, Indexer}
-  alias Doctrans.TestEnv
+  alias Doctrans.Search.{EmbeddingMocks, Indexer}
 
   @moduletag :postgres
 
@@ -30,8 +29,7 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
 
   test "a failed run announces the failure it recorded" do
     page = extracted_page("Failed and announced")
-    TestEnv.put_env(:embedding_module, EmbeddingErrorStub)
-    TestEnv.put_env(:embedding_error_reason, {:http_error, 400})
+    EmbeddingMocks.fail({:http_error, 400})
     :ok = Topics.subscribe_document(page.document_id)
 
     assert {:cancel, _reason} = Indexer.index_page(page.id)
@@ -71,7 +69,6 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
   end
 
   defp extracted_page(text) do
-    TestEnv.put_env(:embedding_module, EmbeddingMock)
     document = document_fixture()
     page_fixture(document, %{extraction_status: "completed", original_markdown: text})
   end

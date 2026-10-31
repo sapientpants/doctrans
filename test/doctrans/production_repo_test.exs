@@ -1,5 +1,7 @@
 defmodule Doctrans.ProductionRepoTest do
-  use ExUnit.Case, async: false
+  # `async: false`: the OS environment it sets is shared by the whole VM, and
+  # the production-configured repository it starts is a named process.
+  use Doctrans.EnvCase, async: false
 
   alias Doctrans.Documents.{Document, Page}
   alias Doctrans.ProductionConfigRepo, as: Repo

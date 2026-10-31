@@ -2,14 +2,8 @@ defmodule Doctrans.Config.ReadinessTest do
   use Doctrans.EnvCase, async: false
 
   alias Doctrans.Config.Readiness
-
-  alias Doctrans.Search.{
-    EmbeddingErrorStub,
-    EmbeddingNilStub,
-    EmbeddingOptsStub,
-    EmbeddingStub
-  }
-
+  alias Doctrans.Processing.OpenAIMock
+  alias Doctrans.Search.EmbeddingMocks
   alias Doctrans.TestEnv
 
   @models ["vision-model", "translation-model", "embedding-model"]
@@ -18,6 +12,10 @@ defmodule Doctrans.Config.ReadinessTest do
   # reads is named here rather than inherited from `config/config.exs`: a test
   # that silently fell back to the shipped model names would pass for the wrong
   # reason the moment those names changed.
+  #
+  # `:models` is the list the stubbed server offers, or the error reason it
+  # fails with; `:embedding` is how the embedding probe answers -- `:fail`,
+  # `{:fail, reason}`, `:nil_vector` or `:observe` -- and defaults to success.
   defp configure(opts \\ []) do
     TestEnv.put_env(:openai,
       base_url: Keyword.get(opts, :chat_url, "http://localhost:8000"),
@@ -31,9 +29,21 @@ defmodule Doctrans.Config.ReadinessTest do
       model: Keyword.get(opts, :embedding_model, "embedding-model")
     )
 
-    TestEnv.put_env(:openai_stub_models, Keyword.get(opts, :models, @models))
-    TestEnv.put_env(:embedding_module, Keyword.get(opts, :embedding_module, EmbeddingStub))
+    stub_models(Keyword.get(opts, :models, @models))
+    stub_embedding(Keyword.get(opts, :embedding, :succeed))
   end
+
+  defp stub_models(models) when is_list(models),
+    do: Mox.stub(OpenAIMock, :list_models, fn -> {:ok, models} end)
+
+  defp stub_models(reason),
+    do: Mox.stub(OpenAIMock, :list_models, fn -> {:error, reason} end)
+
+  defp stub_embedding(:succeed), do: :ok
+  defp stub_embedding(:fail), do: EmbeddingMocks.fail()
+  defp stub_embedding({:fail, reason}), do: EmbeddingMocks.fail(reason)
+  defp stub_embedding(:nil_vector), do: EmbeddingMocks.nil_vector()
+  defp stub_embedding(:observe), do: EmbeddingMocks.observe()
 
   defp codes(report), do: Enum.map(report.problems, fn {code, _bindings} -> code end)
 
@@ -71,7 +81,7 @@ defmodule Doctrans.Config.ReadinessTest do
     end
 
     test "a failed embedding probe is not blamed on a model list that was never fetched" do
-      configure(models: :connection_refused, embedding_module: EmbeddingErrorStub)
+      configure(models: :connection_refused, embedding: :fail)
 
       report = Readiness.check()
 
@@ -149,12 +159,7 @@ defmodule Doctrans.Config.ReadinessTest do
 
   describe "check/0 embedding probe" do
     test "a vector narrower than the stored width reports both widths and the model" do
-      configure(embedding_module: EmbeddingErrorStub)
-
-      TestEnv.put_env(
-        :embedding_error_reason,
-        {:embedding_too_short, [expected: 1024, actual: 384]}
-      )
+      configure(embedding: {:fail, {:embedding_too_short, [expected: 1024, actual: 384]}})
 
       report = Readiness.check()
 
@@ -167,8 +172,7 @@ defmodule Doctrans.Config.ReadinessTest do
     end
 
     test "an embedding endpoint that does not answer is reported generically" do
-      configure(embedding_module: EmbeddingErrorStub)
-      TestEnv.put_env(:embedding_error_reason, :timeout)
+      configure(embedding: {:fail, :timeout})
 
       assert Readiness.check().problems == [
                {:embedding_unavailable, [destination: "localhost"]}
@@ -176,7 +180,7 @@ defmodule Doctrans.Config.ReadinessTest do
     end
 
     test "a success carrying no vector is a failed path, not a ready one" do
-      configure(embedding_module: EmbeddingNilStub)
+      configure(embedding: :nil_vector)
 
       assert Readiness.check().problems == [
                {:embedding_unavailable, [destination: "localhost"]}
@@ -184,12 +188,7 @@ defmodule Doctrans.Config.ReadinessTest do
     end
 
     test "a model absent from the shared server's list beats the generic reason" do
-      configure(
-        embedding_model: "absent-embedding-model",
-        embedding_module: EmbeddingErrorStub
-      )
-
-      TestEnv.put_env(:embedding_error_reason, :timeout)
+      configure(embedding_model: "absent-embedding-model", embedding: {:fail, :timeout})
 
       assert Readiness.check().problems == [
                {:embedding_model_unavailable,
@@ -203,10 +202,8 @@ defmodule Doctrans.Config.ReadinessTest do
       configure(
         embedding_url: "https://embed.example.com",
         embedding_model: "absent-embedding-model",
-        embedding_module: EmbeddingErrorStub
+        embedding: {:fail, :timeout}
       )
-
-      TestEnv.put_env(:embedding_error_reason, :timeout)
 
       assert Readiness.check().problems == [
                {:embedding_unavailable, [destination: "embed.example.com"]}
@@ -214,12 +211,11 @@ defmodule Doctrans.Config.ReadinessTest do
     end
 
     test "the probe is bounded well under the indexing timeout it would inherit" do
-      configure(embedding_module: EmbeddingOptsStub)
-      TestEnv.put_env(:embedding_opts_observer, self())
+      configure(embedding: :observe)
 
       assert Readiness.check().problems == []
 
-      assert_receive {:embedding_opts, "readiness", opts}
+      assert_receive {:embedding_call, "readiness", opts}
       assert Keyword.fetch!(opts, :timeout) == 5_000
     end
   end
@@ -230,10 +226,8 @@ defmodule Doctrans.Config.ReadinessTest do
         vision_model: "absent-vision-model",
         translation_model: "absent-translation-model",
         embedding_model: "absent-embedding-model",
-        embedding_module: EmbeddingErrorStub
+        embedding: {:fail, :timeout}
       )
-
-      TestEnv.put_env(:embedding_error_reason, :timeout)
 
       assert codes(Readiness.check()) == [
                :extraction_model_unavailable,
@@ -248,10 +242,8 @@ defmodule Doctrans.Config.ReadinessTest do
       configure(
         chat_url: "http://user:s3cret@remote.example:8000/v1?key=abc",
         models: :connection_refused,
-        embedding_module: EmbeddingErrorStub
+        embedding: {:fail, :timeout}
       )
-
-      TestEnv.put_env(:embedding_error_reason, :timeout)
 
       report = Readiness.check()
       rendered = inspect(report, limit: :infinity, printable_limit: :infinity)

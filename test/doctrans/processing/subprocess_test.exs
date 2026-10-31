@@ -6,7 +6,7 @@ defmodule Doctrans.Processing.SubprocessTest do
   `async: false` because the credential test mutates the environment of the test
   process, which every child would otherwise inherit.
   """
-  use ExUnit.Case, async: false
+  use Doctrans.EnvCase, async: false
 
   import Doctrans.ProcessProbe
 

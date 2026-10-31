@@ -1,4 +1,7 @@
 defmodule Doctrans.Processing.DocumentReprocessingRaceTest do
+  # `async: false`: the rows are written outside the sandbox so two real
+  # Postgres sessions can contend for them, and the lock is held from a handler
+  # on the VM-global repo query event.
   use ExUnit.Case, async: false
   import Ecto.Query
   import Doctrans.ProcessProbe, only: [eventually: 2]

@@ -1,4 +1,7 @@
 defmodule Doctrans.Processing.CompletionNotificationTest do
+  # `async: false`: the rows are committed outside the sandbox so the broadcast
+  # can be observed against a real commit, which a handler on the VM-global
+  # repo query event holds open.
   use ExUnit.Case, async: false
 
   alias Doctrans.{Documents, Repo}

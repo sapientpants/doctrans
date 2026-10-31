@@ -346,8 +346,8 @@ defmodule Doctrans.SearchTest do
     # An unasked query skipped no ranking, so it reports the healthy mode: only
     # a search that could not be embedded is `:keyword_only`.
     #
-    # The cases that swap `:embedding_module` globally live in
-    # `Doctrans.SearchWithCountTest`, which is `async: false`; this module is not.
+    # The cases that narrow the embedding mock -- outages, vectorless results,
+    # a misshapen vector -- live in `Doctrans.SearchWithCountTest`.
   end
 
   # Postgrex raises on a value it cannot encode, which would escape the

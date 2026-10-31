@@ -9,7 +9,7 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
   Fakes are spawned through `Port.open/2`'s `:spawn_executable`, which execs the
   file directly, so every fake must carry a `#!/bin/sh` shebang.
   """
-  use ExUnit.Case, async: false
+  use Doctrans.EnvCase, async: false
 
   import Doctrans.ProcessProbe
 
@@ -18,15 +18,12 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
   @moduletag :capture_log
 
   alias Doctrans.Processing.PdfExtractor
+  alias Doctrans.TestEnv
 
   setup do
     original_config = Application.get_env(:doctrans, :pdf_extraction, [])
     original_path = System.get_env("PATH")
-
-    on_exit(fn ->
-      Application.put_env(:doctrans, :pdf_extraction, original_config)
-      System.put_env("PATH", original_path)
-    end)
+    on_exit(fn -> System.put_env("PATH", original_path) end)
 
     dir =
       Path.join(
@@ -40,9 +37,8 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
     %{dir: dir, config: original_config}
   end
 
-  defp put_config(config, overrides) do
-    Application.put_env(:doctrans, :pdf_extraction, Keyword.merge(config, overrides))
-  end
+  defp put_config(config, overrides),
+    do: TestEnv.put_env(:pdf_extraction, Keyword.merge(config, overrides))
 
   defp fake(dir, name, body) do
     path = Path.join(dir, name)

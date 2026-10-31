@@ -1,4 +1,6 @@
 defmodule Doctrans.Jobs.HealthCheckJobTest do
+  # `async: false`: the probes read the global `:openai` and `:uploads`
+  # application env, and the `:openai_api` circuit breaker is shared.
   use Doctrans.DataCase, async: false
   use Oban.Testing, repo: Doctrans.Repo
 

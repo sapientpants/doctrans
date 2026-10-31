@@ -1,25 +1,40 @@
 defmodule Doctrans.Chat.RetrievalProbe do
-  @moduledoc false
+  @moduledoc """
+  A model that always asks for one more retrieval round, and an embedder that
+  reports each query it is asked for as `{:embedded, query}`.
+  """
 
-  alias Doctrans.Search.EmbeddingStub
+  import Mox
 
-  def generate(query, opts) do
-    send(Application.fetch_env!(:doctrans, :retrieval_probe_pid), {:embedded, query})
-    EmbeddingStub.generate(query, opts)
-  end
+  alias Doctrans.Processing.OpenAIMock
+  alias Doctrans.Search.{EmbeddingMock, EmbeddingStub}
 
-  def chat(messages, _opts) do
-    content = messages |> List.last() |> Map.fetch!(:content)
+  @doc """
+  Installs the probe on the OpenAI and embedding mocks for the running test.
+  """
+  def install do
+    owner = self()
 
-    if String.contains?(content, "Sufficient:") do
-      {:ok, "Sufficient: no\nQuery 1: liquidity and cash reserves"}
-    else
-      {:ok, "Standalone: assess the balance sheet"}
-    end
-  end
+    stub(EmbeddingMock, :generate, fn query, opts ->
+      send(owner, {:embedded, query})
+      EmbeddingStub.generate(query, opts)
+    end)
 
-  def chat_stream(_messages, on_delta, _opts) do
-    on_delta.("Answer.")
-    {:ok, "Answer."}
+    stub(OpenAIMock, :chat, fn messages, _opts ->
+      content = messages |> List.last() |> Map.fetch!(:content)
+
+      if String.contains?(content, "Sufficient:") do
+        {:ok, "Sufficient: no\nQuery 1: liquidity and cash reserves"}
+      else
+        {:ok, "Standalone: assess the balance sheet"}
+      end
+    end)
+
+    stub(OpenAIMock, :chat_stream, fn _messages, on_delta, _opts ->
+      on_delta.("Answer.")
+      {:ok, "Answer."}
+    end)
+
+    :ok
   end
 end

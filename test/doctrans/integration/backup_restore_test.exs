@@ -24,8 +24,8 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   retained original the restart reads is missing. That is the failure the
   backup procedure's ordering rule exists to prevent.
 
-  Async: `:uploads` and `:openai_module` are both application-global, and this
-  test repoints the storage root out from under the whole VM.
+  Sync: `:uploads` is application-global, and this test repoints the storage
+  root out from under the whole VM. The model stubs themselves are per test.
   """
   use DoctransWeb.ConnCase, async: false
 
@@ -35,7 +35,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Jobs.DocumentExtractionJob
-  alias Doctrans.Processing.{DocumentReprocessing, OpenAIProbe, PageContentStub, Run}
+  alias Doctrans.Processing.{DocumentReprocessing, OpenAIMock, OpenAIProbe, PageContentStub, Run}
   alias Doctrans.Search
   alias Doctrans.TestEnv
 
@@ -129,8 +129,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
 
       # Record the actual answer request, so a canned reply without restored
       # document context cannot satisfy this integration boundary.
-      TestEnv.put_env(:openai_module, OpenAIProbe)
-      TestEnv.put_env(:openai_probe_pid, self())
+      OpenAIProbe.install()
 
       assert {:ok, [_ | _] = hits} =
                Search.search_in_document(document.id, @follow_up)
@@ -235,7 +234,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   end
 
   defp stub_models(_context) do
-    TestEnv.put_env(:openai_module, PageContentStub)
+    Mox.stub_with(OpenAIMock, PageContentStub)
     :ok
   end
 
@@ -256,10 +255,10 @@ defmodule Doctrans.Integration.BackupRestoreTest do
     original_root = temp_root("original")
     restored_root = temp_root("restored")
 
+    # Registered before any `repoint/2`, so it runs after `TestEnv` has put the
+    # shared root back: the suite refuses to run against any root but the
+    # configured one.
     on_exit(fn ->
-      # Restore the shared root before removing either temporary one: the suite
-      # refuses to run against any root but the configured one.
-      Application.put_env(:doctrans, :uploads, previous)
       File.rm_rf!(original_root)
       File.rm_rf!(restored_root)
     end)
@@ -331,7 +330,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   end
 
   defp repoint(previous, root) do
-    Application.put_env(:doctrans, :uploads, Keyword.put(previous, :upload_dir, root))
+    TestEnv.put_env(:uploads, Keyword.put(previous, :upload_dir, root))
   end
 
   defp temp_root(name), do: Path.join(System.tmp_dir!(), "doctrans-#{name}-#{Uniq.UUID.uuid7()}")

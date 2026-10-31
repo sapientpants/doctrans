@@ -1,5 +1,5 @@
 defmodule Doctrans.Processing.DocumentConversionRetryTest do
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
 
   import Doctrans.Fixtures
@@ -7,23 +7,11 @@ defmodule Doctrans.Processing.DocumentConversionRetryTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
-  alias Doctrans.Processing.{ResumablePdfExtractorStub, RetryDocumentConverterStub}
+  alias Doctrans.Processing.{DocumentConverterMocks, ResumablePdfExtractorStub}
 
   setup do
-    for {key, module} <- [
-          document_converter_module: RetryDocumentConverterStub,
-          pdf_extractor_module: ResumablePdfExtractorStub
-        ] do
-      original = Application.fetch_env(:doctrans, key)
-      Application.put_env(:doctrans, key, module)
-
-      on_exit(fn ->
-        case original do
-          {:ok, value} -> Application.put_env(:doctrans, key, value)
-          :error -> Application.delete_env(:doctrans, key)
-        end
-      end)
-    end
+    ResumablePdfExtractorStub.install()
+    DocumentConverterMocks.retry()
 
     document = document_fixture(%{original_filename: "report.docx"})
     directory = Documents.document_upload_dir(document.id)
