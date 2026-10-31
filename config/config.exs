@@ -150,7 +150,6 @@ config :doctrans, :embedding,
 #   an unbounded number of concurrent embedding requests, but stays above one so a
 #   slow page does not stall the rest of the queue. Chunks within a page are
 #   embedded one at a time regardless.
-# - health_check: 1 - Single worker for periodic health checks (cron job)
 config :doctrans, Oban,
   repo: Doctrans.Repo,
   plugins: [
@@ -166,14 +165,12 @@ config :doctrans, Oban,
     # A page's chunks are embedded one at a time against a 60s-per-call timeout
     # and a dense page yields a handful of chunks, so 15 minutes leaves a wide
     # margin over a realistic run while cutting the stall from an hour.
-    {Oban.Lifeline, rescue_after: {15, :minutes}},
-    {Oban.Plugins.Cron, crontab: [{"* * * * *", Doctrans.Jobs.HealthCheckJob}]}
+    {Oban.Lifeline, rescue_after: {15, :minutes}}
   ],
   queues: [
     pdf_extraction: 1,
     llm_processing: 1,
-    embedding_generation: 2,
-    health_check: 1
+    embedding_generation: 2
   ]
 
 # Configures the endpoint
