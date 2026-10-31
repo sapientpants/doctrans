@@ -8,6 +8,10 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
   half-indexed document complete. The row carries its machine state on a
   `data-` attribute so the assertion is on the state, not on prose that every
   locale rewrites.
+
+  Nothing in the page reads `data-content-state`, `data-failed-page-count` or
+  `data-failed-pages`: they are the test contract for this panel, and the
+  suite asserts on them, so renaming one is a change to the tests as well.
   """
   use DoctransWeb, :html
 
