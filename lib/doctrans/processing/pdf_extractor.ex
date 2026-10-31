@@ -32,50 +32,12 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   @behaviour Doctrans.Processing.PdfExtractorBehaviour
 
-  require Logger
-
   alias Doctrans.Config.PdfExtraction
   alias Doctrans.Processing.Executable
   alias Doctrans.Processing.Subprocess
 
   # PDF user-space units are 1/72 inch.
   @points_per_inch 72
-
-  @doc """
-  Extracts all pages from a PDF file as PNG images.
-
-  Returns `{:ok, page_count}` on success or `{:error, reason}` on failure.
-
-  `get_page_count/1` establishes how many pages there are and rejects a document
-  that is too long or whose pages are too large; the render then gets the per-page
-  timeout for each page, capped by the document budget.
-
-  ## Options
-
-  - `:dpi` - Resolution in DPI (default: from config)
-  - `:deadline` - a `System.monotonic_time(:millisecond)` value the whole
-    extraction must finish by
-  """
-  # output_dir is the generated document UUID/pages directory supplied by PdfProcessor.
-  # sobelow_skip ["Traversal.FileModule"]
-  @impl true
-  def extract_pages(pdf_path, output_dir, opts \\ []) do
-    with {:ok, page_count} <- get_page_count(pdf_path),
-         {:ok, timeout} <- budget(opts, document_ceiling(page_count)) do
-      File.mkdir_p!(output_dir)
-
-      args = render_args(pdf_path, output_dir, opts)
-
-      Logger.info("Extracting pages from #{pdf_path} to #{output_dir}")
-
-      with {:ok, _output} <- render(args, timeout),
-           :ok <- check_image_sizes(output_dir) do
-        extracted = output_dir |> list_page_images() |> length()
-        Logger.info("Successfully extracted #{extracted} pages")
-        {:ok, extracted}
-      end
-    end
-  end
 
   @doc """
   Extracts a single page from a PDF file as a PNG image.
@@ -173,15 +135,6 @@ defmodule Doctrans.Processing.PdfExtractor do
   end
 
   defp dpi(opts), do: Keyword.get(opts, :dpi, PdfExtraction.dpi())
-
-  # A whole-document render may take the per-page budget for each of its pages,
-  # but never longer than the job containing it would wait: multiplying the
-  # per-page ceiling by the page limit alone would rebuild the unbounded wait
-  # this module exists to prevent.
-  defp document_ceiling(page_count) do
-    # A malformed `Pages: 0` must not turn into a zero-millisecond deadline.
-    min(max(page_count, 1) * PdfExtraction.timeout(), PdfExtraction.job_timeout())
-  end
 
   # Clamps a command's timeout to the caller's remaining document budget, so
   # per-page deadlines cannot add up past the job that contains them.
@@ -286,16 +239,6 @@ defmodule Doctrans.Processing.PdfExtractor do
       nil -> {:error, :page_image_not_found}
       path -> {:ok, path}
     end
-  end
-
-  # Every oversized render is deleted, not just the first: a leftover image is
-  # what a retry treats as "this page is already extracted", so stopping at the
-  # first offender would leave the later ones to be picked up as finished pages.
-  defp check_image_sizes(output_dir) do
-    output_dir
-    |> list_page_images()
-    |> Enum.map(&check_image_size(&1, extract_page_number(&1)))
-    |> Enum.find(:ok, &match?({:error, _reason}, &1))
   end
 
   # An oversized render is removed rather than left behind: the stored image is

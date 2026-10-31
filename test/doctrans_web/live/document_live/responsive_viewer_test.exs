@@ -391,7 +391,7 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
       completed_page_fixture(document, %{page_number: page_number})
     end
 
-    Documents.get_document_with_pages!(document.id)
+    Documents.get_document_with_pages(document.id)
   end
 
   # A panel the narrow viewport shows: laid out (`flex`), not hidden.

@@ -5,9 +5,6 @@ defmodule Doctrans.Processing.PdfExtractorBehaviour do
   This allows mocking the PDF extraction in tests.
   """
 
-  @callback extract_pages(pdf_path :: String.t(), output_dir :: String.t(), opts :: keyword()) ::
-              {:ok, integer()} | {:error, Doctrans.Errors.reason()}
-
   @callback extract_page(
               pdf_path :: String.t(),
               output_dir :: String.t(),

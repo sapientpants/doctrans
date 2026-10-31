@@ -45,7 +45,7 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
     # model stages for every page, indexing, and the completion check.
     assert {:ok, _job} = DocumentExtractionJob.enqueue_document(document.id, path)
 
-    document = Documents.get_document_with_pages!(document.id)
+    document = Documents.get_document_with_pages(document.id)
 
     %{
       document: document,
@@ -84,7 +84,8 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
   } do
     target = Enum.at(pages, 1)
 
-    assert {:ok, [top | rest]} = Search.search(PageContentStub.source_term(2))
+    assert {:ok, %{results: [top | rest]}} =
+             Search.search_with_count(PageContentStub.source_term(2))
 
     assert top.page_id == target.id
     assert top.document_id == document.id

@@ -99,30 +99,6 @@ defmodule Doctrans.Documents.Pages do
   end
 
   @doc """
-  Creates multiple pages for a document in a single transaction.
-  """
-  @spec create_pages(Document.t(), [map()]) :: {non_neg_integer(), [term()] | nil}
-  def create_pages(document, page_attrs_list) do
-    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
-
-    pages =
-      Enum.map(page_attrs_list, fn attrs ->
-        %{
-          id: Uniq.UUID.uuid7(),
-          document_id: document.id,
-          page_number: attrs.page_number,
-          image_path: attrs.image_path,
-          extraction_status: "pending",
-          translation_status: "pending",
-          inserted_at: now,
-          updated_at: now
-        }
-      end)
-
-    Repo.insert_all(Page, pages)
-  end
-
-  @doc """
   Updates a page.
   """
   @spec update_page(Page.t(), map()) :: {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
@@ -159,31 +135,6 @@ defmodule Doctrans.Documents.Pages do
       |> Repo.update()
       |> Doctrans.Errors.result()
     end)
-  end
-
-  @doc """
-  Gets the next page that needs extraction.
-  """
-  @spec get_next_page_for_extraction(Ecto.UUID.t()) :: Page.t() | nil
-  def get_next_page_for_extraction(document_id) do
-    Page
-    |> where([p], p.document_id == ^document_id and p.extraction_status == "pending")
-    |> order_by([p], p.page_number)
-    |> limit(1)
-    |> Repo.one()
-  end
-
-  @doc """
-  Gets the next page that needs translation.
-  """
-  @spec get_next_page_for_translation(Ecto.UUID.t()) :: Page.t() | nil
-  def get_next_page_for_translation(document_id) do
-    Page
-    |> where([p], p.document_id == ^document_id)
-    |> where([p], p.extraction_status == "completed" and p.translation_status == "pending")
-    |> order_by([p], p.page_number)
-    |> limit(1)
-    |> Repo.one()
   end
 
   @doc """

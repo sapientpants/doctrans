@@ -198,23 +198,6 @@ defmodule Doctrans.DocumentsTest do
     end
   end
 
-  describe "get_document_with_pages!/1" do
-    test "returns document with pages preloaded" do
-      doc = document_with_pages_fixture(%{}, 3)
-      result = Documents.get_document_with_pages!(doc.id)
-      assert result.id == doc.id
-      assert length(result.pages) == 3
-    end
-
-    test "pages are ordered by page_number" do
-      doc = document_fixture(%{total_pages: 3})
-      for number <- [3, 1, 2], do: page_fixture(doc, %{page_number: number})
-      result = Documents.get_document_with_pages!(doc.id)
-      page_numbers = Enum.map(result.pages, & &1.page_number)
-      assert page_numbers == [1, 2, 3]
-    end
-  end
-
   describe "create_document/1" do
     test "creates document with valid attrs" do
       attrs = %{
@@ -359,21 +342,6 @@ defmodule Doctrans.DocumentsTest do
     test "returns correct path" do
       path = Documents.document_upload_dir("test-id")
       assert String.ends_with?(path, "documents/test-id")
-    end
-  end
-
-  describe "document_pages_dir/1" do
-    test "returns correct path" do
-      path = Documents.document_pages_dir("test-id")
-      assert String.ends_with?(path, "documents/test-id/pages")
-    end
-  end
-
-  describe "ensure_document_dirs!/1" do
-    test "creates directories and returns pages dir path" do
-      path = Documents.ensure_document_dirs!("test-ensure-#{System.unique_integer()}")
-      assert File.exists?(path)
-      File.rm_rf!(Path.dirname(path))
     end
   end
 

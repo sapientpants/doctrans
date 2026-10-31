@@ -92,7 +92,7 @@ defmodule Doctrans.Processing.DocumentConversionRetryTest do
   end
 
   defp assert_success(context) do
-    document = Documents.get_document_with_pages!(context.document.id)
+    document = Documents.get_document_with_pages(context.document.id)
     assert document.status == "processing"
     assert document.error_message == nil
     assert document.total_pages == 3

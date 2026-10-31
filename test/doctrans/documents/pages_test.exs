@@ -106,35 +106,6 @@ defmodule Doctrans.Documents.PagesTest do
     end
   end
 
-  describe "create_pages/2" do
-    test "creates multiple pages in bulk" do
-      doc = document_fixture()
-
-      page_attrs = [
-        %{page_number: 1, image_path: "page_1.png"},
-        %{page_number: 2, image_path: "page_2.png"},
-        %{page_number: 3, image_path: "page_3.png"}
-      ]
-
-      {count, _} = Pages.create_pages(doc, page_attrs)
-      assert count == 3
-
-      pages = Pages.list_pages(doc.id)
-      assert length(pages) == 3
-    end
-
-    test "sets default statuses" do
-      doc = document_fixture()
-      page_attrs = [%{page_number: 1, image_path: "page_1.png"}]
-
-      Pages.create_pages(doc, page_attrs)
-
-      [page] = Pages.list_pages(doc.id)
-      assert page.extraction_status == "pending"
-      assert page.translation_status == "pending"
-    end
-  end
-
   describe "update_page/2" do
     test "updates page with valid attrs" do
       doc = document_fixture()
@@ -204,67 +175,6 @@ defmodule Doctrans.Documents.PagesTest do
                Pages.update_page_translation(page, %{translation_status: "invalid"})
 
       assert %{translation_status: ["is invalid"]} = errors_on(changeset)
-    end
-  end
-
-  describe "get_next_page_for_extraction/1" do
-    test "returns first page with pending extraction" do
-      doc = document_with_pages_fixture(%{}, 3)
-      page = Pages.get_next_page_for_extraction(doc.id)
-      assert page.page_number == 1
-      assert page.extraction_status == "pending"
-    end
-
-    test "skips pages with completed extraction" do
-      doc = document_with_pages_fixture(%{}, 3)
-      [page1 | _] = Pages.list_pages(doc.id)
-
-      {:ok, _} = Pages.update_page_extraction(page1, %{extraction_status: "completed"})
-
-      page = Pages.get_next_page_for_extraction(doc.id)
-      assert page.page_number == 2
-    end
-
-    test "returns nil when all pages extracted" do
-      doc = document_with_pages_fixture(%{}, 2)
-
-      for page <- Pages.list_pages(doc.id) do
-        Pages.update_page_extraction(page, %{extraction_status: "completed"})
-      end
-
-      assert is_nil(Pages.get_next_page_for_extraction(doc.id))
-    end
-  end
-
-  describe "get_next_page_for_translation/1" do
-    test "returns first page with completed extraction and pending translation" do
-      doc = document_with_pages_fixture(%{}, 3)
-      [page1 | _] = Pages.list_pages(doc.id)
-
-      {:ok, _} =
-        Pages.update_page_extraction(page1, %{
-          extraction_status: "completed",
-          original_markdown: "test"
-        })
-
-      page = Pages.get_next_page_for_translation(doc.id)
-      assert page.page_number == 1
-    end
-
-    test "does not return pages with pending extraction" do
-      doc = document_with_pages_fixture(%{}, 3)
-      assert is_nil(Pages.get_next_page_for_translation(doc.id))
-    end
-
-    test "returns nil when all pages translated" do
-      doc = document_with_pages_fixture(%{}, 2)
-
-      for page <- Pages.list_pages(doc.id) do
-        {:ok, page} = Pages.update_page_extraction(page, %{extraction_status: "completed"})
-        Pages.update_page_translation(page, %{translation_status: "completed"})
-      end
-
-      assert is_nil(Pages.get_next_page_for_translation(doc.id))
     end
   end
 

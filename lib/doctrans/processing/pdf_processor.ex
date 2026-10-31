@@ -14,7 +14,6 @@ defmodule Doctrans.Processing.PdfProcessor do
   require Logger
 
   alias Doctrans.Config.PdfExtraction
-  alias Doctrans.Config.Uploads
   alias Doctrans.Deps
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
@@ -77,21 +76,6 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   defp maybe_update_error(document, reason) do
     if document, do: Documents.update_document_status(document, "error", reason), else: :ok
-  end
-
-  @doc """
-  Gets the expected PDF file path for a document.
-
-  Returns the path where the PDF would be stored, based on the configured
-  upload directory and document ID. Note that this returns the expected path
-  regardless of whether the file actually exists on disk.
-  """
-  @spec get_pdf_path(Ecto.UUID.t()) :: String.t()
-  def get_pdf_path(document_id) do
-    Path.join([
-      Uploads.upload_dir(),
-      "#{document_id}.pdf"
-    ])
   end
 
   # The output path is built from persisted document/run UUIDs with a fixed pages suffix.

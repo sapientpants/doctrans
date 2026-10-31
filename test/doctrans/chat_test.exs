@@ -5,26 +5,6 @@ defmodule Doctrans.ChatTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Pages
 
-  describe "send_message/4" do
-    test "returns error for empty question" do
-      document = %{id: Ecto.UUID.generate(), title: "Test Doc"}
-
-      assert {:error, :empty_question} = Chat.send_message(document, "", [])
-      assert {:error, :empty_question} = Chat.send_message(document, nil, [])
-    end
-
-    test "returns response even when no relevant pages found" do
-      # Create a document without pages - simulates no relevant content found
-      document = create_document(status: "completed")
-
-      # The stub will still return a response (the LLM is called with empty context)
-      assert {:ok, response} = Chat.send_message(document, "What is this about?", [])
-      assert is_binary(response)
-      # Response should indicate no information found or be a mock response
-      assert String.length(response) > 0
-    end
-  end
-
   describe "build_context/1" do
     test "returns empty string for empty list" do
       assert Chat.build_context([]) == ""

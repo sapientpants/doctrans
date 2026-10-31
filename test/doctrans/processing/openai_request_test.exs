@@ -1077,23 +1077,4 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert_received {:circuit_failure, :openai_api}
     end
   end
-
-  describe "available?/0" do
-    test "returns true when models endpoint is up", %{bypass: bypass} do
-      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
-        json(conn, 200, %{"data" => []})
-      end)
-
-      assert OpenAI.available?()
-    end
-
-    test "returns false when models endpoint fails", %{bypass: bypass} do
-      # stub (not expect): safe GETs are retried on 5xx, so the route may hit multiple times
-      Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
-        json(conn, 500, %{"error" => "boom"})
-      end)
-
-      refute OpenAI.available?()
-    end
-  end
 end

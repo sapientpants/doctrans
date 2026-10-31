@@ -42,34 +42,6 @@ defmodule Doctrans.Search do
 
   require Logger
 
-  @doc """
-  Performs hybrid search across all pages.
-
-  Returns a list of search results sorted by RRF score (combination of
-  semantic similarity and full-text search ranking).
-
-  Use `search_with_count/2` when the total number of matches is wanted too --
-  it is the same statement, the total comes back for free, and it reports
-  whether the ranking was hybrid or degraded to keyword-only. This function
-  degrades the same way; it just does not say so, which is why nothing in
-  `lib/` calls it.
-
-  ## Options
-
-  - `:limit` - Maximum number of results (default: 20)
-  - `:offset` - Matches to skip before the first result (default: 0)
-  - `:rrf_k` - RRF smoothing constant (default: 60, higher = smoother ranking)
-
-  The semantic similarity floor is not an option: it is calibrated against the
-  embedding model rather than chosen per call, and a caller that could lower it
-  would be asking for a ranking of the corpus rather than a set of matches.
-  """
-  @spec search(String.t() | nil, keyword()) ::
-          {:ok, [hybrid_result()]} | {:error, Doctrans.Errors.reason()}
-  def search(query, opts \\ [])
-  def search("", _opts), do: {:ok, []}
-  def search(nil, _opts), do: {:ok, []}
-
   # RRF constant k - higher values give smoother ranking
   @default_rrf_k 60
 
@@ -92,26 +64,23 @@ defmodule Doctrans.Search do
 
   @default_limit 20
 
-  def search(query, opts) when is_binary(query) do
-    with {:ok, %{results: results}} <- search_with_count(query, opts) do
-      {:ok, results}
-    end
-  end
-
   @doc """
-  Performs hybrid search and counts every match, from one query embedding and
-  one statement.
+  Performs hybrid search across all pages and counts every match, from one
+  query embedding and one statement.
+
+  Results are sorted by RRF score (combination of semantic similarity and
+  full-text search ranking).
 
   The page of results and the total come back from a single SELECT: the count is
   a window over the same filtered rows the page is drawn from. So a query costs
   one inference call, one ranking pass, and leaves no window in which indexing
   can land between a count and a search and move the total.
 
-  Takes `search/2`'s options. The total describes the whole match set rather
-  than the page returned -- except past the end of it: an `:offset` beyond the
-  last match returns no rows, and with no rows there is no window to count, so
-  `:total_count` is 0. A caller paginating past the end therefore sees an empty
-  result set, which is what it should render anyway.
+  The total describes the whole match set rather than the page returned --
+  except past the end of it: an `:offset` beyond the last match returns no rows,
+  and with no rows there is no window to count, so `:total_count` is 0. A
+  caller paginating past the end therefore sees an empty result set, which is
+  what it should render anyway.
 
   `:retrieval` names the ranking that produced the page: `:hybrid` when the
   query was embedded, `:keyword_only` when it could not be and the full-text
@@ -123,6 +92,16 @@ defmodule Doctrans.Search do
   clear a cosine similarity floor, so a query about something the library does
   not cover has nothing to fuse and nothing to return -- which is the honest
   answer, and the one an unfiltered ranking of the whole corpus cannot give.
+
+  ## Options
+
+  - `:limit` - Maximum number of results (default: 20)
+  - `:offset` - Matches to skip before the first result (default: 0)
+  - `:rrf_k` - RRF smoothing constant (default: 60, higher = smoother ranking)
+
+  The semantic similarity floor is not an option: it is calibrated against the
+  embedding model rather than chosen per call, and a caller that could lower it
+  would be asking for a ranking of the corpus rather than a set of matches.
   """
   @spec search_with_count(String.t() | nil, keyword()) ::
           {:ok, search_page()} | {:error, Doctrans.Errors.reason()}

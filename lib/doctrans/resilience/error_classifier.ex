@@ -162,20 +162,4 @@ defmodule Doctrans.Resilience.ErrorClassifier do
       :permanent -> false
     end
   end
-
-  @doc """
-  Returns true if the error is classified as permanent.
-
-  ## Examples
-
-      iex> ErrorClassifier.permanent?({:http_error, [status: 404]})
-      true
-
-      iex> ErrorClassifier.permanent?(:timeout)
-      false
-  """
-  @spec permanent?(term()) :: boolean()
-  def permanent?(error) do
-    classify(error) == :permanent
-  end
 end

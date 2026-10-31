@@ -27,10 +27,6 @@ defmodule DoctransWeb.Layouts do
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
 
-  attr :current_scope, :map,
-    default: nil,
-    doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
-
   slot :inner_block, required: true
 
   def app(assigns) do

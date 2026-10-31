@@ -4,7 +4,6 @@ defmodule Doctrans.ConfigTest do
   use Doctrans.EnvCase, async: false
 
   alias Doctrans.Config.{Embedding, OpenAI, Uploads}
-  alias Doctrans.Processing.PdfProcessor
   alias Doctrans.TestEnv
 
   test "reads current settings, including distinct models and timeouts" do
@@ -65,9 +64,6 @@ defmodule Doctrans.ConfigTest do
     assert Uploads.upload_dir() == "/tmp/custom-uploads"
     assert Uploads.max_file_size() == 123
     assert Doctrans.Documents.uploads_dir() == Uploads.upload_dir()
-
-    assert PdfProcessor.get_pdf_path("document") ==
-             "/tmp/custom-uploads/document.pdf"
   end
 
   test "an unset storage root resolves inside the running application" do

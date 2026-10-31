@@ -32,8 +32,5 @@ defmodule Doctrans.Processing.OpenAICrashStub do
   def detect_language(markdown, opts), do: OpenAIStub.detect_language(markdown, opts)
 
   @impl true
-  def available?, do: true
-
-  @impl true
   def list_models, do: {:ok, ["crash-stub-model"]}
 end

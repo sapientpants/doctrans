@@ -2,13 +2,12 @@ defmodule Doctrans.Chat do
   @moduledoc """
   Chat functionality for document Q&A using RAG (Retrieval-Augmented Generation).
 
-  Provides semantic search within a single document and chat completions
-  falling back to the API's /api/chat endpoint.
+  Holds the pieces `Doctrans.Chat.Agent` assembles into a turn: retrieval within
+  a single document, the running context it accumulates across turns, and the
+  prompt built from that context.
   """
 
   alias Doctrans.Chat.MultiSearch
-  alias Doctrans.Chat.QueryExpander
-  alias Doctrans.Deps
   alias Doctrans.Documents
   alias Doctrans.Errors
   alias Doctrans.Search
@@ -21,115 +20,6 @@ defmodule Doctrans.Chat do
           required(:content) => String.t(),
           optional(atom()) => term()
         }
-
-  @doc """
-  Sends a chat message and returns the LLM response.
-
-  This function orchestrates the RAG pipeline:
-  1. Searches document pages for relevant context using semantic search
-  2. Builds a context string from the top-k pages
-  3. Creates a system prompt with the document context
-  4. calls the API chat endpoint with the conversation history
-  5. Returns the response
-
-  ## Parameters
-
-  - `document` - The document struct (must have :id and :title)
-  - `question` - The user's question
-  - `chat_history` - List of previous messages (optional, default: [])
-  - `opts` - Options (optional)
-
-  ## Options
-
-  - `:context_limit` - Number of pages to use for context (default: 5)
-  - `:min_similarity` - Minimum similarity threshold for search results (default: none)
-  - `:model` - Override the default chat model
-
-  ## Returns
-
-  - `{:ok, response_text}` on success
-  - `{:error, reason}` on failure
-  """
-  @spec send_message(Documents.Document.t(), String.t() | nil, [message()], keyword()) ::
-          {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
-  def send_message(document, question, chat_history \\ [], opts \\ [])
-
-  def send_message(_document, "", _chat_history, _opts) do
-    {:error, :empty_question}
-  end
-
-  def send_message(_document, nil, _chat_history, _opts) do
-    {:error, :empty_question}
-  end
-
-  def send_message(document, question, chat_history, opts) do
-    trimmed_question = String.trim(question)
-
-    if trimmed_question == "" do
-      {:error, :empty_question}
-    else
-      answer_question(document, trimmed_question, chat_history, opts)
-    end
-  end
-
-  defp answer_question(document, question, chat_history, opts) do
-    Logger.info(
-      "Processing chat question for document #{document.id}: #{String.slice(question, 0, 100)}"
-    )
-
-    # Expand the query: reformulate with chat context + generate alternative phrasings
-    {standalone_question, queries} = QueryExpander.expand(question, chat_history, opts)
-
-    # Search with all query variants and merge via RRF
-    case retrieve(document.id, standalone_question, queries, retrieval_opts(opts, 5)) do
-      {:ok, pages} ->
-        log_search_results(pages, document.id)
-        request_answer(document, pages, standalone_question, chat_history, opts)
-
-      {:error, reason} = error ->
-        Logger.error(
-          "Chat search failed for document #{document.id}: #{inspect(reason, limit: 5, printable_limit: 256)}"
-        )
-
-        error
-    end
-  end
-
-  defp request_answer(document, pages, standalone_question, chat_history, opts) do
-    context = build_context(pages)
-
-    Logger.debug(
-      "Chat context (#{String.length(context)} chars):\n#{String.slice(context, 0, 500)}..."
-    )
-
-    system_prompt = build_system_prompt(document.title, context)
-    # Use the standalone question so the LLM sees a clear, contextual question
-    messages = build_messages(system_prompt, chat_history, standalone_question)
-
-    case Deps.openai().chat(messages, opts) do
-      {:ok, response} ->
-        {:ok, response}
-
-      {:error, reason} = error ->
-        Logger.error("Chat failed for document #{document.id}: #{inspect(reason)}")
-        error
-    end
-  end
-
-  defp log_search_results([], document_id) do
-    Logger.info("No relevant pages found for chat in document #{document_id}")
-  end
-
-  defp log_search_results(pages, document_id) do
-    page_info =
-      Enum.map_join(pages, ", ", fn p ->
-        "page #{p.page_number} (sim: #{Float.round(p.similarity, 3)})"
-      end)
-
-    Logger.info(
-      "Found #{length(pages)} relevant pages for chat in document #{document_id}: #{page_info}"
-    )
-  end
 
   @doc """
   Builds a context string from a list of search results (chunks or pages).
@@ -374,9 +264,7 @@ defmodule Doctrans.Chat do
   The search options for `retrieve/4`, from a caller's chat options.
 
   `:context_limit` becomes the search `:limit`, falling back to `default_limit`
-  when absent: `send_message/4` reads five pages, `Doctrans.Chat.Agent` eight,
-  since it grades and re-retrieves rather than answering from the first pass.
-  `:min_similarity` is passed through when given.
+  when absent. `:min_similarity` is passed through when given.
   """
   @spec retrieval_opts(keyword(), pos_integer()) :: keyword()
   def retrieval_opts(opts, default_limit) do
@@ -398,8 +286,6 @@ defmodule Doctrans.Chat do
   when retrieval could not run at all -- on any of the three branches, so an
   outage never reaches the reader as "the document holds nothing relevant".
   `{:ok, []}` keeps its own meaning: searched, nothing matched.
-
-  Shared by `send_message/4` and `Doctrans.Chat.Agent`.
   """
   @spec retrieve(Ecto.UUID.t(), String.t(), [String.t()], keyword()) ::
           {:ok, [Search.document_result()]} | {:error, Doctrans.Errors.reason()}

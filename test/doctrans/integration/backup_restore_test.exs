@@ -138,15 +138,15 @@ defmodule Doctrans.Integration.BackupRestoreTest do
 
       pending = Conversations.start_question(document.id, @follow_up)
 
-      assert {:ok, "probe response" = reply} =
-               Chat.send_message(document, @follow_up, saved.history)
+      assert {:ok, "probe stream" = reply, _context} =
+               Chat.Agent.run(document, @follow_up, saved.history, [], fn _event -> :ok end)
 
-      assert_received {:chat_messages,
+      assert_received {:chat_stream_messages,
                        [
                          %{role: "system", content: prompt},
                          %{role: "user", content: @question},
                          %{role: "assistant", content: @answer},
-                         %{role: "user", content: @follow_up}
+                         %{role: "user", content: _standalone}
                        ]}
 
       assert prompt =~ @title
@@ -176,7 +176,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
       assert {:ok, restarted} = DocumentReprocessing.reprocess_document(document.id)
       refute restarted.processing_run_id == document.processing_run_id
 
-      reprocessed = Documents.get_document_with_pages!(document.id)
+      reprocessed = Documents.get_document_with_pages(document.id)
       assert reprocessed.status == "completed"
       fresh = Enum.sort_by(reprocessed.pages, & &1.page_number)
 
@@ -226,7 +226,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
 
       # And the refusal rolled back whole, rather than discarding the pages and
       # then discovering the source was gone.
-      unchanged = Documents.get_document_with_pages!(document.id)
+      unchanged = Documents.get_document_with_pages(document.id)
       assert unchanged.status == "completed"
       assert unchanged.processing_run_id == document.processing_run_id
       assert MapSet.new(unchanged.pages, & &1.id) == MapSet.new(pages, & &1.id)
@@ -281,7 +281,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
     # model stages for every page, and indexing.
     assert {:ok, _job} = DocumentExtractionJob.enqueue_document(document.id, source)
 
-    document = Documents.get_document_with_pages!(document.id)
+    document = Documents.get_document_with_pages(document.id)
     pages = Enum.sort_by(document.pages, & &1.page_number)
 
     assert document.status == "completed"

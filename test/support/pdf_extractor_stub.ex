@@ -9,25 +9,6 @@ defmodule Doctrans.Processing.PdfExtractorStub do
   @behaviour Doctrans.Processing.PdfExtractorBehaviour
 
   @impl true
-  def extract_pages(pdf_path, output_dir, opts \\ [])
-
-  def extract_pages(_pdf_path, output_dir, opts) do
-    page_count = Keyword.get(opts, :page_count, 3)
-
-    # Create fake page images
-    File.mkdir_p!(output_dir)
-
-    for page_num <- 1..page_count do
-      padded = String.pad_leading(to_string(page_num), 2, "0")
-      file_path = Path.join(output_dir, "page-#{padded}.png")
-      # Create a minimal PNG file (1x1 pixel transparent PNG)
-      File.write!(file_path, minimal_png())
-    end
-
-    {:ok, page_count}
-  end
-
-  @impl true
   def extract_page(_pdf_path, output_dir, page_number, _opts \\ []) do
     File.mkdir_p!(output_dir)
 

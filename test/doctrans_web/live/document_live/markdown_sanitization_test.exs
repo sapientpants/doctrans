@@ -184,6 +184,6 @@ defmodule DoctransWeb.DocumentLive.MarkdownSanitizationTest do
         translated_markdown: @payload
       })
 
-    Documents.get_document_with_pages!(document.id)
+    Documents.get_document_with_pages(document.id)
   end
 end

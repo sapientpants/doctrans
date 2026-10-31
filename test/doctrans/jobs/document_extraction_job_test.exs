@@ -273,7 +273,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
   end
 
   defp assert_completed_extraction(document) do
-    saved = Documents.get_document_with_pages!(document.id)
+    saved = Documents.get_document_with_pages(document.id)
     assert saved.status == "completed"
     assert saved.total_pages == 3
     assert Enum.map(saved.pages, & &1.page_number) == [1, 2, 3]

@@ -6,7 +6,6 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
 
   attr :current_page, :integer, required: true
   attr :total_pages, :integer, required: true
-  attr :document, :map, required: true
 
   def page_selector(assigns) do
     ~H"""
