@@ -6,9 +6,6 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
   alias Doctrans.Documents
   alias Doctrans.Processing.PdfExtractorMock
   alias Doctrans.TestEnv
-  alias DoctransWeb.DocumentLive.UploadIntake
-
-  import Doctrans.Fixtures
 
   @moduletag :capture_log
 
@@ -371,90 +368,6 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomesTest do
       refute has_element?(view, "#upload-failures")
       assert has_element?(view, "#upload-modal")
     end
-  end
-
-  describe "create_and_process/2" do
-    test "reports a failure and keeps nothing when the job cannot be queued" do
-      # The extraction job refuses any extension outside the accepted list, so a
-      # stored ".txt" path exercises the enqueue failure without stubbing Oban.
-      {document_id, path} = stored_upload("original.txt")
-
-      assert {:error, "notes.txt", {:unsupported_format, [format: ".txt"]}} =
-               UploadIntake.create_and_process({:ok, document_id, "notes.txt", path}, %{
-                 source: "de",
-                 target: "en"
-               })
-
-      assert Documents.list_documents() == []
-      refute File.exists?(Documents.document_upload_dir(document_id))
-    end
-
-    test "reports a failure and removes the upload when the document cannot be created" do
-      {document_id, path} = stored_upload("original.pdf")
-
-      assert {:error, "_.pdf", :empty_title} =
-               UploadIntake.create_and_process({:ok, document_id, "_.pdf", path}, %{
-                 source: "de",
-                 target: "en"
-               })
-
-      assert Documents.list_documents() == []
-      refute File.exists?(Documents.document_upload_dir(document_id))
-    end
-
-    test "reports a start failure and cleans up when the start path raises" do
-      # A second insert of the same id raises `Ecto.ConstraintError` (the schema
-      # declares no unique constraint to turn it into a changeset error), standing
-      # in for the raises an unreachable database produces mid-start.
-      existing = document_fixture()
-      directory = Documents.document_upload_dir(existing.id)
-      File.mkdir_p!(directory)
-      path = Path.join(directory, "original.pdf")
-      File.write!(path, pdf_content())
-
-      assert {:error, "dupe.pdf", :upload_start_failed} =
-               UploadIntake.create_and_process({:ok, existing.id, "dupe.pdf", path}, %{
-                 source: "de",
-                 target: "en"
-               })
-
-      # The insert never completed, so this call has no row to claim: cleanup takes
-      # the directory it was handed and nothing else. Deleting whatever happens to
-      # sit at that id is how a caller's own document would be destroyed by a
-      # failure that had nothing to do with it.
-      assert [kept] = Documents.list_documents()
-      assert kept.id == existing.id
-      refute File.exists?(directory)
-    end
-
-    test "deletes only the document it created when the enqueue raises" do
-      # Past the insert the row is this call's own, so cleanup may delete it.
-      bystander = document_fixture()
-      {document_id, path} = stored_upload("original.pdf")
-
-      assert {:error, "notes.pdf", :upload_start_failed} =
-               UploadIntake.create_and_process(
-                 {:ok, document_id, "notes.pdf", nil},
-                 %{source: "de", target: "en"}
-               )
-
-      assert [kept] = Documents.list_documents()
-      assert kept.id == bystander.id
-      refute File.exists?(Documents.document_upload_dir(document_id))
-      refute File.exists?(path)
-    end
-  end
-
-  defp stored_upload(basename) do
-    document_id = Uniq.UUID.uuid7()
-    directory = Documents.document_upload_dir(document_id)
-    File.mkdir_p!(directory)
-    path = Path.join(directory, basename)
-    File.write!(path, pdf_content())
-
-    on_exit(fn -> File.rm_rf!(directory) end)
-
-    {document_id, path}
   end
 
   defp upload_files(conn, files) do

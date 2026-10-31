@@ -203,14 +203,18 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
 
       # This module's own line, isolated from the `Task` supervisor's crash
       # report on the same exit -- that report is written by OTP and can include
-      # the original reason. This assertion concerns our application's warning.
-      warning =
+      # the original reason. This assertion concerns our application's warning,
+      # and only the message part of it: the logger prefix carries a timestamp,
+      # and a second like `40.179` contains the `0.1` the vector would leak.
+      message =
         log
         |> String.split("\n")
         |> Enum.find("", &(&1 =~ "Readiness check crashed"))
+        |> String.split("Readiness check crashed: ", parts: 2)
+        |> List.last()
 
-      assert warning =~ "Readiness check crashed: unexpected task failure"
-      refute warning =~ "0.1"
+      assert message =~ "unexpected task failure"
+      refute message =~ "0.1"
     end
   end
 

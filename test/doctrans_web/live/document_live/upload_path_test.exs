@@ -3,7 +3,7 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.{PdfExtractorMock, Run}
+  alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock, Run}
 
   @moduletag :capture_log
 
@@ -54,5 +54,34 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
       refute String.contains?(document.title, "\0")
       assert has_element?(view, "#documents-#{document.id}")
     end
+  end
+
+  test "titles a .docx upload by its root name and keeps its own extension", %{conn: conn} do
+    # The converter is what would run next; a missing LibreOffice stops the job
+    # without depending on whether this machine has one installed.
+    DocumentConverterMocks.missing()
+    filename = "Quarterly_Report.docx"
+    content = <<0x50, 0x4B, 0x03, 0x04>> <> "docx title test"
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    view |> element("#upload-document-btn") |> render_click()
+
+    upload =
+      file_input(view, "#upload-form", :document, [
+        %{name: filename, content: content, type: "application/octet-stream"}
+      ])
+
+    render_upload(upload, filename)
+    view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
+
+    [document] = Documents.list_documents()
+    directory = Documents.document_upload_dir(document.id)
+    on_exit(fn -> File.rm_rf!(directory) end)
+
+    assert document.title == "Quarterly Report"
+    assert document.original_filename == filename
+    assert document.source_extension == ".docx"
+    assert File.read!(Path.join(directory, "original.docx")) == content
+    assert has_element?(view, "#documents-#{document.id}")
   end
 end
