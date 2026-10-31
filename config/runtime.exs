@@ -148,8 +148,6 @@ if config_env() == :prod do
                 "the app itself always serves plain HTTP on PORT."
     end
 
-  config :doctrans, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
-
   config :doctrans, DoctransWeb.Endpoint,
     url: [host: host, port: url_port, scheme: scheme],
     http: [

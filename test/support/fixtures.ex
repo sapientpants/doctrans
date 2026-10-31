@@ -35,18 +35,15 @@ defmodule Doctrans.Fixtures do
   def document_with_pages_fixture(attrs \\ %{}, page_count \\ 3) do
     document = document_fixture(Map.merge(%{total_pages: page_count}, attrs))
 
-    page_attrs_list =
-      Enum.map(1..page_count, fn page_num ->
-        %{
+    for page_num <- 1..page_count do
+      {:ok, _page} =
+        Pages.create_page(document, %{
           page_number: page_num,
           image_path: "documents/#{document.id}/pages/page_#{page_num}.png"
-        }
-      end)
+        })
+    end
 
-    # Discarded deliberately: the document is reloaded with its pages below.
-    _ = Pages.create_pages(document, page_attrs_list)
-
-    Documents.get_document_with_pages!(document.id)
+    Documents.get_document_with_pages(document.id)
   end
 
   @doc """

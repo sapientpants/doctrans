@@ -76,9 +76,6 @@ defmodule Doctrans.Processing.PageContentStub do
   def detect_language(markdown, opts), do: OpenAIStub.detect_language(markdown, opts)
 
   @impl true
-  def available?, do: OpenAIStub.available?()
-
-  @impl true
   def list_models, do: OpenAIStub.list_models()
 
   @impl true

@@ -1,19 +1,18 @@
 defmodule Doctrans.Processing.OpenAITest do
   @moduledoc """
-  Covers `Doctrans.Processing.OpenAI`'s local helpers and its two probe calls.
+  Covers `Doctrans.Processing.OpenAI`'s local helpers and its model-list probe.
 
-  `available?/0` and `list_models/0` are the calls the reprocess modal makes
-  before anything has been processed, and they used to be asserted here with
-  `is_boolean/1` and `is_list/1` against whatever happened to be listening on
-  the configured host — assertions that cannot fail, run against the network.
-  Both now talk to a local Bypass server and are asserted exactly, reachable and
-  not. Nothing in this file leaves the machine.
+  `list_models/0` is the call the reprocess modal makes before anything has
+  been processed, and it used to be asserted here with `is_list/1` against
+  whatever happened to be listening on the configured host — an assertion that
+  cannot fail, run against the network. It now talks to a local Bypass server
+  and is asserted exactly, reachable and not. Nothing in this file leaves the
+  machine.
 
   The unreachable case is driven through a base URL Req cannot build a request
   from rather than a closed port: Req retries a safe GET on `:econnrefused`, so
-  a refused connection costs about seven seconds of backoff per call, and
-  neither probe takes options this test could pass `retry: false` through.
-  `available?/0` has a rescue clause for exactly that failure; `list_models/0`
+  a refused connection costs about seven seconds of backoff per call, and the
+  probe takes no options this test could pass `retry: false` through, so it
   reports a rejected request instead.
 
   The full HTTP surface — chat, streaming, extraction, translation, embedding
@@ -35,40 +34,6 @@ defmodule Doctrans.Processing.OpenAITest do
 
       assert {:error, reason} = result
       assert {:image_unreadable, [reason: :enoent]} = reason
-    end
-  end
-
-  describe "available?/0" do
-    setup :bypass_api
-
-    test "reports the API as available when the model list answers", %{bypass: bypass} do
-      test_pid = self()
-
-      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
-        send(test_pid, :models_requested)
-        json(conn, 200, %{"object" => "list", "data" => [%{"id" => "vision"}]})
-      end)
-
-      assert OpenAI.available?()
-      assert_received :models_requested
-    end
-
-    test "reports the API as unavailable when it rejects the request", %{bypass: bypass} do
-      # An unauthorized key is what an operator with a misconfigured server gets,
-      # and unlike a 5xx it is not retried, so the probe answers in one round trip.
-      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
-        Plug.Conn.resp(conn, 401, "unauthorized")
-      end)
-
-      refute OpenAI.available?()
-    end
-
-    test "reports the API as unavailable when the base URL cannot be requested" do
-      # A base URL without a scheme makes Req raise while building the request.
-      # The probe backs a page load, so it has to answer rather than crash it.
-      put_openai_env(base_url: "localhost:9999", api_key: nil)
-
-      refute OpenAI.available?()
     end
   end
 
@@ -138,11 +103,5 @@ defmodule Doctrans.Processing.OpenAITest do
   defp put_openai_env(overrides) do
     merged = Keyword.merge(Application.fetch_env!(:doctrans, :openai), overrides)
     TestEnv.put_env(:openai, merged)
-  end
-
-  defp json(conn, status, body) do
-    conn
-    |> Plug.Conn.put_resp_content_type("application/json")
-    |> Plug.Conn.resp(status, Jason.encode!(body))
   end
 end

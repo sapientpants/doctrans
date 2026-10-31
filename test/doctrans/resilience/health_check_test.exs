@@ -245,20 +245,6 @@ defmodule Doctrans.Resilience.HealthCheckTest do
     end
   end
 
-  describe "circuit_breaker_status/0" do
-    test "reports every configured fuse" do
-      CircuitBreaker.reset(:embedding_api)
-
-      assert HealthCheck.circuit_breaker_status() == %{openai_api: :ok, embedding_api: :ok}
-    end
-
-    test "reports a blown fuse" do
-      blow(:openai_api)
-
-      assert HealthCheck.circuit_breaker_status().openai_api == :blown
-    end
-  end
-
   # `:openai` also carries the model names the processing pipeline reads, and
   # `Application.put_env/3` is VM-global: replacing the keyword list outright
   # would unset them for every process for as long as the test runs.

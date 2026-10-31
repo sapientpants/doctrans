@@ -3,8 +3,8 @@ defmodule Doctrans.Documents.Page do
   Schema for a single page within a document.
 
   Each page goes through two processing stages:
-  1. Extraction - Using Qwen3-VL to extract markdown from the page image
-  2. Translation - Using Qwen3 to translate the markdown
+  1. Extraction - the configured vision model extracts markdown from the page image
+  2. Translation - the configured text model translates the markdown
 
   ## Statuses
 

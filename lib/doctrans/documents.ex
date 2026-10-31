@@ -15,7 +15,8 @@ defmodule Doctrans.Documents do
   alias Doctrans.Repo
   alias Doctrans.Validation
 
-  # Delegate page operations for backward compatibility
+  # Page operations live in `Doctrans.Documents.Pages`; these delegates are the
+  # primary entry points callers reach them through.
   defdelegate get_page(id), to: Pages
   defdelegate get_page!(id), to: Pages
   defdelegate get_page_by_number(document_id, page_number), to: Pages
@@ -23,12 +24,9 @@ defmodule Doctrans.Documents do
   defdelegate list_pages(document_id), to: Pages
   defdelegate page_content_state(page_ids), to: Pages
   defdelegate create_page(document, attrs), to: Pages
-  defdelegate create_pages(document, page_attrs_list), to: Pages
   defdelegate update_page(page, attrs), to: Pages
   defdelegate update_page_extraction(page, attrs), to: Pages
   defdelegate update_page_translation(page, attrs), to: Pages
-  defdelegate get_next_page_for_extraction(document_id), to: Pages
-  defdelegate get_next_page_for_translation(document_id), to: Pages
   defdelegate completion_state(document_id), to: Pages
   defdelegate failed_page_numbers(document_id), to: Pages
   defdelegate reset_page_for_reprocessing(page), to: Pages
@@ -221,16 +219,6 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
-  Gets a document with its pages preloaded.
-  """
-  @spec get_document_with_pages!(Ecto.UUID.t()) :: Document.t()
-  def get_document_with_pages!(id) do
-    Document
-    |> Repo.get!(id)
-    |> Repo.preload(pages: from(p in Page, order_by: p.page_number))
-  end
-
-  @doc """
   Creates a document with validation.
   """
   @spec create_document(map()) :: {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
@@ -347,14 +335,6 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
-  Returns the pages directory for a document.
-  """
-  @spec document_pages_dir(Ecto.UUID.t()) :: String.t()
-  def document_pages_dir(document_id) do
-    Path.join([document_upload_dir(document_id), "pages"])
-  end
-
-  @doc """
   Returns the base uploads directory.
   """
   @spec uploads_dir() :: String.t()
@@ -389,17 +369,5 @@ defmodule Doctrans.Documents do
                 "Set DOCTRANS_DATA_DIR to a directory the application can write, " <>
                 "or unset it to use the default inside the application directory."
     end
-  end
-
-  @doc """
-  Ensures the document's upload directories exist.
-  """
-  # Callers supply generated or persisted document UUIDs; the only suffix is pages.
-  # sobelow_skip ["Traversal.FileModule"]
-  @spec ensure_document_dirs!(Ecto.UUID.t()) :: String.t()
-  def ensure_document_dirs!(document_id) do
-    pages_dir = document_pages_dir(document_id)
-    File.mkdir_p!(pages_dir)
-    pages_dir
   end
 end

@@ -6,7 +6,8 @@ defmodule Doctrans.Processing.OpenAIProbe do
   `install/0` stubs every callback on `Doctrans.Processing.OpenAIMock` for the
   running test. Each call sends `{function, opts}` to the test process and
   returns a canned successful response; `chat/2` also sends
-  `{:chat_messages, messages}`, and `translate/4` additionally sends
+  `{:chat_messages, messages}`, `chat_stream/3` sends
+  `{:chat_stream_messages, messages}`, and `translate/4` additionally sends
   `{:translate_languages, {source_language, target_language}}`, so a test can
   assert which languages a document was actually translated between.
   """
@@ -27,8 +28,9 @@ defmodule Doctrans.Processing.OpenAIProbe do
       {:ok, "probe response"}
     end)
 
-    stub(OpenAIMock, :chat_stream, fn _messages, on_delta, opts ->
+    stub(OpenAIMock, :chat_stream, fn messages, on_delta, opts ->
       record(owner, :chat_stream, opts)
+      record(owner, :chat_stream_messages, messages)
 
       response = "probe stream"
       [first, rest] = [String.slice(response, 0, 5), String.slice(response, 5..-1//1)]
@@ -54,7 +56,6 @@ defmodule Doctrans.Processing.OpenAIProbe do
       {:ok, "de"}
     end)
 
-    stub(OpenAIMock, :available?, fn -> true end)
     stub(OpenAIMock, :list_models, fn -> {:ok, ["probe-model"]} end)
 
     :ok

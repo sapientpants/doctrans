@@ -121,20 +121,4 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
       assert ErrorClassifier.retryable?({:error, :enoent}) == false
     end
   end
-
-  describe "permanent?/1" do
-    test "returns true for permanent errors" do
-      assert ErrorClassifier.permanent?({:http_error, [status: 404]}) == true
-      assert ErrorClassifier.permanent?({:error, :enoent}) == true
-    end
-
-    test "returns false for retryable errors" do
-      assert ErrorClassifier.permanent?(:timeout) == false
-      assert ErrorClassifier.permanent?({:http_error, [status: 500]}) == false
-    end
-
-    test "returns false for unknown errors" do
-      assert ErrorClassifier.permanent?(:some_unknown) == false
-    end
-  end
 end

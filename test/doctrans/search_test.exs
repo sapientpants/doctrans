@@ -8,7 +8,7 @@ defmodule Doctrans.SearchTest do
 
   import Doctrans.Fixtures
 
-  # The RRF constant `search/2` uses when the caller names none. Scores are
+  # The RRF constant `search_with_count/2` uses when the caller names none. Scores are
   # asserted against it rather than against "something positive", because
   # 1/(k + rank) is the whole of what a fused score means.
   @default_rrf_k 60
@@ -24,21 +24,13 @@ defmodule Doctrans.SearchTest do
     Pgvector.new(List.duplicate(0.1, 512) ++ List.duplicate(0.0, 512))
   end
 
-  describe "search/2" do
-    test "returns empty list for empty query" do
-      assert {:ok, []} = Search.search("")
-    end
-
-    test "returns empty list for nil query" do
-      assert {:ok, []} = Search.search(nil)
-    end
-
+  describe "search_with_count/2 ranking" do
     test "returns no matches when nothing in the library answers the query" do
       # A completed, indexed page that simply says something else: the empty
       # answer has to come from the ranking, not from an empty library.
       searchable_page("A page about gardening tools", "Unrelated Doc")
 
-      assert {:ok, []} = Search.search("nothinginthelibrarysaysthis")
+      assert {:ok, %{results: []}} = Search.search_with_count("nothinginthelibrarysaysthis")
     end
 
     test "finds a page by a keyword in its original markdown" do
@@ -51,7 +43,7 @@ defmodule Doctrans.SearchTest do
           original_markdown: "This is searchable content about cats and dogs"
         })
 
-      assert {:ok, [result]} = Search.search("cats")
+      assert {:ok, %{results: [result]}} = Search.search_with_count("cats")
       assert result.page_id == page.id
       assert result.document_id == document.id
       assert result.document_title == "Keyword Test Doc"
@@ -75,7 +67,7 @@ defmodule Doctrans.SearchTest do
           translated_markdown: "Translated content about elephants"
         })
 
-      assert {:ok, [result]} = Search.search("elephants")
+      assert {:ok, %{results: [result]}} = Search.search_with_count("elephants")
       assert result.page_id == page.id
       assert result.page_number == 2
       assert result.snippet =~ "elephants"
@@ -98,7 +90,7 @@ defmodule Doctrans.SearchTest do
         })
 
       # "run" should match "running" and "runner" due to English stemming
-      assert {:ok, [result]} = Search.search("run")
+      assert {:ok, %{results: [result]}} = Search.search_with_count("run")
       assert result.page_id == page.id
     end
 
@@ -112,7 +104,7 @@ defmodule Doctrans.SearchTest do
           original_markdown: "Unique searchterm findme content"
         })
 
-      assert {:ok, [result]} = Search.search("findme")
+      assert {:ok, %{results: [result]}} = Search.search_with_count("findme")
 
       # The only ranking that ran is the full-text one, and this is its first
       # rank -- so the fused score is exactly one reciprocal rank.
@@ -130,7 +122,7 @@ defmodule Doctrans.SearchTest do
     test "ranks the whole match set, best match first" do
       [first, second, third, fourth] = ranked_corpus("rankedterm", 4)
 
-      assert {:ok, results} = Search.search("rankedterm")
+      assert {:ok, %{results: results}} = Search.search_with_count("rankedterm")
 
       # The order is the answer, not an accident of how the rows came back:
       # each page mentions the term once less than the page before it.
@@ -155,7 +147,7 @@ defmodule Doctrans.SearchTest do
       # creation order would be deciding this on the clock.
       [lower, higher] = Enum.sort([semantic_only.id, keyword_only.id])
 
-      assert {:ok, [first, second]} = Search.search("tiebreakterm")
+      assert {:ok, %{results: [first, second]}} = Search.search_with_count("tiebreakterm")
 
       assert first.score == second.score
       assert [first.page_id, second.page_id] == [lower, higher]
@@ -164,14 +156,16 @@ defmodule Doctrans.SearchTest do
     test "limit returns the top-ranked matches only" do
       [first, second, _third, _fourth] = ranked_corpus("limitedterm", 4)
 
-      assert {:ok, results} = Search.search("limitedterm", limit: 2)
+      assert {:ok, %{results: results}} = Search.search_with_count("limitedterm", limit: 2)
       assert Enum.map(results, & &1.page_id) == [first.id, second.id]
     end
 
     test "offset pages past the matches already returned" do
       [_first, _second, third, fourth] = ranked_corpus("offsetterm", 4)
 
-      assert {:ok, results} = Search.search("offsetterm", limit: 2, offset: 2)
+      assert {:ok, %{results: results}} =
+               Search.search_with_count("offsetterm", limit: 2, offset: 2)
+
       assert Enum.map(results, & &1.page_id) == [third.id, fourth.id]
     end
 
@@ -180,7 +174,9 @@ defmodule Doctrans.SearchTest do
 
       walked =
         Enum.flat_map(0..4//2, fn offset ->
-          assert {:ok, results} = Search.search("combinedterm", limit: 2, offset: offset)
+          assert {:ok, %{results: results}} =
+                   Search.search_with_count("combinedterm", limit: 2, offset: offset)
+
           Enum.map(results, & &1.page_id)
         end)
 
@@ -190,8 +186,11 @@ defmodule Doctrans.SearchTest do
     test "rrf_k smooths the fused score without changing the ranking" do
       [first, second] = ranked_corpus("smoothedterm", 2)
 
-      assert {:ok, [default_top, default_next]} = Search.search("smoothedterm")
-      assert {:ok, [smoothed_top, smoothed_next]} = Search.search("smoothedterm", rrf_k: 100)
+      assert {:ok, %{results: [default_top, default_next]}} =
+               Search.search_with_count("smoothedterm")
+
+      assert {:ok, %{results: [smoothed_top, smoothed_next]}} =
+               Search.search_with_count("smoothedterm", rrf_k: 100)
 
       assert [default_top.page_id, default_next.page_id] == [first.id, second.id]
       assert [smoothed_top.page_id, smoothed_next.page_id] == [first.id, second.id]
@@ -213,7 +212,7 @@ defmodule Doctrans.SearchTest do
         })
 
       # Should not find anything because document status is "processing"
-      assert {:ok, []} = Search.search("uniqueword99")
+      assert {:ok, %{results: []}} = Search.search_with_count("uniqueword99")
     end
 
     for mode <- [:keyword, :semantic] do
@@ -236,12 +235,12 @@ defmodule Doctrans.SearchTest do
             })
           end
 
-        assert {:ok, [result]} = Search.search(query)
+        assert {:ok, %{results: [result]}} = Search.search_with_count(query)
         assert result.page_id == completed.id
 
         # The same text/vector becomes eligible when only its stage changes.
         assert {:ok, _} = Pages.update_page_extraction(pending, %{extraction_status: "completed"})
-        assert {:ok, results} = Search.search(query)
+        assert {:ok, %{results: results}} = Search.search_with_count(query)
         assert Enum.sort(Enum.map(results, & &1.page_id)) == Enum.sort([completed.id, pending.id])
       end
     end
@@ -256,7 +255,7 @@ defmodule Doctrans.SearchTest do
       keyword_only = searchable_page("another page about fusedterm", "Fused Keyword Doc")
       semantic_only = embedded_page("nothing lexical in common", half_aligned_embedding())
 
-      assert {:ok, [top | rest]} = Search.search("fusedterm")
+      assert {:ok, %{results: [top | rest]}} = Search.search_with_count("fusedterm")
 
       assert top.page_id == both.id
       assert top.score == 1 / (@default_rrf_k + 1) + 1 / (@default_rrf_k + 1)
@@ -352,8 +351,8 @@ defmodule Doctrans.SearchTest do
 
   # Postgrex raises on a value it cannot encode, which would escape the
   # `{:ok, _} | {:error, _}` contract and kill the caller rather than fail the
-  # search. Every entry point has to reject those bounds before Postgres sees
-  # them -- including `search/2`, which shares the statement.
+  # search. `search_with_count/2` has to reject those bounds before Postgres
+  # sees them.
   describe "query bounds" do
     test "rejects an offset too large for Postgres to encode" do
       assert {:error, {:invalid_search_bounds, [offset: _]}} =
@@ -373,11 +372,6 @@ defmodule Doctrans.SearchTest do
     test "rejects a negative offset" do
       assert {:error, {:invalid_search_bounds, [offset: -1]}} =
                Search.search_with_count("test", offset: -1)
-    end
-
-    test "rejects out-of-range bounds through search/2 as well" do
-      assert {:error, {:invalid_search_bounds, [offset: _]}} =
-               Search.search("test", offset: 99_999_999_999_999_999_999)
     end
 
     test "accepts the largest offset Postgres can encode" do

@@ -60,7 +60,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         pdf_path = create_temp_pdf()
         assert :ok = PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
 
-        updated_doc = Documents.get_document_with_pages!(document.id)
+        updated_doc = Documents.get_document_with_pages(document.id)
         assert updated_doc.total_pages == 3
         assert Enum.map(updated_doc.pages, & &1.page_number) == [1, 2, 3]
 

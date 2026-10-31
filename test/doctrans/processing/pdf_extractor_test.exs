@@ -67,20 +67,6 @@ defmodule Doctrans.Processing.PdfExtractorTest do
     end
   end
 
-  describe "extract_pages/3" do
-    test "reports a missing PDF without creating the output directory" do
-      dir = tmp_dir("pdf_out")
-      File.rm_rf!(dir)
-
-      assert {:error, reason} = PdfExtractor.extract_pages(@missing_pdf, dir)
-      assert_missing_pdf_reason(reason, :pdfinfo_failed, "pdfinfo")
-
-      # The page count is taken before anything is written, so a document that
-      # cannot even be opened leaves no half-built pages directory behind.
-      refute File.exists?(dir)
-    end
-  end
-
   describe "extract_page/4" do
     test "reports a missing PDF as a renderer failure" do
       dir = tmp_dir("pdf_out")

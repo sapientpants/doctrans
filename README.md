@@ -385,7 +385,6 @@ than re-detected, since it is what produced the text they already contain.
 | `SECRET_KEY_BASE` | - | Secret key for signing (required in production) |
 | `POOL_SIZE` | `10` | Production database connection pool size |
 | `ECTO_IPV6` | unset | Enable IPv6 database sockets in production with `true` or `1` |
-| `DNS_CLUSTER_QUERY` | unset | Optional DNS cluster discovery query in production |
 
 ### Storage root
 

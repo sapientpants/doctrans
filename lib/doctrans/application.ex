@@ -24,7 +24,6 @@ defmodule Doctrans.Application do
     children = [
       DoctransWeb.Telemetry,
       Doctrans.Repo,
-      {DNSCluster, query: Application.get_env(:doctrans, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Doctrans.PubSub},
       # Oban for persistent job queuing
       {Oban, Application.get_env(:doctrans, Oban)},

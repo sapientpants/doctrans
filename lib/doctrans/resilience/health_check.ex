@@ -22,7 +22,6 @@ defmodule Doctrans.Resilience.HealthCheck do
 
   alias Doctrans.Processing.OpenAI
   alias Doctrans.Repo
-  alias Doctrans.Resilience.CircuitBreaker
 
   @typedoc "One verdict per checked dependency."
   @type results :: %{
@@ -168,13 +167,5 @@ defmodule Doctrans.Resilience.HealthCheck do
     )
 
     result
-  end
-
-  @doc """
-  Returns a summary of circuit breaker states.
-  """
-  @spec circuit_breaker_status() :: map()
-  def circuit_breaker_status do
-    CircuitBreaker.status_all()
   end
 end

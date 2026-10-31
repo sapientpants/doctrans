@@ -38,9 +38,6 @@ defmodule Doctrans.Processing.OpenAIStub do
   def detect_language(_markdown, _opts), do: {:ok, "de"}
 
   @impl true
-  def available?, do: true
-
-  @impl true
   def list_models, do: {:ok, @default_models}
 
   @impl true

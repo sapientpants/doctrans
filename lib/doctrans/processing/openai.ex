@@ -274,17 +274,6 @@ defmodule Doctrans.Processing.OpenAI do
     end
   end
 
-  @impl true
-  @spec available?() :: boolean()
-  def available? do
-    case build_base_req() |> Req.get(url: api_url("/v1/models")) do
-      {:ok, %{status: 200}} -> true
-      _ -> false
-    end
-  rescue
-    _ -> false
-  end
-
   # The model list only ever backs a modal a user is waiting in front of, so it
   # gets a tighter per-attempt budget than the processing calls.
   @list_models_timeout 5_000
