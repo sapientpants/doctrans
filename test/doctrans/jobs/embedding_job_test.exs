@@ -258,11 +258,19 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
       EmbeddingMocks.fail()
       attach_retry_telemetry()
 
+      # Telemetry is VM-global, so a concurrent test's embedding retries reach
+      # this handler too: match this test's page, not just the series.
+      page_id = page.id
+
       assert {:error, :timeout} = perform_job(EmbeddingJob, args, attempt: 1, max_attempts: 5)
-      assert_received {:retry_event, [:doctrans, :retry, :attempt], %{type: :embedding}}
+
+      assert_received {:retry_event, [:doctrans, :retry, :attempt],
+                       %{type: :embedding, page_id: ^page_id}}
 
       assert {:error, :timeout} = perform_job(EmbeddingJob, args, attempt: 5, max_attempts: 5)
-      assert_received {:retry_event, [:doctrans, :retry, :exhausted], %{type: :embedding}}
+
+      assert_received {:retry_event, [:doctrans, :retry, :exhausted],
+                       %{type: :embedding, page_id: ^page_id}}
     end
   end
 
