@@ -61,20 +61,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     setup %{tmp_dir: tmp_dir} do
       image_path = Path.join(tmp_dir, "page.png")
       File.write!(image_path, "test image")
-      test_pid = self()
-      handler_id = {__MODULE__, make_ref()}
-
-      :ok =
-        :telemetry.attach(
-          handler_id,
-          [:doctrans, :circuit_breaker, :failure],
-          fn _event, _measurements, metadata, pid ->
-            send(pid, {:circuit_failure, metadata.fuse_name})
-          end,
-          test_pid
-        )
-
-      on_exit(fn -> :telemetry.detach(handler_id) end)
+      watch_fuse_failures()
       %{image_path: image_path}
     end
 
@@ -131,6 +118,24 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
         refute_received {:circuit_failure, :openai_api}
       end
+
+      # A 200 whose body is not a completion is reported like any other failed
+      # call -- one error line at the source -- but a malformed body is not a
+      # transient fault, so it must not push the fuse toward blown.
+      test "reports a malformed 200 for #{@operation} without counting it", context do
+        Bypass.expect_once(context.bypass, "POST", "/v1/chat/completions", fn conn ->
+          json(conn, 200, %{"unexpected" => true})
+        end)
+
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            assert {:error, reason} = call_llm(@operation, context.image_path)
+            assert reason in [:invalid_api_response, :empty_response]
+          end)
+
+        assert log =~ "API call failed"
+        refute_received {:circuit_failure, :openai_api}
+      end
     end
   end
 
@@ -154,6 +159,24 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     json(conn, 200, %{
       "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "hello"}}]
     })
+  end
+
+  # Forwards every circuit-breaker failure to the test as `{:circuit_failure, fuse}`.
+  defp watch_fuse_failures do
+    test_pid = self()
+    handler_id = {__MODULE__, make_ref()}
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:doctrans, :circuit_breaker, :failure],
+        fn _event, _measurements, metadata, pid ->
+          send(pid, {:circuit_failure, metadata.fuse_name})
+        end,
+        test_pid
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
   # Blows `fuse_name` directly: `:embedding_api` opens after 3 failures in 30 s
@@ -798,6 +821,22 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert {:error, :invalid_embedding_response} = OpenAI.embed("text")
     end
 
+    test "reports a malformed 200 without counting it against the fuse", %{bypass: bypass} do
+      watch_fuse_failures()
+
+      Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
+        json(conn, 200, %{"unexpected" => true})
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :invalid_embedding_response} = OpenAI.embed("text")
+        end)
+
+      assert log =~ "API call failed"
+      refute_received {:circuit_failure, :embedding_api}
+    end
+
     # The ask used to live in `Search.Indexer` alone, so search and chat
     # retrieval, which call this directly, kept sending requests -- and melting
     # the fuse further -- after it had blown. Every caller is held off now.
@@ -966,6 +1005,22 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:error, :invalid_api_response} = OpenAI.list_models()
+    end
+
+    test "reports a malformed 200 without counting it against the fuse", %{bypass: bypass} do
+      watch_fuse_failures()
+
+      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
+        json(conn, 200, %{"data" => "not-a-list"})
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :invalid_api_response} = OpenAI.list_models()
+        end)
+
+      assert log =~ "API call failed"
+      refute_received {:circuit_failure, :openai_api}
     end
 
     test "rejects the call without reaching the API when :openai_api is blown", %{

@@ -1,64 +1,82 @@
 defmodule DoctransWeb.ErrorMessages do
-  @moduledoc "Translates domain error reasons in the calling web process's locale."
+  @moduledoc """
+  Translates domain error reasons in the calling web process's locale.
+
+  Every string here lives in the `errors` gettext domain. A reason the catalog
+  does not name renders as a neutral generic message, written to read the same
+  in a flash, in an upload row, and nested inside another message such as
+  "Page 3 extraction failed: ...". A surface that speaks in its own voice -- the
+  chat panel answers in the first person -- supplies its own fallback through
+  `message/2` rather than teaching the catalog a second generic.
+  """
   use Gettext, backend: DoctransWeb.Gettext
 
+  @doc "Renders `reason`, or the neutral generic message when it has no entry."
   @spec message(term()) :: String.t()
-  def message(:query_too_short), do: dgettext("errors", "Query too short")
+  def message(reason), do: lookup(reason) || generic()
 
-  def message({:query_too_long, bindings}),
+  @doc "Renders `reason`, or `fallback` when it has no entry of its own."
+  @spec message(term(), String.t()) :: String.t()
+  def message(reason, fallback) when is_binary(fallback), do: lookup(reason) || fallback
+
+  defp generic, do: dgettext("errors", "An unexpected error occurred. Please try again.")
+
+  defp lookup(:query_too_short), do: dgettext("errors", "Query too short")
+
+  defp lookup({:query_too_long, bindings}),
     do: dgettext("errors", "Query too long (max %{max} characters)", max: binding(bindings, :max))
 
-  def message(:invalid_query), do: dgettext("errors", "Search query must be a string")
+  defp lookup(:invalid_query), do: dgettext("errors", "Search query must be a string")
 
-  def message({:unsupported_language, bindings}),
+  defp lookup({:unsupported_language, bindings}),
     do:
       dgettext("errors", "Unsupported language: %{language}",
         language: binding(bindings, :language)
       )
 
-  def message(:invalid_language), do: dgettext("errors", "Language code must be a string")
+  defp lookup(:invalid_language), do: dgettext("errors", "Language code must be a string")
 
-  def message(:file_content_mismatch),
+  defp lookup(:file_content_mismatch),
     do: dgettext("errors", "File content does not match its extension")
 
-  def message(:file_too_small), do: dgettext("errors", "File is too small to be a valid document")
+  defp lookup(:file_too_small), do: dgettext("errors", "File is too small to be a valid document")
 
-  def message(:file_unreadable), do: dgettext("errors", "Could not read file for validation")
+  defp lookup(:file_unreadable), do: dgettext("errors", "Could not read file for validation")
 
-  def message(:invalid_file_arguments),
+  defp lookup(:invalid_file_arguments),
     do: dgettext("errors", "File path and extension must be strings")
 
-  def message({:missing_required_fields, bindings}),
+  defp lookup({:missing_required_fields, bindings}),
     do:
       dgettext("errors", "Missing required fields: %{fields}", fields: binding(bindings, :fields))
 
-  def message(:empty_title), do: dgettext("errors", "Title cannot be empty")
+  defp lookup(:empty_title), do: dgettext("errors", "Title cannot be empty")
 
-  def message(:invalid_title), do: dgettext("errors", "Title is required and must be a string")
+  defp lookup(:invalid_title), do: dgettext("errors", "Title is required and must be a string")
 
-  def message(:invalid_target_language),
+  defp lookup(:invalid_target_language),
     do: dgettext("errors", "Target language is required and must be a string")
 
-  def message(:invalid_source_language),
+  defp lookup(:invalid_source_language),
     do: dgettext("errors", "Source language is required and must be a string")
 
-  def message(:document_not_found), do: dgettext("errors", "Document not found")
+  defp lookup(:document_not_found), do: dgettext("errors", "Document not found")
 
-  def message(:incomplete_output),
+  defp lookup(:incomplete_output),
     do:
       dgettext(
         "errors",
         "The model did not return complete final text. Use a model with a larger output budget or split the page into smaller sections, then reprocess. The provider must return finish_reason=stop."
       )
 
-  def message(:inference_deadline_exceeded),
+  defp lookup(:inference_deadline_exceeded),
     do:
       dgettext(
         "errors",
         "The model server ran out of time and the request was stopped. Check that it is running and responsive, then reprocess this page."
       )
 
-  def message({:inference_response_too_large, bindings}),
+  defp lookup({:inference_response_too_large, bindings}),
     do:
       dgettext(
         "errors",
@@ -66,23 +84,23 @@ defmodule DoctransWeb.ErrorMessages do
         limit: binding(bindings, :limit)
       )
 
-  def message(:page_not_found), do: dgettext("errors", "Page not found")
+  defp lookup(:page_not_found), do: dgettext("errors", "Page not found")
 
-  def message({:page_extraction_failed, bindings}),
+  defp lookup({:page_extraction_failed, bindings}),
     do:
       dgettext("errors", "Page %{page_number} extraction failed: %{reason}",
         page_number: binding(bindings, :page_number),
         reason: binding(bindings, :reason)
       )
 
-  def message({:page_translation_failed, bindings}),
+  defp lookup({:page_translation_failed, bindings}),
     do:
       dgettext("errors", "Page %{page_number} translation failed: %{reason}",
         page_number: binding(bindings, :page_number),
         reason: binding(bindings, :reason)
       )
 
-  def message({:pages_failed, bindings}),
+  defp lookup({:pages_failed, bindings}),
     do:
       dgettext(
         "errors",
@@ -90,51 +108,51 @@ defmodule DoctransWeb.ErrorMessages do
         page_numbers: binding(bindings, :page_numbers)
       )
 
-  def message({:unsupported_format, bindings}),
+  defp lookup({:unsupported_format, bindings}),
     do:
       dgettext("errors", "Unsupported file format: %{format}", format: binding(bindings, :format))
 
   # A file with no extension at all, where naming the format would say nothing.
-  def message(:unsupported_format),
+  defp lookup(:unsupported_format),
     do: dgettext("errors", "Only PDF, Word, OpenDocument, and RTF documents are accepted")
 
-  def message({:pdf_extraction_failed, bindings}),
+  defp lookup({:pdf_extraction_failed, bindings}),
     do: dgettext("errors", "PDF extraction failed: %{reason}", reason: binding(bindings, :reason))
 
-  def message({:pdf_command_failed, bindings}),
+  defp lookup({:pdf_command_failed, bindings}),
     do: dgettext("errors", "PDF extraction failed: %{error}", error: binding(bindings, :error))
 
-  def message(:page_image_not_found),
+  defp lookup(:page_image_not_found),
     do: dgettext("errors", "Page image not found after extraction")
 
-  def message(:invalid_page_count),
+  defp lookup(:invalid_page_count),
     do: dgettext("errors", "Could not parse page count from pdfinfo output")
 
-  def message({:pdfinfo_failed, bindings}),
+  defp lookup({:pdfinfo_failed, bindings}),
     do: dgettext("errors", "pdfinfo failed: %{error}", error: binding(bindings, :error))
 
-  def message(:pdf_command_timeout),
+  defp lookup(:pdf_command_timeout),
     do:
       dgettext(
         "errors",
         "PDF rendering timed out. Lower the extraction resolution or split the document, then try again."
       )
 
-  def message(:pdfinfo_timeout),
+  defp lookup(:pdfinfo_timeout),
     do:
       dgettext(
         "errors",
         "Reading the PDF timed out before extraction started. The file may be damaged."
       )
 
-  def message(:pdf_extraction_deadline_exceeded),
+  defp lookup(:pdf_extraction_deadline_exceeded),
     do:
       dgettext(
         "errors",
         "Extraction ran out of time for this document. Finished pages were kept; reprocess it to continue."
       )
 
-  def message({:pdf_too_many_pages, bindings}),
+  defp lookup({:pdf_too_many_pages, bindings}),
     do:
       dgettext(
         "errors",
@@ -143,7 +161,7 @@ defmodule DoctransWeb.ErrorMessages do
         limit: binding(bindings, :limit)
       )
 
-  def message({:pdf_page_too_large, bindings}),
+  defp lookup({:pdf_page_too_large, bindings}),
     do:
       dgettext(
         "errors",
@@ -154,7 +172,7 @@ defmodule DoctransWeb.ErrorMessages do
         limit: binding(bindings, :limit)
       )
 
-  def message({:page_image_too_large, bindings}),
+  defp lookup({:page_image_too_large, bindings}),
     do:
       dgettext(
         "errors",
@@ -164,50 +182,59 @@ defmodule DoctransWeb.ErrorMessages do
         limit: binding(bindings, :limit)
       )
 
-  def message({:poppler_not_found, bindings}),
+  defp lookup({:poppler_not_found, bindings}),
     do:
       dgettext("errors", "Required PDF tool %{command} is not installed",
         command: binding(bindings, :command)
       )
 
-  def message(:soffice_not_found), do: dgettext("errors", "LibreOffice is not installed")
+  defp lookup(:soffice_not_found), do: dgettext("errors", "LibreOffice is not installed")
 
-  def message({:source_file_not_found, bindings}),
+  defp lookup({:source_file_not_found, bindings}),
     do: dgettext("errors", "Source file not found: %{path}", path: binding(bindings, :path))
 
-  def message(:converted_pdf_not_found),
+  defp lookup(:converted_pdf_not_found),
     do: dgettext("errors", "Conversion completed but PDF file not found")
 
-  def message({:conversion_failed, bindings}),
+  defp lookup({:conversion_failed, bindings}),
     do:
       dgettext("errors", "Document conversion failed: %{error}", error: binding(bindings, :error))
 
-  def message({:conversion_start_failed, bindings}),
+  defp lookup({:conversion_start_failed, bindings}),
     do:
       dgettext("errors", "Failed to start LibreOffice: %{error}",
         error: binding(bindings, :error)
       )
 
-  def message(:port_died), do: dgettext("errors", "LibreOffice process terminated unexpectedly")
+  defp lookup(:port_died), do: dgettext("errors", "LibreOffice process terminated unexpectedly")
 
-  def message(:conversion_timeout), do: dgettext("errors", "Document conversion timed out")
+  defp lookup(:conversion_timeout), do: dgettext("errors", "Document conversion timed out")
 
-  def message(:original_upload_missing),
-    do: gettext("Original upload unavailable. Re-upload this document to process it again.")
+  defp lookup(:original_upload_missing),
+    do:
+      dgettext(
+        "errors",
+        "Original upload unavailable. Re-upload this document to process it again."
+      )
 
-  def message(:already_processing),
-    do: gettext("This document still has active processing jobs. Please wait for them to finish.")
+  defp lookup(:already_processing),
+    do:
+      dgettext(
+        "errors",
+        "This document still has active processing jobs. Please wait for them to finish."
+      )
 
-  def message(:obsolete_run), do: gettext("The document has changed. Please try again.")
+  defp lookup(:obsolete_run),
+    do: dgettext("errors", "The document has changed. Please try again.")
 
-  def message(:not_cancellable),
+  defp lookup(:not_cancellable),
     do:
       dgettext(
         "errors",
         "This document has already finished processing, so there is nothing left to stop."
       )
 
-  def message(:nothing_to_retry),
+  defp lookup(:nothing_to_retry),
     do:
       dgettext(
         "errors",
@@ -219,7 +246,7 @@ defmodule DoctransWeb.ErrorMessages do
   # before anything has been uploaded: the user is deciding, not recovering.
   # `%{destination}` is a host or a redacted URL from `Doctrans.Config.Inference`
   # and never carries a credential.
-  def message({:inference_unavailable, bindings}),
+  defp lookup({:inference_unavailable, bindings}),
     do:
       dgettext(
         "errors",
@@ -227,7 +254,7 @@ defmodule DoctransWeb.ErrorMessages do
         destination: binding(bindings, :destination)
       )
 
-  def message({:extraction_model_unavailable, bindings}),
+  defp lookup({:extraction_model_unavailable, bindings}),
     do:
       dgettext(
         "errors",
@@ -236,7 +263,7 @@ defmodule DoctransWeb.ErrorMessages do
         destination: binding(bindings, :destination)
       )
 
-  def message({:translation_model_unavailable, bindings}),
+  defp lookup({:translation_model_unavailable, bindings}),
     do:
       dgettext(
         "errors",
@@ -247,7 +274,7 @@ defmodule DoctransWeb.ErrorMessages do
 
   # Search is the only casualty of a broken embedding path, and saying so is what
   # keeps this from reading as a reason to cancel the upload.
-  def message({:embedding_model_unavailable, bindings}),
+  defp lookup({:embedding_model_unavailable, bindings}),
     do:
       dgettext(
         "errors",
@@ -256,7 +283,7 @@ defmodule DoctransWeb.ErrorMessages do
         destination: binding(bindings, :destination)
       )
 
-  def message({:embedding_unavailable, bindings}),
+  defp lookup({:embedding_unavailable, bindings}),
     do:
       dgettext(
         "errors",
@@ -264,7 +291,7 @@ defmodule DoctransWeb.ErrorMessages do
         destination: binding(bindings, :destination)
       )
 
-  def message({:embedding_dimensions_too_small, bindings}),
+  defp lookup({:embedding_dimensions_too_small, bindings}),
     do:
       dgettext(
         "errors",
@@ -274,47 +301,56 @@ defmodule DoctransWeb.ErrorMessages do
         expected: binding(bindings, :expected)
       )
 
-  def message(:invalid_model), do: gettext("Invalid model selection")
-  def message(:upload_unreadable), do: dgettext("errors", "Could not read uploaded file")
+  defp lookup(:invalid_model), do: dgettext("errors", "Invalid model selection")
+  defp lookup(:upload_unreadable), do: dgettext("errors", "Could not read uploaded file")
 
-  def message(:upload_store_failed),
+  defp lookup(:upload_store_failed),
     do: dgettext("errors", "Could not store the uploaded file")
 
-  def message(:upload_start_failed),
+  defp lookup(:upload_start_failed),
     do: dgettext("errors", "Could not start processing for this document")
 
-  # The upload list's own fallback. The generic one below is written in the chat
-  # assistant's first person ("Sorry, I encountered an error"), which reads as a
-  # non-sequitur next to a filename.
-  def message(:upload_failed),
+  # The upload list's own fallback: it names the file's fate, where the generic
+  # message could only say that something failed.
+  defp lookup(:upload_failed),
     do: dgettext("errors", "This file could not be uploaded. Please try again.")
 
   # The changeset is dropped deliberately: a per-file upload message says the save
   # failed, never which column the database objected to.
-  def message({:validation_failed, _bindings}),
+  defp lookup({:validation_failed, _bindings}),
     do: dgettext("errors", "The document could not be saved")
 
-  def message({:file_too_large, bindings}),
+  defp lookup({:file_too_large, bindings}),
     do:
       dgettext("errors", "File too large (%{size}MB, max %{max}MB)",
         size: binding(bindings, :size),
         max: binding(bindings, :max)
       )
 
-  def message(:empty_question), do: gettext("Please enter a question.")
-  def message({:database_error, _}), do: message(:database_error)
-  def message(:database_error), do: gettext("Failed to search the document. Please try again.")
-  def message(:search_failed), do: gettext("Search is temporarily unavailable. Please try again.")
-  def message({:retrieval_unavailable, _}), do: message(:retrieval_unavailable)
+  defp lookup(:empty_question), do: dgettext("errors", "Please enter a question.")
+  defp lookup({:database_error, _}), do: lookup(:database_error)
 
-  def message(:retrieval_unavailable),
-    do: gettext("Document search is temporarily unavailable. Please try again.")
+  defp lookup(:database_error),
+    do: dgettext("errors", "Failed to search the document. Please try again.")
 
-  def message(:delete_failed), do: gettext("Failed to delete document")
-  def message(:reprocess_failed), do: gettext("Failed to reset page for reprocessing")
-  def message(:models_unavailable), do: gettext("Failed to fetch models from OpenAI")
-  def message(_), do: gettext("Sorry, I encountered an error. Please try again.")
+  defp lookup(:search_failed),
+    do: dgettext("errors", "Search is temporarily unavailable. Please try again.")
 
+  defp lookup({:retrieval_unavailable, _}), do: lookup(:retrieval_unavailable)
+
+  defp lookup(:retrieval_unavailable),
+    do: dgettext("errors", "Document search is temporarily unavailable. Please try again.")
+
+  defp lookup(:delete_failed), do: dgettext("errors", "Failed to delete document")
+  defp lookup(:reprocess_failed), do: dgettext("errors", "Failed to reset page for reprocessing")
+
+  defp lookup(:models_unavailable),
+    do: dgettext("errors", "Could not fetch the list of models from the model server")
+
+  defp lookup(_), do: nil
+
+  # A binding that is itself a reason is rendered through `message/1`, so a
+  # nested reason without an entry reads as the same neutral text as a bare one.
   defp binding(bindings, key) do
     case Keyword.get(bindings, key) do
       value when is_binary(value) or is_number(value) -> value

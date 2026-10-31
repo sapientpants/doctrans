@@ -29,6 +29,50 @@ defmodule DoctransWeb.ErrorMessagesTest do
     assert ErrorMessages.message(%RuntimeError{message: "private details"}) == message
   end
 
+  describe "the generic fallback" do
+    test "is neutral copy that reads the same bare and nested" do
+      Gettext.with_locale(DoctransWeb.Gettext, "en", fn ->
+        generic = ErrorMessages.message(:unknown)
+
+        # Not the chat assistant's first person: the same text ends up in a flash
+        # and next to a page number.
+        refute generic =~ ~r/\b(I|Sorry)\b/
+
+        assert ErrorMessages.message(
+                 {:page_extraction_failed, [page_number: 3, reason: :unknown]}
+               ) ==
+                 "Page 3 extraction failed: " <> generic
+      end)
+    end
+
+    test "message/2 substitutes the caller's fallback only for reasons without an entry" do
+      Gettext.with_locale(DoctransWeb.Gettext, "en", fn ->
+        assert ErrorMessages.message(:unknown, "custom fallback") == "custom fallback"
+
+        assert ErrorMessages.message({:operation_failed, [reason: "detail"]}, "custom fallback") ==
+                 "custom fallback"
+
+        assert ErrorMessages.message(:document_not_found, "custom fallback") ==
+                 ErrorMessages.message(:document_not_found)
+      end)
+    end
+
+    test "the model list failure names the model server, not a vendor" do
+      for locale <- Gettext.known_locales(DoctransWeb.Gettext) do
+        Gettext.with_locale(DoctransWeb.Gettext, locale, fn ->
+          refute ErrorMessages.message(:models_unavailable) =~ "OpenAI"
+        end)
+      end
+    end
+
+    # The catalog is one gettext domain. A message extracted into `default.pot`
+    # would split error strings across two PO files per locale again.
+    test "every message is extracted into the errors domain" do
+      refute File.read!("priv/gettext/default.pot") =~ "lib/doctrans_web/error_messages.ex"
+      assert File.read!("priv/gettext/errors.pot") =~ "lib/doctrans_web/error_messages.ex"
+    end
+  end
+
   describe "localized errors" do
     test "translates errors in every supported non-English locale" do
       translations = %{

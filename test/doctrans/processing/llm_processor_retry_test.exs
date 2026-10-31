@@ -293,6 +293,23 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       assert Documents.get_document!(context.document.id).status != "error"
     end
 
+    test "a page reset while the model was answering is left to the generation that replaced it",
+         context do
+      reset_page_during_extraction(context.page)
+
+      # The run guard refuses the stale write, and the run reports success:
+      # there is no retry to schedule for work the reset's generation now owns.
+      assert :ok = LlmProcessor.process_page(context.page.id, MapSet.new())
+      assert_calls(extract_markdown: 1)
+
+      saved = Documents.get_page!(context.page.id)
+      assert saved.processing_generation != context.page.processing_generation
+      assert saved.extraction_status == "pending"
+      assert saved.original_markdown == nil
+      assert saved.translation_status == "pending"
+      assert Documents.get_document!(context.document.id).status != "error"
+    end
+
     test "a document deleted mid-run ends the run without failing the job", context do
       # Indexing is the last thing extraction does before the run re-reads the
       # page, so a deletion there lands in the window the rescue exists for.
@@ -344,6 +361,15 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   defp perform_page_job(page, opts) do
     args = LlmProcessingJob.page_args(page, page.processing_generation, %{})
     perform_job(LlmProcessingJob, args, opts)
+  end
+
+  # Answers the extraction only after resetting the page, the way a reprocess
+  # requested from another tab lands while the model is still working.
+  defp reset_page_during_extraction(page) do
+    stub_extraction(fn _image, _opts ->
+      {:ok, _reset} = Pages.reset_page_for_reprocessing(Documents.get_page!(page.id))
+      {:ok, "# Markdown from the superseded run"}
+    end)
   end
 
   defp delete_document_after_indexing(document) do

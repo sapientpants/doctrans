@@ -25,7 +25,7 @@ defmodule Doctrans.Processing.ApiFailure do
   """
   @spec handle(atom(), reason(), keyword()) :: {:error, Doctrans.Errors.reason()}
   def handle(fuse, reason, opts \\ []) do
-    normalized = normalize_reason(reason)
+    normalized = reason |> source_reason() |> Doctrans.Errors.normalize()
     classification = ErrorClassifier.classify(normalized)
 
     cond do
@@ -50,14 +50,16 @@ defmodule Doctrans.Processing.ApiFailure do
     # out at the production log level; the raw reason stays behind :debug.
     Logger.error("API call failed (#{classification}): #{inspect(normalized)}")
     Logger.debug("API call failure detail: #{inspect(reason)}")
-    {:error, Doctrans.Errors.normalize(normalized)}
+    {:error, normalized}
   end
 
-  # ErrorClassifier keys HTTP failures as {:http_error, status}, so map our
-  # internal {:http_status, status, resp} tuple onto that shape.
-  defp normalize_reason({:http_status, status, _resp}), do: {:http_error, status}
+  # The client's `{:http_status, status, resp}` tuple becomes the source shape
+  # `{:http_error, status}`, which `Doctrans.Errors.normalize/1` then turns into
+  # the `{:http_error, [status: status]}` every consumer -- classifier, job,
+  # message catalog -- is written against.
+  defp source_reason({:http_status, status, _resp}), do: {:http_error, status}
 
-  defp normalize_reason({:error, reason}), do: normalize_reason(reason)
+  defp source_reason({:error, reason}), do: source_reason(reason)
 
-  defp normalize_reason(reason), do: reason
+  defp source_reason(reason), do: reason
 end

@@ -35,17 +35,18 @@ defmodule Doctrans.Resilience.ErrorClassifier do
       iex> ErrorClassifier.classify({:error, %Req.TransportError{reason: :timeout}})
       :retryable
 
-      iex> ErrorClassifier.classify({:http_error, 404})
+      iex> ErrorClassifier.classify({:http_error, [status: 404]})
       :permanent
 
-      iex> ErrorClassifier.classify({:http_error, 500})
+      iex> ErrorClassifier.classify({:http_error, [status: 500]})
       :retryable
+
+  HTTP failures arrive in the shape `Doctrans.Errors.normalize/1` gives them,
+  `{:http_error, [status: status]}`; the source shape `{:http_error, status}` is
+  normalized before it gets here.
   """
   @spec classify(term()) :: classification()
   def classify(error)
-
-  def classify({:http_error, bindings}) when is_list(bindings),
-    do: classify({:http_error, Keyword.fetch!(bindings, :status)})
 
   def classify({:transport_error, _}), do: :retryable
   def classify(:conversion_timeout), do: :retryable
@@ -78,9 +79,14 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   def classify(%Req.TransportError{}), do: :retryable
 
   # HTTP status codes
-  def classify({:http_error, status}) when status == 429, do: :retryable
-  def classify({:http_error, status}) when status >= 500 and status < 600, do: :retryable
-  def classify({:http_error, status}) when status >= 400 and status < 500, do: :permanent
+  def classify({:http_error, bindings}) when is_list(bindings) do
+    case Keyword.fetch!(bindings, :status) do
+      429 -> :retryable
+      status when status >= 500 and status < 600 -> :retryable
+      status when status >= 400 and status < 500 -> :permanent
+      _ -> :unknown
+    end
+  end
 
   # File errors
   def classify({:error, :enoent}), do: :permanent
@@ -145,7 +151,7 @@ defmodule Doctrans.Resilience.ErrorClassifier do
       iex> ErrorClassifier.retryable?(:timeout)
       true
 
-      iex> ErrorClassifier.retryable?({:http_error, 404})
+      iex> ErrorClassifier.retryable?({:http_error, [status: 404]})
       false
   """
   @spec retryable?(term()) :: boolean()
@@ -162,7 +168,7 @@ defmodule Doctrans.Resilience.ErrorClassifier do
 
   ## Examples
 
-      iex> ErrorClassifier.permanent?({:http_error, 404})
+      iex> ErrorClassifier.permanent?({:http_error, [status: 404]})
       true
 
       iex> ErrorClassifier.permanent?(:timeout)

@@ -37,27 +37,35 @@ defmodule Doctrans.Processing.OpenAI do
         request_body = build_request_body(Keyword.put(opts, :messages, messages))
 
         post_chat_completion(request_body, opts)
-        |> resolve_extract_response(:openai_api)
+        |> resolve_completion_response(:openai_api)
 
       {:error, reason} ->
         {:error, {:image_unreadable, [reason: reason]}}
     end
   end
 
-  defp resolve_extract_response({:ok, %Req.Response{status: 200, body: body}}, fuse) do
-    case parse_chat_response(body) do
-      {:ok, _} = result -> result
-      {:error, _} = error -> ApiFailure.handle(fuse, error)
-    end
+  # Every way a call can fail -- a non-2xx, a transport error, or a 200 whose
+  # body does not parse -- is reported through `ApiFailure.handle/3`, so each
+  # failure is logged once at the source, classified once, and leaves in the
+  # normalized shape. A malformed body never melts the fuse: the classifier
+  # calls it permanent or unknown, not transient.
+  defp resolve_completion_response({:ok, %Req.Response{status: 200, body: body}}, fuse) do
+    body |> parse_chat_response() |> report_parse_failure(fuse)
   end
 
-  defp resolve_extract_response({:ok, %Req.Response{status: status} = resp}, fuse) do
+  defp resolve_completion_response({:ok, %Req.Response{status: status} = resp}, fuse) do
     ApiFailure.handle(fuse, {:http_status, status, resp})
   end
 
-  defp resolve_extract_response({:error, reason}, fuse) do
+  defp resolve_completion_response({:error, reason}, fuse) do
     ApiFailure.handle(fuse, reason)
   end
+
+  defp report_parse_failure(result, fuse, opts \\ [])
+  defp report_parse_failure({:ok, _} = result, _fuse, _opts), do: result
+
+  defp report_parse_failure({:error, _} = error, fuse, opts),
+    do: ApiFailure.handle(fuse, error, opts)
 
   defp build_multimodal_content(image_path, image_data, opts) do
     ext = Path.extname(image_path)
@@ -95,19 +103,7 @@ defmodule Doctrans.Processing.OpenAI do
     )
 
     post_chat_completion(request_body, opts)
-    |> resolve_chat_response(fuse)
-  end
-
-  defp resolve_chat_response({:ok, %Req.Response{status: 200, body: body}}, _fuse) do
-    parse_chat_response(body)
-  end
-
-  defp resolve_chat_response({:ok, %Req.Response{status: status} = resp}, fuse) do
-    ApiFailure.handle(fuse, {:http_status, status, resp})
-  end
-
-  defp resolve_chat_response({:error, reason}, fuse) do
-    ApiFailure.handle(fuse, reason)
+    |> resolve_completion_response(fuse)
   end
 
   # One deadline and one size cap per call; Req's retries run inside it.
@@ -183,7 +179,7 @@ defmodule Doctrans.Processing.OpenAI do
            collect: collect_sse(collector)
          ) do
       {:ok, %Req.Response{status: 200} = resp} ->
-        collected_content(resp.body, collector)
+        resp.body |> collected_content(collector) |> report_parse_failure(fuse)
 
       {:ok, %Req.Response{} = resp} ->
         ApiFailure.handle(fuse, {:http_status, resp.status, resp})
@@ -311,7 +307,7 @@ defmodule Doctrans.Processing.OpenAI do
            retry: :safe_transient
          ) do
       {:ok, %Req.Response{status: 200, body: body}} ->
-        parse_list_models_response(body)
+        body |> parse_list_models_response() |> report_parse_failure(fuse, melt: false)
 
       {:ok, %Req.Response{status: status} = resp} ->
         ApiFailure.handle(fuse, {:http_status, status, resp}, melt: false)
@@ -367,7 +363,7 @@ defmodule Doctrans.Processing.OpenAI do
            redirect: false
          ) do
       {:ok, %Req.Response{status: 200, body: body}} ->
-        parse_embed_response(body)
+        body |> parse_embed_response() |> report_parse_failure(fuse)
 
       {:ok, %Req.Response{status: status} = resp} ->
         ApiFailure.handle(fuse, {:http_status, status, resp})

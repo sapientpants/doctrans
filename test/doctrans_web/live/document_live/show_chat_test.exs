@@ -394,6 +394,47 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       assert assigns.chat_task_ref == nil
     end
 
+    # The chat panel answers in the first person, so a failure the message
+    # catalog cannot name is the assistant's apology -- not the neutral fallback
+    # a flash would show for the same reason.
+    test "a failed turn without a message of its own answers with the apology", %{
+      conn: conn,
+      document: document
+    } do
+      Mox.stub(Doctrans.Processing.OpenAIMock, :chat_stream, fn _messages, _on_delta, _opts ->
+        {:error, :circuit_open}
+      end)
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> form("#chat-form", %{message: "What is this document about?"}) |> render_submit()
+      await_chat_turn(view)
+
+      apology = "Sorry, I encountered an error. Please try again."
+      assert render(view) =~ apology
+
+      assert %{messages: [%{role: "user"}, %{role: "error", content: ^apology}]} =
+               Conversations.load(document.id)
+    end
+
+    test "a failed turn with a message of its own is not apologised for", %{
+      conn: conn,
+      document: document
+    } do
+      Mox.stub(Doctrans.Processing.OpenAIMock, :chat_stream, fn _messages, _on_delta, _opts ->
+        {:error, :incomplete_output}
+      end)
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> form("#chat-form", %{message: "What is this document about?"}) |> render_submit()
+      await_chat_turn(view)
+
+      html = render(view)
+      assert html =~ "did not return complete final text"
+      refute html =~ "Sorry, I encountered an error"
+    end
+
     test "empty message is not submitted", %{conn: conn, document: document} do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 

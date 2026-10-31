@@ -201,9 +201,11 @@ defmodule Doctrans.Search.Indexer do
   # oversized chunk must not strand the chunks that failed transiently beside it,
   # which is what classifying on the first failure alone used to do.
   defp retry_or_cancel([_ | _] = reasons) do
+    reasons = Enum.map(reasons, &Errors.normalize/1)
+
     case Enum.find(reasons, &ErrorClassifier.retryable?/1) do
-      nil -> {:cancel, Errors.normalize(hd(reasons))}
-      retryable -> {:error, Errors.normalize(retryable)}
+      nil -> {:cancel, hd(reasons)}
+      retryable -> {:error, retryable}
     end
   end
 
