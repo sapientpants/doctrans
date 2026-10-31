@@ -26,6 +26,7 @@ defmodule Doctrans.Chat.Agent do
 
   alias Doctrans.Chat
   alias Doctrans.Chat.{Grader, QueryExpander}
+  alias Doctrans.Deps
   alias Doctrans.Documents.Document
   alias Doctrans.Search
 
@@ -70,7 +71,7 @@ defmodule Doctrans.Chat.Agent do
   end
 
   defp do_run(document, question, chat_history, opts, on_event) do
-    search_opts = search_opts(opts)
+    search_opts = Chat.retrieval_opts(opts, 8)
 
     Logger.info(
       "Agent processing question for document #{document.id}: #{String.slice(question, 0, 100)}"
@@ -90,15 +91,6 @@ defmodule Doctrans.Chat.Agent do
       {:error, reason} = error ->
         Logger.error("Agent retrieval failed for document #{document.id}: #{inspect(reason)}")
         error
-    end
-  end
-
-  defp search_opts(opts) do
-    base = [limit: Keyword.get(opts, :context_limit, 8)]
-
-    case Keyword.get(opts, :min_similarity) do
-      nil -> base
-      min_similarity -> Keyword.put(base, :min_similarity, min_similarity)
     end
   end
 
@@ -178,7 +170,7 @@ defmodule Doctrans.Chat.Agent do
         if Keyword.has_key?(o, :max_tokens), do: o, else: Keyword.put(o, :max_tokens, 8192)
       end)
 
-    case openai_module().chat_stream(messages, on_delta, opts) do
+    case Deps.openai().chat_stream(messages, on_delta, opts) do
       {:ok, response} ->
         {:ok, response}
 
@@ -186,9 +178,5 @@ defmodule Doctrans.Chat.Agent do
         Logger.error("Agent generation failed for document #{document.id}: #{inspect(reason)}")
         error
     end
-  end
-
-  defp openai_module do
-    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
   end
 end

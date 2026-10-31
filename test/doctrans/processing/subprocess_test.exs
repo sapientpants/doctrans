@@ -25,6 +25,50 @@ defmodule Doctrans.Processing.SubprocessTest do
     %{dir: dir}
   end
 
+  describe "classify/2" do
+    @tags [
+      name: "tool",
+      timeout: 1_000,
+      failure_tag: :tool_failed,
+      start_tag: :tool_start_failed,
+      timeout_tag: :tool_timeout
+    ]
+
+    test "a clean exit yields the output" do
+      assert Subprocess.classify({:ok, {"done\n", 0}}, @tags) == {:ok, "done\n"}
+    end
+
+    test "a non-zero exit carries the scrubbed output under the failure tag" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert Subprocess.classify({:ok, {"bad input \xFF\n", 2}}, @tags) ==
+                   {:error, {:tool_failed, [error: "bad input �"]}}
+        end)
+
+      assert log =~ "tool failed with exit code 2"
+    end
+
+    test "a deadline kill is the bare timeout tag" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert Subprocess.classify({:timeout, "partial"}, @tags) == {:error, :tool_timeout}
+        end)
+
+      assert log =~ "tool timed out after 1000ms"
+    end
+
+    test "anything short of an exit is the start tag" do
+      assert Subprocess.classify({:start_error, "enoent"}, @tags) ==
+               {:error, {:tool_start_failed, [error: "enoent"]}}
+
+      assert Subprocess.classify({:error, :eagain}, @tags) ==
+               {:error, {:tool_start_failed, [error: ":eagain"]}}
+
+      assert Subprocess.classify({:subprocess_owner_down, :killed}, @tags) ==
+               {:error, {:tool_start_failed, [error: ":killed"]}}
+    end
+  end
+
   defp script(dir, body) do
     path = Path.join(dir, "script_#{System.unique_integer([:positive])}")
     File.write!(path, body)

@@ -16,9 +16,10 @@ defmodule Mix.Tasks.RechunkDocuments do
 
   import Ecto.Query
 
+  alias Doctrans.Deps
   alias Doctrans.Documents.{Chunk, Page}
   alias Doctrans.Repo
-  alias Doctrans.Search.{Chunker, Embedding}
+  alias Doctrans.Search.Chunker
 
   @shortdoc "Re-chunk and re-embed all existing document pages"
 
@@ -95,7 +96,7 @@ defmodule Mix.Tasks.RechunkDocuments do
     Enum.map(chunks, fn chunk ->
       embed_content = Chunker.content_for_embedding(chunk_data, chunk.chunk_index)
 
-      case embedding_module().generate(embed_content, []) do
+      case Deps.embedding().generate(embed_content, []) do
         {:ok, embedding} ->
           chunk
           |> Chunk.embedding_changeset(%{embedding: embedding, embedding_status: "completed"})
@@ -111,7 +112,7 @@ defmodule Mix.Tasks.RechunkDocuments do
   end
 
   defp embed_page(page) do
-    case embedding_module().generate(page.original_markdown, []) do
+    case Deps.embedding().generate(page.original_markdown, []) do
       {:ok, embedding} ->
         page
         |> Page.embedding_changeset(%{embedding: embedding, embedding_status: "completed"})
@@ -120,9 +121,5 @@ defmodule Mix.Tasks.RechunkDocuments do
       {:error, _} ->
         :ok
     end
-  end
-
-  defp embedding_module do
-    Application.get_env(:doctrans, :embedding_module, Embedding)
   end
 end

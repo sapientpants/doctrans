@@ -21,6 +21,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   require Logger
 
+  alias Doctrans.Deps
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Errors
@@ -34,11 +35,6 @@ defmodule Doctrans.Processing.LlmProcessor do
   @type outcome :: :ok | {:error, Errors.reason()} | {:cancel, Errors.reason()}
 
   @typep stage :: :extraction | :translation
-
-  # Allow OpenAI module to be configured for testing
-  defp openai_module do
-    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
-  end
 
   @doc """
   Processes a single page through the LLM pipeline (extraction + translation).
@@ -170,7 +166,7 @@ defmodule Doctrans.Processing.LlmProcessor do
          {:ok, page} <- mark_stage(page, :extraction, "processing") do
       image_path = Path.join(Documents.uploads_dir(), page.image_path)
 
-      case openai_module().extract_markdown(image_path, model_opts(opts, :extraction_model)) do
+      case Deps.openai().extract_markdown(image_path, model_opts(opts, :extraction_model)) do
         {:ok, markdown} -> save_extraction(page, markdown, opts)
         {:error, reason} -> fail_stage(page, :extraction, reason)
       end
@@ -211,7 +207,7 @@ defmodule Doctrans.Processing.LlmProcessor do
          {:ok, document} <- fetch_document(page) do
       source_language = SourceLanguage.resolve(document, page.original_markdown)
 
-      case openai_module().translate(
+      case Deps.openai().translate(
              page.original_markdown,
              source_language,
              document.target_language,

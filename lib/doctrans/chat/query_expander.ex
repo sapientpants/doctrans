@@ -16,11 +16,10 @@ defmodule Doctrans.Chat.QueryExpander do
   via RRF.
   """
 
-  alias Doctrans.Chat.LineParser
+  alias Doctrans.Chat.{LineParser, StructuredCall}
 
   require Logger
 
-  @expansion_timeout 30_000
   @max_predict 512
   @max_queries 6
 
@@ -38,9 +37,8 @@ defmodule Doctrans.Chat.QueryExpander do
 
   def expand(question, chat_history, opts) do
     prompt = build_prompt(question, chat_history)
-    messages = [%{role: "user", content: prompt}]
 
-    case openai_module().chat(messages, chat_opts(opts)) do
+    case StructuredCall.ask(prompt, opts, @max_predict) do
       {:ok, response} ->
         Logger.debug("Query planner raw response:\n#{String.slice(response, 0, 500)}")
         parse_plan(response, question)
@@ -140,18 +138,5 @@ defmodule Doctrans.Chat.QueryExpander do
       role = if msg.role == "user", do: "User", else: "Assistant"
       "#{role}: #{msg.content}"
     end)
-  end
-
-  defp chat_opts(opts) do
-    model = Keyword.get(opts, :model)
-    # Query planning is a structured transform, not a reasoning task; disable
-    # thinking so the max_tokens budget is not consumed producing an empty
-    # (thinking-only) response.
-    base = [timeout: @expansion_timeout, max_tokens: @max_predict, think: false]
-    if model, do: Keyword.put(base, :model, model), else: base
-  end
-
-  defp openai_module do
-    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
   end
 end

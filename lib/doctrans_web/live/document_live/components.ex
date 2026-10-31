@@ -168,29 +168,49 @@ defmodule DoctransWeb.DocumentLive.Components do
   def status_text("cancelled"), do: gettext("Stopped")
   def status_text(_), do: gettext("Unknown")
 
+  # The dashboard's sort orders, in menu order. Each carries the short label the
+  # trigger button shows and the full one its menu entry shows; both are msgids,
+  # so the clauses below are generated from this list rather than written out,
+  # which is what keeps the menu, the labels and the event guard in step.
+  @sort_options [
+    {:inserted_at, :desc, "Newest", "Newest First"},
+    {:inserted_at, :asc, "Oldest", "Oldest First"},
+    {:title, :asc, "A-Z", "Name (A-Z)"},
+    {:title, :desc, "Z-A", "Name (Z-A)"}
+  ]
+
+  @doc "The `{field, direction}` pairs documents can be sorted by, in menu order."
+  @spec sort_options() :: [{atom(), :asc | :desc}]
+  def sort_options,
+    do: Enum.map(@sort_options, fn {field, dir, _short, _long} -> {field, dir} end)
+
   @doc """
-  Returns the sort label for the sort dropdown.
+  Returns the short sort label for the sort dropdown's trigger button.
   """
-  def sort_label(:inserted_at, :desc), do: gettext("Newest")
-  def sort_label(:inserted_at, :asc), do: gettext("Oldest")
-  def sort_label(:title, :asc), do: gettext("A-Z")
-  def sort_label(:title, :desc), do: gettext("Z-A")
+  for {field, dir, short, _long} <- @sort_options do
+    def sort_label(unquote(field), unquote(dir)), do: gettext(unquote(short))
+  end
+
   def sort_label(_, _), do: gettext("Sort")
 
   @doc """
-  Returns the display name for a language code.
+  Returns the full sort label for an entry in the sort dropdown's menu.
   """
-  def language_name("da"), do: gettext("Danish")
-  def language_name("de"), do: gettext("German")
-  def language_name("en"), do: gettext("English")
-  def language_name("es"), do: gettext("Spanish")
-  def language_name("fr"), do: gettext("French")
-  def language_name("it"), do: gettext("Italian")
-  def language_name("nl"), do: gettext("Dutch")
-  def language_name("no"), do: gettext("Norwegian")
-  def language_name("pl"), do: gettext("Polish")
-  def language_name("pt"), do: gettext("Portuguese")
-  def language_name("sv"), do: gettext("Swedish")
+  for {field, dir, _short, long} <- @sort_options do
+    def sort_menu_label(unquote(field), unquote(dir)), do: gettext(unquote(long))
+  end
+
+  @doc """
+  Returns the display name for a language code.
+
+  One clause per entry in `Doctrans.Languages.names/0`, so a language added
+  there is named here without a second list to update. A code outside that list
+  reads as itself.
+  """
+  for {code, name} <- Doctrans.Languages.names() do
+    def language_name(unquote(code)), do: gettext(unquote(name))
+  end
+
   def language_name(code), do: code
 
   @doc """

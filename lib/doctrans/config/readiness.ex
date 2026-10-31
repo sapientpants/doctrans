@@ -56,6 +56,7 @@ defmodule Doctrans.Config.Readiness do
   alias Doctrans.Config.Embedding
   alias Doctrans.Config.Inference
   alias Doctrans.Config.OpenAI
+  alias Doctrans.Deps
 
   @typedoc """
   What the configured inference setup can and cannot do right now.
@@ -116,7 +117,7 @@ defmodule Doctrans.Config.Readiness do
   # A malformed success is indistinguishable from a failure for our purposes:
   # either way there is no list to check model names against.
   defp list_models do
-    case openai_module().list_models() do
+    case Deps.openai().list_models() do
       {:ok, names} when is_list(names) -> {:ok, names}
       _other -> :error
     end
@@ -149,7 +150,7 @@ defmodule Doctrans.Config.Readiness do
   # vector down to the stored width and rejects a narrower one, so a server that
   # answers with a usable vector has proved both.
   defp embedding_problems(models, chat, embedding) do
-    case embedding_module().generate(@probe_text, timeout: @probe_timeout) do
+    case Deps.embedding().generate(@probe_text, timeout: @probe_timeout) do
       {:ok, nil} ->
         [unreachable_problem(models, chat, embedding)]
 
@@ -194,10 +195,4 @@ defmodule Doctrans.Config.Readiness do
   # witness. Same when no listing was fetched at all.
   defp unreachable_problem(:error, _chat, embedding),
     do: {:embedding_unavailable, [destination: destination(embedding)]}
-
-  defp openai_module,
-    do: Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
-
-  defp embedding_module,
-    do: Application.get_env(:doctrans, :embedding_module, Doctrans.Search.Embedding)
 end

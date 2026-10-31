@@ -15,15 +15,11 @@ defmodule Doctrans.Processing.PdfProcessor do
 
   alias Doctrans.Config.PdfExtraction
   alias Doctrans.Config.Uploads
+  alias Doctrans.Deps
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.{Completion, Run}
-
-  # Allow PdfExtractor module to be configured for testing
-  defp pdf_extractor_module do
-    Application.get_env(:doctrans, :pdf_extractor_module, Doctrans.Processing.PdfExtractor)
-  end
 
   @doc """
   Extracts pages from a PDF and creates page records progressively.
@@ -112,7 +108,7 @@ defmodule Doctrans.Processing.PdfProcessor do
     # timeout instead of failing cleanly with its finished pages preserved.
     deadline = System.monotonic_time(:millisecond) + PdfExtraction.job_timeout()
 
-    with {:ok, page_count} <- pdf_extractor_module().get_page_count(pdf_path),
+    with {:ok, page_count} <- Deps.pdf_extractor().get_page_count(pdf_path),
          {:ok, document} <- set_total_pages(document, page_count),
          :ok <-
            extract_pages_progressively(document, pdf_path, pages_dir, page_count, deadline) do
@@ -209,7 +205,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   end
 
   defp extract_and_save_page(document, page, pdf_path, pages_dir, page_number, deadline) do
-    case pdf_extractor_module().extract_page(pdf_path, pages_dir, page_number, deadline: deadline) do
+    case Deps.pdf_extractor().extract_page(pdf_path, pages_dir, page_number, deadline: deadline) do
       {:ok, image_path} ->
         relative_path = Path.relative_to(image_path, Documents.uploads_dir())
         save_current_page(document, page, %{page_number: page_number, image_path: relative_path})

@@ -36,15 +36,11 @@ defmodule Doctrans.Search do
           optional(:rrf_score) => float()
         }
 
+  alias Doctrans.Deps
   alias Doctrans.Repo
   alias Doctrans.Search.HybridQuery
 
   require Logger
-
-  # Allow embedding module to be configured for testing
-  defp embedding_module do
-    Application.get_env(:doctrans, :embedding_module, Doctrans.Search.Embedding)
-  end
 
   @doc """
   Performs hybrid search across all pages.
@@ -168,7 +164,7 @@ defmodule Doctrans.Search do
   # not run. Either way `nil` reaches the statement as a NULL vector, which
   # `HybridQuery.run/3` turns into an empty semantic ranking.
   defp query_embedding(query) do
-    case embedding_module().generate(query, []) do
+    case Deps.embedding().generate(query, []) do
       {:ok, nil} ->
         Logger.warning("Search embedding returned no vector, keyword-only")
         {nil, :keyword_only}
@@ -251,7 +247,7 @@ defmodule Doctrans.Search do
     limit = Keyword.get(opts, :limit, 3)
     min_similarity = Keyword.get(opts, :min_similarity, @chat_similarity_threshold)
 
-    with {:ok, query_embedding} <- embedding_module().generate(query, []) do
+    with {:ok, query_embedding} <- Deps.embedding().generate(query, []) do
       search_by_embedding(document_id, query_embedding,
         limit: limit,
         min_similarity: min_similarity

@@ -13,7 +13,7 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   """
 
   alias Doctrans.Config.Uploads
-  alias Doctrans.Documents.Intake
+  alias Doctrans.Documents.{Formats, Intake}
 
   @max_entries 10
 
@@ -40,6 +40,10 @@ defmodule DoctransWeb.DocumentLive.UploadIntake do
   """
   @spec max_entries() :: pos_integer()
   def max_entries, do: @max_entries
+
+  @doc "The extensions the file picker offers: every format a document can be uploaded in."
+  @spec accept() :: [String.t()]
+  def accept, do: Formats.supported_extensions()
 
   @doc """
   Translates the errors LiveView reports for an entry into the reasons the rest of

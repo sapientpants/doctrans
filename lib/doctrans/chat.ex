@@ -8,6 +8,7 @@ defmodule Doctrans.Chat do
 
   alias Doctrans.Chat.MultiSearch
   alias Doctrans.Chat.QueryExpander
+  alias Doctrans.Deps
   alias Doctrans.Documents
   alias Doctrans.Errors
   alias Doctrans.Search
@@ -80,7 +81,7 @@ defmodule Doctrans.Chat do
     {standalone_question, queries} = QueryExpander.expand(question, chat_history, opts)
 
     # Search with all query variants and merge via RRF
-    case retrieve(document.id, standalone_question, queries, search_opts(opts)) do
+    case retrieve(document.id, standalone_question, queries, retrieval_opts(opts, 5)) do
       {:ok, pages} ->
         log_search_results(pages, document.id)
         request_answer(document, pages, standalone_question, chat_history, opts)
@@ -91,15 +92,6 @@ defmodule Doctrans.Chat do
         )
 
         error
-    end
-  end
-
-  defp search_opts(opts) do
-    base = [limit: Keyword.get(opts, :context_limit, 5)]
-
-    case Keyword.get(opts, :min_similarity) do
-      nil -> base
-      min_similarity -> Keyword.put(base, :min_similarity, min_similarity)
     end
   end
 
@@ -114,7 +106,7 @@ defmodule Doctrans.Chat do
     # Use the standalone question so the LLM sees a clear, contextual question
     messages = build_messages(system_prompt, chat_history, standalone_question)
 
-    case openai_module().chat(messages, opts) do
+    case Deps.openai().chat(messages, opts) do
       {:ok, response} ->
         {:ok, response}
 
@@ -378,10 +370,22 @@ defmodule Doctrans.Chat do
   @spec embeddings_ready?(Documents.Document.t() | Ecto.UUID.t()) :: boolean()
   defdelegate embeddings_ready?(document), to: Documents
 
-  # Private functions
+  @doc """
+  The search options for `retrieve/4`, from a caller's chat options.
 
-  defp openai_module do
-    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
+  `:context_limit` becomes the search `:limit`, falling back to `default_limit`
+  when absent: `send_message/4` reads five pages, `Doctrans.Chat.Agent` eight,
+  since it grades and re-retrieves rather than answering from the first pass.
+  `:min_similarity` is passed through when given.
+  """
+  @spec retrieval_opts(keyword(), pos_integer()) :: keyword()
+  def retrieval_opts(opts, default_limit) do
+    base = [limit: Keyword.get(opts, :context_limit, default_limit)]
+
+    case Keyword.get(opts, :min_similarity) do
+      nil -> base
+      min_similarity -> Keyword.put(base, :min_similarity, min_similarity)
+    end
   end
 
   @doc """
@@ -421,13 +425,10 @@ defmodule Doctrans.Chat do
   # The tag carries the reason's tag alone: the detail is already logged where
   # it arose, and what reaches the reader is a rendered message, not a payload.
   defp tag_outage({:error, reason}) do
-    {:error, {:retrieval_unavailable, [reason: tag_only(Errors.normalize(reason))]}}
+    {:error, {:retrieval_unavailable, [reason: Errors.tag(reason)]}}
   end
 
   defp tag_outage(result), do: result
-
-  defp tag_only({code, _bindings}), do: code
-  defp tag_only(code) when is_atom(code), do: code
 
   @doc false
   @spec build_system_prompt(String.t(), String.t()) :: String.t()

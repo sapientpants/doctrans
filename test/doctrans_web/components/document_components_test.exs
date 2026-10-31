@@ -133,5 +133,36 @@ defmodule DoctransWeb.DocumentComponentsTest do
     test "returns code for unknown language" do
       assert Components.language_name("xx") == "xx"
     end
+
+    test "names every language a document can be translated into" do
+      for code <- Doctrans.Languages.supported() do
+        assert Components.language_name(code) != code
+      end
+    end
+  end
+
+  describe "sort_options/0 and sort_menu_label/2" do
+    test "offers both directions of both fields, newest first" do
+      assert Components.sort_options() == [
+               {:inserted_at, :desc},
+               {:inserted_at, :asc},
+               {:title, :asc},
+               {:title, :desc}
+             ]
+    end
+
+    test "every option has a menu label and a trigger label" do
+      for {field, dir} <- Components.sort_options() do
+        assert Components.sort_menu_label(field, dir) != ""
+        assert Components.sort_label(field, dir) != "Sort"
+      end
+    end
+
+    test "menu labels spell the order out" do
+      assert Components.sort_menu_label(:inserted_at, :desc) == "Newest First"
+      assert Components.sort_menu_label(:inserted_at, :asc) == "Oldest First"
+      assert Components.sort_menu_label(:title, :asc) == "Name (A-Z)"
+      assert Components.sort_menu_label(:title, :desc) == "Name (Z-A)"
+    end
   end
 end

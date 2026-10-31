@@ -4,8 +4,8 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   Routes documents to appropriate processors based on file type:
   - PDF files are processed directly via PdfProcessor
-  - Word, OpenDocument, and Rich Text Format documents (.docx, .doc, .odt, .rtf)
-    are converted to PDF first, then processed
+  - the other formats in `Doctrans.Documents.Formats` -- Word, OpenDocument and
+    Rich Text -- are converted to PDF first, then processed
 
   This provides a unified interface for document processing while supporting
   multiple input formats.
@@ -13,18 +13,10 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   require Logger
 
+  alias Doctrans.Deps
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
+  alias Doctrans.Documents.{Formats, Topics}
   alias Doctrans.Processing.{PdfProcessor, Run}
-
-  # Allow DocumentConverter module to be configured for testing
-  defp document_converter_module do
-    Application.get_env(
-      :doctrans,
-      :document_converter_module,
-      Doctrans.Processing.DocumentConverter
-    )
-  end
 
   @doc """
   Extracts pages from a document and creates page records progressively.
@@ -59,16 +51,16 @@ defmodule Doctrans.Processing.DocumentProcessor do
   end
 
   defp process_source(document_id, file_path, cancelled_documents, document) do
-    extension = file_path |> Path.extname() |> String.downcase()
+    extension = Formats.extension(file_path)
 
-    case extension do
-      ".pdf" ->
+    cond do
+      extension == ".pdf" ->
         PdfProcessor.extract_document(document_id, file_path, cancelled_documents, document)
 
-      ext when ext in [".docx", ".doc", ".odt", ".rtf"] ->
+      extension in Formats.convertible_extensions() ->
         extract_convertible_document(document_id, file_path, cancelled_documents, document)
 
-      _ ->
+      true ->
         Logger.error("Unsupported file format: #{extension}")
         {:error, {:unsupported_format, [format: extension]}}
     end
@@ -94,7 +86,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
     Logger.info("Converting document #{file_path} to PDF")
 
-    case document_converter_module().convert_to_pdf(file_path, output_dir) do
+    case Deps.document_converter().convert_to_pdf(file_path, output_dir) do
       {:ok, pdf_path} ->
         PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents, document)
 
@@ -111,22 +103,5 @@ defmodule Doctrans.Processing.DocumentProcessor do
          {:ok, document} <- Documents.update_document_status(document, "error", reason) do
       _ = Topics.broadcast_document_updated(document)
     end
-  end
-
-  @doc """
-  Checks if the document processor can handle a given file type.
-  """
-  @spec supported_format?(String.t()) :: boolean()
-  def supported_format?(file_path) do
-    extension = file_path |> Path.extname() |> String.downcase()
-    extension in [".pdf", ".docx", ".doc", ".odt", ".rtf"]
-  end
-
-  @doc """
-  Returns a list of supported file extensions.
-  """
-  @spec supported_extensions() :: [String.t()]
-  def supported_extensions do
-    [".pdf", ".docx", ".doc", ".odt", ".rtf"]
   end
 end

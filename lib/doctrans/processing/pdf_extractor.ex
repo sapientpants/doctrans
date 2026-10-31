@@ -209,44 +209,19 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   # Runs one poppler command under a deadline. `:failure_tag` names a non-zero
   # exit and `:timeout_tag` a deadline for the caller, so a hung `pdfinfo` is not
-  # reported as a rendering problem; everything else is a failure of the command
-  # itself, with the output the subprocess kept.
+  # reported as a rendering problem; a command that never ran to an exit is a
+  # failure of the command itself, whichever one it was.
   defp run(executable, args, timeout, tags) do
     fn -> Subprocess.run(executable, args, timeout: timeout) end
     |> Subprocess.supervised()
-    |> classify(executable, timeout, tags)
-  end
-
-  defp classify({:ok, {output, 0}}, _executable, _timeout, _tags), do: {:ok, output}
-
-  defp classify({:ok, {output, exit_code}}, executable, _timeout, tags) do
-    diagnostic = Subprocess.diagnostic(output)
-
-    Logger.error(
-      "#{executable} failed with exit code #{exit_code}: " <> String.slice(diagnostic, 0, 500)
+    |> Subprocess.classify(
+      name: executable,
+      timeout: timeout,
+      failure_tag: Keyword.fetch!(tags, :failure_tag),
+      start_tag: :pdf_command_failed,
+      timeout_tag: Keyword.fetch!(tags, :timeout_tag)
     )
-
-    {:error, {Keyword.fetch!(tags, :failure_tag), [error: diagnostic]}}
   end
-
-  defp classify({:timeout, output}, executable, timeout, tags) do
-    diagnostic = Subprocess.diagnostic(output)
-
-    Logger.error(
-      "#{executable} timed out after #{timeout}ms: " <> String.slice(diagnostic, 0, 500)
-    )
-
-    {:error, Keyword.fetch!(tags, :timeout_tag)}
-  end
-
-  defp classify({:start_error, message}, _executable, _timeout, _tags),
-    do: {:error, {:pdf_command_failed, [error: Subprocess.diagnostic(message)]}}
-
-  defp classify({:error, reason}, _executable, _timeout, _tags),
-    do: {:error, {:pdf_command_failed, [error: inspect(reason)]}}
-
-  defp classify({:subprocess_owner_down, reason}, _executable, _timeout, _tags),
-    do: {:error, {:pdf_command_failed, [error: inspect(reason)]}}
 
   defp parse_page_count(output) do
     case Regex.run(~r/Pages:\s*(\d+)/, output) do

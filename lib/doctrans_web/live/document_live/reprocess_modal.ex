@@ -32,6 +32,16 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
       page.translation_status in ["completed", "error", "pending"]
   end
 
+  @doc """
+  Whether the whole-document reprocess control is offered.
+
+  The status rule is `DocumentReprocessing`'s own, so the button and the
+  transaction behind it cannot disagree; the original upload still has to be on
+  disk, which the caller knows and this does not.
+  """
+  def can_reprocess_document?(%Doctrans.Documents.Document{} = document),
+    do: DocumentReprocessing.reprocessable?(document)
+
   def handle_event("show_document_reprocess_modal", params, socket) do
     handle_event("show_reprocess_modal", params, assign(socket, :reprocess_scope, :document))
   end

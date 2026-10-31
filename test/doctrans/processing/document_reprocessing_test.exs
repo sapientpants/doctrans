@@ -17,6 +17,8 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     StartupRecovery
   }
 
+  alias DoctransWeb.DocumentLive.ReprocessModal
+
   setup do
     ResumablePdfExtractorStub.install()
     DocumentConverterMocks.retry()
@@ -42,6 +44,20 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
 
     on_exit(fn -> File.rm_rf(directory) end)
     %{document: document, page: page, source: source, old_image: old_image}
+  end
+
+  test "reprocessable?/1 admits exactly the settled statuses, as the UI control does" do
+    for status <- ~w(completed error cancelled) do
+      document = %Documents.Document{status: status}
+      assert DocumentReprocessing.reprocessable?(document)
+      assert ReprocessModal.can_reprocess_document?(document)
+    end
+
+    for status <- ~w(uploading queued extracting processing) do
+      document = %Documents.Document{status: status}
+      refute DocumentReprocessing.reprocessable?(document)
+      refute ReprocessModal.can_reprocess_document?(document)
+    end
   end
 
   test "full restart reconverts the actual original and renders fresh pages", c do
