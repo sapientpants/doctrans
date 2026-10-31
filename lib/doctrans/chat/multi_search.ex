@@ -8,6 +8,7 @@ defmodule Doctrans.Chat.MultiSearch do
   across multiple query phrasings.
   """
 
+  alias Doctrans.Deps
   alias Doctrans.Errors
   alias Doctrans.Search
 
@@ -104,7 +105,7 @@ defmodule Doctrans.Chat.MultiSearch do
   # Searching on it yields `{:ok, []}`, an absence of matches, which is the one
   # thing this module exists to keep apart from a query that never ran.
   defp search_one(document_id, query, search_opts) do
-    case embedding_module().generate(query, []) do
+    case Deps.embedding().generate(query, []) do
       {:ok, nil} -> {:error, :embedding_unavailable}
       {:ok, embedding} -> Search.search_by_embedding(document_id, embedding, search_opts)
       {:error, reason} -> {:error, reason}
@@ -118,7 +119,7 @@ defmodule Doctrans.Chat.MultiSearch do
       "Multi-search query failed: #{inspect(reason, limit: 5, printable_limit: 256)}"
     )
 
-    {:error, tag_only(Errors.normalize(reason))}
+    {:error, Errors.tag(reason)}
   end
 
   defp outcome({:exit, reason}) do
@@ -126,14 +127,6 @@ defmodule Doctrans.Chat.MultiSearch do
 
     {:error, :task_exited}
   end
-
-  # Both failure paths hand back the tag alone. An exit reason can carry a
-  # stacktrace holding the query text and its 1024-float embedding, and a
-  # `{:database_error, [reason: %Postgrex.Error{}]}` binding carries the whole
-  # SQL statement -- detail that belongs in the log, not in a reason the caller
-  # renders. A bare atom is still a `Doctrans.Errors.reason()`.
-  defp tag_only({code, _bindings}), do: code
-  defp tag_only(code) when is_atom(code), do: code
 
   # For each ranked list, assign RRF scores based on position
   # Then sum scores per unique chunk (or fallback page) across all lists
@@ -162,9 +155,5 @@ defmodule Doctrans.Chat.MultiSearch do
     # Keep the result data with the best similarity across queries
     {_identity, _score, best} = Enum.max_by(entries, fn {_, _, result} -> result.similarity end)
     Map.put(best, :rrf_score, total_score)
-  end
-
-  defp embedding_module do
-    Application.get_env(:doctrans, :embedding_module, Doctrans.Search.Embedding)
   end
 end

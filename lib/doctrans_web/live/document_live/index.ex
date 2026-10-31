@@ -45,7 +45,7 @@ defmodule DoctransWeb.DocumentLive.Index do
       |> UploadReadiness.init()
       |> DocumentStream.init()
       |> allow_upload(:document,
-        accept: ~w(.pdf .docx .doc .odt .rtf),
+        accept: UploadIntake.accept(),
         max_entries: UploadIntake.max_entries(),
         # max_file_size: client-side limit; the on-disk size is re-verified
         # in UploadIntake.consume_entry/2 before the file is accepted
@@ -133,48 +133,15 @@ defmodule DoctransWeb.DocumentLive.Index do
                 id="sort-documents-menu"
                 class="dropdown-content z-10 menu menu-sm p-1 shadow-lg bg-base-200 rounded-lg w-40 mt-1"
               >
-                <li>
+                <li :for={{field, dir} <- sort_options()}>
                   <button
                     type="button"
                     phx-click="sort"
-                    phx-value-field="inserted_at"
-                    phx-value-dir="desc"
-                    class={[@sort_by == :inserted_at && @sort_dir == :desc && "active"]}
+                    phx-value-field={field}
+                    phx-value-dir={dir}
+                    class={[@sort_by == field && @sort_dir == dir && "active"]}
                   >
-                    {gettext("Newest First")}
-                  </button>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    phx-click="sort"
-                    phx-value-field="inserted_at"
-                    phx-value-dir="asc"
-                    class={[@sort_by == :inserted_at && @sort_dir == :asc && "active"]}
-                  >
-                    {gettext("Oldest First")}
-                  </button>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    phx-click="sort"
-                    phx-value-field="title"
-                    phx-value-dir="asc"
-                    class={[@sort_by == :title && @sort_dir == :asc && "active"]}
-                  >
-                    {gettext("Name (A-Z)")}
-                  </button>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    phx-click="sort"
-                    phx-value-field="title"
-                    phx-value-dir="desc"
-                    class={[@sort_by == :title && @sort_dir == :desc && "active"]}
-                  >
-                    {gettext("Name (Z-A)")}
+                    {sort_menu_label(field, dir)}
                   </button>
                 </li>
               </ul>
@@ -287,17 +254,18 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   # --- Sorting ---------------------------------------------------------------
 
-  @allowed_sort_fields ~w(inserted_at title)
-  @allowed_sort_dirs ~w(asc desc)
-
+  # The event carries strings, and only a pair the menu renders is accepted: the
+  # match is against the menu's own options, so nothing is turned into an atom.
   @impl true
-  def handle_event("sort", %{"field" => field, "dir" => dir}, socket)
-      when field in @allowed_sort_fields and dir in @allowed_sort_dirs do
-    sort_by = String.to_existing_atom(field)
-    sort_dir = String.to_existing_atom(dir)
+  def handle_event("sort", %{"field" => field, "dir" => dir}, socket) do
+    case Enum.find(sort_options(), &sort_option_named?(&1, field, dir)) do
+      {sort_by, sort_dir} ->
+        socket = assign(socket, :sort_by, sort_by) |> assign(:sort_dir, sort_dir)
+        {:noreply, DocumentStream.refresh(socket)}
 
-    socket = assign(socket, :sort_by, sort_by) |> assign(:sort_dir, sort_dir)
-    {:noreply, DocumentStream.refresh(socket)}
+      nil ->
+        {:noreply, socket}
+    end
   end
 
   @impl true
@@ -336,6 +304,9 @@ defmodule DoctransWeb.DocumentLive.Index do
         {:noreply, put_flash(socket, :error, ErrorMessages.message(:delete_failed))}
     end
   end
+
+  defp sort_option_named?({field, dir}, field_name, dir_name),
+    do: Atom.to_string(field) == field_name and Atom.to_string(dir) == dir_name
 
   # A card for a document another tab already deleted is gone either way.
   defp delete_existing_document(nil), do: :ok

@@ -44,7 +44,8 @@ defmodule Doctrans.Processing.Cancellation do
   def cancel_document(%Document{} = document), do: cancel_document(document.id)
 
   def cancel_document(document_id) do
-    transact(fn -> cancel_locked(document_id) end) |> publish()
+    Repo.safe_transaction(fn -> cancel_locked(document_id) end)
+    |> Topics.publish_document_updated()
   end
 
   defp cancel_locked(document_id) do
@@ -127,21 +128,6 @@ defmodule Doctrans.Processing.Cancellation do
         "Failed to cancel jobs for document #{document_id}: #{Exception.message(error)}"
       )
 
-      {:error, {:database_error, [reason: error]}}
-  end
-
-  # Broadcast after the transaction commits, so subscribers read committed state.
-  defp publish({:ok, document}) do
-    _ = Topics.broadcast_document_updated(document)
-    {:ok, document}
-  end
-
-  defp publish(error), do: error
-
-  defp transact(fun) do
-    Repo.transaction(fun) |> Errors.result()
-  rescue
-    error in [Postgrex.Error, DBConnection.ConnectionError, Ecto.ConstraintError] ->
       {:error, {:database_error, [reason: error]}}
   end
 end

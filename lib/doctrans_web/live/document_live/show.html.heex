@@ -35,7 +35,7 @@
             id="show-document-reprocess"
             type="button"
             phx-click="show_document_reprocess_modal"
-            disabled={!@source_available || @document.status not in ~w(completed error cancelled)}
+            disabled={!@source_available || !can_reprocess_document?(@document)}
             aria-label={reprocess_document_hint(@source_available)}
             title={reprocess_document_hint(@source_available)}
             class="inline-flex items-center gap-2 rounded-lg border border-base-300 px-3 py-2 text-sm transition-colors hover:bg-base-300 disabled:cursor-not-allowed disabled:opacity-40"

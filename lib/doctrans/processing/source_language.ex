@@ -18,6 +18,7 @@ defmodule Doctrans.Processing.SourceLanguage do
 
   require Logger
 
+  alias Doctrans.Deps
   alias Doctrans.Documents.{Document, Topics}
   alias Doctrans.Languages
   alias Doctrans.Repo
@@ -66,11 +67,6 @@ defmodule Doctrans.Processing.SourceLanguage do
     end
   end
 
-  # Allow OpenAI module to be configured for testing
-  defp openai_module do
-    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
-  end
-
   defp sample(markdown) when is_binary(markdown), do: String.slice(markdown, 0, @sample_limit)
   defp sample(_markdown), do: ""
 
@@ -79,7 +75,7 @@ defmodule Doctrans.Processing.SourceLanguage do
   defp blank?(sample), do: String.trim(sample) == ""
 
   defp ask_model(sample) do
-    case openai_module().detect_language(sample, []) do
+    case Deps.openai().detect_language(sample, []) do
       {:ok, reply} ->
         language_code(reply) || fallback()
 

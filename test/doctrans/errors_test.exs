@@ -23,4 +23,15 @@ defmodule Doctrans.ErrorsTest do
     assert ErrorClassifier.classify(reason) == :retryable
     assert ErrorClassifier.classify({:image_unreadable, [reason: :enoent]}) == :permanent
   end
+
+  test "tag/1 keeps the code and drops the bindings, normalizing first" do
+    assert Errors.tag(:circuit_open) == :circuit_open
+
+    assert Errors.tag({:database_error, [reason: %Postgrex.Error{message: "select ..."}]}) ==
+             :database_error
+
+    assert Errors.tag({:http_error, 503}) == :http_error
+    assert Errors.tag(%Req.TransportError{reason: :econnrefused}) == :transport_error
+    assert Errors.tag({:badmatch, {:error, :enoent}}) == :operation_failed
+  end
 end

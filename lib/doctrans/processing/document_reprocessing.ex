@@ -16,16 +16,26 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   # stop without deleting the document is the point of offering one.
   @reprocessable ~w(completed error cancelled)
 
+  @doc """
+  Whether a document is in a state a fresh run may replace.
+
+  The status check alone: `reprocess_document/2` also requires that no run is
+  active and that the original upload is still on disk, which the caller cannot
+  know without the lock.
+  """
+  @spec reprocessable?(Documents.Document.t()) :: boolean()
+  def reprocessable?(%Documents.Document{status: status}), do: status in @reprocessable
+
   @spec reprocess_document(Ecto.UUID.t(), keyword()) ::
           {:ok, Documents.Document.t()} | {:error, Doctrans.Errors.reason()}
   def reprocess_document(document_id, opts \\ []) do
-    transact(fn ->
+    Repo.safe_transaction(fn ->
       document = Run.lock(document_id) || Repo.rollback(:document_not_found)
       ensure_reprocessable!(document, opts)
       purge_generated_content(document)
       start_run(document, opts)
     end)
-    |> publish()
+    |> Topics.publish_document_updated()
   end
 
   defp ensure_reprocessable!(document, opts) do
@@ -71,7 +81,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   end
 
   defp reset_page(page, opts) do
-    result = transact(fn -> do_reset_page(page, opts) end)
+    result = Repo.safe_transaction(fn -> do_reset_page(page, opts) end)
 
     case result do
       {:ok, {document, page}} ->
@@ -116,7 +126,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   @spec retry_failed_pages(Ecto.UUID.t(), keyword()) ::
           {:ok, non_neg_integer()} | {:error, Doctrans.Errors.reason()}
   def retry_failed_pages(document_id, opts \\ []) do
-    transact(fn -> do_retry_failed_pages(document_id, opts) end) |> publish_retried()
+    Repo.safe_transaction(fn -> do_retry_failed_pages(document_id, opts) end) |> publish_retried()
   end
 
   defp do_retry_failed_pages(document_id, opts) do
@@ -210,18 +220,4 @@ defmodule Doctrans.Processing.DocumentReprocessing do
       {:error, reason} -> Repo.rollback(reason)
     end
   end
-
-  defp transact(fun) do
-    Repo.transaction(fun) |> Doctrans.Errors.result()
-  rescue
-    error in [Postgrex.Error, DBConnection.ConnectionError, Ecto.ConstraintError] ->
-      {:error, {:database_error, [reason: error]}}
-  end
-
-  defp publish({:ok, document}) do
-    _ = Topics.broadcast_document_updated(document)
-    {:ok, document}
-  end
-
-  defp publish(error), do: error
 end

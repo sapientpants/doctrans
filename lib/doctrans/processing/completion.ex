@@ -27,7 +27,7 @@ defmodule Doctrans.Processing.Completion do
   still has a pending retry that may yet succeed (`:retrying`).
   """
   @spec check_document_completion(
-          Uniq.UUID.t()
+          Ecto.UUID.t()
           | Documents.Page.t()
           | Documents.Document.t()
           | nil
@@ -117,7 +117,7 @@ defmodule Doctrans.Processing.Completion do
   Only updates if document is currently in uploading, extracting, or queued state.
   This is safe to call multiple times - it will only update if needed.
   """
-  @spec update_document_status_to_processing(Uniq.UUID.t() | Documents.Page.t()) ::
+  @spec update_document_status_to_processing(Ecto.UUID.t() | Documents.Page.t()) ::
           :ok | {:error, :obsolete_run}
   def update_document_status_to_processing(%Documents.Page{} = page) do
     Run.with_page(page, fn _ -> start_processing(page.document_id) end)

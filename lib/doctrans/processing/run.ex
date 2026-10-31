@@ -3,7 +3,7 @@ defmodule Doctrans.Processing.Run do
   import Ecto.Query
   alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Page, Pages}
+  alias Doctrans.Documents.{Document, Formats, Page, Pages}
   alias Doctrans.Jobs.{Keys, LlmProcessingJob}
   alias Doctrans.Processing.JobQuery
   alias Doctrans.Repo
@@ -90,11 +90,9 @@ defmodule Doctrans.Processing.Run do
   @spec source_path(Document.t()) :: String.t() | nil
   def source_path(document) do
     # Older documents predate source metadata; retain their filename fallback.
-    extension =
-      document.source_extension ||
-        document.original_filename |> Path.extname() |> String.downcase()
+    extension = document.source_extension || Formats.extension(document.original_filename)
 
-    if extension in ~w(.pdf .doc .docx .odt .rtf) do
+    if Formats.supported?(extension) do
       Path.join(Documents.document_upload_dir(document.id), "original" <> extension)
     end
   end

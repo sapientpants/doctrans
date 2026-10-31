@@ -12,11 +12,10 @@ defmodule Doctrans.Chat.Grader do
   reproduces the pre-agent behavior of answering with whatever was retrieved.
   """
 
-  alias Doctrans.Chat.LineParser
+  alias Doctrans.Chat.{LineParser, StructuredCall}
 
   require Logger
 
-  @grade_timeout 30_000
   @max_predict 256
 
   @typedoc "A verdict on the retrieved context, with queries to retry when it falls short."
@@ -52,9 +51,7 @@ defmodule Doctrans.Chat.Grader do
     Query 2: <another better search query, only if not sufficient>
     """
 
-    messages = [%{role: "user", content: prompt}]
-
-    case openai_module().chat(messages, chat_opts(opts)) do
+    case StructuredCall.ask(prompt, opts, @max_predict) do
       {:ok, response} ->
         Logger.debug("Grader raw response:\n#{String.slice(response, 0, 300)}")
         {:ok, parse_grade(response)}
@@ -80,18 +77,5 @@ defmodule Doctrans.Chat.Grader do
       |> Enum.uniq()
 
     %{sufficient: sufficient?, refined_queries: refined_queries}
-  end
-
-  defp chat_opts(opts) do
-    model = Keyword.get(opts, :model)
-    # Grading is a structured classification, not a reasoning task; disable
-    # thinking so the small max_tokens budget produces the verdict, not an
-    # empty (thinking-only) response.
-    base = [timeout: @grade_timeout, max_tokens: @max_predict, think: false]
-    if model, do: Keyword.put(base, :model, model), else: base
-  end
-
-  defp openai_module do
-    Application.get_env(:doctrans, :openai_module, Doctrans.Processing.OpenAI)
   end
 end

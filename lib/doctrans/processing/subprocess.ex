@@ -160,6 +160,56 @@ defmodule Doctrans.Processing.Subprocess do
   end
 
   @doc """
+  Turns a run's outcome into the caller's success or `Doctrans.Errors.reason()`.
+
+  A clean exit yields the retained output. Every other outcome is logged with
+  the `:name` the caller gives the command, the diagnostic cut to its first 500
+  characters, and mapped to one of three tags, each with the diagnostic as its
+  `:error` binding where there is one:
+
+  - `:failure_tag` - the command exited non-zero
+  - `:timeout_tag` - it was killed at the deadline (`:timeout`, for the log),
+    with no binding: the output of a hung command explains nothing
+  - `:start_tag` - it never ran to an exit: a start failure, a port error, or
+    the owner process of a `supervised/1` run going down
+
+  Which is to say a hung command and a failing one are told apart for the caller,
+  and a command that could not be started is not reported as one that failed.
+  """
+  @spec classify(outcome() | {:subprocess_owner_down, term()}, keyword()) ::
+          {:ok, binary()} | {:error, Doctrans.Errors.reason()}
+  def classify({:ok, {output, 0}}, _opts), do: {:ok, output}
+
+  def classify({:ok, {output, exit_code}}, opts) do
+    diagnostic = diagnostic(output)
+
+    Logger.error(
+      "#{Keyword.fetch!(opts, :name)} failed with exit code #{exit_code}: " <>
+        String.slice(diagnostic, 0, 500)
+    )
+
+    {:error, {Keyword.fetch!(opts, :failure_tag), [error: diagnostic]}}
+  end
+
+  def classify({:timeout, output}, opts) do
+    Logger.error(
+      "#{Keyword.fetch!(opts, :name)} timed out after #{Keyword.fetch!(opts, :timeout)}ms: " <>
+        String.slice(diagnostic(output), 0, 500)
+    )
+
+    {:error, Keyword.fetch!(opts, :timeout_tag)}
+  end
+
+  def classify({:start_error, message}, opts),
+    do: {:error, {Keyword.fetch!(opts, :start_tag), [error: diagnostic(message)]}}
+
+  def classify({:error, reason}, opts),
+    do: {:error, {Keyword.fetch!(opts, :start_tag), [error: inspect(reason)]}}
+
+  def classify({:subprocess_owner_down, reason}, opts),
+    do: {:error, {Keyword.fetch!(opts, :start_tag), [error: inspect(reason)]}}
+
+  @doc """
   Turns retained command output into text safe to show and to encode.
 
   A byte-limited tail can begin mid-codepoint, and a tool is free to write bytes

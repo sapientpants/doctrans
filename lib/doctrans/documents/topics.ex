@@ -74,6 +74,21 @@ defmodule Doctrans.Documents.Topics do
   end
 
   @doc """
+  Broadcasts the document inside an `{:ok, document}` result and hands the result on.
+
+  Anything else passes through untouched. For the tail of a transaction
+  pipeline: the broadcast then follows the commit, so subscribers read committed
+  state.
+  """
+  @spec publish_document_updated(result) :: result when result: {:ok, Document.t()} | term()
+  def publish_document_updated({:ok, %Document{} = document} = result) do
+    _ = broadcast_document_updated(document)
+    result
+  end
+
+  def publish_document_updated(result), do: result
+
+  @doc """
   Broadcasts a document deletion event to the document's viewers and to dashboards.
 
   Carries the bare id, per the payload rule in the moduledoc -- the row is gone.

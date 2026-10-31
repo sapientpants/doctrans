@@ -18,7 +18,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   alias Doctrans.Config.PdfExtraction
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
+  alias Doctrans.Documents.{Formats, Topics}
   alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.DocumentProcessor
   alias Doctrans.Processing.Run
@@ -53,9 +53,9 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
       document = Run.lock(document_id) || Repo.rollback(:document_not_found)
 
       # This is the stored upload path, whose extension passed magic-byte validation.
-      extension = file_path |> Path.extname() |> String.downcase()
+      extension = Formats.extension(file_path)
 
-      unless extension in ~w(.pdf .doc .docx .odt .rtf),
+      unless Formats.supported?(extension),
         do: Repo.rollback({:unsupported_format, [format: extension]})
 
       document =

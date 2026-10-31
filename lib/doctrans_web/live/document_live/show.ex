@@ -24,7 +24,9 @@ defmodule DoctransWeb.DocumentLive.Show do
   import DoctransWeb.DocumentLive.PageViewer,
     only: [zoom_controls: 1, navigation: 1, view_tabs: 1, content_panel_label: 1]
 
-  import DoctransWeb.DocumentLive.ReprocessModal, only: [reprocess_modal: 1, can_reprocess?: 1]
+  import DoctransWeb.DocumentLive.ReprocessModal,
+    only: [reprocess_modal: 1, can_reprocess?: 1, can_reprocess_document?: 1]
+
   import DoctransWeb.DocumentLive.StatusPanel, only: [status_panel: 1]
 
   # Every event `ReprocessModal` owns. The modal is a function component, so the

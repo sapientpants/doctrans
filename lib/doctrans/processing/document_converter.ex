@@ -71,20 +71,32 @@ defmodule Doctrans.Processing.DocumentConverter do
   end
 
   defp supervise_conversion(path, source_path, output_dir) do
+    timeout = get_timeout()
+
     # The profile is created inside the supervised process so a caller killed
     # mid-conversion still has it removed.
-    case Subprocess.supervised(fn -> run_conversion(path, source_path, output_dir) end) do
-      {:subprocess_owner_down, reason} -> finalize({:error, reason}, nil, nil)
-      result -> result
+    outcome =
+      Subprocess.supervised(fn -> run_conversion(path, source_path, output_dir, timeout) end)
+
+    classified =
+      Subprocess.classify(outcome,
+        name: "LibreOffice conversion",
+        timeout: timeout,
+        failure_tag: :conversion_failed,
+        start_tag: :conversion_start_failed,
+        timeout_tag: :conversion_timeout
+      )
+
+    with {:ok, _output} <- classified do
+      finalize(pdf_path(source_path, output_dir))
     end
   end
 
   # The output directory comes from the stored upload path; profile_dir is created by mktemp.
   # sobelow_skip ["Traversal.FileModule"]
-  defp run_conversion(soffice_path, source_path, output_dir) do
+  defp run_conversion(soffice_path, source_path, output_dir, timeout) do
     File.mkdir_p!(output_dir)
 
-    timeout = get_timeout()
     profile_dir = create_profile_dir!()
 
     args = [
@@ -97,60 +109,34 @@ defmodule Doctrans.Processing.DocumentConverter do
       source_path
     ]
 
-    base_name = Path.basename(source_path, Path.extname(source_path))
-    pdf_path = Path.join(output_dir, "#{base_name}.pdf")
-
     Logger.info("Converting #{source_path} to PDF in #{output_dir} using #{soffice_path}")
 
-    result =
-      try do
-        # soffice's launcher can return while its children are still working,
-        # so the process group is killed even when the launcher exits cleanly.
-        Subprocess.run(soffice_path, args, timeout: timeout, kill_on_exit: true)
-      after
-        # Remove the throwaway profile whether the conversion succeeded,
-        # failed, or was killed.
-        File.rm_rf(profile_dir)
-      end
-
-    finalize(result, pdf_path, timeout)
+    try do
+      # soffice's launcher can return while its children are still working,
+      # so the process group is killed even when the launcher exits cleanly.
+      Subprocess.run(soffice_path, args, timeout: timeout, kill_on_exit: true)
+    after
+      # Remove the throwaway profile whether the conversion succeeded,
+      # failed, or was killed.
+      File.rm_rf(profile_dir)
+    end
   end
 
-  defp finalize({:ok, {_output, 0}}, pdf_path, _timeout) do
+  # Where soffice writes its output: the source's basename with a .pdf extension.
+  defp pdf_path(source_path, output_dir) do
+    base_name = Path.basename(source_path, Path.extname(source_path))
+    Path.join(output_dir, "#{base_name}.pdf")
+  end
+
+  # A clean exit is not yet a conversion: soffice reports success for a file it
+  # declined to convert, so the PDF has to be there.
+  defp finalize(pdf_path) do
     if File.exists?(pdf_path) do
       Logger.info("Successfully converted to #{pdf_path}")
       {:ok, pdf_path}
     else
       {:error, :converted_pdf_not_found}
     end
-  end
-
-  defp finalize({:ok, {output, exit_code}}, _pdf_path, _timeout) do
-    diagnostic = Subprocess.diagnostic(output)
-
-    Logger.error(
-      "LibreOffice conversion failed with exit code #{exit_code}: " <>
-        String.slice(diagnostic, 0, 500)
-    )
-
-    {:error, {:conversion_failed, [error: diagnostic]}}
-  end
-
-  defp finalize({:start_error, reason}, _pdf_path, _timeout) do
-    {:error, {:conversion_start_failed, [error: Subprocess.diagnostic(reason)]}}
-  end
-
-  defp finalize({:error, reason}, _pdf_path, _timeout) do
-    {:error, {:conversion_start_failed, [error: reason]}}
-  end
-
-  defp finalize({:timeout, output}, _pdf_path, timeout) do
-    Logger.error(
-      "LibreOffice conversion timed out after #{timeout}ms: " <>
-        String.slice(Subprocess.diagnostic(output), 0, 500)
-    )
-
-    {:error, :conversion_timeout}
   end
 
   # Creates a throwaway LibreOffice profile for a single conversion.

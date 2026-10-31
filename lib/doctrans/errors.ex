@@ -15,6 +15,22 @@ defmodule Doctrans.Errors do
   def normalize({code, bindings}) when is_atom(code) and is_list(bindings), do: {code, bindings}
   def normalize(reason), do: {:operation_failed, [reason: reason]}
 
+  @doc """
+  The tag of a reason alone, with any bindings dropped.
+
+  For a reason that is handed on as a binding of another, or rendered where only
+  its kind matters. Bindings can carry what belongs in the log and nowhere else:
+  an exit reason's stacktrace holding a query and its embedding, a
+  `%Postgrex.Error{}` holding the whole SQL statement.
+  """
+  @spec tag(term()) :: atom()
+  def tag(reason) do
+    case normalize(reason) do
+      {code, _bindings} -> code
+      code when is_atom(code) -> code
+    end
+  end
+
   @doc "Normalizes an error result, preserving successful results."
   @spec result({:ok, value} | {:error, term()}) :: {:ok, value} | {:error, reason()}
         when value: var

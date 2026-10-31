@@ -19,6 +19,7 @@ defmodule Doctrans.Search.Indexer do
 
   import Ecto.Query
 
+  alias Doctrans.Deps
   alias Doctrans.Documents.{Chunk, Page, Topics}
   alias Doctrans.Errors
   alias Doctrans.Repo
@@ -27,10 +28,6 @@ defmodule Doctrans.Search.Indexer do
 
   @typedoc "What the caller should do next: nothing, retry, or stop retrying."
   @type outcome :: :ok | {:error, Errors.reason()} | {:cancel, Errors.reason()}
-
-  defp embedding_module do
-    Application.get_env(:doctrans, :embedding_module, Doctrans.Search.Embedding)
-  end
 
   @doc """
   Indexes the page at `revision`: chunks its source text and embeds each chunk.
@@ -311,7 +308,7 @@ defmodule Doctrans.Search.Indexer do
     end
   end
 
-  defp embed(content), do: embedding_module().generate(content, [])
+  defp embed(content), do: Deps.embedding().generate(content, [])
 
   # `Repo.update!` raises `Ecto.StaleEntryError` when the row it targets is gone
   # by the time the UPDATE runs. `with_current_revision/2` holds the page, so in
