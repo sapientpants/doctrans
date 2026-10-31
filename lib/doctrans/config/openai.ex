@@ -1,5 +1,11 @@
 defmodule Doctrans.Config.OpenAI do
-  @moduledoc "Typed runtime settings for the OpenAI-compatible API."
+  @moduledoc """
+  Typed runtime settings for the OpenAI-compatible API.
+
+  The request bounds (`timeout/0`, `deadline/0`, `max_response_bytes/0`) have
+  their defaults here and nowhere else; `config/config.exs` explains what each
+  one is for and sets a key only to override it.
+  """
 
   alias Doctrans.Config
 

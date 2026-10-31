@@ -59,6 +59,50 @@ if config_env() != :test do
   end
 end
 
+# The listener, for every environment that starts a server. `config/test.exs`
+# pins its own loopback port and never serves, so it is left alone.
+#
+# Doctrans is a local, single-user app with no authentication, so the endpoint
+# binds on loopback only. PHX_BIND_IP is the one explicit way to widen that:
+# PHX_BIND_IP=0.0.0.0 (or :: for IPv6) accepts connections on every interface,
+# which is what a container needs and what reaches the app from a trusted LAN —
+# you do so at your own risk, since there is no auth to pass.
+#
+# The value has to be parsed here rather than passed through: Bandit types `:ip`
+# as `:inet.socket_address()` and hands it to `:gen_tcp.listen/2`, which exits
+# with :badarg on a binary, so a textual address stops the endpoint from ever
+# starting. `:inet.parse_address/1` takes a charlist and accepts IPv4 and IPv6
+# literals alike; it resolves no host names, which is why the error below says so.
+#
+# The parse stays inline rather than in a helper module. This file runs after
+# compilation (it calls `Doctrans.EnvLoader.load/0` above), so a helper would be
+# reachable; but the parse is one `case`, nothing else needs it, and keeping it
+# beside the variable it reads shows how that variable is interpreted.
+if config_env() != :test do
+  bind_ip_string = System.get_env("PHX_BIND_IP") || "127.0.0.1"
+
+  bind_ip =
+    case :inet.parse_address(String.to_charlist(bind_ip_string)) do
+      {:ok, address} ->
+        address
+
+      {:error, _reason} ->
+        raise "PHX_BIND_IP must be an IPv4 or IPv6 address literal, got: #{bind_ip_string}. " <>
+                "Use 127.0.0.1 to bind on loopback, 0.0.0.0 (or :: for IPv6) to accept " <>
+                "connections on every interface. Host names are not resolved."
+    end
+
+  port = String.to_integer(System.get_env("PORT") || "4000")
+
+  config :doctrans, DoctransWeb.Endpoint,
+    http: [
+      # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
+      # for details about using IPv6 vs IPv4 and loopback vs public addresses.
+      ip: bind_ip,
+      port: port
+    ]
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -90,31 +134,6 @@ if config_env() == :prod do
       """
 
   host = System.get_env("PHX_HOST") || "example.com"
-  port = String.to_integer(System.get_env("PORT") || "4000")
-
-  # Doctrans is a local, single-user app with no authentication, so the
-  # endpoint defaults to binding on loopback only. Set PHX_BIND_IP to
-  # expose it to other interfaces, e.g. PHX_BIND_IP=0.0.0.0 to reach it
-  # from a trusted LAN (you do so at your own risk: there is no auth).
-  #
-  # The value has to be parsed here rather than passed through: Bandit types
-  # `:ip` as `:inet.socket_address()` and hands it to `:gen_tcp.listen/2`, which
-  # exits with :badarg on a string, so a textual address stops the endpoint from
-  # ever starting. `:inet.parse_address/1` takes a charlist and accepts IPv4 and
-  # IPv6 literals alike; it resolves no host names, which is why the error below
-  # says so.
-  bind_ip_string = System.get_env("PHX_BIND_IP") || "127.0.0.1"
-
-  bind_ip =
-    case :inet.parse_address(String.to_charlist(bind_ip_string)) do
-      {:ok, address} ->
-        address
-
-      {:error, _reason} ->
-        raise "PHX_BIND_IP must be an IPv4 or IPv6 address literal, got: #{bind_ip_string}. " <>
-                "Use 127.0.0.1 to bind on loopback, 0.0.0.0 (or :: for IPv6) to accept " <>
-                "connections on every interface. Host names are not resolved."
-    end
 
   # The advertised URL is the address this app reports as its own, and it has to
   # describe what the deployment actually serves.
@@ -134,6 +153,9 @@ if config_env() == :prod do
   # and this container still listens on PORT.
   scheme = System.get_env("PHX_SCHEME") || "http"
 
+  # The listening port, read the same way the listener block above reads it.
+  port = String.to_integer(System.get_env("PORT") || "4000")
+
   url_port =
     case scheme do
       "http" ->
@@ -150,14 +172,6 @@ if config_env() == :prod do
 
   config :doctrans, DoctransWeb.Endpoint,
     url: [host: host, port: url_port, scheme: scheme],
-    http: [
-      # Bind on loopback by default (see PHX_BIND_IP above); exposing to a
-      # trusted LAN requires an explicit PHX_BIND_IP.
-      # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
-      # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-      ip: bind_ip,
-      port: port
-    ],
     secret_key_base: secret_key_base,
     live_view: [signing_salt: secret_key_base]
 

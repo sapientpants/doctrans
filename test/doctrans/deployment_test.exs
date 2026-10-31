@@ -195,8 +195,9 @@ defmodule Doctrans.DeploymentTest do
     test "states its container binding explicitly", %{compose: compose} do
       # The endpoint has to listen on every interface *inside* the container for
       # the loopback-published port to reach it. Saying so here keeps it out of
-      # `config/dev.exs`, where it was once inferred from DATABASE_HOST and so
-      # widened a developer's own binding as a side effect of moving Postgres.
+      # the application's own configuration, where it was once inferred from
+      # DATABASE_HOST and so widened a developer's own binding as a side effect
+      # of moving Postgres.
       assert compose["services"]["app"]["environment"]["PHX_BIND_IP"] == "0.0.0.0"
     end
 
