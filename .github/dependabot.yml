@@ -3,6 +3,10 @@
 # Please see the documentation for all configuration options:
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 
+# Every ecosystem waits seven days after a release before proposing it. A
+# compromised package is usually yanked within days of publication, so the
+# cooldown is the cheapest defence against pulling one in the hour it is live;
+# zizmor's `dependabot-cooldown` audit fails the gate without it.
 version: 2
 updates:
   # The ecosystem identifier for Elixir/Hex is "mix" (the manifest is mix.exs).
@@ -11,6 +15,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       mix-minor-and-patch:
         update-types:
@@ -22,6 +28,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
 
   # Keeps the digest-pinned base images in `Dockerfile.dev` and `Dockerfile`
   # current — a digest pin that nothing bumps only trades a mutable tag for a
@@ -33,3 +41,5 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7

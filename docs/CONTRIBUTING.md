@@ -45,7 +45,14 @@ JavaScript modules. Deployment tests use `docker compose config` to normalize
 ports and volumes; they do not start containers or require a Docker daemon, and
 they ignore the operator's `.env` file. The policy adapter checks in
 `scripts/test-command-policy.sh` additionally need Node's TypeScript support;
-unsupported runtimes are explicitly reported as skipped.
+unsupported runtimes are explicitly reported as skipped. That script is a
+pre-commit hook too, so `mix precommit` and CI both run it whenever the policy,
+its tests, or the pi and Codex adapters change.
+
+The `scripts/check_*.exs` gates each have a smoke test under `test/scripts/`.
+They run the real script as a subprocess against a fixture tree through
+`Doctrans.GateScript`, so the exit status the hook relies on is what is tested;
+add a case there whenever a gate grows a rule.
 
 Test one observable contract per scenario. Establish fixture preconditions,
 assert identities and persisted outcomes, and use barriers for concurrency.
@@ -59,6 +66,13 @@ The quality gate is defined once, in `.pre-commit-config.yaml`. `mix precommit` 
 a thin wrapper around `pre-commit run --all-files`, and CI invokes the same command,
 so the local and CI check sets cannot drift apart. Add or change a check there, not
 in the Mix alias.
+
+GitHub Actions workflows are audited by [zizmor](https://docs.zizmor.sh/) from the
+same gate: every `uses:` must be pinned to a full commit SHA, every checkout must
+set `persist-credentials: false`, and Dependabot must apply a release cooldown.
+Its policy lives in `.github/zizmor.yml`. Resolve a tag to a SHA with
+`gh api repos/OWNER/REPO/commits/TAG --jq .sha` and keep the `# vX.Y.Z` comment
+beside the pin, which is what Dependabot rewrites when it bumps it.
 
 `mix precommit`, the test pre-commit hook, and CI run `mix test --cover` with
 ExCoveralls. CI runs coverage on every pull request and push to `main`, including
