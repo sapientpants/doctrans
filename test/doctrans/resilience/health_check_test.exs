@@ -15,6 +15,10 @@ defmodule Doctrans.Resilience.HealthCheckTest do
   alias Doctrans.Resilience.HealthCheck
   alias Doctrans.TestEnv
 
+  # The OpenAI probe is `OpenAI.list_models/0`, whose failures are logged at
+  # :error by `Doctrans.Processing.ApiFailure`.
+  @moduletag :capture_log
+
   @completed [:doctrans, :health_check, :completed]
 
   setup do
@@ -22,7 +26,20 @@ defmodule Doctrans.Resilience.HealthCheckTest do
     bypass = Bypass.open()
     put_openai_env(base_url: "http://localhost:#{bypass.port}", api_key: "sk-test-123")
 
-    on_exit(fn -> CircuitBreaker.reset(:openai_api) end)
+    # The probe retries a safe GET on transport errors; keep the real retry
+    # path but not its seconds of backoff, which the unreachable case would
+    # otherwise spend.
+    prev_req = Application.fetch_env(:req, :default_options)
+    Req.default_options(Keyword.put(Req.default_options(), :retry_delay, 0))
+
+    on_exit(fn ->
+      CircuitBreaker.reset(:openai_api)
+
+      case prev_req do
+        {:ok, value} -> Application.put_env(:req, :default_options, value)
+        :error -> Application.delete_env(:req, :default_options)
+      end
+    end)
 
     %{bypass: bypass}
   end
@@ -42,14 +59,38 @@ defmodule Doctrans.Resilience.HealthCheckTest do
       assert_received {:authorization, ["Bearer sk-test-123"]}
     end
 
-    test "reports an empty model list when the API returns no data", %{bypass: bypass} do
+    test "reports an empty model list when the API advertises none", %{bypass: bypass} do
+      Bypass.expect(bypass, "GET", "/v1/models", &models(&1, []))
+
+      assert HealthCheck.check_openai() == {:ok, %{available: true, models: [], circuit: :ok}}
+    end
+
+    test "reports a body without a model list as a malformed response", %{bypass: bypass} do
+      # The probe is the same parser the reprocess modal relies on, so a server
+      # that answers 200 with no `data` is a broken dependency, not a healthy
+      # one with nothing to offer.
       Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, Jason.encode!(%{"object" => "list"}))
       end)
 
-      assert HealthCheck.check_openai() == {:ok, %{available: true, models: [], circuit: :ok}}
+      assert HealthCheck.check_openai() == {:error, :invalid_api_response}
+    end
+
+    test "sends no authorization header when no API key is configured", %{bypass: bypass} do
+      # The probe used to build its own request and send `Bearer ` for a nil
+      # key; going through the client, an absent key means an absent header.
+      test_pid = self()
+      put_openai_env(api_key: nil)
+
+      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
+        send(test_pid, {:authorization, Plug.Conn.get_req_header(conn, "authorization")})
+        models(conn, [])
+      end)
+
+      assert {:ok, _} = HealthCheck.check_openai()
+      assert_received {:authorization, []}
     end
 
     test "reports the status code when the API rejects the request", %{bypass: bypass} do

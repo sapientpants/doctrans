@@ -293,9 +293,16 @@ defmodule Doctrans.Processing.OpenAI do
   # gets a tighter per-attempt budget than the processing calls.
   @list_models_timeout 5_000
 
+  # Asks the `:openai_api` fuse like every other call on that endpoint; a blown
+  # fuse answers `{:error, :circuit_open}` without a request. Never melts it,
+  # though: see `ApiFailure.handle/3` on `melt: false`.
   @impl true
   @spec list_models() :: {:ok, [String.t()]} | {:error, Doctrans.Errors.reason()}
   def list_models do
+    CircuitBreaker.call(:openai_api, &do_list_models/0, melt: false)
+  end
+
+  defp do_list_models do
     fuse = :openai_api
 
     case build_base_req()
@@ -331,7 +338,14 @@ defmodule Doctrans.Processing.OpenAI do
   def embed(nil, _opts), do: {:ok, nil}
   def embed("", _opts), do: {:ok, nil}
 
+  # The ask lives next to the melt, so every caller -- indexer, search, chat
+  # retrieval -- is held off a blown `:embedding_api` fuse without wrapping the
+  # call itself. `melt: false`: `ApiFailure.handle/3` classifies and melts.
   def embed(text, opts) when is_binary(text) do
+    CircuitBreaker.call(:embedding_api, fn -> do_embed(text, opts) end, melt: false)
+  end
+
+  defp do_embed(text, opts) do
     model = Keyword.get(opts, :model) || Embedding.model()
     timeout = Keyword.get(opts, :timeout) || Embedding.timeout()
     fuse = :embedding_api
@@ -391,32 +405,19 @@ defmodule Doctrans.Processing.OpenAI do
   # renders the same URLs into the privacy copy; one rule, one place.
   defp redact_url(url), do: Inference.redact_url(url)
 
-  defp base_url do
-    OpenAI.base_url()
-  end
+  defp base_url, do: OpenAI.base_url()
 
-  defp api_key do
-    OpenAI.api_key()
-  end
+  defp api_key, do: OpenAI.api_key()
 
-  defp build_base_req do
-    case api_key() do
-      nil -> Req.new()
-      key -> Req.new(headers: [{"authorization", "Bearer #{key}"}])
-    end
-  end
+  defp build_base_req, do: bearer_req(api_key())
 
   defp embed_url(path) do
     "#{embed_base_url()}/#{String.trim_leading(path, "/")}"
   end
 
-  defp embed_base_url do
-    Embedding.base_url()
-  end
+  defp embed_base_url, do: Embedding.base_url()
 
-  defp embed_api_key do
-    Embedding.api_key()
-  end
+  defp embed_api_key, do: Embedding.api_key()
 
   # Embeddings read the `:embedding` section, so a search box can be bounded on
   # its own. Only `:timeout` differs by default -- a minute against five, spending
@@ -429,12 +430,11 @@ defmodule Doctrans.Processing.OpenAI do
     )
   end
 
-  defp build_embed_base_req do
-    case embed_api_key() do
-      nil -> Req.new()
-      key -> Req.new(headers: [{"authorization", "Bearer #{key}"}])
-    end
-  end
+  defp build_embed_base_req, do: bearer_req(embed_api_key())
+
+  # No key, no header: an absent credential is not an empty one.
+  defp bearer_req(nil), do: Req.new()
+  defp bearer_req(key), do: Req.new(headers: [{"authorization", "Bearer #{key}"}])
 
   defp build_request_body(options) do
     model = Keyword.get(options, :model) || OpenAI.chat_model()
