@@ -8,7 +8,7 @@ defmodule Doctrans.SearchTest do
 
   import Doctrans.Fixtures
 
-  # The RRF constant `search/2` uses when the caller names none. Scores are
+  # The RRF constant `search_with_count/2` uses when the caller names none. Scores are
   # asserted against it rather than against "something positive", because
   # 1/(k + rank) is the whole of what a fused score means.
   @default_rrf_k 60
@@ -24,15 +24,7 @@ defmodule Doctrans.SearchTest do
     Pgvector.new(List.duplicate(0.1, 512) ++ List.duplicate(0.0, 512))
   end
 
-  describe "search/2" do
-    test "returns empty list for empty query" do
-      assert {:ok, %{results: []}} = Search.search_with_count("")
-    end
-
-    test "returns empty list for nil query" do
-      assert {:ok, %{results: []}} = Search.search_with_count(nil)
-    end
-
+  describe "search_with_count/2 ranking" do
     test "returns no matches when nothing in the library answers the query" do
       # A completed, indexed page that simply says something else: the empty
       # answer has to come from the ranking, not from an empty library.
@@ -359,8 +351,8 @@ defmodule Doctrans.SearchTest do
 
   # Postgrex raises on a value it cannot encode, which would escape the
   # `{:ok, _} | {:error, _}` contract and kill the caller rather than fail the
-  # search. Every entry point has to reject those bounds before Postgres sees
-  # them -- including `search/2`, which shares the statement.
+  # search. `search_with_count/2` has to reject those bounds before Postgres
+  # sees them.
   describe "query bounds" do
     test "rejects an offset too large for Postgres to encode" do
       assert {:error, {:invalid_search_bounds, [offset: _]}} =
