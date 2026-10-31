@@ -10,8 +10,9 @@ defmodule Doctrans.Search.Indexer do
   the caller — `Doctrans.Jobs.EmbeddingJob`, which owns the retry schedule — and
   work that no longer applies is reported as `{:cancel, reason}` so it is not
   retried at all. The OpenAI client underneath still replays transient failures
-  within a single call (`retry: :transient`) and melts the `:embedding_api` fuse
-  itself, which is why the calls here pass `melt: false`.
+  within a single call (`retry: :transient`) and owns the `:embedding_api` fuse
+  outright -- it asks before the request and melts on failure -- so nothing here
+  touches the circuit breaker.
   """
 
   require Logger
@@ -21,7 +22,7 @@ defmodule Doctrans.Search.Indexer do
   alias Doctrans.Documents.{Chunk, Page, Topics}
   alias Doctrans.Errors
   alias Doctrans.Repo
-  alias Doctrans.Resilience.{CircuitBreaker, ErrorClassifier}
+  alias Doctrans.Resilience.ErrorClassifier
   alias Doctrans.Search.Chunker
 
   @typedoc "What the caller should do next: nothing, retry, or stop retrying."
@@ -308,14 +309,7 @@ defmodule Doctrans.Search.Indexer do
     end
   end
 
-  # `melt: false`: the client this wraps classifies its own failures and melts
-  # the same fuse, so melting here too would count every failure twice and would
-  # push the fuse toward blown on permanent errors it deliberately ignores.
-  defp embed(content) do
-    CircuitBreaker.call(:embedding_api, fn -> embedding_module().generate(content, []) end,
-      melt: false
-    )
-  end
+  defp embed(content), do: embedding_module().generate(content, [])
 
   # `Repo.update!` raises `Ecto.StaleEntryError` when the row it targets is gone
   # by the time the UPDATE runs. `with_current_revision/2` holds the page, so in

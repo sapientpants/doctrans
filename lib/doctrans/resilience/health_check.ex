@@ -20,7 +20,7 @@ defmodule Doctrans.Resilience.HealthCheck do
       true
   """
 
-  alias Doctrans.Config.OpenAI
+  alias Doctrans.Processing.OpenAI
   alias Doctrans.Repo
   alias Doctrans.Resilience.CircuitBreaker
 
@@ -60,8 +60,13 @@ defmodule Doctrans.Resilience.HealthCheck do
   @doc """
   Checks OpenAI API availability.
 
-  Returns `{:ok, %{available: true, models: [...]}}` on success,
-  or `{:error, reason}` on failure.
+  Returns `{:ok, %{available: true, models: [...], circuit: :ok}}` on success,
+  or `{:error, reason}` on failure. The probe is `OpenAI.list_models/0`, the
+  same call the reprocess modal makes: it asks the `:openai_api` fuse first, so
+  a blown circuit reports `{:error, :circuit_open}` without a request, and it
+  authenticates the way every other client call does, sending no header at all
+  when no key is configured. The check inherits the probe's retry policy, so an
+  unreachable endpoint is reported after Req's safe-GET retries, not before.
   """
   @spec check_openai() :: {:ok, map()} | {:error, term()}
   def check_openai do
@@ -69,35 +74,9 @@ defmodule Doctrans.Resilience.HealthCheck do
 
     result =
       try do
-        # Check circuit breaker status first
-        circuit_status = CircuitBreaker.status(:openai_api)
-
-        if circuit_status == :blown do
-          {:error, :circuit_open}
-        else
-          # Actually check OpenAI connectivity
-          url = "#{OpenAI.base_url()}/v1/models"
-
-          # `retry: false` because a health check reports the state of the
-          # dependency now, not after Req's default `:safe_transient` policy has
-          # spent three backoffs (~7 s) on it -- which would also overrun the 5 s
-          # `receive_timeout` this check is bounded by.
-          case Req.get(url,
-                 receive_timeout: 5_000,
-                 retry: false,
-                 headers: [{"authorization", "Bearer #{OpenAI.api_key()}"}]
-               ) do
-            {:ok, %{status: 200, body: body}} ->
-              models = get_in(body, ["data"]) || []
-              model_names = Enum.map(models, & &1["id"])
-              {:ok, %{available: true, models: model_names, circuit: circuit_status}}
-
-            {:ok, %{status: status}} ->
-              {:error, {:http_error, [status: status]}}
-
-            {:error, reason} ->
-              {:error, Doctrans.Errors.normalize(reason)}
-          end
+        case OpenAI.list_models() do
+          {:ok, models} -> {:ok, %{available: true, models: models, circuit: :ok}}
+          {:error, _reason} = error -> error
         end
       rescue
         e -> {:error, Doctrans.Errors.normalize(e)}

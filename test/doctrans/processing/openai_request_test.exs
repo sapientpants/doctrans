@@ -16,6 +16,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
   setup do
     CircuitBreaker.reset(:openai_api)
+    CircuitBreaker.reset(:embedding_api)
     prev_req = Application.fetch_env(:req, :default_options)
     # Exercise the real retry path without spending seconds on backoff in tests
     # whose assertions concern the resulting HTTP contract.
@@ -41,6 +42,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
     on_exit(fn ->
       CircuitBreaker.reset(:openai_api)
+      CircuitBreaker.reset(:embedding_api)
 
       case prev_req do
         {:ok, value} -> Application.put_env(:req, :default_options, value)
@@ -152,6 +154,24 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     json(conn, 200, %{
       "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "hello"}}]
     })
+  end
+
+  # Blows `fuse_name` directly: `:embedding_api` opens after 3 failures in 30 s
+  # and `:openai_api` after 5 in 60 s, so six melts cover both.
+  defp blow(fuse_name) do
+    for _ <- 1..6, do: :fuse.melt(fuse_name)
+    assert CircuitBreaker.status(fuse_name) == :blown
+    :ok
+  end
+
+  # Drains the request notifications already in the mailbox so a `refute_received`
+  # that follows speaks to the next call alone.
+  defp flush_requests do
+    receive do
+      :http_request -> flush_requests()
+    after
+      0 -> :ok
+    end
   end
 
   defp json(conn, status, payload) do
@@ -778,6 +798,41 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert {:error, :invalid_embedding_response} = OpenAI.embed("text")
     end
 
+    # The ask used to live in `Search.Indexer` alone, so search and chat
+    # retrieval, which call this directly, kept sending requests -- and melting
+    # the fuse further -- after it had blown. Every caller is held off now.
+    test "rejects the call without reaching the API when :embedding_api is blown", %{
+      bypass: bypass,
+      test_pid: test_pid
+    } do
+      Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
+        send(test_pid, :http_request)
+        json(conn, 200, %{"data" => [%{"embedding" => List.duplicate(0.1, 1024)}]})
+      end)
+
+      blow(:embedding_api)
+
+      assert {:error, :circuit_open} = OpenAI.embed("text")
+      refute_received :http_request
+    end
+
+    test "a server that keeps failing blows :embedding_api and is then left alone", %{
+      bypass: bypass,
+      test_pid: test_pid
+    } do
+      Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
+        send(test_pid, :http_request)
+        json(conn, 500, %{"error" => "boom"})
+      end)
+
+      for _ <- 1..4, do: assert({:error, _} = OpenAI.embed("text"))
+      assert CircuitBreaker.status(:embedding_api) == :blown
+
+      flush_requests()
+      assert {:error, :circuit_open} = OpenAI.embed("text")
+      refute_received :http_request
+    end
+
     test "keeps an echoed request body out of the error log", %{bypass: bypass} do
       # A 4xx from an OpenAI-compatible server commonly quotes the input it
       # rejected. For an embedding call that input is the user's search text, so
@@ -911,6 +966,21 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       end)
 
       assert {:error, :invalid_api_response} = OpenAI.list_models()
+    end
+
+    test "rejects the call without reaching the API when :openai_api is blown", %{
+      bypass: bypass,
+      test_pid: test_pid
+    } do
+      Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
+        send(test_pid, :http_request)
+        json(conn, 200, %{"data" => [%{"id" => "model-a"}]})
+      end)
+
+      blow(:openai_api)
+
+      assert {:error, :circuit_open} = OpenAI.list_models()
+      refute_received :http_request
     end
 
     # `:openai_api` is shared with extraction, translation, chat and background
