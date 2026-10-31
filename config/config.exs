@@ -19,8 +19,10 @@ config :doctrans, Doctrans.Repo, types: Doctrans.PostgrexTypes
 # OPENAI_HOST / OPENAI_API_KEY env vars allow overriding (e.g., Docker:
 # http://host.docker.internal:8000). Defaults match the local OMLX server.
 #
-# The three settings below are what keep a misbehaving endpoint from holding a
-# page (see `Doctrans.Processing.RequestBounds`):
+# Three optional keys keep a misbehaving endpoint from holding a page (see
+# `Doctrans.Processing.RequestBounds`). Each has its default in
+# `Doctrans.Config.OpenAI`, stated there and nowhere else; set a key here only
+# to override it:
 # - timeout: milliseconds one receive may take. A server that keeps sending
 #   resets it, so on its own it bounds silence, not the request.
 # - deadline: milliseconds the whole call may take, retries included. A silent,
@@ -33,10 +35,7 @@ config :doctrans, :openai,
   api_key: nil,
   vision_model: "mlx-community/Qwen3.5-9B-MLX-4bit",
   translation_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
-  chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
-  timeout: 300_000,
-  deadline: 600_000,
-  max_response_bytes: 8_000_000
+  chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit"
 
 # Circuit breaker configuration for resilience
 config :doctrans, :circuit_breakers,
@@ -57,10 +56,13 @@ config :doctrans, :circuit_breakers,
 config :doctrans, :uploads, max_file_size: 100_000_000
 
 # PDF extraction configuration
-# Higher DPI = better text recognition but larger files
+#
+# Every key is optional and has its default in `Doctrans.Config.PdfExtraction`,
+# stated there and nowhere else; set a key here only to override it.
+# Higher DPI = better text recognition but larger files.
 #
 # Extraction runs in a single-slot queue against external poppler commands, so
-# every bound here exists to keep one document from holding that slot:
+# every bound exists to keep one document from holding that slot:
 # - timeout: milliseconds one `pdftoppm` render may take before its process
 #   group is killed
 # - info_timeout: the same deadline for the much cheaper `pdfinfo` call
@@ -74,7 +76,7 @@ config :doctrans, :uploads, max_file_size: 100_000_000
 #   this at the configured :dpi is rejected before it is rendered. A maximal PDF
 #   media box renders to gigabytes well inside the deadline, so this is the bound
 #   that has to come first. The default admits an E-size (36x48in) drawing at
-#   150 dpi.
+#   the default :dpi.
 # - max_image_bytes: a rendered page above this is deleted and reported, since
 #   the image is about to be sent to a model; lower :dpi is the usual answer
 #
@@ -83,14 +85,7 @@ config :doctrans, :uploads, max_file_size: 100_000_000
 #   for installations that are not on $PATH
 # - search_dirs: directories to fall back to when $PATH has no match, for a
 #   daemon started with a slim environment. Set to [] to require $PATH.
-config :doctrans, :pdf_extraction,
-  dpi: 150,
-  timeout: 120_000,
-  info_timeout: 15_000,
-  job_timeout: 3_600_000,
-  max_pages: 1_000,
-  max_page_pixels: 40_000_000,
-  max_image_bytes: 20_000_000
+config :doctrans, :pdf_extraction, []
 
 # Document conversion configuration (for Word, OpenDocument, etc.)
 # Requires LibreOffice to be installed:
@@ -133,9 +128,10 @@ config :doctrans, DoctransWeb.Gettext,
 
 # Embedding configuration for semantic search. A nil URL uses the OpenAI endpoint.
 #
-# Embedding calls are bounded the same way: :timeout defaults to 60_000 here,
-# while :deadline and :max_response_bytes fall back to the :openai settings
-# unless they are set in this section.
+# Embedding calls are bounded the same way, by optional :timeout, :deadline and
+# :max_response_bytes keys in this section. Unset, `Doctrans.Config.Embedding`
+# applies its own shorter per-receive timeout and falls back to the :openai
+# deadline and response bound.
 config :doctrans, :embedding,
   base_url: nil,
   api_key: nil,

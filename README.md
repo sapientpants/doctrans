@@ -211,8 +211,9 @@ source without printing either value. To use the file's API key, start with
 
 Tests follow the same loading rules; use `DOCTRANS_ENV_FILE` to select a separate
 test file when needed. Settings read before runtime configuration, such as `DATABASE_HOST`
-in dev/test and `PORT` and `PHX_BIND_IP` in dev, must be exported in the process environment
-before starting Mix; the runtime `.env` loader is too late to affect them.
+in dev/test, must be exported in the process environment before starting Mix; the runtime
+`.env` loader is too late to affect them. `PORT` and `PHX_BIND_IP` are read at runtime in
+every environment, so the file can set them.
 
 The checked-in Compose file sets literal environment values, so copying `.env` does not
 override those values. Edit `docker-compose.yml` or use a Compose override to change them.
@@ -294,7 +295,9 @@ Conversations are saved per document and can be resumed after reopening it.
 
 ## Configuration
 
-Key settings in `config/config.exs` (timeouts shown below are the client defaults):
+Key settings in `config/config.exs`. Each request bound is optional: its default is stated once,
+in the `Doctrans.Config.OpenAI`, `Doctrans.Config.Embedding` or `Doctrans.Config.PdfExtraction`
+module that reads it, and a key is set in `config.exs` only to override that default.
 
 ```elixir
 # API server settings (runtime OPENAI_HOST / OPENAI_API_KEY override these)
@@ -303,18 +306,19 @@ config :doctrans, :openai,
   api_key: nil,
   vision_model: "mlx-community/Qwen3.5-9B-MLX-4bit",
   translation_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
-  chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit",
-  timeout: 300_000,           # One receive; a server that keeps sending resets it
-  deadline: 600_000,          # The whole call, retries included
-  max_response_bytes: 8_000_000
+  chat_model: "mlx-community/Qwen3.6-35B-A3B-4bit"
+  # Optional overrides, defaults in Doctrans.Config.OpenAI:
+  #   timeout: one receive; a server that keeps sending resets it
+  #   deadline: the whole call, retries included
+  #   max_response_bytes: largest response body accepted
 
 # Embedding settings
 config :doctrans, :embedding,
   base_url: nil, # Falls back to the OpenAI base_url
   api_key: nil,
-  model: "mlx-community/Qwen3-Embedding-8B-4bit-DWQ",
-  timeout: 60_000
-  # :deadline and :max_response_bytes fall back to the :openai settings
+  model: "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"
+  # Optional overrides, defaults in Doctrans.Config.Embedding: :timeout, and
+  # :deadline / :max_response_bytes, which fall back to the :openai settings
 
 # Circuit breaker configuration for resilience
 config :doctrans, :circuit_breakers,
@@ -326,8 +330,9 @@ config :doctrans, :circuit_breakers,
 # DOCTRANS_DATA_DIR replaces it.
 config :doctrans, :uploads, max_file_size: 100_000_000  # 100MB
 
-# PDF extraction configuration
-config :doctrans, :pdf_extraction, dpi: 150
+# PDF extraction bounds (dpi, per-command and per-job timeouts, page and
+# image size limits): optional overrides, defaults in Doctrans.Config.PdfExtraction
+config :doctrans, :pdf_extraction, []
 
 # Document conversion timeout (for DOCX, DOC, ODT, RTF via LibreOffice)
 config :doctrans, :document_conversion, timeout: 120_000
@@ -378,7 +383,7 @@ than re-detected, since it is what produced the text they already contain.
 | `DATABASE_HOST` | `localhost` | PostgreSQL hostname (dev/test) |
 | `DATABASE_URL` | - | Full database URL (required in production) |
 | `PORT` | `4000` | Phoenix server port (dev/prod; tests use 4002) |
-| `PHX_BIND_IP` | `127.0.0.1` | Interface the endpoint binds to (dev and prod, with the same default and the same parsing in both). Must be an IPv4 or IPv6 address literal; host names are not resolved, and an unparseable or empty value raises at startup naming the variable. Doctrans has no authentication, so it defaults to loopback; set `PHX_BIND_IP=0.0.0.0` to expose it to a trusted LAN at your own risk. No other setting, `DATABASE_HOST` included, changes the binding |
+| `PHX_BIND_IP` | `127.0.0.1` | Interface the endpoint binds to (dev and prod, read by the one listener block in `config/runtime.exs`). Must be an IPv4 or IPv6 address literal; host names are not resolved, and an unparseable or empty value raises at startup naming the variable. Doctrans has no authentication, so it defaults to loopback; set `PHX_BIND_IP=0.0.0.0` to expose it to a trusted LAN at your own risk. No other setting, `DATABASE_HOST` included, changes the binding |
 | `PHX_HOST` | `example.com` | Production host for URL generation (dev uses `localhost`). Must be the host the browser actually uses: Phoenix compares the LiveView socket's `Origin` host against it, so a mismatch renders the page once and then never connects |
 | `PHX_SCHEME` | `http` | Scheme the application advertises in generated URLs (prod only); use `https` behind a TLS terminator, which also advertises port 443 instead of `PORT`. The application itself always serves plain HTTP on `PORT`. Only the host is origin-checked, so this affects the addresses the app hands out, not whether the socket connects |
 | `PHX_SERVER` | unset | Set to `true` to enable the HTTP server when starting a release |

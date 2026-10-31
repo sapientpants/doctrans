@@ -22,7 +22,8 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     environment:
-      DATABASE_URL: ecto://postgres:postgres@db/doctrans_dev
+      # config/dev.exs reads only the host; credentials and the database name
+      # are fixed there, and DATABASE_URL is a release-only setting.
       DATABASE_HOST: db
       OPENAI_HOST: http://host.docker.internal:8000
       PHX_HOST: localhost
@@ -47,7 +48,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # Allow access to host machine's Ollama
+    # Allow access to the host machine's OpenAI-compatible server (oMLX)
     extra_hosts:
       - "host.docker.internal:host-gateway"
     stdin_open: true

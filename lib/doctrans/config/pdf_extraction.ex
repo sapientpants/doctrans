@@ -2,9 +2,9 @@ defmodule Doctrans.Config.PdfExtraction do
   @moduledoc """
   Typed access to the PDF extraction bounds.
 
-  Every bound a document can exhaust lives here, so the defaults are stated once
-  rather than restated by each caller. See `config/config.exs` for what each one
-  is for.
+  Every bound a document can exhaust lives here, and its default is stated here
+  and nowhere else: `config/config.exs` explains what each one is for and sets
+  only the keys a deployment overrides.
   """
 
   alias Doctrans.Config

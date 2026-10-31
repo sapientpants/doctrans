@@ -1,6 +1,8 @@
 defmodule Doctrans.RuntimeConfigTest do
   # Reads `config/runtime.exs` directly: `mix test` never evaluates the storage
-  # root block it defines, so the operator-facing variable is otherwise untested.
+  # root and listener blocks it defines, so the operator-facing variables are
+  # otherwise untested. The listener is read for :dev and :prod alike, since the
+  # one parse serves both.
   #
   # `async: false`: the OS environment it sets is shared by the whole VM.
   use Doctrans.EnvCase, async: false
@@ -35,7 +37,8 @@ defmodule Doctrans.RuntimeConfigTest do
 
   defp upload_dir(env), do: get_in(read_config(env), [:doctrans, :uploads, :upload_dir])
 
-  defp endpoint(key), do: get_in(read_config(:prod), [:doctrans, DoctransWeb.Endpoint, key])
+  defp endpoint(env \\ :prod, key),
+    do: get_in(read_config(env), [:doctrans, DoctransWeb.Endpoint, key])
 
   test "an absolute DOCTRANS_DATA_DIR becomes the storage root" do
     System.put_env("DOCTRANS_DATA_DIR", "/srv/doctrans-data/")
@@ -77,28 +80,64 @@ defmodule Doctrans.RuntimeConfigTest do
   # Bandit types `:ip` as `:inet.socket_address()` and hands it to
   # `:gen_tcp.listen/2`, which exits with :badarg on a string. A textual address
   # here is not a cosmetic problem: the endpoint never starts.
-  describe "PHX_BIND_IP" do
-    test "defaults to the loopback address as a tuple, not a string" do
-      assert endpoint(:http)[:ip] == {127, 0, 0, 1}
+  #
+  # The interface the endpoint listens on is the one setting that decides
+  # whether an app with no authentication is reachable from the LAN, so every
+  # case runs for development and production alike.
+  for env <- [:dev, :prod] do
+    describe "PHX_BIND_IP in #{env}" do
+      @env env
+
+      test "defaults to the loopback address as a tuple, not a string" do
+        assert endpoint(@env, :http)[:ip] == {127, 0, 0, 1}
+      end
+
+      test "parses an explicit IPv4 literal" do
+        System.put_env("PHX_BIND_IP", "0.0.0.0")
+
+        assert endpoint(@env, :http)[:ip] == {0, 0, 0, 0}
+      end
+
+      test "parses an IPv6 literal" do
+        System.put_env("PHX_BIND_IP", "::1")
+
+        assert endpoint(@env, :http)[:ip] == {0, 0, 0, 0, 0, 0, 0, 1}
+      end
+
+      test "a value that is not an address literal is rejected by name" do
+        System.put_env("PHX_BIND_IP", "localhost")
+
+        assert_raise RuntimeError, ~r/PHX_BIND_IP.*localhost/s, fn -> endpoint(@env, :http) end
+      end
+
+      # `System.get_env/1 || default` treats "" as a value, so an explicitly
+      # empty setting does not fall back to loopback — it fails to parse.
+      # Refusing to start is the right answer either way, and the README says
+      # so; this pins it rather than leaving the documented behaviour to the
+      # shape of an `||`.
+      test "an explicitly empty value is rejected rather than falling back" do
+        System.put_env("PHX_BIND_IP", "")
+
+        assert_raise RuntimeError, ~r/PHX_BIND_IP must be an IPv4 or IPv6 address literal/, fn ->
+          endpoint(@env, :http)
+        end
+      end
+
+      test "PORT chooses the listening port" do
+        System.put_env("PORT", "4321")
+
+        assert endpoint(@env, :http)[:port] == 4321
+      end
     end
+  end
 
-    test "parses an explicit IPv4 literal" do
-      System.put_env("PHX_BIND_IP", "0.0.0.0")
+  # The suite's own endpoint is configured in `config/test.exs` and never
+  # serves; the listener block must not reach into it.
+  test "the test environment keeps the listener from config/test.exs" do
+    System.put_env("PHX_BIND_IP", "0.0.0.0")
+    System.put_env("PORT", "4321")
 
-      assert endpoint(:http)[:ip] == {0, 0, 0, 0}
-    end
-
-    test "parses an IPv6 literal" do
-      System.put_env("PHX_BIND_IP", "::1")
-
-      assert endpoint(:http)[:ip] == {0, 0, 0, 0, 0, 0, 0, 1}
-    end
-
-    test "a value that is not an address literal is rejected by name" do
-      System.put_env("PHX_BIND_IP", "localhost")
-
-      assert_raise RuntimeError, ~r/PHX_BIND_IP.*localhost/s, fn -> endpoint(:http) end
-    end
+    assert endpoint(:test, :http) == nil
   end
 
   # The advertised URL is what the app hands out as its own address, in
