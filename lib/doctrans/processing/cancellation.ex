@@ -1,6 +1,6 @@
 defmodule Doctrans.Processing.Cancellation do
   @moduledoc """
-  Stops a document's processing without deleting the document.
+  Stops a document's processing, on its own or ahead of deleting the document.
 
   Cancellation is a statement about work that has not started. `cancel_jobs/1`
   cancels the document's waiting jobs — `available`, `scheduled`, `retryable`
@@ -10,9 +10,12 @@ defmodule Doctrans.Processing.Cancellation do
   state `Completion` refuses to overturn, so a job finishing after the fact
   cannot report the document completed or failed.
 
-  Nothing generated is discarded. The pages keep the content they produced, and
-  the document stays reprocessable — as a whole, or page by page — so recovering
-  from a cancellation never means uploading the file again.
+  Nothing generated is discarded by `cancel_document/1`. The pages keep the
+  content they produced, and the document stays reprocessable — as a whole, or
+  page by page — so recovering from a cancellation never means uploading the file
+  again. `cancel_and_delete/1` is the one call here that does discard: it is what
+  deleting a document means from the user's side, the queued work stopped before
+  the row and files go.
   """
 
   import Ecto.Query
@@ -75,6 +78,23 @@ defmodule Doctrans.Processing.Cancellation do
       ]
     )
     |> Repo.update_all([])
+  end
+
+  @doc """
+  Cancels the document's waiting jobs, then deletes the document and its files.
+
+  `Documents.delete_document/1` on its own would leave the document's queued jobs
+  to wake up against a row that is gone. Jobs already executing are out of reach
+  and run to completion either way, as `cancel_jobs/1` describes.
+
+  Stops at the first failure, so a cancellation the database refused leaves the
+  document in place rather than deleting it with its jobs still queued.
+  """
+  @spec cancel_and_delete(Document.t()) :: {:ok, Document.t()} | {:error, Errors.reason()}
+  def cancel_and_delete(%Document{} = document) do
+    with :ok <- cancel_jobs(document.id) do
+      Documents.delete_document(document)
+    end
   end
 
   @doc """

@@ -337,13 +337,11 @@ defmodule DoctransWeb.DocumentLive.Index do
     end
   end
 
+  # A card for a document another tab already deleted is gone either way.
   defp delete_existing_document(nil), do: :ok
 
   defp delete_existing_document(document) do
-    with :ok <- Cancellation.cancel_jobs(document.id),
-         {:ok, _} <- Documents.delete_document(document) do
-      :ok
-    end
+    with {:ok, _deleted} <- Cancellation.cancel_and_delete(document), do: :ok
   end
 
   # One pass over the entries in the order the user picked them, so the outcome list

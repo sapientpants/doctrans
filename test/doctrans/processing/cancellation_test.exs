@@ -235,4 +235,48 @@ defmodule Doctrans.Processing.CancellationTest do
     |> Ecto.Changeset.change(state: state)
     |> Repo.update!()
   end
+
+  describe "cancel_and_delete/1" do
+    test "cancels the waiting jobs, then deletes the document and its files" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        doc = document_with_pages_fixture(%{}, 2)
+        dir = Documents.document_upload_dir(doc.id)
+        File.mkdir_p!(dir)
+        on_exit(fn -> File.rm_rf!(dir) end)
+
+        {:ok, job} = DocumentExtractionJob.enqueue_document(doc.id, "/tmp/original.pdf")
+        assert Repo.get!(Oban.Job, job.id).state == "available"
+
+        assert {:ok, deleted} = Cancellation.cancel_and_delete(doc)
+
+        assert deleted.id == doc.id
+        assert Repo.get!(Oban.Job, job.id).state == "cancelled"
+        assert is_nil(Documents.get_document(doc.id))
+        assert Documents.list_pages(doc.id) == []
+        refute File.exists?(dir)
+      end)
+    end
+
+    test "leaves another document's jobs alone" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        doc = document_fixture()
+        other = document_fixture()
+        {:ok, job} = DocumentExtractionJob.enqueue_document(other.id, "/tmp/original.pdf")
+
+        assert {:ok, _deleted} = Cancellation.cancel_and_delete(doc)
+
+        assert Repo.get!(Oban.Job, job.id).state == "available"
+        assert Documents.get_document(other.id).id == other.id
+      end)
+    end
+
+    test "succeeds when the document was already removed after lookup" do
+      doc = document_fixture()
+      stale = Documents.get_document(doc.id)
+
+      assert {:ok, _} = Documents.delete_document(doc)
+      assert {:ok, deleted} = Cancellation.cancel_and_delete(stale)
+      assert deleted.id == doc.id
+    end
+  end
 end
