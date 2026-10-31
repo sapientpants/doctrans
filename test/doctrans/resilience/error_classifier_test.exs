@@ -51,20 +51,20 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
     end
 
     test "classifies HTTP 5xx errors as retryable" do
-      assert ErrorClassifier.classify({:http_error, 500}) == :retryable
-      assert ErrorClassifier.classify({:http_error, 502}) == :retryable
-      assert ErrorClassifier.classify({:http_error, 503}) == :retryable
-      assert ErrorClassifier.classify({:http_error, 599}) == :retryable
+      assert ErrorClassifier.classify({:http_error, [status: 500]}) == :retryable
+      assert ErrorClassifier.classify({:http_error, [status: 502]}) == :retryable
+      assert ErrorClassifier.classify({:http_error, [status: 503]}) == :retryable
+      assert ErrorClassifier.classify({:http_error, [status: 599]}) == :retryable
     end
 
     test "classifies HTTP 429 as retryable" do
-      assert ErrorClassifier.classify({:http_error, 429}) == :retryable
+      assert ErrorClassifier.classify({:http_error, [status: 429]}) == :retryable
     end
 
     test "classifies HTTP 4xx errors as permanent" do
-      assert ErrorClassifier.classify({:http_error, 400}) == :permanent
-      assert ErrorClassifier.classify({:http_error, 404}) == :permanent
-      assert ErrorClassifier.classify({:http_error, 422}) == :permanent
+      assert ErrorClassifier.classify({:http_error, [status: 400]}) == :permanent
+      assert ErrorClassifier.classify({:http_error, [status: 404]}) == :permanent
+      assert ErrorClassifier.classify({:http_error, [status: 422]}) == :permanent
     end
 
     test "classifies file errors as permanent" do
@@ -109,7 +109,7 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
   describe "retryable?/1" do
     test "returns true for retryable errors" do
       assert ErrorClassifier.retryable?(:timeout) == true
-      assert ErrorClassifier.retryable?({:http_error, 500}) == true
+      assert ErrorClassifier.retryable?({:http_error, [status: 500]}) == true
     end
 
     test "returns true for unknown errors (default to retry)" do
@@ -117,20 +117,20 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
     end
 
     test "returns false for permanent errors" do
-      assert ErrorClassifier.retryable?({:http_error, 404}) == false
+      assert ErrorClassifier.retryable?({:http_error, [status: 404]}) == false
       assert ErrorClassifier.retryable?({:error, :enoent}) == false
     end
   end
 
   describe "permanent?/1" do
     test "returns true for permanent errors" do
-      assert ErrorClassifier.permanent?({:http_error, 404}) == true
+      assert ErrorClassifier.permanent?({:http_error, [status: 404]}) == true
       assert ErrorClassifier.permanent?({:error, :enoent}) == true
     end
 
     test "returns false for retryable errors" do
       assert ErrorClassifier.permanent?(:timeout) == false
-      assert ErrorClassifier.permanent?({:http_error, 500}) == false
+      assert ErrorClassifier.permanent?({:http_error, [status: 500]}) == false
     end
 
     test "returns false for unknown errors" do

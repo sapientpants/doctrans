@@ -33,7 +33,7 @@ msgstr "A-Z"
 msgid "Actions"
 msgstr "Aktionen"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:87
+#: lib/doctrans_web/live/document_live/viewer_components.ex:90
 #, elixir-autogen, elixir-format
 msgid "An error occurred processing this page"
 msgstr "Bei der Verarbeitung dieser Seite ist ein Fehler aufgetreten"
@@ -53,7 +53,7 @@ msgstr "Verbindung wird wiederhergestellt"
 msgid "Back"
 msgstr "Zurück"
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:347
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:345
 #: lib/doctrans_web/live/document_live/upload_components.ex:142
 #, elixir-autogen, elixir-format
 msgid "Cancel"
@@ -95,15 +95,10 @@ msgstr "Geben Sie einen Suchbegriff ein, um Inhalte in allen Ihren Dokumenten zu
 msgid "Error"
 msgstr "Fehler"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:63
+#: lib/doctrans_web/live/document_live/viewer_components.ex:75
 #, elixir-autogen, elixir-format
 msgid "Extracting text from page..."
 msgstr "Text wird aus der Seite extrahiert..."
-
-#: lib/doctrans_web/error_messages.ex:313
-#, elixir-autogen, elixir-format
-msgid "Failed to delete document"
-msgstr "Dokument konnte nicht gelöscht werden"
 
 #: lib/doctrans_web/live/search_live.ex:211
 #, elixir-autogen, elixir-format
@@ -161,7 +156,7 @@ msgstr "Noch keine Dokumente"
 msgid "No files were uploaded"
 msgstr "Keine Dateien wurden hochgeladen"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:94
+#: lib/doctrans_web/live/document_live/viewer_components.ex:65
 #, elixir-autogen, elixir-format
 msgid "No page selected"
 msgstr "Keine Seite ausgewählt"
@@ -295,7 +290,7 @@ msgstr "Zielsprache"
 msgid "Translated Content"
 msgstr "Übersetzter Inhalt"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:73
+#: lib/doctrans_web/live/document_live/viewer_components.ex:85
 #, elixir-autogen, elixir-format
 msgid "Translating content..."
 msgstr "Inhalt wird übersetzt..."
@@ -325,6 +320,7 @@ msgstr "Neues Dokument hochladen"
 msgid "Uploading"
 msgstr "Hochladen"
 
+#: lib/doctrans_web/live/document_live/viewer_components.ex:70
 #: lib/doctrans_web/live/document_live/viewer_components.ex:80
 #, elixir-autogen, elixir-format
 msgid "Waiting to process..."
@@ -378,15 +374,10 @@ msgstr "Dokumente"
 msgid "Drag and drop documents here, or"
 msgstr "Dokumente hierher ziehen oder"
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:322
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:320
 #, elixir-autogen, elixir-format
 msgid "Extraction Model"
 msgstr "Extraction Model"
-
-#: lib/doctrans_web/error_messages.ex:314
-#, elixir-autogen, elixir-format
-msgid "Failed to reset page for reprocessing"
-msgstr "Failed to reset page for reprocessing"
 
 #: lib/doctrans_web/live/search_live.ex:386
 #: lib/doctrans_web/live/search_live.ex:398
@@ -394,12 +385,7 @@ msgstr "Failed to reset page for reprocessing"
 msgid "Go to page %{page}"
 msgstr "Go to page %{page}"
 
-#: lib/doctrans_web/error_messages.ex:277
-#, elixir-autogen, elixir-format
-msgid "Invalid model selection"
-msgstr "Invalid model selection"
-
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:261
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:259
 #, elixir-autogen, elixir-format
 msgid "Loading models..."
 msgstr "Loading models..."
@@ -419,20 +405,15 @@ msgstr "Page queued for reprocessing"
 msgid "Please try again in a moment."
 msgstr "Please try again in a moment."
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:359
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:357
 #, elixir-autogen, elixir-format
 msgid "Reprocess"
 msgstr "Reprocess"
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:278
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:276
 #, elixir-autogen, elixir-format
 msgid "Reprocess Page"
 msgstr "Seite erneut verarbeiten"
-
-#: lib/doctrans_web/error_messages.ex:307
-#, elixir-autogen, elixir-format
-msgid "Search is temporarily unavailable. Please try again."
-msgstr "Search is temporarily unavailable. Please try again."
 
 #: lib/doctrans_web/live/search_live.ex:380
 #, elixir-autogen, elixir-format
@@ -444,7 +425,7 @@ msgstr "Search results pagination"
 msgid "Search unavailable"
 msgstr "Search unavailable"
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:287
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:285
 #, elixir-autogen, elixir-format
 msgid "Select models to use for re-extracting and re-translating this page."
 msgstr "Select models to use for re-extracting and re-translating this page."
@@ -454,7 +435,7 @@ msgstr "Select models to use for re-extracting and re-translating this page."
 msgid "Showing %{start}-%{end} of %{total} results for \"%{query}\""
 msgstr "Zeige %{start}-%{end} von %{total} Ergebnissen für \"%{query}\""
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:332
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:330
 #, elixir-autogen, elixir-format
 msgid "Translation Model"
 msgstr "Translation Model"
@@ -498,20 +479,10 @@ msgstr "Chat schließen"
 msgid "Document is still being processed. Chat will be available soon."
 msgstr "Das Dokument wird noch verarbeitet. Der Chat wird verfügbar sein, sobald die Verarbeitung abgeschlossen ist."
 
-#: lib/doctrans_web/error_messages.ex:306
-#, elixir-autogen, elixir-format
-msgid "Failed to search the document. Please try again."
-msgstr "Das Dokument konnte nicht durchsucht werden. Bitte versuchen Sie es erneut."
-
 #: lib/doctrans_web/live/document_live/chat_components.ex:112
 #, elixir-autogen, elixir-format
 msgid "I'll find relevant content and answer based on it."
 msgstr "Ich finde relevante Inhalte und antworte darauf basierend."
-
-#: lib/doctrans_web/error_messages.ex:304
-#, elixir-autogen, elixir-format
-msgid "Please enter a question."
-msgstr "Bitte geben Sie eine Frage ein."
 
 #: lib/doctrans_web/privacy_copy.ex:36
 #, elixir-autogen, elixir-format
@@ -524,7 +495,7 @@ msgstr "Private Dokumentenübersetzung mit lokaler KI"
 msgid "Send message"
 msgstr "Nachricht senden"
 
-#: lib/doctrans_web/error_messages.ex:316
+#: lib/doctrans_web/live/document_live/chat_session.ex:163
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Entschuldigung, es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut."
@@ -548,11 +519,6 @@ msgstr "Ihre Dokumente verlassen nie Ihr Gerät"
 #, elixir-autogen, elixir-format
 msgid "Checking the sources..."
 msgstr "Quellen werden überprüft..."
-
-#: lib/doctrans_web/error_messages.ex:315
-#, elixir-autogen, elixir-format
-msgid "Failed to fetch models from OpenAI"
-msgstr "Modelle konnten nicht von OpenAI abgerufen werden"
 
 #: lib/doctrans_web/live/document_live/chat_components.ex:255
 #, elixir-autogen, elixir-format
@@ -589,7 +555,6 @@ msgstr "Dokumentverarbeitung"
 msgid "Document queued for reprocessing"
 msgstr "Dokument zur erneuten Verarbeitung eingereiht"
 
-#: lib/doctrans_web/error_messages.ex:196
 #: lib/doctrans_web/live/document_live/show.ex:401
 #: lib/doctrans_web/live/document_live/show.html.heex:93
 #, elixir-autogen, elixir-format
@@ -611,43 +576,28 @@ msgstr "Die Verarbeitung ist fehlgeschlagen. Sie können das Dokument erneut ver
 msgid "Processing progress"
 msgstr "Verarbeitungsfortschritt"
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:357
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:355
 #: lib/doctrans_web/live/document_live/status_panel.ex:164
 #: lib/doctrans_web/live/document_live/status_panel.ex:175
 #, elixir-autogen, elixir-format
 msgid "Queuing…"
 msgstr "Wird eingereiht…"
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:278
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:276
 #: lib/doctrans_web/live/document_live/show.ex:398
 #, elixir-autogen, elixir-format
 msgid "Reprocess document"
 msgstr "Dokument erneut verarbeiten"
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:284
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:282
 #, elixir-autogen, elixir-format
 msgid "Run every processing step again from the original upload. Existing pages and search results will be replaced. This may take some time."
 msgstr "Alle Verarbeitungsschritte werden mit der Originaldatei erneut ausgeführt. Vorhandene Seiten und Suchergebnisse werden ersetzt. Dies kann einige Zeit dauern."
 
-#: lib/doctrans_web/error_messages.ex:201
-#, elixir-autogen, elixir-format
-msgid "The document has changed. Please try again."
-msgstr "Das Dokument wurde geändert. Bitte versuchen Sie es erneut."
-
-#: lib/doctrans_web/error_messages.ex:199
-#, elixir-autogen, elixir-format
-msgid "This document still has active processing jobs. Please wait for them to finish."
-msgstr "Für dieses Dokument sind noch Verarbeitungsaufträge aktiv. Bitte warten Sie, bis diese beendet sind."
-
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:262
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:260
 #, elixir-autogen, elixir-format
 msgid "Select a model"
 msgstr "Modell auswählen"
-
-#: lib/doctrans_web/error_messages.ex:311
-#, elixir-autogen, elixir-format
-msgid "Document search is temporarily unavailable. Please try again."
-msgstr "Die Dokumentsuche ist vorübergehend nicht verfügbar. Bitte versuchen Sie es erneut."
 
 #: lib/doctrans_web/live/search_live.ex:263
 #, elixir-autogen, elixir-format
@@ -659,12 +609,12 @@ msgstr "Die semantische Suche ist nicht verfügbar, daher werden nur Stichworttr
 msgid "These results may be incomplete until it is back."
 msgstr "Diese Ergebnisse sind möglicherweise unvollständig, bis sie wieder verfügbar ist."
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:309
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:307
 #, elixir-autogen, elixir-format
 msgid "Retry"
 msgstr "Erneut versuchen"
 
-#: lib/doctrans_web/live/document_live/reprocess_modal.ex:309
+#: lib/doctrans_web/live/document_live/reprocess_modal.ex:307
 #, elixir-autogen, elixir-format
 msgid "Retrying..."
 msgstr "Wird erneut versucht..."
@@ -884,17 +834,17 @@ msgstr "Wird gestoppt…"
 msgid "Translation"
 msgstr "Übersetzung"
 
-#: lib/doctrans_web/live/document_live/upload_readiness.ex:109
+#: lib/doctrans_web/live/document_live/upload_readiness.ex:107
 #, elixir-autogen, elixir-format
 msgid "Checking model availability..."
 msgstr "Modellverfügbarkeit wird geprüft..."
 
-#: lib/doctrans_web/live/document_live/upload_readiness.ex:120
+#: lib/doctrans_web/live/document_live/upload_readiness.ex:118
 #, elixir-autogen, elixir-format
 msgid "Could not check whether the model settings will work."
 msgstr "Es konnte nicht geprüft werden, ob die Modelleinstellungen funktionieren."
 
-#: lib/doctrans_web/live/document_live/upload_readiness.ex:131
+#: lib/doctrans_web/live/document_live/upload_readiness.ex:129
 #, elixir-autogen, elixir-format
 msgid "Processing may not finish with the current settings"
 msgstr "Die Verarbeitung wird mit den aktuellen Einstellungen möglicherweise nicht abgeschlossen"

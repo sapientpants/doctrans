@@ -10,6 +10,8 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   requests and does not reach into the chat contexts itself.
   """
 
+  use Gettext, backend: DoctransWeb.Gettext
+
   import Phoenix.Component, only: [assign: 3]
   import Phoenix.LiveView, only: [stream: 3, stream: 4, stream_insert: 3]
 
@@ -150,10 +152,15 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
 
   @doc """
   Applies a failed chat turn to the socket, rendering `reason` for the reader.
+
+  The assistant answers in the first person, so a failure the catalog cannot
+  name is its own apology here, not the neutral fallback every flash shares.
   """
   def put_failure(socket, reason) do
-    put_error(socket, ErrorMessages.message(reason))
+    put_error(socket, ErrorMessages.message(reason, apology()))
   end
+
+  defp apology, do: gettext("Sorry, I encountered an error. Please try again.")
 
   @doc """
   Applies a successful chat response to the socket.

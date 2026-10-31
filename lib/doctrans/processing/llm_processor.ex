@@ -13,6 +13,10 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   Errors remain structured across background processes. The web layer translates
   them using the viewing process's locale.
+
+  A page reset, replaced or deleted while its run is in flight makes every
+  further write to it answer `{:error, :obsolete_run}`; such a run ends as `:ok`,
+  because the generation that superseded it now owns the work.
   """
 
   require Logger
@@ -65,22 +69,36 @@ defmodule Doctrans.Processing.LlmProcessor do
           Logger.info("Document #{page.document_id} was cancelled, skipping page #{page_id}")
           :ok
         else
-          do_process_page(page, opts)
+          page |> do_process_page(opts) |> settle_obsolete_run(page)
         end
     end
-  rescue
-    error in MatchError ->
-      if error.term == {:error, :obsolete_run}, do: :ok, else: reraise(error, __STACKTRACE__)
-
-    Ecto.NoResultsError ->
-      :ok
   end
+
+  # Every page write goes through `Run.with_page/2`, which answers
+  # `{:error, :obsolete_run}` once the page has been reset, replaced or deleted
+  # under this run. The work belongs to the generation that superseded it, so
+  # the run ends as a success rather than as a retry of work it no longer owns.
+  defp settle_obsolete_run({:error, :obsolete_run}, page) do
+    Logger.info("Page #{page.id} changed mid-run, leaving it to its current generation")
+    :ok
+  end
+
+  defp settle_obsolete_run(outcome, _page), do: outcome
 
   defp do_process_page(page, opts) do
     with :ok <- maybe_extract(page, opts),
-         extracted <- Documents.get_page!(page.id),
+         {:ok, extracted} <- reload_page(page),
          :ok <- maybe_translate(extracted, opts) do
       reconcile_document(extracted)
+    end
+  end
+
+  # The row can be gone between stages: indexing is the last thing extraction
+  # does, and a deletion that lands there takes the page with it.
+  defp reload_page(page) do
+    case Documents.get_page(page.id) do
+      nil -> {:error, :obsolete_run}
+      current -> {:ok, current}
     end
   end
 
@@ -134,10 +152,8 @@ defmodule Doctrans.Processing.LlmProcessor do
        when status in ["pending", "processing", "error"] do
     # No content to translate - mark as completed with empty translation
     Logger.warning("Page #{page.page_number} has no content to translate, marking as completed")
-    {:ok, page} = Documents.update_page_translation(page, %{translation_status: "completed"})
-    Topics.broadcast_page_updated(page)
 
-    :ok
+    with {:ok, _page} <- mark_stage(page, :translation, "completed"), do: :ok
   end
 
   defp maybe_translate(_page, _opts), do: :ok
@@ -147,31 +163,30 @@ defmodule Doctrans.Processing.LlmProcessor do
       "Extracting markdown for page #{page.page_number} of document #{page.document_id}"
     )
 
-    # Update document status to "processing" when page extraction starts (if not already processing).
-    # This is safe to call for every page - Completion only updates if status
-    # is in a pre-processing state (uploading, extracting, queued).
-    :ok = Completion.update_document_status_to_processing(page)
+    # Moves the document out of its pre-processing states (uploading, extracting,
+    # queued) when its first page starts; a document already processing is left
+    # alone, so every page may call it.
+    with :ok <- Completion.update_document_status_to_processing(page),
+         {:ok, page} <- mark_stage(page, :extraction, "processing") do
+      image_path = Path.join(Documents.uploads_dir(), page.image_path)
 
-    {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "processing"})
-    Topics.broadcast_page_updated(page)
+      case openai_module().extract_markdown(image_path, model_opts(opts, :extraction_model)) do
+        {:ok, markdown} -> save_extraction(page, markdown, opts)
+        {:error, reason} -> fail_stage(page, :extraction, reason)
+      end
+    end
+  end
 
-    image_path = Path.join(Documents.uploads_dir(), page.image_path)
-
-    case openai_module().extract_markdown(image_path, model_opts(opts, :extraction_model)) do
-      {:ok, markdown} ->
-        {:ok, page} =
-          Documents.update_page_extraction(page, %{
-            extraction_model: opts[:extraction_model],
-            original_markdown: markdown,
-            extraction_status: "completed"
-          })
-
-        Topics.broadcast_page_updated(page)
-        queue_indexing(page)
-        :ok
-
-      {:error, reason} ->
-        fail_stage(page, :extraction, reason)
+  defp save_extraction(page, markdown, opts) do
+    with {:ok, page} <-
+           Documents.update_page_extraction(page, %{
+             extraction_model: opts[:extraction_model],
+             original_markdown: markdown,
+             extraction_status: "completed"
+           }) do
+      Topics.broadcast_page_updated(page)
+      queue_indexing(page)
+      :ok
     end
   end
 
@@ -192,32 +207,40 @@ defmodule Doctrans.Processing.LlmProcessor do
   defp translate(page, opts) do
     Logger.info("Translating page #{page.page_number} of document #{page.document_id}")
 
-    {:ok, page} = Documents.update_page_translation(page, %{translation_status: "processing"})
-    Topics.broadcast_page_updated(page)
+    with {:ok, page} <- mark_stage(page, :translation, "processing"),
+         {:ok, document} <- fetch_document(page) do
+      source_language = SourceLanguage.resolve(document, page.original_markdown)
 
-    document = Documents.get_document!(page.document_id)
-    source_language = SourceLanguage.resolve(document, page.original_markdown)
+      case openai_module().translate(
+             page.original_markdown,
+             source_language,
+             document.target_language,
+             model_opts(opts, :translation_model)
+           ) do
+        {:ok, translated} -> save_translation(page, translated, opts)
+        {:error, reason} -> fail_stage(page, :translation, reason)
+      end
+    end
+  end
 
-    case openai_module().translate(
-           page.original_markdown,
-           source_language,
-           document.target_language,
-           model_opts(opts, :translation_model)
-         ) do
-      {:ok, translated} ->
-        {:ok, page} =
-          Documents.update_page_translation(page, %{
-            translation_model: opts[:translation_model],
-            translated_markdown: translated,
-            translation_status: "completed"
-          })
+  defp save_translation(page, translated, opts) do
+    with {:ok, page} <-
+           Documents.update_page_translation(page, %{
+             translation_model: opts[:translation_model],
+             translated_markdown: translated,
+             translation_status: "completed"
+           }) do
+      Topics.broadcast_page_updated(page)
+      :ok
+    end
+  end
 
-        Topics.broadcast_page_updated(page)
-
-        :ok
-
-      {:error, reason} ->
-        fail_stage(page, :translation, reason)
+  # A document deleted after its page was read is the same obsolete run as a
+  # page replaced under it: nothing of this generation is left to write to.
+  defp fetch_document(page) do
+    case Documents.get_document(page.document_id) do
+      nil -> {:error, :obsolete_run}
+      document -> {:ok, document}
     end
   end
 
@@ -236,31 +259,41 @@ defmodule Doctrans.Processing.LlmProcessor do
   @spec fail_stage(Documents.Page.t(), stage(), term()) ::
           {:error, Errors.reason()} | {:cancel, Errors.reason()}
   defp fail_stage(page, stage, reason) do
-    {:ok, page} = mark_stage_errored(page, stage)
-    Topics.broadcast_page_updated(page)
+    with {:ok, page} <- mark_stage(page, stage, "error") do
+      failure = {failure_code(stage), [page_number: page.page_number, reason: reason]}
 
-    failure = {failure_code(stage), [page_number: page.page_number, reason: reason]}
+      if ErrorClassifier.retryable?(reason) do
+        Logger.warning(
+          "#{stage_name(stage)} failed for page #{page.page_number}, leaving the retry to the job: #{inspect(reason)}"
+        )
 
-    if ErrorClassifier.retryable?(reason) do
-      Logger.warning(
-        "#{stage_name(stage)} failed for page #{page.page_number}, leaving the retry to the job: #{inspect(reason)}"
-      )
+        {:error, failure}
+      else
+        Logger.error(
+          "Permanent #{stage} error for page #{page.page_number}, not retrying: #{inspect(reason)}"
+        )
 
-      {:error, failure}
-    else
-      Logger.error(
-        "Permanent #{stage} error for page #{page.page_number}, not retrying: #{inspect(reason)}"
-      )
-
-      {:cancel, failure}
+        {:cancel, failure}
+      end
     end
   end
 
-  defp mark_stage_errored(page, :extraction),
-    do: Documents.update_page_extraction(page, %{extraction_status: "error"})
+  # Writes a stage status under the run guard and announces it. The guard's
+  # `{:error, :obsolete_run}` is returned as is, for `process_page/3` to settle.
+  @spec mark_stage(Documents.Page.t(), stage(), String.t()) ::
+          {:ok, Documents.Page.t()} | {:error, Errors.reason()}
+  defp mark_stage(page, stage, status) do
+    with {:ok, page} <- write_stage(page, stage, status) do
+      Topics.broadcast_page_updated(page)
+      {:ok, page}
+    end
+  end
 
-  defp mark_stage_errored(page, :translation),
-    do: Documents.update_page_translation(page, %{translation_status: "error"})
+  defp write_stage(page, :extraction, status),
+    do: Documents.update_page_extraction(page, %{extraction_status: status})
+
+  defp write_stage(page, :translation, status),
+    do: Documents.update_page_translation(page, %{translation_status: status})
 
   defp failure_code(:extraction), do: :page_extraction_failed
   defp failure_code(:translation), do: :page_translation_failed
