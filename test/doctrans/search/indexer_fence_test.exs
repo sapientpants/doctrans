@@ -9,13 +9,12 @@ defmodule Doctrans.Search.IndexerFenceTest do
   these drive the rest, by injecting the competing write between the query that
   reads a revision and the one that acts on it.
   """
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
 
   import Doctrans.Fixtures
 
   alias Doctrans.Documents.{Chunk, Page}
-  alias Doctrans.Search.{Chunker, Indexer}
-  alias Doctrans.TestEnv
+  alias Doctrans.Search.{Chunker, EmbeddingMocks, Indexer}
 
   test "cancels when the revision moves between reading the page and claiming it" do
     page = extracted_page("Superseded before the status write")
@@ -67,7 +66,7 @@ defmodule Doctrans.Search.IndexerFenceTest do
   test "treats a chunk deleted under a current page as nothing left to write" do
     text = "Chunk removed mid-embedding"
     page = extracted_page(text)
-    barrier = install_barrier(text)
+    barrier = EmbeddingMocks.hold(text)
 
     run =
       Task.Supervisor.async_nolink(Doctrans.TaskSupervisor, fn ->
@@ -99,7 +98,7 @@ defmodule Doctrans.Search.IndexerFenceTest do
 
     # Hold the run on the first chunk; the others have not been written yet.
     first = markdown |> Chunker.chunk() |> Chunker.content_for_embedding(0)
-    barrier = install_barrier(first)
+    barrier = EmbeddingMocks.hold(first)
 
     run =
       Task.Supervisor.async_nolink(Doctrans.TaskSupervisor, fn ->
@@ -172,11 +171,5 @@ defmodule Doctrans.Search.IndexerFenceTest do
       nil ->
         :ok
     end
-  end
-
-  defp install_barrier(text) do
-    barrier = make_ref()
-    TestEnv.put_env(:embedding_stub_barrier, {text, self(), barrier})
-    barrier
   end
 end

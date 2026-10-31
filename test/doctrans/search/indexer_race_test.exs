@@ -1,10 +1,11 @@
 defmodule Doctrans.Search.IndexerRaceTest do
-  # Shared sandbox mode lets the indexing task use this test's database connection.
-  use Doctrans.DataCase, async: false
+  # The indexing task is started through `Doctrans.TaskSupervisor`, so it carries
+  # this test in `$callers` and reaches both its sandbox connection and its
+  # embedding stub without a shared sandbox or a global stub.
+  use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents.{Chunk, Page, Pages}
-  alias Doctrans.Search.Indexer
-  alias Doctrans.TestEnv
+  alias Doctrans.Search.{EmbeddingMocks, Indexer}
 
   import Doctrans.Fixtures
 
@@ -19,7 +20,7 @@ defmodule Doctrans.Search.IndexerRaceTest do
       page =
         page_fixture(document, %{extraction_status: "completed", original_markdown: old_text})
 
-      old_barrier = install_barrier(old_text)
+      old_barrier = EmbeddingMocks.hold(old_text)
       old_run = index_async(page)
       assert_receive {:embedding_started, ^old_barrier, old_task}, 5_000
 
@@ -51,7 +52,7 @@ defmodule Doctrans.Search.IndexerRaceTest do
 
       # Installing the next barrier before releasing the obsolete run lets that run
       # finish: it embeds the old text, which no longer matches the barrier.
-      new_barrier = install_barrier(new_text)
+      new_barrier = EmbeddingMocks.hold(new_text)
 
       if @stage == :crash do
         Process.exit(old_task, :kill)
@@ -133,19 +134,13 @@ defmodule Doctrans.Search.IndexerRaceTest do
     end)
   end
 
-  defp install_barrier(text) do
-    barrier = make_ref()
-    TestEnv.put_env(:embedding_stub_barrier, {text, self(), barrier})
-    barrier
-  end
-
   describe "indexing vs concurrent deletion" do
     test "completes cleanly when the page is deleted mid-embedding" do
       document = document_fixture()
       text = "Embedding deletion race #{document.id}"
       page = page_fixture(document, %{extraction_status: "completed", original_markdown: text})
       chunks = from c in Chunk, where: c.page_id == ^page.id
-      barrier = install_barrier(text)
+      barrier = EmbeddingMocks.hold(text)
 
       run = index_async(page)
 

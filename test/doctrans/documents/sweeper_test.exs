@@ -1,7 +1,9 @@
 defmodule Doctrans.Documents.SweeperTest do
+  # Repoints the global `:uploads` key, so it cannot run alongside async tests.
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Documents.Sweeper
+  alias Doctrans.TestEnv
 
   import Doctrans.Fixtures
 
@@ -10,15 +12,12 @@ defmodule Doctrans.Documents.SweeperTest do
     # of their own rather than emptying the one the rest of the suite shares.
     previous = Application.fetch_env!(:doctrans, :uploads)
     uploads_dir = Path.join(System.tmp_dir!(), "doctrans-sweeper-#{Uniq.UUID.uuid7()}")
-    Application.put_env(:doctrans, :uploads, Keyword.put(previous, :upload_dir, uploads_dir))
+    TestEnv.put_env(:uploads, Keyword.put(previous, :upload_dir, uploads_dir))
 
     documents_dir = Path.join(uploads_dir, "documents")
     File.mkdir_p!(documents_dir)
 
-    on_exit(fn ->
-      Application.put_env(:doctrans, :uploads, previous)
-      File.rm_rf!(uploads_dir)
-    end)
+    on_exit(fn -> File.rm_rf!(uploads_dir) end)
 
     %{documents_dir: documents_dir}
   end

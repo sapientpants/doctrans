@@ -10,18 +10,18 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
   the query cannot be embedded, which is a success the reader must not mistake
   for the whole answer.
 
-  Not async: each test swaps global `Application` env (the embedding module, or
-  the stub's barrier) to observe or hold an embedding call.
+  Each test narrows the embedding mock for itself -- to observe, fail or hold an
+  embedding call -- and the stub reaches only this test's LiveView and its
+  `start_async` tasks, so the file runs concurrently with the rest of the suite.
   """
-  use DoctransWeb.ConnCase, async: false
+  use DoctransWeb.ConnCase, async: true
 
   import Doctrans.Fixtures
   import ExUnit.CaptureLog
 
   alias Doctrans.Documents.Pages
   alias Doctrans.Repo
-  alias Doctrans.Search.{EmbeddingDimensionStub, EmbeddingErrorStub, EmbeddingProbe}
-  alias Doctrans.TestEnv
+  alias Doctrans.Search.EmbeddingMocks
   alias DoctransWeb.SearchLive
 
   # A synchronous regression does not fail these tests, it wedges them: the
@@ -37,16 +37,15 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
     test "embeds a submitted query exactly once", %{conn: conn} do
       searchable_page("Contains onceonlyterm in the text", "Once Only Doc")
 
-      TestEnv.put_env(:embedding_probe_pid, self())
-      TestEnv.put_env(:embedding_module, EmbeddingProbe)
+      EmbeddingMocks.observe()
 
       # `live/2` runs the disconnected mount and then the connected one; only
       # the connected mount may embed.
       {:ok, view, _html} = live(conn, ~p"/search?q=onceonlyterm")
       assert render_async(view, @async_timeout) =~ "Once Only Doc"
 
-      assert_receive {:embedded, "onceonlyterm"}, @async_timeout
-      refute_receive {:embedded, "onceonlyterm"}, 100
+      assert_receive {:embedding_call, "onceonlyterm", _opts}, @async_timeout
+      refute_receive {:embedding_call, "onceonlyterm", _opts}, 100
     end
   end
 
@@ -252,7 +251,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
       # The embedding succeeds and the query fails for a real reason, which is
       # what separates an outage from the degraded keyword-only mode: there are
       # no results to show, so the error panel stands alone.
-      TestEnv.put_env(:embedding_module, EmbeddingDimensionStub)
+      EmbeddingMocks.wrong_dimension()
 
       {:ok, view, _html} = live(conn, ~p"/search?q=failingstatementterm")
 
@@ -301,8 +300,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
 
     test "says nothing about retrieval until the search reports", %{conn: conn} do
       searchable_page("Contains degradedterm in the text", "Degraded Doc")
-      inference_down_for("degradedterm")
-      barrier = install_barrier("degradedterm")
+      barrier = EmbeddingMocks.hold("degradedterm", result: {:error, :circuit_open})
 
       {:ok, view, _html} = live(conn, ~p"/search?q=degradedterm")
 
@@ -394,11 +392,10 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
     }
   end
 
-  # The plan fails this query alone, so every other embedding in the VM keeps
-  # behaving normally while the override stands.
+  # The plan fails this query alone, so every other embedding this test makes
+  # keeps behaving normally.
   defp inference_down_for(query) do
-    TestEnv.put_env(:embedding_module, EmbeddingErrorStub)
-    TestEnv.put_env(:embedding_error_plan, [{query, :circuit_open}])
+    EmbeddingMocks.fail_matching([{query, :circuit_open}])
   end
 
   defp search_page(results, total_count, retrieval \\ :hybrid) do
@@ -440,9 +437,5 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
 
   # Parks the embedding stub on `text` until this test releases it, so the
   # LiveView can be observed mid-inference.
-  defp install_barrier(text) do
-    barrier = make_ref()
-    TestEnv.put_env(:embedding_stub_barrier, {text, self(), barrier})
-    barrier
-  end
+  defp install_barrier(text), do: EmbeddingMocks.hold(text)
 end

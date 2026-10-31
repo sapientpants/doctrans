@@ -1,4 +1,5 @@
 defmodule Doctrans.Search.EmbeddingTest do
+  # Not async: each test points the global `:embedding` setting at its Bypass server.
   use Doctrans.EnvCase, async: false
 
   alias Doctrans.Search.Embedding

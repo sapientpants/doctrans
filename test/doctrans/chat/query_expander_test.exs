@@ -1,8 +1,9 @@
 defmodule Doctrans.Chat.QueryExpanderTest do
-  use Doctrans.EnvCase, async: false
+  # Each test scripts the planner's reply through a probe installed on the
+  # OpenAI mock for that test alone.
+  use Doctrans.EnvCase, async: true
 
   alias Doctrans.Chat.{ContractProbe, QueryExpander}
-  alias Doctrans.TestEnv
 
   describe "expand/3" do
     test "plans multiple targeted queries even without chat history" do
@@ -111,7 +112,6 @@ defmodule Doctrans.Chat.QueryExpanderTest do
 
   defp respond_with(response) do
     probe = start_supervised!({ContractProbe, %{owner: self(), chat_responses: [response]}})
-    TestEnv.put_env(:chat_contract_probe, probe)
-    TestEnv.put_env(:openai_module, ContractProbe)
+    ContractProbe.install(probe)
   end
 end

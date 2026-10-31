@@ -15,6 +15,15 @@ This is a web application written using the Phoenix web framework.
   pattern in the chat path predates it — follow it only when editing that path, don't copy it into new
   code. Note that `cancel_async/2` kills the task without clearing the ref it is tracked under, so a
   result already in flight can still arrive: identify async results by payload, not by arrival.
+- **External collaborators in tests are Mox mocks in private mode.** `config/test.exs` points
+  `:embedding_module`, `:openai_module`, `:pdf_extractor_module` and `:document_converter_module`
+  at `*Mock` modules; `Doctrans.Mocks.setup/1` (run by DataCase, ConnCase and EnvCase) installs the
+  default stubs for every test. Narrow a mock per test with `Mox.stub/3`, `Mox.stub_with/2` or the
+  builders in `Doctrans.Search.EmbeddingMocks` / `Doctrans.Processing.OpenAIProbe`; **never
+  override those four `*_module` keys** or add app-env knobs to a stub. A stub only reaches
+  processes the test spawned (`$callers`), so a test that drives an application-started process
+  stays `async: false`, which switches that test to global mode. Genuinely global settings
+  (`:openai`, `:uploads`, ...) go through `Doctrans.TestEnv.put_env/2` in an `async: false` test
 - **NEVER change the git remote URL** (e.g. swapping between `git@github.com:...` SSH and
   `https://github.com/...`). If a git operation such as `git push` fails with an access or
   connection error, **stop and wait for the user to fix it** — do not work around it by

@@ -1,17 +1,22 @@
 defmodule DoctransWeb.DocumentLive.ReprocessingTest do
+  # Sync: every test points the global `:openai` application env at a Bypass
+  # server, which the model list the reprocess dialog fetches is read from.
   use DoctransWeb.ConnCase, async: false
   import Doctrans.Fixtures
   alias Doctrans.Documents
   alias Doctrans.Processing.Run
+  alias Doctrans.TestEnv
 
   setup do
-    previous = Application.fetch_env!(:doctrans, :openai)
     bypass = Bypass.open()
 
-    Application.put_env(
-      :doctrans,
+    TestEnv.put_env(
       :openai,
-      Keyword.put(previous, :base_url, "http://localhost:#{bypass.port}")
+      Keyword.put(
+        Application.fetch_env!(:doctrans, :openai),
+        :base_url,
+        "http://localhost:#{bypass.port}"
+      )
     )
 
     Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
@@ -20,7 +25,6 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
       |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}, %{id: "translation"}]}))
     end)
 
-    on_exit(fn -> Application.put_env(:doctrans, :openai, previous) end)
     document = document_fixture(%{status: "completed", total_pages: 1})
     page_fixture(document, %{extraction_status: "completed", translation_status: "completed"})
     directory = Documents.document_upload_dir(document.id)

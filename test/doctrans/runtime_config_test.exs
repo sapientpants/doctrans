@@ -1,7 +1,9 @@
 defmodule Doctrans.RuntimeConfigTest do
   # Reads `config/runtime.exs` directly: `mix test` never evaluates the storage
   # root block it defines, so the operator-facing variable is otherwise untested.
-  use ExUnit.Case, async: false
+  #
+  # `async: false`: the OS environment it sets is shared by the whole VM.
+  use Doctrans.EnvCase, async: false
 
   @env_keys ~w(DOCTRANS_DATA_DIR DATABASE_URL SECRET_KEY_BASE DOCTRANS_ENV_FILE
                PHX_BIND_IP PHX_SCHEME PORT)

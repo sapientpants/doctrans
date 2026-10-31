@@ -1,4 +1,7 @@
 defmodule Doctrans.Processing.LlmProcessorRetryTest do
+  # `async: false`: the retry telemetry and the `[:oban, :job, :stop]` event
+  # this file listens to are VM-global, so a concurrent test's retries and job
+  # completions would reach the handlers attached here.
   use Doctrans.DataCase, async: false
   use Oban.Testing, repo: Doctrans.Repo
 
@@ -7,9 +10,8 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Pages, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.LlmProcessor
+  alias Doctrans.Processing.{LlmProcessor, OpenAIMock, OpenAIStub}
   alias Doctrans.Resilience.ErrorClassifier
-  alias Doctrans.TestEnv
 
   # The processor owns no retry loop: a stage calls the model once per run and
   # reports the failure for the job to schedule, so a page costs at most one
@@ -25,7 +27,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
     File.write!(path, "test image")
     on_exit(fn -> File.rm(path) end)
 
-    TestEnv.put_env(:openai_stub_pid, self())
+    observe_model_calls()
     attach_retry_telemetry()
     Topics.subscribe_document(document.id)
 
@@ -66,7 +68,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
     test "the next attempt resumes the errored stage and completes the page", context do
       fail_extraction(:timeout)
       assert {:error, _} = LlmProcessor.process_page(context.page.id, MapSet.new())
-      recover(:openai_stub_extraction_error)
+      recover(:extract_markdown)
 
       assert :ok = LlmProcessor.process_page(context.page.id, MapSet.new())
 
@@ -168,7 +170,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
          context do
       fail_translation(:timeout)
       assert {:error, _} = LlmProcessor.process_page(context.page.id, MapSet.new())
-      recover(:openai_stub_translation_error)
+      recover(:translate)
 
       assert :ok = LlmProcessor.process_page(context.page.id, MapSet.new())
 
@@ -180,7 +182,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       assert saved.translated_markdown =~ context.document.target_language
 
       assert_calls(translate: 2)
-      refute_received {:openai_stub_call, :extract_markdown}
+      refute_received {:model_call, :extract_markdown}
 
       assert Documents.get_document!(context.document.id).status == "completed"
     end
@@ -272,7 +274,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
                )
 
       {:ok, reset} = Pages.reset_page_for_reprocessing(Documents.get_page!(context.page.id))
-      recover(:openai_stub_extraction_error)
+      recover(:extract_markdown)
 
       # The replayed attempt belongs to the generation the reset superseded, and
       # the job reports success rather than running: Oban must not retry work a
@@ -303,12 +305,41 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
     end
   end
 
-  defp fail_extraction(reason), do: TestEnv.put_env(:openai_stub_extraction_error, reason)
+  # The stub answers every call the same way, so the result alone cannot tell
+  # one model call from three. Each extraction and translation call is reported
+  # to the test as `{:model_call, function}` before it is answered, whether the
+  # answer is the default stub's or a stubbed failure.
+  defp observe_model_calls do
+    stub_extraction(&OpenAIStub.extract_markdown/2)
+    stub_translation(&OpenAIStub.translate/4)
+  end
 
-  defp fail_translation(reason), do: TestEnv.put_env(:openai_stub_translation_error, reason)
+  defp fail_extraction(reason), do: stub_extraction(fn _image, _opts -> {:error, reason} end)
+
+  defp fail_translation(reason),
+    do: stub_translation(fn _markdown, _source, _target, _opts -> {:error, reason} end)
 
   # Clears a stubbed failure so the next call sees a healthy model.
-  defp recover(key), do: Application.delete_env(:doctrans, key)
+  defp recover(:extract_markdown), do: stub_extraction(&OpenAIStub.extract_markdown/2)
+  defp recover(:translate), do: stub_translation(&OpenAIStub.translate/4)
+
+  defp stub_extraction(implementation) do
+    owner = self()
+
+    Mox.stub(OpenAIMock, :extract_markdown, fn image_path, opts ->
+      send(owner, {:model_call, :extract_markdown})
+      implementation.(image_path, opts)
+    end)
+  end
+
+  defp stub_translation(implementation) do
+    owner = self()
+
+    Mox.stub(OpenAIMock, :translate, fn markdown, source, target, opts ->
+      send(owner, {:model_call, :translate})
+      implementation.(markdown, source, target, opts)
+    end)
+  end
 
   defp perform_page_job(page, opts) do
     args = LlmProcessingJob.page_args(page, page.processing_generation, %{})
@@ -334,8 +365,8 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
 
   # Asserts exactly `count` calls of `function` reached the model.
   defp assert_calls([{function, count}]) do
-    for _ <- 1..count, do: assert_received({:openai_stub_call, ^function})
-    refute_received {:openai_stub_call, ^function}
+    for _ <- 1..count, do: assert_received({:model_call, ^function})
+    refute_received {:model_call, ^function}
   end
 
   defp attach_retry_telemetry do

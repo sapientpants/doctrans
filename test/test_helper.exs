@@ -3,7 +3,9 @@
 # for any future path that repoints the root -- a stray environment variable, a
 # leaked `Application.put_env` -- which would otherwise erase real documents
 # while the suite reported success.
-expected_upload_root = Path.expand("../tmp/uploads_test", __DIR__)
+expected_upload_root =
+  Path.expand("../tmp/uploads_test#{System.get_env("MIX_TEST_PARTITION")}", __DIR__)
+
 actual_upload_root = Doctrans.Config.Uploads.upload_dir()
 
 if actual_upload_root != expected_upload_root do
@@ -22,15 +24,17 @@ System.at_exit(fn _status -> File.rm_rf(expected_upload_root) end)
 ExUnit.start()
 Ecto.Adapters.SQL.Sandbox.mode(Doctrans.Repo, :manual)
 
-# Define mocks for external services
+# The external collaborators are Mox mocks, and `config/test.exs` points every
+# `*_module` setting at them. Mox runs in private mode: each test installs its
+# own stubs (`Doctrans.Mocks.setup/1` installs the defaults), and they reach
+# only the processes that test spawned -- LiveViews under test, `start_async`
+# tasks, supervised tasks and inline Oban jobs all carry `$callers`. An
+# `async: false` test gets global mode instead, so a process the application
+# started on its own can still reach that test's stubs.
 Mox.defmock(Doctrans.Search.EmbeddingMock, for: Doctrans.Search.EmbeddingBehaviour)
 Mox.defmock(Doctrans.Processing.OpenAIMock, for: Doctrans.Processing.OpenAIBehaviour)
 Mox.defmock(Doctrans.Processing.PdfExtractorMock, for: Doctrans.Processing.PdfExtractorBehaviour)
 
-# Set global mode so stubs work across process boundaries (LiveView tests)
-Mox.set_mox_global()
-
-# Set up default stubs for mocks
-Mox.stub_with(Doctrans.Search.EmbeddingMock, Doctrans.Search.EmbeddingStub)
-Mox.stub_with(Doctrans.Processing.OpenAIMock, Doctrans.Processing.OpenAIStub)
-Mox.stub_with(Doctrans.Processing.PdfExtractorMock, Doctrans.Processing.PdfExtractorStub)
+Mox.defmock(Doctrans.Processing.DocumentConverterMock,
+  for: Doctrans.Processing.DocumentConverterBehaviour
+)

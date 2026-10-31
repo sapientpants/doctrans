@@ -13,34 +13,31 @@ defmodule DoctransWeb.DocumentLive.UploadCorruptPdfTest do
   the document ends in `error` with the diagnostic recorded, its card says so,
   and no page was created that a later stage could mistake for a success.
   """
+  # Sync: the test mounts the dashboard, whose PubSub is global, and overrides
+  # the global `:uploads` application env.
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.PdfExtractor
+  alias Doctrans.Processing.{PdfExtractor, PdfExtractorMock}
+  alias Doctrans.TestEnv
 
   # Both the extractor and the extraction job log the poppler diagnostic.
   @moduletag :capture_log
 
   setup do
-    previous_uploads = Application.fetch_env!(:doctrans, :uploads)
-    previous_extractor = Application.fetch_env!(:doctrans, :pdf_extractor_module)
     directory = Path.join(System.tmp_dir!(), "upload-corrupt-#{Uniq.UUID.uuid7()}")
     File.mkdir_p!(directory)
 
-    Application.put_env(:doctrans, :uploads,
+    TestEnv.put_env(:uploads,
       upload_dir: directory,
       max_file_size: 100_000
     )
 
-    # The real extractor, against the mock `config/test.exs` installs: the point
-    # of this file is that poppler is what refuses the document.
-    Application.put_env(:doctrans, :pdf_extractor_module, PdfExtractor)
+    # The real extractor behind the mock the suite installs by default: the
+    # point of this file is that poppler is what refuses the document.
+    Mox.stub_with(PdfExtractorMock, PdfExtractor)
 
-    on_exit(fn ->
-      Application.put_env(:doctrans, :uploads, previous_uploads)
-      Application.put_env(:doctrans, :pdf_extractor_module, previous_extractor)
-      File.rm_rf!(directory)
-    end)
+    on_exit(fn -> File.rm_rf!(directory) end)
 
     %{directory: directory}
   end

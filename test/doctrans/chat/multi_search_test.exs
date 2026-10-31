@@ -1,14 +1,14 @@
 defmodule Doctrans.Chat.MultiSearchTest do
+  # Sync: `capture_info_log/1` raises the VM-wide `Logger` level for the
+  # duration of a capture, which a concurrent test would see too. The embedding
+  # stubs themselves are per test.
   use Doctrans.DataCase, async: false
 
   import ExUnit.CaptureLog
 
   alias Doctrans.Chat.{ContractProbe, MultiSearch}
   alias Doctrans.Documents
-  alias Doctrans.Search.EmbeddingErrorStub
-  alias Doctrans.Search.EmbeddingExitStub
-  alias Doctrans.Search.EmbeddingNilStub
-  alias Doctrans.TestEnv
+  alias Doctrans.Search.EmbeddingMocks
 
   describe "search_with_queries/3" do
     test "returns empty results when no pages exist" do
@@ -61,8 +61,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
            }}
         )
 
-      TestEnv.put_env(:chat_contract_probe, probe)
-      TestEnv.put_env(:embedding_module, ContractProbe)
+      ContractProbe.install(probe)
 
       # Assets ranks chunks 0, 1, 2 of the first page; liabilities ranks the
       # second page, then chunk 0. Only chunk 0 receives two reciprocal ranks.
@@ -122,8 +121,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
       # Distinct reasons per query, so the assertion below pins *which* failure
       # is reported rather than passing for any of them.
-      TestEnv.put_env(:embedding_module, EmbeddingErrorStub)
-      TestEnv.put_env(:embedding_error_plan, [{"firstq", :circuit_open}, {"secondq", :timeout}])
+      EmbeddingMocks.fail_matching([{"firstq", :circuit_open}, {"secondq", :timeout}])
 
       log =
         capture_info_log(fn ->
@@ -141,7 +139,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
       document = create_document(status: "completed")
       insert_page_with_embedding(document, 1)
 
-      TestEnv.put_env(:embedding_module, EmbeddingExitStub)
+      EmbeddingMocks.exit_with_text()
 
       log =
         capture_info_log(fn ->
@@ -164,7 +162,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
       # `{:ok, nil}` is a legal success, but nothing can be ranked against a
       # NULL vector: searching on it would report "nothing matched" for a query
       # that never ran.
-      TestEnv.put_env(:embedding_module, EmbeddingNilStub)
+      EmbeddingMocks.nil_vector()
 
       capture_info_log(fn ->
         assert {:error, :embedding_unavailable} =
@@ -177,8 +175,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
       page = insert_page_with_embedding(document, 1)
 
       # Only the first query fails; the second embeds through the ordinary stub.
-      TestEnv.put_env(:embedding_module, EmbeddingErrorStub)
-      TestEnv.put_env(:embedding_error_plan, [{"failingquery", :circuit_open}])
+      EmbeddingMocks.fail_matching([{"failingquery", :circuit_open}])
 
       log =
         capture_info_log(fn ->

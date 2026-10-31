@@ -1,39 +1,28 @@
 defmodule Doctrans.Chat.GraderTest do
-  use ExUnit.Case, async: false
+  # Each test scripts the model's reply on the OpenAI mock for itself, so the
+  # file needs neither the database nor any global state.
+  use Doctrans.EnvCase, async: true
 
   alias Doctrans.Chat.Grader
-
-  # Test-only OpenAI module whose chat/2 returns a response configured via :openai_stub_chat_error.
-  defmodule FakeOpenAI do
-    def chat(_messages, _opts) do
-      case Application.get_env(:doctrans, :grader_fake_response) do
-        {:error, reason} -> {:error, reason}
-        response when is_binary(response) -> {:ok, response}
-        _ -> {:ok, ""}
-      end
-    end
-  end
-
-  setup do
-    original = Application.get_env(:doctrans, :openai_module)
-    Application.put_env(:doctrans, :openai_module, FakeOpenAI)
-
-    on_exit(fn ->
-      Application.put_env(:doctrans, :openai_module, original)
-      Application.delete_env(:doctrans, :grader_fake_response)
-    end)
-
-    :ok
-  end
+  alias Doctrans.Processing.OpenAIMock
 
   describe "grade/3" do
     test "empty context is graded insufficient without querying the model" do
+      owner = self()
+
+      Mox.stub(OpenAIMock, :chat, fn _messages, _opts ->
+        send(owner, :model_queried)
+        {:ok, ""}
+      end)
+
       assert {:ok, %{sufficient: false, refined_queries: []}} =
                Grader.grade("What is the capital?", "")
+
+      refute_received :model_queried
     end
 
     test "parses a sufficient verdict" do
-      Application.put_env(:doctrans, :grader_fake_response, "Sufficient: yes")
+      respond_with("Sufficient: yes")
 
       assert {:ok, %{sufficient: true, refined_queries: []}} =
                Grader.grade("What is the capital?", "[Page 1] Paris is the capital.")
@@ -46,7 +35,7 @@ defmodule Doctrans.Chat.GraderTest do
       Query 2: capital city demographics
       """
 
-      Application.put_env(:doctrans, :grader_fake_response, response)
+      respond_with(response)
 
       assert {:ok, grade} = Grader.grade("How many people live there?", "[Page 1] Some text.")
       refute grade.sufficient
@@ -58,17 +47,26 @@ defmodule Doctrans.Chat.GraderTest do
     end
 
     test "defaults to sufficient when the response has no recognizable verdict" do
-      Application.put_env(:doctrans, :grader_fake_response, "some unrelated text")
+      respond_with("some unrelated text")
 
       assert {:ok, %{sufficient: true}} =
                Grader.grade("Question?", "[Page 1] Context.")
     end
 
     test "falls back to sufficient on model error" do
-      Application.put_env(:doctrans, :grader_fake_response, {:error, :timeout})
+      respond_with({:error, :timeout})
 
       assert {:ok, %{sufficient: true, refined_queries: []}} =
                Grader.grade("Question?", "[Page 1] Context.")
     end
+  end
+
+  # Scripts `chat/2`'s reply: a binary is returned as a success, a tuple as is.
+  defp respond_with({:error, _reason} = error) do
+    Mox.stub(OpenAIMock, :chat, fn _messages, _opts -> error end)
+  end
+
+  defp respond_with(response) when is_binary(response) do
+    Mox.stub(OpenAIMock, :chat, fn _messages, _opts -> {:ok, response} end)
   end
 end

@@ -42,6 +42,7 @@ defmodule Doctrans.DataCase do
     # Lets `Doctrans.TestEnv` refuse a global application-env override from a
     # test that runs concurrently with others.
     Doctrans.TestEnv.record_async(tags)
+    Doctrans.Mocks.setup(tags)
 
     pid = Sandbox.start_owner!(Doctrans.Repo, shared: not tags[:async])
     on_exit(fn -> Sandbox.stop_owner(pid) end)

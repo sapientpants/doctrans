@@ -1,11 +1,13 @@
 defmodule Doctrans.BackupTest do
   @moduledoc """
-  Async: these tests repoint the global `:uploads` key at a root of their own.
+  `async: false`: these tests repoint the global `:uploads` key at a root of
+  their own.
   """
 
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Backup
+  alias Doctrans.TestEnv
 
   import Doctrans.Fixtures
 
@@ -14,12 +16,9 @@ defmodule Doctrans.BackupTest do
     # test put there rather than the root the rest of the suite shares.
     previous = Application.fetch_env!(:doctrans, :uploads)
     root = Path.join(System.tmp_dir!(), "doctrans-backup-#{Uniq.UUID.uuid7()}")
-    Application.put_env(:doctrans, :uploads, Keyword.put(previous, :upload_dir, root))
+    TestEnv.put_env(:uploads, Keyword.put(previous, :upload_dir, root))
 
-    on_exit(fn ->
-      Application.put_env(:doctrans, :uploads, previous)
-      File.rm_rf!(root)
-    end)
+    on_exit(fn -> File.rm_rf!(root) end)
 
     %{root: root}
   end

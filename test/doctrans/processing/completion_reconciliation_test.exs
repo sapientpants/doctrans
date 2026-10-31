@@ -1,9 +1,9 @@
 defmodule Doctrans.Processing.CompletionReconciliationTest do
-  # Every case here swaps the global :openai_module for a stub that raises on
-  # any call, which is how they prove no model request is made. Reconciliation
-  # decides from rows that are already saved, so that holds for the startup
-  # phase as much as for a replay.
-  use Doctrans.DataCase, async: false
+  # Every case here stubs the model client with one that raises on any call,
+  # which is how they prove no model request is made. Reconciliation decides
+  # from rows that are already saved, so that holds for the startup phase as
+  # much as for a replay.
+  use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
 
   import Doctrans.Fixtures
@@ -11,7 +11,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{LlmProcessor, OpenAICrashStub, StartupRecovery}
+  alias Doctrans.Processing.{LlmProcessor, OpenAICrashStub, OpenAIMock, StartupRecovery}
 
   # The state a crash between the last page write and the document update
   # leaves behind: every page saved, the document still "processing".
@@ -29,9 +29,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
   end
 
   setup do
-    previous_module = Application.fetch_env!(:doctrans, :openai_module)
-    Application.put_env(:doctrans, :openai_module, OpenAICrashStub)
-    on_exit(fn -> Application.put_env(:doctrans, :openai_module, previous_module) end)
+    Mox.stub_with(OpenAIMock, OpenAICrashStub)
     :ok
   end
 

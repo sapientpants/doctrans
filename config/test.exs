@@ -31,17 +31,21 @@ config :phoenix, :plug_init_mode, :runtime
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
-# Use mocks for external services in tests
+# External services go through Mox mocks. `test/test_helper.exs` defines them
+# and `Doctrans.Mocks` installs each test's default stubs.
 config :doctrans, :embedding_module, Doctrans.Search.EmbeddingMock
-config :doctrans, :openai_module, Doctrans.Processing.OpenAIStub
+config :doctrans, :openai_module, Doctrans.Processing.OpenAIMock
 config :doctrans, :pdf_extractor_module, Doctrans.Processing.PdfExtractorMock
+config :doctrans, :document_converter_module, Doctrans.Processing.DocumentConverterMock
 
 # Use an isolated storage root for tests, outside the application directory, so
 # the suite exercises the same nondefault root an operator gets from
 # DOCTRANS_DATA_DIR. `config/runtime.exs` deliberately ignores that variable in
-# :test, and `test/test_helper.exs` refuses to run against any other root.
+# :test, and `test/test_helper.exs` refuses to run against any other root. The
+# root carries the test partition like the database does, so partitioned runs
+# do not delete each other's files.
 config :doctrans, :uploads,
-  upload_dir: Path.expand("../tmp/uploads_test", __DIR__),
+  upload_dir: Path.expand("../tmp/uploads_test#{System.get_env("MIX_TEST_PARTITION")}", __DIR__),
   max_file_size: 100_000_000
 
 # Disable health check worker in tests (makes real HTTP/DB calls)

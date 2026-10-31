@@ -1,12 +1,12 @@
 defmodule Doctrans.Jobs.LlmProcessingJobTest do
-  use Doctrans.DataCase
+  use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
 
   alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
   alias Doctrans.Documents.Pages
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{OpenAICrashStub, OpenAIProbe, StartupRecovery}
+  alias Doctrans.Processing.{OpenAICrashStub, OpenAIMock, OpenAIProbe, StartupRecovery}
   alias Oban.Engines.Basic
 
   import Doctrans.Fixtures
@@ -64,15 +64,7 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
 
   describe "persisted model selections" do
     setup do
-      previous_module = Application.fetch_env!(:doctrans, :openai_module)
-      Application.put_env(:doctrans, :openai_module, OpenAIProbe)
-      Application.put_env(:doctrans, :openai_probe_pid, self())
-
-      on_exit(fn ->
-        Application.put_env(:doctrans, :openai_module, previous_module)
-        Application.delete_env(:doctrans, :openai_probe_pid)
-      end)
-
+      OpenAIProbe.install()
       :ok
     end
 
@@ -151,9 +143,7 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
     end
 
     test "a crash on the last attempt still settles the document" do
-      previous_module = Application.fetch_env!(:doctrans, :openai_module)
-      Application.put_env(:doctrans, :openai_module, OpenAICrashStub)
-      on_exit(fn -> Application.put_env(:doctrans, :openai_module, previous_module) end)
+      Mox.stub_with(OpenAIMock, OpenAICrashStub)
 
       document = document_fixture(%{status: "processing", total_pages: 1})
       page = page_fixture(document)
@@ -167,9 +157,7 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
     end
 
     test "a crash before the last attempt leaves the document processing" do
-      previous_module = Application.fetch_env!(:doctrans, :openai_module)
-      Application.put_env(:doctrans, :openai_module, OpenAICrashStub)
-      on_exit(fn -> Application.put_env(:doctrans, :openai_module, previous_module) end)
+      Mox.stub_with(OpenAIMock, OpenAICrashStub)
 
       document = document_fixture(%{status: "processing", total_pages: 1})
       page = page_fixture(document)

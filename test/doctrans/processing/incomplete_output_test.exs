@@ -1,24 +1,26 @@
 defmodule Doctrans.Processing.IncompleteOutputTest do
+  # `async: false`: the real client is pointed at Bypass through the global
+  # `:openai` application env, and the `:openai_api` circuit breaker is shared.
   use Doctrans.DataCase, async: false
 
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.{LlmProcessor, OpenAI}
+  alias Doctrans.Processing.{LlmProcessor, OpenAI, OpenAIMock}
   alias Doctrans.Resilience.{CircuitBreaker, ErrorClassifier}
+  alias Doctrans.TestEnv
   alias DoctransWeb.ErrorMessages
 
   setup do
     bypass = Bypass.open()
-    previous = Application.get_env(:doctrans, :openai)
-    previous_module = Application.get_env(:doctrans, :openai_module)
 
-    Application.put_env(:doctrans, :openai,
+    TestEnv.put_env(:openai,
       base_url: "http://localhost:#{bypass.port}",
       chat_model: "test-model"
     )
 
-    Application.put_env(:doctrans, :openai_module, OpenAI)
+    # The processor's calls go through the real client, and from there to Bypass.
+    Mox.stub_with(OpenAIMock, OpenAI)
     CircuitBreaker.reset(:openai_api)
 
     document = document_fixture(%{status: "processing", total_pages: 1})
@@ -28,8 +30,6 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
     File.write!(path, "test image")
 
     on_exit(fn ->
-      Application.put_env(:doctrans, :openai, previous)
-      Application.put_env(:doctrans, :openai_module, previous_module)
       CircuitBreaker.reset(:openai_api)
       File.rm(path)
     end)

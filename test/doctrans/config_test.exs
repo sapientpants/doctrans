@@ -1,22 +1,14 @@
 defmodule Doctrans.ConfigTest do
-  use ExUnit.Case, async: false
+  # Overrides the `:openai`, `:embedding` and `:uploads` settings, which are
+  # VM-global, so this file cannot run alongside async tests.
+  use Doctrans.EnvCase, async: false
 
   alias Doctrans.Config.{Embedding, OpenAI, Uploads}
   alias Doctrans.Processing.PdfProcessor
-
-  setup do
-    previous =
-      Map.new([:openai, :embedding, :uploads], &{&1, Application.fetch_env!(:doctrans, &1)})
-
-    on_exit(fn ->
-      for {key, value} <- previous, do: Application.put_env(:doctrans, key, value)
-    end)
-
-    :ok
-  end
+  alias Doctrans.TestEnv
 
   test "reads current settings, including distinct models and timeouts" do
-    Application.put_env(:doctrans, :openai,
+    TestEnv.put_env(:openai,
       base_url: "http://llm:8000",
       api_key: "test-key",
       vision_model: "vision",
@@ -32,26 +24,26 @@ defmodule Doctrans.ConfigTest do
     assert OpenAI.translation_model() == "translation"
     assert OpenAI.timeout() == 1234
 
-    Application.put_env(:doctrans, :openai, chat_model: "changed")
+    TestEnv.put_env(:openai, chat_model: "changed")
     assert OpenAI.chat_model() == "changed"
     assert OpenAI.vision_model() == "changed"
     assert OpenAI.translation_model() == "changed"
     assert OpenAI.api_key() == nil
     assert OpenAI.timeout() == 300_000
 
-    Application.put_env(:doctrans, :openai, vision_model: "vision-only")
+    TestEnv.put_env(:openai, vision_model: "vision-only")
     assert OpenAI.chat_model() == "vision-only"
   end
 
   test "embedding shares the API endpoint unless explicitly configured" do
-    Application.put_env(:doctrans, :openai, base_url: "http://llm:8000", chat_model: "chat")
-    Application.put_env(:doctrans, :embedding, base_url: nil)
+    TestEnv.put_env(:openai, base_url: "http://llm:8000", chat_model: "chat")
+    TestEnv.put_env(:embedding, base_url: nil)
     assert Embedding.base_url() == "http://llm:8000"
     assert Embedding.model() == "chat"
     assert Embedding.api_key() == nil
     assert Embedding.timeout() == 60_000
 
-    Application.put_env(:doctrans, :embedding,
+    TestEnv.put_env(:embedding,
       base_url: "http://embeddings:9000",
       api_key: "embedding-key",
       model: "embedding-model",
@@ -65,7 +57,7 @@ defmodule Doctrans.ConfigTest do
   end
 
   test "upload consumers share the configured directory and size limit" do
-    Application.put_env(:doctrans, :uploads,
+    TestEnv.put_env(:uploads,
       upload_dir: "/tmp/custom-uploads",
       max_file_size: 123
     )
@@ -79,28 +71,28 @@ defmodule Doctrans.ConfigTest do
   end
 
   test "an unset storage root resolves inside the running application" do
-    Application.put_env(:doctrans, :uploads, max_file_size: 1)
+    TestEnv.put_env(:uploads, max_file_size: 1)
 
     assert Uploads.upload_dir() == Application.app_dir(:doctrans, "priv/static/uploads")
     assert Path.type(Uploads.upload_dir()) == :absolute
   end
 
   test "a relative storage root is expanded, so persisted page paths stay resolvable" do
-    Application.put_env(:doctrans, :uploads, upload_dir: "relative/uploads", max_file_size: 1)
+    TestEnv.put_env(:uploads, upload_dir: "relative/uploads", max_file_size: 1)
 
     assert Uploads.upload_dir() == Path.expand("relative/uploads")
     assert Path.type(Uploads.upload_dir()) == :absolute
   end
 
   test "a storage root that is neither a path nor absent fails explicitly" do
-    Application.put_env(:doctrans, :uploads, upload_dir: :default, max_file_size: 1)
+    TestEnv.put_env(:uploads, upload_dir: :default, max_file_size: 1)
 
     assert_raise ArgumentError, ~r/invalid :upload_dir/, &Uploads.upload_dir/0
   end
 
   test "missing required settings fail explicitly" do
-    Application.put_env(:doctrans, :openai, [])
-    Application.put_env(:doctrans, :uploads, [])
+    TestEnv.put_env(:openai, [])
+    TestEnv.put_env(:uploads, [])
     assert_raise KeyError, fn -> OpenAI.chat_model() end
     assert_raise KeyError, fn -> OpenAI.base_url() end
     assert_raise KeyError, fn -> Uploads.max_file_size() end

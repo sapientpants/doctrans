@@ -1,5 +1,8 @@
 defmodule Doctrans.Chat.RetrieveTest do
-  use Doctrans.DataCase, async: false
+  # The probe and the failing embedder are installed on the mocks per test; the
+  # multi-query branch runs under `Doctrans.TaskSupervisor`, which carries
+  # `$callers`, so nothing here is shared with other tests.
+  use Doctrans.DataCase, async: true
 
   import ExUnit.CaptureLog
 
@@ -7,20 +10,10 @@ defmodule Doctrans.Chat.RetrieveTest do
   alias Doctrans.Chat.Agent
   alias Doctrans.Chat.RetrievalProbe
   alias Doctrans.Documents
-  alias Doctrans.Search.EmbeddingErrorStub
+  alias Doctrans.Search.EmbeddingMocks
 
   setup do
-    original_embedding = Application.get_env(:doctrans, :embedding_module)
-    original_openai = Application.get_env(:doctrans, :openai_module)
-    Application.put_env(:doctrans, :embedding_module, RetrievalProbe)
-    Application.put_env(:doctrans, :openai_module, RetrievalProbe)
-    Application.put_env(:doctrans, :retrieval_probe_pid, self())
-
-    on_exit(fn ->
-      Application.put_env(:doctrans, :embedding_module, original_embedding)
-      Application.put_env(:doctrans, :openai_module, original_openai)
-      Application.delete_env(:doctrans, :retrieval_probe_pid)
-    end)
+    RetrievalProbe.install()
 
     {:ok, document} =
       Documents.create_document(%{
@@ -116,13 +109,7 @@ defmodule Doctrans.Chat.RetrieveTest do
     refute_receive {:embedded, _}
   end
 
-  defp fail_embeddings do
-    Application.put_env(:doctrans, :embedding_module, EmbeddingErrorStub)
-    Application.put_env(:doctrans, :embedding_error_reason, :circuit_open)
-
-    on_exit(fn ->
-      Application.put_env(:doctrans, :embedding_module, RetrievalProbe)
-      Application.delete_env(:doctrans, :embedding_error_reason)
-    end)
-  end
+  # Replaces the probe's embedder with one that fails every query; the probe's
+  # model stays in place.
+  defp fail_embeddings, do: EmbeddingMocks.fail(:circuit_open)
 end

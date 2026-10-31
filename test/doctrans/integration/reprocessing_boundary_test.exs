@@ -10,12 +10,12 @@ defmodule Doctrans.Integration.ReprocessingBoundaryTest do
   run that exhausts its retries would otherwise flip a document to "error" while
   the generation that replaced it is still processing happily.
 
-  Both cases swap `:openai_module` for a stub that raises on any call, so a run
-  that was *not* refused announces itself instead of quietly succeeding.
-
-  Async: `:openai_module` is application-global.
+  Both cases install a model stub that raises on any call, so a run that was
+  *not* refused announces itself instead of quietly succeeding. The stub is per
+  test and `perform_job/3` runs in the test process, so the file runs
+  concurrently with the rest of the suite.
   """
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
 
   import Doctrans.Fixtures
@@ -23,13 +23,12 @@ defmodule Doctrans.Integration.ReprocessingBoundaryTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Page}
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{OpenAICrashStub, SupersedingCrashStub}
-  alias Doctrans.TestEnv
+  alias Doctrans.Processing.{OpenAICrashStub, OpenAIMock, SupersedingCrashStub}
 
   @max_attempts 3
 
   test "a job queued for a superseded generation makes no model call and rewrites nothing" do
-    TestEnv.put_env(:openai_module, OpenAICrashStub)
+    Mox.stub_with(OpenAIMock, OpenAICrashStub)
 
     document = document_fixture(%{status: "processing", total_pages: 1})
 
@@ -65,11 +64,9 @@ defmodule Doctrans.Integration.ReprocessingBoundaryTest do
   end
 
   test "a run superseded mid-flight does not fail the document its replacement owns" do
-    TestEnv.put_env(:openai_module, SupersedingCrashStub)
-
     document = document_fixture(%{status: "processing", total_pages: 1})
     page = document |> page_fixture() |> with_generation()
-    TestEnv.put_env(:superseding_crash_page_id, page.id)
+    SupersedingCrashStub.install(page)
 
     # The last attempt is the one that settles the document, so it is the only
     # attempt on which the guard can be the difference.
@@ -95,7 +92,7 @@ defmodule Doctrans.Integration.ReprocessingBoundaryTest do
   # The control for the test above: without it, that assertion would also hold
   # if exhausted jobs stopped reporting failures altogether.
   test "the same crash on the current generation does fail the document" do
-    TestEnv.put_env(:openai_module, OpenAICrashStub)
+    Mox.stub_with(OpenAIMock, OpenAICrashStub)
 
     document = document_fixture(%{status: "processing", total_pages: 1})
     page = document |> page_fixture() |> with_generation()

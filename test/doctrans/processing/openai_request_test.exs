@@ -3,17 +3,19 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
   Exercises the real `Doctrans.Processing.OpenAI` HTTP request layer against a
   local Bypass server, covering request building, response parsing, and the
   circuit-breaker error path.
+
+  `async: false`: the `:openai` and `:embedding` settings and Req's default
+  options are VM-global, and the `:openai_api` fuse is shared.
   """
 
-  use ExUnit.Case, async: false
+  use Doctrans.EnvCase, async: false
 
   alias Doctrans.Processing.OpenAI
   alias Doctrans.Resilience.CircuitBreaker
+  alias Doctrans.TestEnv
 
   setup do
     CircuitBreaker.reset(:openai_api)
-    prev_openai = Application.get_env(:doctrans, :openai)
-    prev_embedding = Application.get_env(:doctrans, :embedding)
     prev_req = Application.fetch_env(:req, :default_options)
     # Exercise the real retry path without spending seconds on backoff in tests
     # whose assertions concern the resulting HTTP contract.
@@ -23,9 +25,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     bypass = Bypass.open()
     url = "http://localhost:#{bypass.port}"
 
-    Application.put_env(
-      :doctrans,
-      :openai,
+    TestEnv.put_env(:openai,
       base_url: url,
       api_key: "sk-test-123",
       chat_model: "test-chat-model",
@@ -33,9 +33,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       translation_model: "test-translation-model"
     )
 
-    Application.put_env(
-      :doctrans,
-      :embedding,
+    TestEnv.put_env(:embedding,
       base_url: url,
       api_key: "sk-embed-456",
       model: "test-embed-model"
@@ -43,8 +41,6 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
     on_exit(fn ->
       CircuitBreaker.reset(:openai_api)
-      restore_env(:openai, prev_openai)
-      restore_env(:embedding, prev_embedding)
 
       case prev_req do
         {:ok, value} -> Application.put_env(:req, :default_options, value)
@@ -156,12 +152,6 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     json(conn, 200, %{
       "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "hello"}}]
     })
-  end
-
-  defp restore_env(key, value) do
-    if value,
-      do: Application.put_env(:doctrans, key, value),
-      else: Application.delete_env(:doctrans, key)
   end
 
   defp json(conn, status, payload) do
@@ -405,9 +395,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     end
 
     test "returns error on transport failure" do
-      Application.put_env(
-        :doctrans,
-        :openai,
+      TestEnv.put_env(:openai,
         base_url: "http://127.0.0.1:1",
         api_key: nil,
         chat_model: "test-chat-model"
@@ -422,7 +410,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       url: url,
       test_pid: test_pid
     } do
-      Application.put_env(:doctrans, :openai,
+      TestEnv.put_env(:openai,
         base_url: url,
         api_key: nil,
         chat_model: "test-chat-model"
@@ -678,9 +666,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
           5_000 -> flunk("SSE test server did not start")
         end
 
-      Application.put_env(
-        :doctrans,
-        :openai,
+      TestEnv.put_env(:openai,
         base_url: "http://127.0.0.1:#{port}",
         api_key: nil,
         chat_model: "test-chat-model"
@@ -709,9 +695,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     end
 
     test "returns error on transport failure" do
-      Application.put_env(
-        :doctrans,
-        :openai,
+      TestEnv.put_env(:openai,
         base_url: "http://127.0.0.1:1",
         api_key: nil,
         chat_model: "test-chat-model"
@@ -724,7 +708,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
   describe "embed/2" do
     test "uses the shared endpoint without inserting a double slash", %{bypass: bypass} do
-      Application.put_env(:doctrans, :embedding, base_url: nil, model: "embed")
+      TestEnv.put_env(:embedding, base_url: nil, model: "embed")
 
       Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
         json(conn, 200, %{"data" => [%{"embedding" => List.duplicate(0.1, 1024)}]})
@@ -879,13 +863,13 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     end
 
     defp configure_endpoints(base_url) do
-      Application.put_env(:doctrans, :openai,
+      TestEnv.put_env(:openai,
         base_url: base_url,
         api_key: "sk-test-123",
         chat_model: "test-chat-model"
       )
 
-      Application.put_env(:doctrans, :embedding,
+      TestEnv.put_env(:embedding,
         base_url: base_url,
         model: "test-embedding-model"
       )

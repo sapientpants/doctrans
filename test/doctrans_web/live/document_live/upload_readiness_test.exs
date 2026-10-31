@@ -8,22 +8,19 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
   all-clear, that nothing it shows carries a credential, and that none of it
   stops the upload.
 
-  Not async: every test swaps global `Application` env to configure the endpoints
-  and the collaborators the probe runs against.
+  Not async: every test mounts the dashboard, whose PubSub is global, and swaps
+  global `Application` env to configure the endpoints the probe reads. The
+  collaborators it runs against are Mox stubs scoped to the test.
   """
   use DoctransWeb.ConnCase, async: false
   use Oban.Testing, repo: Doctrans.Repo
 
   import ExUnit.CaptureLog
 
-  alias Doctrans.Search.{
-    EmbeddingErrorStub,
-    EmbeddingExitStub,
-    EmbeddingOptsStub
-  }
-
   alias Doctrans.Documents
   alias Doctrans.Jobs.DocumentExtractionJob
+  alias Doctrans.Processing.OpenAIMock
+  alias Doctrans.Search.EmbeddingMocks
   alias Doctrans.TestEnv
   alias DoctransWeb.DocumentLive.UploadReadiness
   alias DoctransWeb.ErrorMessages
@@ -59,11 +56,14 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
       model: Keyword.get(opts, :embedding_model, "embedding-model")
     )
 
-    TestEnv.put_env(:openai_stub_models, Keyword.get(opts, :models, @models))
+    # A list is the server's answer; anything else is the reason it gave none.
+    models =
+      case Keyword.get(opts, :models, @models) do
+        models when is_list(models) -> {:ok, models}
+        reason -> {:error, reason}
+      end
 
-    if embedding_module = opts[:embedding_module] do
-      TestEnv.put_env(:embedding_module, embedding_module)
-    end
+    Mox.stub(OpenAIMock, :list_models, fn -> models end)
   end
 
   defp open_modal(view) do
@@ -91,8 +91,7 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
 
     test "reports while the probe is in flight, then replaces it", %{conn: conn} do
       configure()
-      barrier = make_ref()
-      TestEnv.put_env(:embedding_stub_barrier, {"readiness", self(), barrier})
+      barrier = EmbeddingMocks.hold("readiness")
 
       {:ok, view, _html} = live(conn, ~p"/")
       view = open_modal(view)
@@ -141,8 +140,8 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
     # not translation, and the line has to say so or it reads as a reason to
     # cancel an upload that would have worked.
     test "says an unavailable embedding model costs search rather than translation", %{conn: conn} do
-      configure(embedding_model: "absent-embedding-model", embedding_module: EmbeddingErrorStub)
-      TestEnv.put_env(:embedding_error_reason, :timeout)
+      configure(embedding_model: "absent-embedding-model")
+      EmbeddingMocks.fail(:timeout)
 
       {:ok, view, _html} = live(conn, ~p"/")
       view = open_modal(view)
@@ -156,12 +155,8 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
     end
 
     test "reports both widths when the embedding model is too narrow", %{conn: conn} do
-      configure(embedding_module: EmbeddingErrorStub)
-
-      TestEnv.put_env(
-        :embedding_error_reason,
-        {:embedding_too_short, [expected: 1024, actual: 384]}
-      )
+      configure()
+      EmbeddingMocks.fail({:embedding_too_short, [expected: 1024, actual: 384]})
 
       {:ok, view, _html} = live(conn, ~p"/")
       view = open_modal(view)
@@ -175,8 +170,8 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
     end
 
     test "tells the user a silent server will leave the upload queued", %{conn: conn} do
-      configure(models: :connection_refused, embedding_module: EmbeddingErrorStub)
-      TestEnv.put_env(:embedding_error_reason, :timeout)
+      configure(models: :connection_refused)
+      EmbeddingMocks.fail(:timeout)
 
       {:ok, view, _html} = live(conn, ~p"/")
       view = open_modal(view)
@@ -192,7 +187,8 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
 
   describe "a check that could not be made" do
     test "says so rather than rendering an all-clear", %{conn: conn} do
-      configure(embedding_module: EmbeddingExitStub)
+      configure()
+      EmbeddingMocks.exit_with_text()
 
       log =
         capture_log(fn ->
@@ -235,11 +231,10 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
     test "no part of a credential-bearing endpoint reaches the dialog", %{conn: conn} do
       configure(
         chat_url: "http://user:s3cret@remote.example:8000/v1?key=abc",
-        models: :connection_refused,
-        embedding_module: EmbeddingErrorStub
+        models: :connection_refused
       )
 
-      TestEnv.put_env(:embedding_error_reason, :timeout)
+      EmbeddingMocks.fail(:timeout)
 
       {:ok, view, _html} = live(conn, ~p"/")
       view = open_modal(view)
@@ -296,17 +291,17 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
 
   describe "when the check runs" do
     test "on each open of the dialog, and never before one", %{conn: conn} do
-      configure(embedding_module: EmbeddingOptsStub)
-      TestEnv.put_env(:embedding_opts_observer, self())
+      configure()
+      EmbeddingMocks.observe()
 
       {:ok, view, _html} = live(conn, ~p"/")
 
       # Mounting the dashboard is not about to upload anything, and two HTTP
       # calls per visit would be paid by every reader.
-      refute_receive {:embedding_opts, "readiness", _opts}, 100
+      refute_receive {:embedding_call, "readiness", _opts}, 100
 
       view = open_modal(view)
-      assert_receive {:embedding_opts, "readiness", _opts}, @async_timeout
+      assert_receive {:embedding_call, "readiness", _opts}, @async_timeout
       render_async(view, @async_timeout)
 
       # Closing and reopening is the retry offered to a user who has just gone
@@ -314,7 +309,7 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
       render_click(view, "hide_upload_modal")
       view = open_modal(view)
 
-      assert_receive {:embedding_opts, "readiness", _opts}, @async_timeout
+      assert_receive {:embedding_call, "readiness", _opts}, @async_timeout
       render_async(view, @async_timeout)
     end
   end

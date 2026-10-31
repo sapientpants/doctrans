@@ -1,10 +1,12 @@
 defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
+  # Sync: every test points the global `:openai` application env at a Bypass
+  # server, and one overrides the global `:embedding` env.
   use DoctransWeb.ConnCase, async: false
 
   import Doctrans.Fixtures
   import ExUnit.CaptureLog
 
-  alias Doctrans.{Config, Documents}
+  alias Doctrans.{Config, Documents, TestEnv}
   alias Doctrans.Documents.{Pages, Topics}
   alias Doctrans.Processing.Run
   alias DoctransWeb.DocumentLive.ReprocessModal
@@ -12,16 +14,17 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   alias Phoenix.LiveView.Channel
 
   setup do
-    previous = Application.fetch_env!(:doctrans, :openai)
     bypass = Bypass.open()
 
-    Application.put_env(
-      :doctrans,
+    TestEnv.put_env(
       :openai,
-      Keyword.put(previous, :base_url, "http://localhost:#{bypass.port}")
+      Keyword.put(
+        Application.fetch_env!(:doctrans, :openai),
+        :base_url,
+        "http://localhost:#{bypass.port}"
+      )
     )
 
-    on_exit(fn -> Application.put_env(:doctrans, :openai, previous) end)
     %{bypass: bypass}
   end
 
@@ -155,14 +158,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   end
 
   test "embedding models are excluded from both model lists", %{conn: conn, bypass: bypass} do
-    previous = Application.get_env(:doctrans, :embedding)
-    Application.put_env(:doctrans, :embedding, model: "custom-vector-model")
-
-    on_exit(fn ->
-      if previous,
-        do: Application.put_env(:doctrans, :embedding, previous),
-        else: Application.delete_env(:doctrans, :embedding)
-    end)
+    TestEnv.put_env(:embedding, model: "custom-vector-model")
 
     models = ["vision", "text-embedding-3-small", "Qwen3-Embedding-8B", "custom-vector-model"]
 

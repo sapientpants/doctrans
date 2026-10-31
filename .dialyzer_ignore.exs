@@ -49,22 +49,23 @@
   # owner: @sapientpants
   # expires: 2026-12-12
   # upstream: none
-  # rationale: Same case as the entries below, in the stub that supersedes a page and
-  #   then crashes: the crash is the scenario, so `extract_markdown/2` terminating only
-  #   with an exception is the correct typing of a correct function.
-  {"test/support/superseding_crash_stub.ex", :no_return, 23},
-
-  # owner: @sapientpants
-  # expires: 2026-12-12
-  # upstream: none
-  # rationale: See the entry above — `translate/4` is the second raising callback of the
-  #   superseding stub.
-  {"test/support/superseding_crash_stub.ex", :no_return, 29},
-
-  # owner: @sapientpants
-  # expires: 2026-12-12
-  # upstream: none
   # rationale: See the entry above — `translate/4` is the second raising callback of the
   #   same stub.
-  {"test/support/openai_crash_stub.ex", :no_return, 24}
+  {"test/support/openai_crash_stub.ex", :no_return, 24},
+
+  # owner: @sapientpants
+  # expires: 2026-12-12
+  # upstream: none
+  # rationale: Same case, in the Mox stub that supersedes a page and then crashes: the
+  #   closure installed for `extract_markdown/2` only calls a function that raises, which
+  #   is the scenario under test, so "no local return" is the correct typing of a correct
+  #   closure. An anonymous function cannot carry `@dialyzer`, hence the register.
+  {"test/support/superseding_crash_stub.ex", :no_return, 27},
+
+  # owner: @sapientpants
+  # expires: 2026-12-12
+  # upstream: none
+  # rationale: See the entry above — the closure installed for `translate/4` is the
+  #   second one of the superseding stub.
+  {"test/support/superseding_crash_stub.ex", :no_return, 31}
 ]

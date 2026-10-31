@@ -1,4 +1,6 @@
 defmodule Doctrans.Processing.CancellationErrorsTest do
+  # `async: false`: it mounts the dashboard, whose PubSub is global, and renames
+  # a table out from under every other test's queries while a case runs.
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents

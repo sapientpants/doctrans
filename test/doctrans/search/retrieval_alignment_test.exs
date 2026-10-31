@@ -1,5 +1,5 @@
 defmodule Doctrans.Search.RetrievalAlignmentTest do
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
 
   alias Doctrans.{Chat, Repo, Search}
   alias Doctrans.Documents.{Chunk, Page}

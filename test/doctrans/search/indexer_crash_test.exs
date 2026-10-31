@@ -8,20 +8,18 @@ defmodule Doctrans.Search.IndexerCrashTest do
   `EmbeddingJob`'s attempts, and `StartupRecovery`, which keys on the status,
   re-enqueued it on every boot thereafter.
   """
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
 
   import Doctrans.Fixtures
 
   alias Doctrans.Documents.Page
-  alias Doctrans.Search.Indexer
-  alias Doctrans.TestEnv
-
-  defmodule EmbeddingRaiseStub do
-    def generate(_content, _opts), do: raise(ArgumentError, "embedding blew up")
-  end
+  alias Doctrans.Search.{EmbeddingMock, Indexer}
 
   test "a raise below the status write marks the page errored and still propagates" do
-    TestEnv.put_env(:embedding_module, EmbeddingRaiseStub)
+    Mox.stub(EmbeddingMock, :generate, fn _content, _opts ->
+      raise ArgumentError, "embedding blew up"
+    end)
+
     page = extracted_page("A page whose embedding call raises partway through")
 
     assert_raise ArgumentError, fn -> Indexer.index_page(page.id) end

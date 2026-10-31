@@ -5,23 +5,16 @@ defmodule Doctrans.SearchWithCountTest do
   retrieval mode it reports -- which is how a caller tells an embedding outage
   apart from a query that simply matched nothing.
 
-  Not async: each test swaps `:embedding_module` in the global `Application`
-  environment, as every other module in this suite that does so.
+  Each test narrows the embedding mock for itself -- to observe, fail or
+  misshape a query embedding -- and the stub reaches only this test's process,
+  so the file runs concurrently with the rest of the suite.
   """
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents.Pages
   alias Doctrans.Repo
   alias Doctrans.Search
-
-  alias Doctrans.Search.{
-    EmbeddingDimensionStub,
-    EmbeddingErrorStub,
-    EmbeddingNilStub,
-    EmbeddingProbe
-  }
-
-  alias Doctrans.TestEnv
+  alias Doctrans.Search.EmbeddingMocks
 
   import Doctrans.Fixtures
   import ExUnit.CaptureLog
@@ -30,8 +23,7 @@ defmodule Doctrans.SearchWithCountTest do
     test "counts and lists matches from a single query embedding" do
       page = searchable_page("A page about sharedembeddingterm and nothing else")
 
-      TestEnv.put_env(:embedding_probe_pid, self())
-      use_embedding_module(EmbeddingProbe)
+      EmbeddingMocks.observe()
 
       assert {:ok, %{results: [result], total_count: 1, retrieval: :hybrid}} =
                Search.search_with_count("sharedembeddingterm")
@@ -41,8 +33,8 @@ defmodule Doctrans.SearchWithCountTest do
 
       # One inference call is what makes the count and the results describe the
       # same vector: there is no second embedding for them to disagree about.
-      assert_received {:embedded, "sharedembeddingterm"}
-      refute_received {:embedded, "sharedembeddingterm"}
+      assert_received {:embedding_call, "sharedembeddingterm", _opts}
+      refute_received {:embedding_call, "sharedembeddingterm", _opts}
     end
 
     test "counts every match, not just the page of results returned" do
@@ -77,7 +69,7 @@ defmodule Doctrans.SearchWithCountTest do
       |> searchable_page()
       |> embed()
 
-      use_embedding_module(EmbeddingDimensionStub)
+      EmbeddingMocks.wrong_dimension()
 
       log =
         capture_log(fn ->
@@ -116,7 +108,7 @@ defmodule Doctrans.SearchWithCountTest do
       # else in the response says why the ranking was half of one.
       assert log =~ "keyword-only"
       assert log =~ ":timeout"
-      assert_received {:embedding_call, "failingembeddingterm"}
+      assert_received {:embedding_call, "failingembeddingterm", _opts}
     end
 
     test "reports no matches as no matches, not as an outage" do
@@ -185,7 +177,7 @@ defmodule Doctrans.SearchWithCountTest do
 
       # `{:ok, nil}` is a legal embedding result; ranking never ran, so calling
       # it hybrid would claim a semantic half that sat out.
-      use_embedding_module(EmbeddingNilStub)
+      EmbeddingMocks.nil_vector()
 
       capture_log(fn ->
         assert {:ok, %{results: [result], total_count: 1, retrieval: :keyword_only}} =
@@ -203,7 +195,7 @@ defmodule Doctrans.SearchWithCountTest do
       assert {:error, {:invalid_search_bounds, [offset: _]}} =
                Search.search_with_count("boundedegradeterm", offset: 99_999_999_999_999_999_999)
 
-      refute_received {:embedding_call, _}
+      refute_received {:embedding_call, _text, _opts}
     end
   end
 
@@ -241,13 +233,9 @@ defmodule Doctrans.SearchWithCountTest do
     |> Repo.update!()
   end
 
-  defp use_embedding_module(module), do: TestEnv.put_env(:embedding_module, module)
-
-  # The plan fails this query alone, so the swapped-in module stays
-  # behaviourally identical for anything else embedding concurrently.
+  # The plan fails this query alone, so the stub stays behaviourally identical
+  # for anything else this test embeds, and every call is reported back.
   defp fail_embeddings_for(query) do
-    use_embedding_module(EmbeddingErrorStub)
-    TestEnv.put_env(:embedding_error_plan, [{query, :timeout}])
-    TestEnv.put_env(:embedding_call_observer, self())
+    EmbeddingMocks.fail_matching([{query, :timeout}], observe: true)
   end
 end

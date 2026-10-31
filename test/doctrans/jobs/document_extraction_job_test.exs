@@ -1,13 +1,13 @@
 defmodule Doctrans.Jobs.DocumentExtractionJobTest do
-  use Doctrans.DataCase
+  # `async: false`: the timeout case overrides the global `:pdf_extraction`
+  # application env.
+  use Doctrans.DataCase, async: false
   use Oban.Testing, repo: Doctrans.Repo
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Jobs.DocumentExtractionJob
-  alias Doctrans.Processing.MissingConverterStub
-  alias Doctrans.Processing.PdfExtractorFailingStub
-  alias Doctrans.Processing.RetryDocumentConverterStub
+  alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock}
   alias Doctrans.TestEnv
 
   import Doctrans.Fixtures
@@ -79,13 +79,12 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       assert timeout != :infinity
 
       original = Application.get_env(:doctrans, :pdf_extraction, [])
-      on_exit(fn -> Application.put_env(:doctrans, :pdf_extraction, original) end)
 
       # Still bounded with the key removed entirely.
-      Application.put_env(:doctrans, :pdf_extraction, Keyword.delete(original, :job_timeout))
+      TestEnv.put_env(:pdf_extraction, Keyword.delete(original, :job_timeout))
       assert is_integer(DocumentExtractionJob.timeout(job))
 
-      Application.put_env(:doctrans, :pdf_extraction, Keyword.put(original, :job_timeout, 5_000))
+      TestEnv.put_env(:pdf_extraction, Keyword.put(original, :job_timeout, 5_000))
       assert DocumentExtractionJob.timeout(job) == 5_000
     end
   end
@@ -104,18 +103,13 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       path = Path.join(dir, "original.pdf")
       File.write!(path, "%PDF-1.4\n" <> String.duplicate("0", 1_024))
 
-      original_module = Application.fetch_env(:doctrans, :pdf_extractor_module)
-      Application.put_env(:doctrans, :pdf_extractor_module, PdfExtractorFailingStub)
-
-      on_exit(fn ->
-        restore_env(:pdf_extractor_module, original_module)
-        Application.delete_env(:doctrans, :test_extraction_failure)
-      end)
-
       %{path: path}
     end
 
-    defp fail_with(reason), do: Application.put_env(:doctrans, :test_extraction_failure, reason)
+    # Fails the extractor's page count, the first thing extraction asks it for.
+    defp fail_with(reason) do
+      Mox.stub(PdfExtractorMock, :get_page_count, fn _pdf_path -> {:error, reason} end)
+    end
 
     test "a document over the page limit is cancelled rather than retried", %{path: path} do
       document = document_fixture()
@@ -175,10 +169,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       File.write!(Path.join(upload_dir, "original.docx"), "fake docx content")
       on_exit(fn -> File.rm_rf!(upload_dir) end)
 
-      original_converter = Application.fetch_env(:doctrans, :document_converter_module)
-      Application.put_env(:doctrans, :document_converter_module, MissingConverterStub)
-
-      on_exit(fn -> restore_env(:document_converter_module, original_converter) end)
+      DocumentConverterMocks.missing()
 
       # No number of retries installs LibreOffice, and each one re-occupies the
       # single extraction slot to reach the same answer.
@@ -189,11 +180,6 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
     end
 
     defp names_failure?(_reason, _tag), do: false
-
-    # Putting `nil` back is not the same as the key never having been set: the
-    # callers read these with a module default, which an explicit nil defeats.
-    defp restore_env(key, {:ok, value}), do: Application.put_env(:doctrans, key, value)
-    defp restore_env(key, :error), do: Application.delete_env(:doctrans, key)
   end
 
   describe "perform/1 with file_path" do
@@ -273,7 +259,8 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       document = document_fixture(%{original_filename: "test.docx"})
 
       docx_path = document_source_fixture(document, "retained office input")
-      TestEnv.put_env(:document_converter_module, RetryDocumentConverterStub)
+
+      DocumentConverterMocks.retry()
 
       assert :ok = perform_job(DocumentExtractionJob, %{"document_id" => document.id})
       assert_completed_extraction(document)

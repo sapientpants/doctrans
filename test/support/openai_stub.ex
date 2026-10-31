@@ -1,163 +1,78 @@
 defmodule Doctrans.Processing.OpenAIStub do
   @moduledoc """
-  Mock implementation of OpenAIBehaviour for tests.
+  The default `Doctrans.Processing.OpenAIBehaviour` stub.
 
-  Returns fake responses that can be used in tests without
-  requiring the actual API service.
+  Returns fake responses, so tests exercise the processing and chat code paths
+  without the model server. `Doctrans.Mocks.setup/1` installs it on
+  `Doctrans.Processing.OpenAIMock` for every test, and a test that needs one
+  call to fail, or a particular model list or detected language, narrows the
+  mock for that function alone:
 
-  ## Configuration
+      Mox.stub(OpenAIMock, :extract_markdown, fn _image_path, _opts -> {:error, :timeout} end)
+      Mox.stub(OpenAIMock, :list_models, fn -> {:ok, ["my-model"]} end)
 
-  You can configure mock behavior per-test using Application.put_env:
-
-      # Simulate extraction error
-      Application.put_env(:doctrans, :openai_stub_extraction_error, "error message")
-
-      # Simulate translation error
-      Application.put_env(:doctrans, :openai_stub_translation_error, :circuit_open)
-
-      # Stub a custom model list (a non-list value stubs an error instead)
-      Application.put_env(:doctrans, :openai_stub_models, ["my-model"])
-
-      # Stub the detected source language (defaults to "de")
-      Application.put_env(:doctrans, :openai_stub_detected_language, "fr")
-
-      # Simulate language detection error
-      Application.put_env(:doctrans, :openai_stub_detection_error, :circuit_open)
-
-      # Reset to default behavior
-      Application.delete_env(:doctrans, :openai_stub_extraction_error)
-
-  A test that needs to know how many model calls a run made — the stub answers
-  every call the same way, so the result alone cannot tell one call from three —
-  can have each extraction and translation call reported to it:
-
-      Application.put_env(:doctrans, :openai_stub_pid, self())
-      assert_received {:openai_stub_call, :extract_markdown}
+  A test that needs every call recorded installs `Doctrans.Processing.OpenAIProbe`.
   """
 
   @behaviour Doctrans.Processing.OpenAIBehaviour
 
-  @impl true
-  def extract_markdown(image_path, opts \\ [])
+  @default_models [
+    "mlx-community/Qwen3.6-35B-A3B-4bit",
+    "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"
+  ]
 
+  @doc "The model list `list_models/0` answers with."
+  def default_models, do: @default_models
+
+  @impl true
   def extract_markdown(_image_path, _opts) do
-    record(:extract_markdown)
-
-    case Application.get_env(:doctrans, :openai_stub_extraction_error) do
-      nil ->
-        {:ok,
-         "# Extracted Test Content\n\nThis is mock markdown content extracted from the image."}
-
-      error ->
-        {:error, error}
-    end
+    {:ok, "# Extracted Test Content\n\nThis is mock markdown content extracted from the image."}
   end
 
   @impl true
-  def translate(markdown, source_language, target_language, opts \\ [])
-
   def translate(markdown, source_language, target_language, _opts) do
-    record(:translate)
-
-    case Application.get_env(:doctrans, :openai_stub_translation_error) do
-      nil -> {:ok, "# Translated #{source_language} to #{target_language}\n\n#{markdown}"}
-      error -> {:error, error}
-    end
+    {:ok, "# Translated #{source_language} to #{target_language}\n\n#{markdown}"}
   end
 
   @impl true
-  def detect_language(markdown, opts \\ [])
-
-  def detect_language(_markdown, _opts) do
-    case Application.get_env(:doctrans, :openai_stub_detection_error) do
-      nil -> {:ok, Application.get_env(:doctrans, :openai_stub_detected_language, "de")}
-      error -> {:error, error}
-    end
-  end
+  def detect_language(_markdown, _opts), do: {:ok, "de"}
 
   @impl true
-  def available? do
-    not Application.get_env(:doctrans, :openai_stub_unavailable, false)
-  end
+  def available?, do: true
 
   @impl true
-  def list_models do
-    case Application.get_env(:doctrans, :openai_stub_models) do
-      nil ->
-        {:ok, ["mlx-community/Qwen3.6-35B-A3B-4bit", "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"]}
-
-      models when is_list(models) ->
-        {:ok, models}
-
-      error ->
-        {:error, error}
-    end
-  end
+  def list_models, do: {:ok, @default_models}
 
   @impl true
-  def chat(messages, opts \\ [])
-
   def chat(messages, _opts) do
-    case Application.get_env(:doctrans, :openai_stub_chat_error) do
-      nil ->
-        # Handle both atom keys (%{role: "user"}) and string keys (%{"role" => "user"})
-        user_msg =
-          messages
-          |> Enum.filter(fn msg ->
-            Map.get(msg, :role) || Map.get(msg, "role") == "user"
-          end)
-          |> List.last()
+    # Handle both atom keys (%{role: "user"}) and string keys (%{"role" => "user"})
+    user_msg =
+      messages
+      |> Enum.filter(fn msg -> Map.get(msg, :role) || Map.get(msg, "role") == "user" end)
+      |> List.last()
 
-        content =
-          case user_msg do
-            nil ->
-              "unknown question"
+    content =
+      case user_msg do
+        nil -> "unknown question"
+        msg -> Map.get(msg, :content) || Map.get(msg, "content") || "unknown question"
+      end
 
-            msg ->
-              Map.get(msg, :content) || Map.get(msg, "content") || "unknown question"
-          end
-
-        {:ok,
-         "This is a mock response to your question about: #{String.slice(content, 0, 50)}. The document contains relevant information."}
-
-      error ->
-        {:error, error}
-    end
+    {:ok,
+     "This is a mock response to your question about: #{String.slice(content, 0, 50)}. The document contains relevant information."}
   end
 
   @impl true
-  def chat_stream(messages, on_delta, opts \\ [])
-
   def chat_stream(messages, on_delta, opts) do
-    case chat(messages, opts) do
-      {:ok, response} ->
-        # Emit the mock response in chunks to exercise streaming.
-        chunk_size = max(1, div(String.length(response), 3))
+    {:ok, response} = chat(messages, opts)
 
-        response
-        |> String.graphemes()
-        |> Enum.chunk_every(chunk_size)
-        |> Enum.each(fn chunk ->
-          on_delta.(Enum.join(chunk))
-        end)
+    # Emit the mock response in chunks to exercise streaming.
+    chunk_size = max(1, div(String.length(response), 3))
 
-        {:ok, response}
+    response
+    |> String.graphemes()
+    |> Enum.chunk_every(chunk_size)
+    |> Enum.each(fn chunk -> on_delta.(Enum.join(chunk)) end)
 
-      error ->
-        error
-    end
-  end
-
-  def embed(_text, _opts) do
-    # Return a vector of 1024 dimensions (truncated from native 4096)
-    vector = Enum.map(1..1024, fn _i -> :rand.uniform() * 2 - 1 end)
-    {:ok, vector}
-  end
-
-  defp record(function) do
-    case Application.get_env(:doctrans, :openai_stub_pid) do
-      pid when is_pid(pid) -> send(pid, {:openai_stub_call, function})
-      _ -> :ok
-    end
+    {:ok, response}
   end
 end

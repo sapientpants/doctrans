@@ -15,8 +15,12 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
   screen reader announces: we assert the names exist and resolve, not how they
   are read out.
   """
+  # Sync: the tests mount the dashboard, whose PubSub is global, and override the
+  # global `:uploads` and `:openai` application env.
   use DoctransWeb.ConnCase, async: false
 
+  alias Doctrans.Processing.PdfExtractorMock
+  alias Doctrans.TestEnv
   alias DoctransWeb.DocumentLive.Components
 
   import Doctrans.Fixtures
@@ -24,19 +28,15 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
   @moduletag :capture_log
 
   setup do
-    previous_uploads = Application.fetch_env!(:doctrans, :uploads)
-    previous_extractor = Application.fetch_env!(:doctrans, :pdf_extractor_module)
     directory = Path.join(System.tmp_dir!(), "keyboard-a11y-#{Uniq.UUID.uuid7()}")
     File.mkdir_p!(directory)
 
-    Application.put_env(:doctrans, :uploads, upload_dir: directory, max_file_size: 100_000)
-    Application.put_env(:doctrans, :pdf_extractor_module, Doctrans.UploadPathExtractorStub)
+    TestEnv.put_env(:uploads, upload_dir: directory, max_file_size: 100_000)
 
-    on_exit(fn ->
-      Application.put_env(:doctrans, :uploads, previous_uploads)
-      Application.put_env(:doctrans, :pdf_extractor_module, previous_extractor)
-      File.rm_rf!(directory)
-    end)
+    # Keep the uploaded original on disk rather than extracting it.
+    Mox.stub(PdfExtractorMock, :get_page_count, fn _path -> {:error, :invalid_pdf} end)
+
+    on_exit(fn -> File.rm_rf!(directory) end)
 
     :ok
   end
@@ -350,7 +350,6 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
   # The reprocess dialog asks the model endpoint as it opens; the answer is not
   # what these tests are about, so it is stubbed rather than left to fail.
   defp stub_model_list(_context) do
-    previous = Application.fetch_env!(:doctrans, :openai)
     bypass = Bypass.open()
 
     Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
@@ -359,13 +358,14 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
       |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}]}))
     end)
 
-    Application.put_env(
-      :doctrans,
+    TestEnv.put_env(
       :openai,
-      Keyword.put(previous, :base_url, "http://localhost:#{bypass.port}")
+      Keyword.put(
+        Application.fetch_env!(:doctrans, :openai),
+        :base_url,
+        "http://localhost:#{bypass.port}"
+      )
     )
-
-    on_exit(fn -> Application.put_env(:doctrans, :openai, previous) end)
 
     :ok
   end

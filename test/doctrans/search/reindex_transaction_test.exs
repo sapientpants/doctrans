@@ -1,6 +1,8 @@
 defmodule Doctrans.Search.ReindexTransactionTest do
   # A surrounding sandbox transaction would hide whether independent page jobs
   # committed. This one case uses real transactions and cleans up its own rows.
+  # Not async: its committed rows and the trigger it installs on `oban_jobs` are
+  # visible to every other test for as long as they exist.
   use ExUnit.Case, async: false
   use Oban.Testing, repo: Doctrans.Repo
 

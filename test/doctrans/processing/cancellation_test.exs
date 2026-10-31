@@ -1,5 +1,5 @@
 defmodule Doctrans.Processing.CancellationTest do
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
 
   import Doctrans.Fixtures

@@ -1,28 +1,25 @@
 defmodule Doctrans.Processing.DocumentReprocessingTest do
-  use Doctrans.DataCase, async: false
+  use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
   import Doctrans.Fixtures
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Documents.{Chunk, Page}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
-  alias Doctrans.Processing.{Completion, DocumentReprocessing, Run, StartupRecovery}
+
+  alias Doctrans.Processing.{
+    Completion,
+    DocumentConverterMocks,
+    DocumentReprocessing,
+    OpenAIMock,
+    ResumablePdfExtractorStub,
+    Run,
+    StartupRecovery
+  }
 
   setup do
-    for {key, value} <- [
-          pdf_extractor_module: Doctrans.Processing.ResumablePdfExtractorStub,
-          document_converter_module: Doctrans.Processing.RetryDocumentConverterStub
-        ] do
-      old = Application.fetch_env(:doctrans, key)
-      Application.put_env(:doctrans, key, value)
-
-      on_exit(fn ->
-        case old do
-          {:ok, value} -> Application.put_env(:doctrans, key, value)
-          :error -> Application.delete_env(:doctrans, key)
-        end
-      end)
-    end
+    ResumablePdfExtractorStub.install()
+    DocumentConverterMocks.retry()
 
     document =
       document_fixture(%{status: "completed", total_pages: 1, original_filename: "report.docx"})
@@ -163,8 +160,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   end
 
   test "extraction completion preserves an exhausted translation error", c do
-    Application.put_env(:doctrans, :openai_stub_translation_error, :circuit_open)
-    on_exit(fn -> Application.delete_env(:doctrans, :openai_stub_translation_error) end)
+    Mox.stub(OpenAIMock, :translate, fn _markdown, _source, _target, _opts ->
+      {:error, :circuit_open}
+    end)
+
     owner = self()
 
     Oban.Testing.with_testing_mode(:manual, fn ->
@@ -424,8 +423,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   end
 
   test "exhausted page jobs expose a retryable document error without false provenance", c do
-    Application.put_env(:doctrans, :openai_stub_extraction_error, :circuit_open)
-    on_exit(fn -> Application.delete_env(:doctrans, :openai_stub_extraction_error) end)
+    Mox.stub(OpenAIMock, :extract_markdown, fn _image_path, _opts -> {:error, :circuit_open} end)
 
     Oban.Testing.with_testing_mode(:manual, fn ->
       {:ok, page} =

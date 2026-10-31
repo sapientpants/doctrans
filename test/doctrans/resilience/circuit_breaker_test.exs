@@ -1,5 +1,7 @@
 defmodule Doctrans.Resilience.CircuitBreakerTest do
-  use ExUnit.Case, async: false
+  # The `:fuse` circuit breakers are application-wide: melting and resetting
+  # them here would be seen by any test running at the same time.
+  use Doctrans.EnvCase, async: false
 
   alias Doctrans.Resilience.CircuitBreaker
 
