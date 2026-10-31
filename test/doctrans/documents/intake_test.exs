@@ -30,6 +30,16 @@ defmodule Doctrans.Documents.IntakeTest do
       assert File.read!(stored) == @pdf
     end
 
+    test "takes a charlist path like any other Path.t()" do
+      path = temp_file("Report.pdf", @pdf)
+
+      assert {:ok, document_id, "Report.pdf", stored} =
+               Intake.accept(String.to_charlist(path), "Report.pdf")
+
+      on_exit(fn -> File.rm_rf!(Documents.document_upload_dir(document_id)) end)
+      assert File.read!(stored) == @pdf
+    end
+
     test "rejects content that does not match the claimed extension and stores nothing" do
       path = temp_file("fake.docx", @pdf)
 

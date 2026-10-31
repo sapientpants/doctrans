@@ -64,6 +64,10 @@ defmodule Doctrans.Documents.Intake do
   # magic-byte-validated extension.
   # sobelow_skip ["Traversal.FileModule"]
   def accept(path, client_name) do
+    # Normalized once: `File` takes any `Path.t()`, but `Validation.validate_file_content/2`
+    # guards on a binary, and a charlist path would be rejected as invalid arguments
+    # rather than checked.
+    path = to_string(path)
     extension = client_name |> Path.extname() |> String.downcase()
 
     with :ok <- validate_disk_size(path, Uploads.max_file_size()),
@@ -298,10 +302,8 @@ defmodule Doctrans.Documents.Intake do
 
   # The client-side size limit is not a security boundary; verify the actual size
   # of the file on disk before accepting it.
-  @spec validate_disk_size(Path.t(), pos_integer()) :: :ok | {:error, Errors.reason()}
+  @spec validate_disk_size(String.t(), pos_integer()) :: :ok | {:error, Errors.reason()}
   defp validate_disk_size(path, max_size) do
-    path = to_string(path)
-
     case File.stat(path) do
       {:ok, %{size: size}} when size <= max_size ->
         :ok
