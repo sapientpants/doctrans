@@ -20,52 +20,59 @@
 
 [
   # owner: @sapientpants
-  # expires: 2026-12-12
+  # expires: 2026-11-30
   # upstream: none
   # rationale: `sanitize_title/1`'s `%{} = attrs` clause is unreachable because every
   #   caller path validates `:title` as a binary first. It is kept as a defensive
   #   fallback for a private pipeline; the alternative is a FunctionClauseError if the
   #   validation order ever changes. Re-decide at expiry: delete the clause or keep it.
+  #   First-party and waiting on nothing, so it is the first entry to come due.
   {"lib/doctrans/validation.ex", :pattern_match_cov, 243},
 
   # owner: @sapientpants
-  # expires: 2026-12-12
+  # expires: 2027-01-31
   # upstream: none
   # rationale: `use Gettext.Backend` generates a call to `Gettext.Plural.plural/3` with
   #   the `Expo.PluralForms.plural_ast/0` opaque term inlined from the compiled .po
   #   headers. The warning is in generated code at line 1, three times (one per plural
   #   form in priv/gettext); nothing in this repository can annotate it. No upstream
   #   issue was found; recheck after the next gettext/expo bump before filing one.
+  #   Dated a quarter out to give Dependabot's weekly Hex cycle a chance to ship that
+  #   bump before the recheck.
   {"lib/doctrans_web/gettext.ex", :call_without_opaque, 1},
 
   # owner: @sapientpants
-  # expires: 2026-12-12
+  # expires: 2027-02-28
   # upstream: none
   # rationale: The stub implements `OpenAIBehaviour` by raising; terminating with an
   #   exception is the behaviour under test, so `no_return` is the correct typing of a
-  #   correct function. Both raising callbacks are pinned by line.
+  #   correct function. Both raising callbacks are pinned by line. The only open
+  #   question is whether a `@dialyzer {:nowarn_function, ...}` on the stub itself
+  #   should replace these two entries; nothing upstream is pending, so it is dated
+  #   after the first-party clause and the gettext recheck.
   {"test/support/openai_crash_stub.ex", :no_return, 21},
 
   # owner: @sapientpants
-  # expires: 2026-12-12
+  # expires: 2027-02-28
   # upstream: none
   # rationale: See the entry above — `translate/4` is the second raising callback of the
-  #   same stub.
+  #   same stub, re-decided together with it.
   {"test/support/openai_crash_stub.ex", :no_return, 24},
 
   # owner: @sapientpants
-  # expires: 2026-12-12
+  # expires: 2027-03-31
   # upstream: none
   # rationale: Same case, in the Mox stub that supersedes a page and then crashes: the
   #   closure installed for `extract_markdown/2` only calls a function that raises, which
   #   is the scenario under test, so "no local return" is the correct typing of a correct
-  #   closure. An anonymous function cannot carry `@dialyzer`, hence the register.
+  #   closure. An anonymous function cannot carry `@dialyzer`, hence the register, and
+  #   with no attribute alternative there is the least to re-decide, so it comes due last.
   {"test/support/superseding_crash_stub.ex", :no_return, 27},
 
   # owner: @sapientpants
-  # expires: 2026-12-12
+  # expires: 2027-03-31
   # upstream: none
   # rationale: See the entry above — the closure installed for `translate/4` is the
-  #   second one of the superseding stub.
+  #   second one of the superseding stub, re-decided together with it.
   {"test/support/superseding_crash_stub.ex", :no_return, 31}
 ]

@@ -1,0 +1,12 @@
+# zizmor policy for the workflow audit run from .pre-commit-config.yaml.
+#
+# Every `uses:` must name a full commit SHA. A mutable tag like `@v7` can be
+# repointed by anyone who can push to the action's repository, and the CI job
+# already downloads and executes hook code from several external repositories on
+# top of that. `hash-pin` for `*` has been zizmor's default since v1.20.0; it is
+# restated here so the rule is visible and survives a default change.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin

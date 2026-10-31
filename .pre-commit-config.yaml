@@ -84,6 +84,19 @@ repos:
         name: Validate GitHub Actions workflows
         args: ["--verbose"]
 
+  # GitHub Actions security audit. This replaced a first-party pin checker: every
+  # `uses:` must name a full commit SHA (`unpinned-uses`, hash-pin for all), every
+  # checkout must set `persist-credentials: false` (`artipacked`), and the rest of
+  # zizmor's offline audits -- template injection, excessive permissions, cache
+  # poisoning -- come with it. Every action README shows a floating tag, so the
+  # pin regression is a copy-paste away; Dependabot's github-actions ecosystem
+  # keeps the pins from going stale. Policy lives in .github/zizmor.yml.
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.31.1
+    hooks:
+      - id: zizmor
+        name: Audit GitHub Actions workflows (zizmor)
+
   # Elixir hooks
   - repo: local
     hooks:
@@ -144,17 +157,17 @@ repos:
         pass_filenames: false
         files: ^(mise\.toml|Dockerfile(\.dev)?|scripts/check_toolchain_pins\.exs)$
 
-      # 3.57. GitHub Actions pin register. Every `uses:` must name an immutable
-      # commit SHA with a version comment, and every checkout must set
-      # `persist-credentials: false`. Every action README shows a floating tag, so
-      # the regression is a copy-paste away; Dependabot's github-actions ecosystem
-      # is what keeps the pins from going stale.
-      - id: check-action-pins
-        name: Check GitHub Actions are SHA-pinned
-        entry: elixir scripts/check_action_pins.exs
-        language: system
+      # 3.57. Command-policy regression suite. scripts/command-policy.sh is the one
+      # copy of the rule table every agent runs, and this is the only thing that
+      # proves a rule change still blocks what it should and nothing else: it drives
+      # the matcher, the pi adapter, and -- where the CLI is installed -- the codex
+      # rules against the cases in the test script. Needs bash, jq, git and node.
+      - id: test-command-policy
+        name: Test the agent command policy
+        entry: scripts/test-command-policy.sh
+        language: script
         pass_filenames: false
-        files: ^(\.github/workflows/.*\.ya?ml|scripts/check_action_pins\.exs)$
+        files: ^(scripts/((test-)?command-policy\.sh|pi-adapter\.test\.mjs|fixtures/)|\.(pi/extensions|codex)/)
 
       # 3.6. Module size limit. This line is the only place the number is stated:
       # the script requires --max-lines and has no default, so a caller cannot
