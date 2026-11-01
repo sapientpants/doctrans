@@ -227,19 +227,18 @@ defmodule Doctrans.Search.Chunker.Segments do
   defp union({open_start, _open_len}, {start, len}), do: {open_start, start + len - open_start}
 
   # The bytes between two segments -- the separator the split dropped -- which
-  # the combined span covers and so has to be counted. Words are reported as
-  # zero, which holds only as far as `word_count/1`'s non-Unicode `\s` reaches.
-  # `@sentence_boundary` and `@word_boundary` match Unicode whitespace, so a
-  # dropped separator can hold a non-breaking or ideographic space that
-  # `word_count/1` counts as a word in the content while this counts none, and
-  # `subtract_joined_word/4` corrects only the zero-width case. A gap mixing the
-  # two -- `" " <> nbsp <> " "` -- therefore undercounts by one per separator:
-  # 400 sentences so separated pack into chunks of up to 1,033 words against a
-  # ceiling of 400, measured. This predates the span rewrite -- `Chunker` hit
-  # the same mismatch on its paragraph gaps and now measures them exactly --
-  # and is handed to the Unicode-aware `word_count/1` item.
+  # the combined span covers and so has to be counted. It is measured the same
+  # way a segment is, which keeps the running total an upper bound on the span's
+  # own measure: `@sentence_boundary` and `@word_boundary` match Unicode
+  # whitespace, so a dropped separator can hold a non-breaking or ideographic
+  # space that `word_count/1`'s non-Unicode `\s` does not split on and so
+  # counts as a word once it sits inside the content. Reporting the gap as zero
+  # words, as this once did, undercounted by one per such separator: 400
+  # sentences joined on `" " <> nbsp <> " "` packed into a 599-word chunk
+  # against a ceiling of 400. `Chunker.extend/5` measures its paragraph gaps
+  # the same way, for the same reason.
   defp gap_measure(_text, {_start, 0}), do: zero()
-  defp gap_measure(text, {_start, len} = gap), do: {0, grapheme_count(slice(text, gap)), len}
+  defp gap_measure(text, gap), do: measure(slice(text, gap))
 
   # Graphemes and bytes are additive across a join; words are not. Where no
   # whitespace separates two segments -- which is what a zero-width sentence

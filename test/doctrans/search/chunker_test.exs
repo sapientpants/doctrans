@@ -24,8 +24,11 @@ defmodule Doctrans.Search.ChunkerTest do
 
   # Whitespace runs inside one paragraph: a single newline does not start a new
   # one. Two of these are sentence terminators, so the split ladder's top rung
-  # is reachable.
-  @intra_separators [" ", "  ", "\t", "\n", " \n ", ". ", "。"]
+  # is reachable. The last two hold a non-breaking and an ideographic space,
+  # which the split boundaries treat as whitespace but `word_count/1` does not,
+  # so a gap that drops one and is then counted as zero words breaks the word
+  # ceiling -- the bug the limits property exists to catch.
+  @intra_separators [" ", "  ", "\t", "\n", " \n ", ". ", "。", " \u00A0 ", ".\u3000"]
 
   # What separates two paragraphs. Every one of these is a paragraph break and
   # all but the first are longer than the two bytes `finalize_paras/1` used to
@@ -309,6 +312,34 @@ defmodule Doctrans.Search.ChunkerTest do
       assert Enum.all?(chunks, &String.valid?(&1.content))
       assert_within_limits(chunks)
       assert_preserves(String.duplicate("é", 5000), chunks)
+    end
+
+    test "a separator the word count does not split on still counts toward the ceiling" do
+      # The probe that found this: one-word sentences joined on
+      # `" " <> nbsp <> " "`. The sentence split drops the whole separator, the
+      # chunk takes it back in as content, and `word_count/1`'s non-Unicode
+      # `\s` counts the non-breaking space it holds as a word. Counting the
+      # dropped gap as zero words undercounted by one per sentence and packed
+      # 599 words into a chunk against a ceiling of 400.
+      text = Enum.map_join(1..400, " \u00A0 ", &"w#{&1}.")
+
+      chunks = Chunker.chunk(text)
+
+      assert length(chunks) > 1
+      assert_within_limits(chunks)
+      assert_preserves(text, chunks)
+    end
+
+    test "the word rung counts a dropped non-ASCII separator the same way" do
+      # The same source with no sentence terminator, so it reaches the rung
+      # below: a word boundary is Unicode whitespace too, and overshot alike.
+      text = Enum.map_join(1..400, " \u00A0 ", &"w#{&1}")
+
+      chunks = Chunker.chunk(text)
+
+      assert length(chunks) > 1
+      assert_within_limits(chunks)
+      assert_preserves(text, chunks)
     end
 
     test "sentences are found in scripts the English pattern could not match" do
