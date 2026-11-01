@@ -1,6 +1,7 @@
 defmodule Doctrans.TestEnv do
   @moduledoc """
-  Scopes an `Application` env override to the lifetime of one test.
+  Scopes VM-global state -- an `Application` env override, the circuit
+  breakers -- to the lifetime of one test.
 
   Changing a setting in the application environment is how this suite drives
   the code that reads configuration (collaborator modules are Mox mocks and need
@@ -14,9 +15,14 @@ defmodule Doctrans.TestEnv do
   `put_env/2` raises in an async one rather than silently handing a concurrent
   test the wrong collaborator. The check reads a flag recorded per test by
   `Doctrans.DataCase.setup_sandbox/1` or `Doctrans.EnvCase`.
+
+  The `:fuse` circuit breakers are global in the same way, and `reset_fuses/0`
+  applies the same rule to them.
   """
 
   import ExUnit.Callbacks, only: [on_exit: 1]
+
+  alias Doctrans.Resilience.CircuitBreaker
 
   @async_key :doctrans_test_env_async
 
@@ -44,7 +50,7 @@ defmodule Doctrans.TestEnv do
   before the first override.
   """
   def put_env(key, value) do
-    override(key, fn -> Application.put_env(:doctrans, key, value) end)
+    override(key, "put_env/2", fn -> Application.put_env(:doctrans, key, value) end)
   end
 
   @doc """
@@ -55,29 +61,37 @@ defmodule Doctrans.TestEnv do
   finds rather than the default.
   """
   def delete_env(key) do
-    override(key, fn -> Application.delete_env(:doctrans, key) end)
+    override(key, "delete_env/1", fn -> Application.delete_env(:doctrans, key) end)
   end
 
-  defp override(key, change) do
-    registered = async?()
+  @doc """
+  Resets every circuit breaker for the running test, and again when it exits.
 
-    if is_nil(registered) do
-      raise ArgumentError,
-            "use Doctrans.EnvCase, DataCase or ConnCase before overriding application env"
-    end
+  A fuse is VM-global state like the application env, and nothing undoes a melt
+  on its own: the `:standard` strategy counts melts over a window of up to a
+  minute, and a blown fuse stays blown until its refresh timer fires. So a test
+  that fails real requests through `Doctrans.Processing.OpenAI` -- or blows a
+  fuse on purpose -- leaves the next test's calls asked against that history,
+  and a blown `:openai_api` turns `OpenAI.list_models/0` into
+  `{:error, :circuit_open}` without a request. Call this from the `setup` of a
+  test whose outcome depends on a closed circuit.
 
-    if registered do
-      raise ArgumentError, """
-      #{inspect(__MODULE__)}.put_env/2 was called from an async test.
+  Like `put_env/2` it is only safe in an `async: false` test, and raises in an
+  async one: the reset would land on whatever a concurrent test was asserting.
+  """
+  def reset_fuses do
+    refuse_async!("reset_fuses/0", "the circuit breakers")
+    reset_all_fuses()
+    on_exit(&reset_all_fuses/0)
+  end
 
-      Application env is global. Overriding #{inspect(key)} here would apply to \
-      every test running concurrently, not just this one, and would be restored \
-      out from under them when this test exits.
+  defp reset_all_fuses do
+    for name <- CircuitBreaker.fuse_names(), do: CircuitBreaker.reset(name)
+    :ok
+  end
 
-      Move the test to `async: false`, or drive the collaborator without \
-      touching application env.
-      """
-    end
+  defp override(key, fun, change) do
+    refuse_async!(fun, "#{inspect(key)}")
 
     previous = Application.fetch_env(:doctrans, key)
     change.()
@@ -88,5 +102,28 @@ defmodule Doctrans.TestEnv do
         :error -> Application.delete_env(:doctrans, key)
       end
     end)
+  end
+
+  defp refuse_async!(fun, subject) do
+    registered = async?()
+
+    if is_nil(registered) do
+      raise ArgumentError,
+            "use Doctrans.EnvCase, DataCase or ConnCase before calling " <>
+              "#{inspect(__MODULE__)}.#{fun}"
+    end
+
+    if registered do
+      raise ArgumentError, """
+      #{inspect(__MODULE__)}.#{fun} was called from an async test.
+
+      That state is global. Changing #{subject} here would apply to every test \
+      running concurrently, not just this one, and would be restored out from \
+      under them when this test exits.
+
+      Move the test to `async: false`, or drive the collaborator without \
+      touching global state.
+      """
+    end
   end
 end
