@@ -3,6 +3,7 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Layout
   alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock, Run}
 
   @moduletag :capture_log
@@ -41,11 +42,11 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
       view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
 
       [document] = Documents.list_documents()
-      directory = Documents.document_upload_dir(document.id)
+      directory = Layout.document_dir(document.id)
       on_exit(fn -> File.rm_rf!(directory) end)
 
       assert {:ok, _uuid} = Ecto.UUID.cast(document.id)
-      assert Path.relative_to(directory, Documents.uploads_dir()) == "documents/#{document.id}"
+      assert Path.relative_to(directory, Layout.root()) == "documents/#{document.id}"
       assert Enum.sort(File.ls!(directory)) == ["original.pdf", "runs"]
       assert File.read!(Path.join(directory, "original.pdf")) == content
       assert document.source_extension == ".pdf"
@@ -75,7 +76,7 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
     view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
 
     [document] = Documents.list_documents()
-    directory = Documents.document_upload_dir(document.id)
+    directory = Layout.document_dir(document.id)
     on_exit(fn -> File.rm_rf!(directory) end)
 
     assert document.title == "Quarterly Report"

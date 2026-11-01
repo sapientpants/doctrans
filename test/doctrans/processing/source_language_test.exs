@@ -20,6 +20,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
   import ExUnit.CaptureLog
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Layout
   alias Doctrans.Processing.{LlmProcessor, OpenAIMock, OpenAIProbe, SourceLanguage}
   alias Doctrans.TestEnv
 
@@ -246,7 +247,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
             image_path: "documents/#{document.id}/pages/page_#{number}.png"
           })
 
-        path = Path.join(Documents.uploads_dir(), page.image_path)
+        path = Path.join(Layout.root(), page.image_path)
         File.mkdir_p!(Path.dirname(path))
         File.write!(path, "test image")
         on_exit(fn -> File.rm(path) end)

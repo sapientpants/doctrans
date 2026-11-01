@@ -16,7 +16,7 @@ defmodule Doctrans.Documents.Intake do
 
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
-  alias Doctrans.Documents.Document
+  alias Doctrans.Documents.{Document, Layout}
   alias Doctrans.Errors
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Validation
@@ -270,8 +270,8 @@ defmodule Doctrans.Documents.Intake do
   # sobelow_skip ["Traversal.FileModule"]
   defp store(path, extension) do
     document_id = Uniq.UUID.uuid7()
-    dest_dir = Documents.document_upload_dir(document_id)
-    dest_path = Path.join(dest_dir, "original#{extension}")
+    dest_dir = Layout.document_dir(document_id)
+    dest_path = Layout.original_path(document_id, extension)
 
     with :ok <- File.mkdir_p(dest_dir),
          :ok <- File.cp(path, dest_path) do
@@ -288,7 +288,7 @@ defmodule Doctrans.Documents.Intake do
   # a path derived from the display filename.
   # sobelow_skip ["Traversal.FileModule"]
   defp discard_upload(document_id) do
-    document_id |> Documents.document_upload_dir() |> File.rm_rf()
+    document_id |> Layout.document_dir() |> File.rm_rf()
   end
 
   # `Path.rootname/1` drops whatever extension the file carries -- `.docx` and

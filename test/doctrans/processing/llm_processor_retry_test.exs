@@ -8,7 +8,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Pages, Topics}
+  alias Doctrans.Documents.{Layout, Pages, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.{LlmProcessor, OpenAIMock, OpenAIStub}
   alias Doctrans.Resilience.ErrorClassifier
@@ -22,7 +22,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
     document = document_fixture(%{status: "processing", total_pages: 1})
     page = page_fixture(document)
 
-    path = Path.join(Documents.uploads_dir(), page.image_path)
+    path = Path.join(Layout.root(), page.image_path)
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, "test image")
     on_exit(fn -> File.rm(path) end)

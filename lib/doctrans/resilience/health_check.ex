@@ -20,6 +20,7 @@ defmodule Doctrans.Resilience.HealthCheck do
       true
   """
 
+  alias Doctrans.Config.Uploads
   alias Doctrans.Processing.OpenAI
   alias Doctrans.Repo
 
@@ -134,7 +135,7 @@ defmodule Doctrans.Resilience.HealthCheck do
 
     result =
       try do
-        uploads_dir = Doctrans.Documents.uploads_dir()
+        uploads_dir = Uploads.upload_dir()
 
         # Check directory exists
         unless File.dir?(uploads_dir) do

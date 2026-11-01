@@ -8,7 +8,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   import ExUnit.CaptureLog
 
   alias Doctrans.{Config, Documents, TestEnv}
-  alias Doctrans.Documents.{Pages, Topics}
+  alias Doctrans.Documents.{Layout, Pages, Topics}
   alias Doctrans.Processing.Run
   alias DoctransWeb.DocumentLive.ReprocessModal
   alias DoctransWeb.ErrorMessages
@@ -585,7 +585,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
 
     # The document-scope trigger is disabled unless the original upload is still
     # on disk.
-    directory = Documents.document_upload_dir(document.id)
+    directory = Layout.document_dir(document.id)
     File.mkdir_p!(directory)
     File.write!(Run.source_path(document), "original pdf")
     on_exit(fn -> File.rm_rf(directory) end)

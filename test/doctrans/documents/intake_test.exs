@@ -2,7 +2,7 @@ defmodule Doctrans.Documents.IntakeTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Intake
+  alias Doctrans.Documents.{Intake, Layout}
   alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock}
 
   import Doctrans.Fixtures
@@ -23,10 +23,10 @@ defmodule Doctrans.Documents.IntakeTest do
       path = temp_file("Report.PDF", @pdf)
 
       assert {:ok, document_id, "Report.PDF", stored} = Intake.accept(path, "Report.PDF")
-      on_exit(fn -> File.rm_rf!(Documents.document_upload_dir(document_id)) end)
+      on_exit(fn -> File.rm_rf!(Layout.document_dir(document_id)) end)
 
       assert {:ok, _uuid} = Ecto.UUID.cast(document_id)
-      assert stored == Path.join(Documents.document_upload_dir(document_id), "original.pdf")
+      assert stored == Path.join(Layout.document_dir(document_id), "original.pdf")
       assert File.read!(stored) == @pdf
     end
 
@@ -36,7 +36,7 @@ defmodule Doctrans.Documents.IntakeTest do
       assert {:ok, document_id, "Report.pdf", stored} =
                Intake.accept(String.to_charlist(path), "Report.pdf")
 
-      on_exit(fn -> File.rm_rf!(Documents.document_upload_dir(document_id)) end)
+      on_exit(fn -> File.rm_rf!(Layout.document_dir(document_id)) end)
       assert File.read!(stored) == @pdf
     end
 
@@ -123,7 +123,7 @@ defmodule Doctrans.Documents.IntakeTest do
                })
 
       assert is_nil(Documents.get_document(document_id))
-      refute File.exists?(Documents.document_upload_dir(document_id))
+      refute File.exists?(Layout.document_dir(document_id))
     end
 
     test "reports a failure and removes the upload when the document cannot be created" do
@@ -136,7 +136,7 @@ defmodule Doctrans.Documents.IntakeTest do
                })
 
       assert is_nil(Documents.get_document(document_id))
-      refute File.exists?(Documents.document_upload_dir(document_id))
+      refute File.exists?(Layout.document_dir(document_id))
     end
 
     test "reports a start failure and cleans up when the start path raises" do
@@ -144,7 +144,7 @@ defmodule Doctrans.Documents.IntakeTest do
       # declares no unique constraint to turn it into a changeset error), standing
       # in for the raises an unreachable database produces mid-start.
       existing = document_fixture()
-      directory = Documents.document_upload_dir(existing.id)
+      directory = Layout.document_dir(existing.id)
       File.mkdir_p!(directory)
       path = Path.join(directory, "original.pdf")
       File.write!(path, @pdf)
@@ -176,7 +176,7 @@ defmodule Doctrans.Documents.IntakeTest do
 
       assert Documents.get_document!(bystander.id).id == bystander.id
       assert is_nil(Documents.get_document(document_id))
-      refute File.exists?(Documents.document_upload_dir(document_id))
+      refute File.exists?(Layout.document_dir(document_id))
       refute File.exists?(path)
     end
   end
@@ -184,7 +184,7 @@ defmodule Doctrans.Documents.IntakeTest do
   # A file where `accept/2` would have put it, for driving the second step alone.
   defp stored_upload(basename, content \\ @pdf) do
     document_id = Uniq.UUID.uuid7()
-    directory = Documents.document_upload_dir(document_id)
+    directory = Layout.document_dir(document_id)
     File.mkdir_p!(directory)
     path = Path.join(directory, basename)
     File.write!(path, content)

@@ -6,6 +6,7 @@ defmodule Doctrans.Processing.DocumentReprocessingRaceTest do
   import Ecto.Query
   import Doctrans.ProcessProbe, only: [eventually: 2]
   alias Doctrans.{Documents, Repo}
+  alias Doctrans.Documents.Layout
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.{DocumentReprocessing, Run}
   alias Ecto.Adapters.SQL.Sandbox
@@ -18,7 +19,7 @@ defmodule Doctrans.Processing.DocumentReprocessingRaceTest do
         Doctrans.Fixtures.document_fixture(%{status: "completed", total_pages: 1})
       end)
 
-    directory = Documents.document_upload_dir(document.id)
+    directory = Layout.document_dir(document.id)
     File.mkdir_p!(directory)
     File.write!(Run.source_path(document), "original")
 

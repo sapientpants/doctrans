@@ -5,6 +5,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
   use DoctransWeb.ConnCase, async: false
   import Doctrans.Fixtures
   alias Doctrans.Documents
+  alias Doctrans.Documents.Layout
   alias Doctrans.Processing.Run
   alias Doctrans.TestEnv
 
@@ -32,7 +33,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
 
     document = document_fixture(%{status: "completed", total_pages: 1})
     page_fixture(document, %{extraction_status: "completed", translation_status: "completed"})
-    directory = Documents.document_upload_dir(document.id)
+    directory = Layout.document_dir(document.id)
     File.mkdir_p!(directory)
     File.write!(Run.source_path(document), "original pdf")
     on_exit(fn -> File.rm_rf(directory) end)

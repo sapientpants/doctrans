@@ -3,7 +3,7 @@ defmodule Doctrans.StorageRootTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Config.Uploads
-  alias Doctrans.Documents
+  alias Doctrans.Documents.Layout
   alias Doctrans.Resilience.HealthCheck
   alias Doctrans.TestEnv
 
@@ -18,11 +18,11 @@ defmodule Doctrans.StorageRootTest do
   end
 
   test "a storage root chosen after boot is created and reported healthy", %{root: root} do
-    assert Documents.uploads_dir() == root
+    assert Layout.root() == root
     refute File.exists?(root)
     assert {:error, {:uploads_directory_missing, _}} = HealthCheck.check_filesystem()
 
-    assert Documents.ensure_uploads_dir!() == root
+    assert Uploads.ensure_root!() == root
     assert File.dir?(root)
     assert HealthCheck.check_filesystem() == :ok
   end
@@ -94,7 +94,7 @@ defmodule Doctrans.StorageRootTest do
       max_file_size: 1
     )
 
-    assert_raise RuntimeError, ~r/DOCTRANS_DATA_DIR/, &Documents.ensure_uploads_dir!/0
+    assert_raise RuntimeError, ~r/DOCTRANS_DATA_DIR/, &Uploads.ensure_root!/0
   end
 
   test "an unwritable storage root is reported unhealthy", %{root: root} do

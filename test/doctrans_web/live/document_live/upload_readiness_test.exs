@@ -18,6 +18,7 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
   import ExUnit.CaptureLog
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Layout
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.OpenAIMock
   alias Doctrans.Search.EmbeddingMocks
@@ -280,7 +281,7 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
         view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
 
         assert [document] = Documents.list_documents()
-        directory = Documents.document_upload_dir(document.id)
+        directory = Layout.document_dir(document.id)
         on_exit(fn -> File.rm_rf!(directory) end)
 
         assert File.read!(Path.join(directory, "original.pdf")) ==

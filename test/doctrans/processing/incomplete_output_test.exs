@@ -6,6 +6,7 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Layout
   alias Doctrans.Processing.{LlmProcessor, OpenAI, OpenAIMock}
   alias Doctrans.Resilience.{CircuitBreaker, ErrorClassifier}
   alias Doctrans.TestEnv
@@ -25,7 +26,7 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
 
     document = document_fixture(%{status: "processing", total_pages: 1})
     page = page_fixture(document)
-    path = Path.join(Documents.uploads_dir(), page.image_path)
+    path = Path.join(Layout.root(), page.image_path)
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, "test image")
 

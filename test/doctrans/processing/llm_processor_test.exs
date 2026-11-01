@@ -4,7 +4,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Pages
+  alias Doctrans.Documents.{Layout, Pages}
   alias Doctrans.Processing.{LlmProcessor, OpenAIMock}
 
   import Doctrans.Fixtures
@@ -15,7 +15,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       page = page_fixture(document, %{page_number: 1})
 
       # Create the image file for the mock to find
-      upload_dir = Documents.uploads_dir()
+      upload_dir = Layout.root()
       full_path = Path.join(upload_dir, page.image_path)
       File.mkdir_p!(Path.dirname(full_path))
       File.write!(full_path, "fake image")
@@ -195,7 +195,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
 
   # Helper to create a fake image file for tests
   defp setup_image_file(page) do
-    upload_dir = Documents.uploads_dir()
+    upload_dir = Layout.root()
     full_path = Path.join(upload_dir, page.image_path)
     File.mkdir_p!(Path.dirname(full_path))
     File.write!(full_path, "fake image")

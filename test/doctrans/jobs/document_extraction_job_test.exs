@@ -5,7 +5,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
   use Oban.Testing, repo: Doctrans.Repo
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
+  alias Doctrans.Documents.{Layout, Topics}
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock}
   alias Doctrans.TestEnv
@@ -164,7 +164,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
     test "a missing LibreOffice is cancelled rather than retried" do
       document = document_fixture(%{original_filename: "report.docx"})
 
-      upload_dir = Doctrans.Documents.document_upload_dir(document.id)
+      upload_dir = Layout.document_dir(document.id)
       File.mkdir_p!(upload_dir)
       File.write!(Path.join(upload_dir, "original.docx"), "fake docx content")
       on_exit(fn -> File.rm_rf!(upload_dir) end)
@@ -281,7 +281,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
     for page <- saved.pages do
       assert page.extraction_status == "completed"
       assert page.translation_status == "completed"
-      assert File.regular?(Path.join(Documents.uploads_dir(), page.image_path))
+      assert File.regular?(Path.join(Layout.root(), page.image_path))
     end
   end
 end

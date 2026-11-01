@@ -11,6 +11,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
 
   use Doctrans.DataCase, async: false
 
+  alias Doctrans.Config.Uploads
   alias Doctrans.Resilience.CircuitBreaker
   alias Doctrans.Resilience.HealthCheck
   alias Doctrans.TestEnv
@@ -160,7 +161,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
 
   describe "check_filesystem/0" do
     test "returns :ok and leaves no probe file behind" do
-      uploads_dir = Doctrans.Documents.uploads_dir()
+      uploads_dir = Uploads.upload_dir()
 
       assert HealthCheck.check_filesystem() == :ok
       refute Enum.any?(File.ls!(uploads_dir), &String.starts_with?(&1, ".health_check_"))

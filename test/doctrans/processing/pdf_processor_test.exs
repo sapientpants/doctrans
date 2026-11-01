@@ -2,7 +2,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
+  alias Doctrans.Documents.{Layout, Topics}
   alias Doctrans.Processing.Completion
   alias Doctrans.Processing.PdfProcessor
 
@@ -65,7 +65,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         assert Enum.map(updated_doc.pages, & &1.page_number) == [1, 2, 3]
 
         for page <- updated_doc.pages do
-          assert File.regular?(Path.join(Documents.uploads_dir(), page.image_path))
+          assert File.regular?(Path.join(Layout.root(), page.image_path))
           assert page.extraction_status == "pending"
         end
 
@@ -142,7 +142,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         assert Enum.map(pages, & &1.id) == [completed.id, pending.id, translating.id]
 
         for page <- pages do
-          assert File.regular?(Path.join(Documents.uploads_dir(), page.image_path))
+          assert File.regular?(Path.join(Layout.root(), page.image_path))
         end
 
         restored = Documents.get_page!(completed.id)

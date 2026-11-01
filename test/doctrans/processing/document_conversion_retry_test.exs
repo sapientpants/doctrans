@@ -5,7 +5,7 @@ defmodule Doctrans.Processing.DocumentConversionRetryTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
+  alias Doctrans.Documents.{Layout, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
   alias Doctrans.Processing.{DocumentConverterMocks, ResumablePdfExtractorStub}
 
@@ -14,7 +14,7 @@ defmodule Doctrans.Processing.DocumentConversionRetryTest do
     DocumentConverterMocks.retry()
 
     document = document_fixture(%{original_filename: "report.docx"})
-    directory = Documents.document_upload_dir(document.id)
+    directory = Layout.document_dir(document.id)
     File.mkdir_p!(directory)
     source_path = Path.join(directory, "original.docx")
     File.write!(source_path, "original document")
