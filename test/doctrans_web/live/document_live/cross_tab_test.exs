@@ -374,8 +374,8 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
       view |> form("#chat-form", %{"message" => question}) |> render_submit()
 
       # Parked inside the agent pipeline, which is where a real turn spends its
-      # time. The task is `async_nolink`, so nothing that happens to the LiveView
-      # or to the document reaches it on its own.
+      # time. The task runs under `Doctrans.TaskSupervisor`, so nothing that
+      # happens to the document reaches it on its own.
       assert_receive {:embedding_started, ^barrier, task_pid}, 2_000
       monitor = Process.monitor(task_pid)
 
@@ -399,16 +399,15 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
       assert has_element?(view, "#document-not-found")
 
       # Both shapes a killed turn can still deliver: a result sent before the kill
-      # landed, and a `:DOWN` for a monitor already flushed. `interrupt_chat/1`
-      # cleared `chat_task_ref`, so each is identified by its ref -- not by having
-      # turned up late -- and falls to the stale-ref clauses that drop it.
-      send(view.pid, {make_ref(), {:ok, "Stale answer", []}})
-      send(view.pid, {:DOWN, make_ref(), :process, self(), :boom})
-
-      # Rendering round-trips through the viewer, so a message that killed it
-      # fails here rather than going unnoticed.
-      assert has_element?(view, "#document-not-found")
-      assert Process.alive?(view.pid)
+      # landed, and the exit of the killed task. `ChatSession.interrupt/1`
+      # cleared `chat_token`, so each is identified by what it carries -- not by
+      # having turned up late -- and is dropped by `handle_async/3`, with no
+      # document to apply it to.
+      socket = :sys.get_state(view.pid).socket
+      stale = {:ok, {make_ref(), {:ok, "Stale answer", []}}}
+      assert {:noreply, ^socket} = Show.handle_async(:chat_turn, stale, socket)
+      assert {:noreply, ^socket} = Show.handle_async(:chat_turn, {:exit, :killed}, socket)
+      assert socket.assigns.document == nil
     end
   end
 

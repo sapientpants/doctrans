@@ -116,7 +116,6 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:search_query, nil)
       |> assign(:search_page, nil)
       |> ReprocessModal.init()
-      |> StatusPanel.init()
       |> ChatSession.init(document)
 
     {:ok, socket}
@@ -191,6 +190,10 @@ defmodule DoctransWeb.DocumentLive.Show do
     ReprocessModal.handle_async(:fetch_models, result, socket)
   end
 
+  def handle_async(:chat_turn, result, socket) do
+    ChatSession.handle_async(:chat_turn, result, socket)
+  end
+
   # PubSub Handlers
 
   @impl true
@@ -217,19 +220,13 @@ defmodule DoctransWeb.DocumentLive.Show do
 
     if document do
       changed? = document.processing_run_id != socket.assigns.document.processing_run_id
-      socket = if changed?, do: interrupt_chat(socket), else: socket
-
-      number =
-        min(
-          socket.assigns.current_page_number,
-          document.total_pages || socket.assigns.current_page_number
-        )
+      socket = if changed?, do: ChatSession.interrupt(socket), else: socket
 
       {:noreply,
        socket
        |> assign(:document, document)
        |> assign(:source_available, Run.source_available?(document))
-       |> PageViewer.apply_params(%{"page" => to_string(max(1, number))})
+       |> PageViewer.goto_page(socket.assigns.current_page_number)
        |> refresh_progress()}
     else
       {:noreply, document_vanished(socket)}
@@ -284,66 +281,11 @@ defmodule DoctransWeb.DocumentLive.Show do
     {:noreply, socket |> assign(:progress_refresh_pending, false) |> refresh_progress()}
   end
 
-  def handle_info({:chat_event, token, event}, socket) do
-    if token == socket.assigns.chat_token,
-      do: handle_info({:chat_event, event}, socket),
-      else: {:noreply, socket}
+  # Streaming events from the chat turn in flight
+  def handle_info({:chat_event, _token, _event} = message, socket) do
+    ChatSession.handle_info(message, socket)
   end
 
-  # Chat streaming/progress events from the agent pipeline
-
-  @impl true
-  def handle_info({:chat_event, _event}, %{assigns: %{chat_loading: false}} = socket),
-    do: {:noreply, socket}
-
-  def handle_info({:chat_event, {:stage, stage}}, socket) do
-    {:noreply, assign(socket, :chat_stage, stage)}
-  end
-
-  @impl true
-  def handle_info({:chat_event, {:delta, text}}, socket) do
-    {:noreply,
-     assign(socket, :chat_streaming_content, socket.assigns.chat_streaming_content <> text)}
-  end
-
-  # Chat response handlers (async_nolink pattern)
-
-  @impl true
-  def handle_info({ref, {:ok, response, retrieved_context}}, socket)
-      when socket.assigns.chat_task_ref == ref do
-    # Flush the :DOWN message
-    Process.demonitor(ref, [:flush])
-
-    case ChatSession.put_response(socket, response, retrieved_context) do
-      {:ok, socket} -> {:noreply, socket}
-      {:error, :obsolete_run} -> {:noreply, interrupt_chat(socket)}
-    end
-  end
-
-  @impl true
-  def handle_info({ref, {:error, reason}}, socket) when socket.assigns.chat_task_ref == ref do
-    Process.demonitor(ref, [:flush])
-    {:noreply, ChatSession.put_failure(socket, reason)}
-  end
-
-  @impl true
-  def handle_info({:DOWN, ref, :process, _pid, reason}, socket)
-      when socket.assigns.chat_task_ref == ref do
-    # :normal = success (result already handled); only error on crashes
-    if reason == :normal,
-      do: {:noreply, socket},
-      else: {:noreply, ChatSession.put_failure(socket, :unknown)}
-  end
-
-  # Catch-all handlers for stale task refs
-  @impl true
-  def handle_info({ref, _result}, socket) when is_reference(ref) do
-    Process.demonitor(ref, [:flush])
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket), do: {:noreply, socket}
   defp refresh_progress(%{assigns: %{document: nil}} = socket), do: socket
 
   defp refresh_progress(socket) do
@@ -360,37 +302,10 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   # The document this viewer is on has gone: deleted in another tab, or already
-  # gone by the time a `{:document_updated, _}` made us re-read it.
-  #
-  # A turn in flight has to be stopped here rather than when its result lands.
-  # `Cancellation.cancel_jobs/1` cancels Oban jobs and never reaches a task this
-  # LiveView spawned, and the task is `async_nolink`, so nothing else will: left
-  # alone it runs the whole agent pipeline -- several LLM calls, up to a 300s
-  # receive timeout each -- to produce an answer with nowhere to go. Every landing
-  # a turn has writes through `Doctrans.Chat.Conversations`, whose chat session
-  # cascaded away with the document, so the answer could not be saved in any case.
-  # It also survives the user navigating away, being unlinked from this process.
-  #
-  # Killing the task and clearing the ref here is also what lets the stale-ref
-  # catch-alls at the bottom of this module handle a result that was already in
-  # flight: `chat_task_ref` is nil by the time it arrives, so it matches nothing
-  # else and is dropped -- identified by its ref, not by when it turned up.
+  # gone by the time a `{:document_updated, _}` made us re-read it. A turn in
+  # flight is stopped with it; `ChatSession.interrupt/1` says why it cannot wait.
   defp document_vanished(socket) do
-    socket |> interrupt_chat() |> assign(:document, nil)
-  end
-
-  defp interrupt_chat(socket) do
-    if socket.assigns.chat_task_pid, do: Process.exit(socket.assigns.chat_task_pid, :kill)
-    if socket.assigns.chat_task_ref, do: Process.demonitor(socket.assigns.chat_task_ref, [:flush])
-
-    socket
-    |> assign(:chat_task_pid, nil)
-    |> assign(:chat_token, nil)
-    |> assign(:chat_task_ref, nil)
-    |> assign(:chat_loading, false)
-    |> assign(:chat_streaming_content, "")
-    |> assign(:chat_retrieved_context, [])
-    |> assign(:embeddings_ready, false)
+    socket |> ChatSession.interrupt() |> assign(:document, nil)
   end
 
   # Names the reprocess-document button and fills its tooltip. The two must say

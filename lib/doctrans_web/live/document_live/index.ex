@@ -16,19 +16,12 @@ defmodule DoctransWeb.DocumentLive.Index do
   import DoctransWeb.DocumentLive.Components
   import DoctransWeb.DocumentLive.UploadComponents
 
-  # How long to wait after a page-level update before refreshing affected cards.
-  # Page updates arrive very frequently (one per page, per document); this
-  # coalesces bursts while retaining a trailing refresh for every affected document.
-  @refresh_coalesce_ms 1_500
-
   @impl true
   def mount(_params, _session, socket) do
     defaults = Application.get_env(:doctrans, :defaults, [])
 
     socket =
       socket
-      |> assign(:refresh_scheduled?, false)
-      |> assign(:pending_document_ids, [])
       |> assign(:show_upload_modal, false)
       |> assign(:upload_failures, [])
       |> assign(:upload_pending, [])
@@ -406,28 +399,12 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def handle_info({:page_updated, page}, socket) do
-    if socket.assigns.refresh_scheduled? do
-      ids = Enum.uniq([page.document_id | socket.assigns.pending_document_ids])
-      {:noreply, assign(socket, :pending_document_ids, ids)}
-    else
-      Process.send_after(self(), :dashboard_refresh, @refresh_coalesce_ms)
-
-      {:noreply,
-       socket
-       |> assign(:refresh_scheduled?, true)
-       |> DocumentStream.refresh_documents([page.document_id])}
-    end
+    {:noreply, DocumentStream.page_updated(socket, page)}
   end
 
   @impl true
   def handle_info(:dashboard_refresh, socket) do
-    ids = socket.assigns.pending_document_ids
-
-    {:noreply,
-     socket
-     |> assign(:refresh_scheduled?, false)
-     |> assign(:pending_document_ids, [])
-     |> DocumentStream.refresh_documents(ids)}
+    {:noreply, DocumentStream.refresh_pending(socket)}
   end
 
   @impl true

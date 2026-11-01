@@ -12,7 +12,9 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
   and released by `unsubscribe/0`: every message it delivers -- a document
   created, updated or deleted, a page progressing -- is handled by calling back
   into this module, so the subscription lives with the state it feeds rather
-  than one module away from it.
+  than one module away from it. That includes the coalescing of page bursts:
+  `page_updated/2` schedules the `:dashboard_refresh` timer and collects the
+  documents it will refresh, and `refresh_pending/1` is that timer landing.
 
   Kept out of the LiveView module so that `Index` handles events and messages and does
   not also reach into the `Documents` context, in the same idiom as
@@ -27,6 +29,11 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
 
+  # How long to wait after a page-level update before refreshing affected cards.
+  # Page updates arrive very frequently (one per page, per document); this
+  # coalesces bursts while retaining a trailing refresh for every affected document.
+  @refresh_coalesce_ms 1_500
+
   @doc """
   Assigns the empty stream state. The list itself arrives from `refresh/1`.
 
@@ -39,6 +46,8 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
 
     socket
     |> assign(:documents_count, 0)
+    |> assign(:refresh_scheduled?, false)
+    |> assign(:pending_document_ids, [])
     |> stream(:documents, [])
   end
 
@@ -74,6 +83,40 @@ defmodule DoctransWeb.DocumentLive.DocumentStream do
     found_ids = Enum.map(summaries, & &1.id)
     socket = Enum.reduce(ids -- found_ids, socket, &remove(&2, &1))
     update_documents(socket, summaries)
+  end
+
+  @doc """
+  Refreshes the card of the document `page` belongs to.
+
+  The first page update of a burst refreshes its card at once and starts the
+  `:dashboard_refresh` timer; every update until that timer lands only records
+  its document, so a burst costs one query up front and one trailing refresh
+  per affected document rather than one per page.
+  """
+  def page_updated(socket, page) do
+    if socket.assigns.refresh_scheduled? do
+      ids = Enum.uniq([page.document_id | socket.assigns.pending_document_ids])
+      assign(socket, :pending_document_ids, ids)
+    else
+      Process.send_after(self(), :dashboard_refresh, @refresh_coalesce_ms)
+
+      socket
+      |> assign(:refresh_scheduled?, true)
+      |> refresh_documents([page.document_id])
+    end
+  end
+
+  @doc """
+  Handles the `:dashboard_refresh` timer: refreshes every document whose page
+  updates arrived while it was pending, and arms the next burst.
+  """
+  def refresh_pending(socket) do
+    ids = socket.assigns.pending_document_ids
+
+    socket
+    |> assign(:refresh_scheduled?, false)
+    |> assign(:pending_document_ids, [])
+    |> refresh_documents(ids)
   end
 
   @doc """

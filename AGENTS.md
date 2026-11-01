@@ -11,10 +11,9 @@ This is a web application written using the Phoenix web framework.
   client for Phoenix apps
 - **Off-process work in a LiveView goes through `start_async/3`/`handle_async/3`**, supervised by
   `Doctrans.TaskSupervisor` (`start_async(..., supervisor: Doctrans.TaskSupervisor)`). `SearchLive`
-  is the reference. The older raw `Task.Supervisor.async_nolink` + `handle_info({ref, _})` + stored-ref
-  pattern in the chat path predates it — follow it only when editing that path, don't copy it into new
-  code. Note that `cancel_async/2` kills the task without clearing the ref it is tracked under, so a
-  result already in flight can still arrive: identify async results by payload, not by arrival.
+  is the reference; `DocumentLive.ChatSession` is the same pattern with streaming events. Note that
+  `cancel_async/2` kills the task without clearing the ref it is tracked under, so a result already
+  in flight can still arrive: identify async results by payload, not by arrival.
 - **External collaborators in tests are Mox mocks in private mode.** `config/test.exs` points
   `:embedding_module`, `:openai_module`, `:pdf_extractor_module` and `:document_converter_module`
   at `*Mock` modules; `Doctrans.Mocks.setup/1` (run by DataCase, ConnCase and EnvCase) installs the

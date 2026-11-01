@@ -279,14 +279,14 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
     } do
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
       question = Conversations.start_question(document.id, "Old question")
-      ref = make_ref()
+      token = make_ref()
 
       socket =
         :sys.get_state(view.pid).socket
         |> Phoenix.Component.assign(
           chat_loading: true,
           chat_question: question,
-          chat_task_ref: ref,
+          chat_token: token,
           chat_last_question: question.content
         )
 
@@ -294,11 +294,45 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       |> Ecto.Changeset.change(processing_run_id: Ecto.UUID.generate())
       |> Repo.update!()
 
-      {:noreply, updated} = Show.handle_info({ref, {:ok, "Stale answer", []}}, socket)
+      result = {:ok, {token, {:ok, "Stale answer", []}}}
+      {:noreply, updated} = Show.handle_async(:chat_turn, result, socket)
       refute updated.assigns.chat_loading
-      assert updated.assigns.chat_task_ref == nil
+      assert updated.assigns.chat_token == nil
       assert updated.assigns.chat_retrieved_context == []
       assert length(Conversations.load(document.id).messages) == 1
+    end
+
+    test "a result or exit from an interrupted turn is dropped", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      question = Conversations.start_question(document.id, "Interrupted question")
+
+      socket =
+        :sys.get_state(view.pid).socket
+        |> Phoenix.Component.assign(
+          chat_loading: true,
+          chat_question: question,
+          chat_token: make_ref(),
+          chat_last_question: question.content
+        )
+
+      interrupted = ChatSession.interrupt(socket)
+      refute interrupted.assigns.chat_loading
+      assert interrupted.assigns.chat_token == nil
+
+      # Both shapes a killed turn can still deliver: a result it sent before the
+      # kill landed, and the exit of a task no later turn superseded. Each is
+      # identified by what it carries -- a token that no longer matches, an exit
+      # while no turn is running -- not by having turned up late.
+      stale = {:ok, {socket.assigns.chat_token, {:ok, "Stale answer", []}}}
+      assert {:noreply, ^interrupted} = Show.handle_async(:chat_turn, stale, interrupted)
+
+      assert {:noreply, ^interrupted} =
+               Show.handle_async(:chat_turn, {:exit, :killed}, interrupted)
+
+      assert Enum.map(Conversations.load(document.id).messages, & &1.role) == ["user"]
     end
 
     test "chat button is visible in header", %{conn: conn, document: document} do
@@ -391,7 +425,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       assigns = :sys.get_state(view.pid).socket.assigns
       refute assigns.chat_loading
-      assert assigns.chat_task_ref == nil
+      assert assigns.chat_token == nil
     end
 
     # The chat panel answers in the first person, so a failure the message
@@ -607,25 +641,18 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
     refute has_element?(view, "#chat-streaming")
     assigns = :sys.get_state(view.pid).socket.assigns
     refute assigns.chat_loading
-    assert assigns.chat_task_ref == nil
-    assert assigns.chat_task_pid == nil
+    assert assigns.chat_token == nil
   end
 
-  # A chat turn is an `async_nolink` task, which `render_async/2` does not cover,
-  # so this waits on the task itself rather than on a render. Nothing holds the
+  # A chat turn is a `start_async/3` task, so `render_async/2` waits on it: it
+  # monitors the task and returns once it has exited, by which time its result
+  # is already ahead of the next round trip to the LiveView. Nothing holds the
   # turn open -- the stubs answer immediately, and this file is `async: true`, so
   # it cannot install the global embedding barrier that would -- so the task may
-  # already have finished by the time this looks. Monitoring covers both: the
-  # exit reason is `:normal` if we got here first and `:noproc` if we did not,
-  # and either way the task sent its result to the LiveView before exiting, so
-  # that message sits ahead of the caller's next round trip. Waiting at all is
-  # also what keeps the task from outliving the test and querying the database
-  # with no sandbox owner.
-  defp await_chat_turn(view) do
-    pid = :sys.get_state(view.pid).socket.assigns.chat_task_pid
-    monitor = Process.monitor(pid)
-    assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 2_000
-  end
+  # already have finished by the time this looks, which is covered the same way.
+  # Waiting at all is also what keeps the task from outliving the test and
+  # querying the database with no sandbox owner.
+  defp await_chat_turn(view), do: render_async(view, 2_000)
 
   defp context_chunk(page, content) do
     %{
