@@ -27,6 +27,7 @@ defmodule Doctrans.Documents do
   defdelegate update_page_extraction(page, attrs), to: Pages
   defdelegate update_page_translation(page, attrs), to: Pages
   defdelegate completion_state(document_id), to: Pages
+  defdelegate embeddings_ready?(document), to: Pages
   defdelegate failed_page_numbers(document_id), to: Pages
   defdelegate reset_page_for_reprocessing(page), to: Pages
 
@@ -149,43 +150,6 @@ defmodule Doctrans.Documents do
     sort_by = Keyword.get(opts, :sort_by, :inserted_at)
     sort_dir = Keyword.get(opts, :sort_dir, :desc)
     order_by(query, ^[{sort_dir, sort_by}, {sort_dir, :id}])
-  end
-
-  @doc """
-  Returns true when the document has embeddings ready to answer questions.
-
-  Prefers chunk-level embeddings and falls back to page-level ones, which is the
-  granularity documents indexed before chunking still carry.
-  """
-  @spec embeddings_ready?(Document.t() | Ecto.UUID.t()) :: boolean()
-  def embeddings_ready?(%Document{id: document_id}), do: embeddings_ready?(document_id)
-
-  def embeddings_ready?(document_id) do
-    chunks_embedded?(document_id) or pages_embedded?(document_id)
-  end
-
-  # Reached through the page association rather than by naming `Chunk`, which this
-  # module can no longer afford to alias: Credo's `ModuleDependencies` check caps a
-  # module at `max_deps: 10` first-party dependencies (`.credo.exs`), and aliasing
-  # `Topics` for the cross-tab broadcasts put `Documents` at the ceiling. Going
-  # through `Page has_many :chunks` is equivalent -- same inner join, same three
-  # predicates, same `exists?` -- so re-adding the alias would fail the build for
-  # nothing.
-  defp chunks_embedded?(document_id) do
-    Page
-    |> where([p], p.document_id == ^document_id)
-    |> join(:inner, [p], c in assoc(p, :chunks))
-    |> where([_p, c], c.embedding_status == "completed")
-    |> where([_p, c], not is_nil(c.embedding))
-    |> Repo.exists?()
-  end
-
-  defp pages_embedded?(document_id) do
-    Page
-    |> where([p], p.document_id == ^document_id)
-    |> where([p], p.embedding_status == "completed")
-    |> where([p], not is_nil(p.embedding))
-    |> Repo.exists?()
   end
 
   @doc """
