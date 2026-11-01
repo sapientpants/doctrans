@@ -9,8 +9,7 @@ defmodule Doctrans.Documents do
 
   import Ecto.Query
 
-  alias Doctrans.Documents.{Document, Layout, Page, Pages, Summary, Topics}
-  alias Doctrans.Processing.Run
+  alias Doctrans.Documents.{Document, Layout, Page, Pages, Revision, Summary, Topics}
   alias Doctrans.Repo
   alias Doctrans.Validation
 
@@ -205,7 +204,7 @@ defmodule Doctrans.Documents do
   @spec update_document(Document.t(), map()) ::
           {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def update_document(%Document{} = document, attrs) do
-    Run.with_current(document, fn current ->
+    Revision.with_current(document, fn current ->
       current
       |> Document.changeset(attrs)
       |> Repo.update()
@@ -219,7 +218,7 @@ defmodule Doctrans.Documents do
   @spec update_document_status(Document.t(), String.t(), term()) ::
           {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
   def update_document_status(%Document{} = document, status, error_message \\ nil) do
-    Run.with_current(document, fn current ->
+    Revision.with_current(document, fn current ->
       current
       |> Document.status_changeset(status, Doctrans.Errors.diagnostic(error_message))
       |> Repo.update()
@@ -243,7 +242,7 @@ defmodule Doctrans.Documents do
   def delete_document(%Document{} = document) do
     result =
       Repo.transaction(fn ->
-        _ = Run.lock(document.id)
+        _ = Revision.lock(document.id)
         delete_locked_document(document)
       end)
       |> case do

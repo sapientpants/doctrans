@@ -8,8 +8,7 @@ defmodule Doctrans.Documents.Pages do
   import Ecto.Query
   import Doctrans.Documents.Page, only: [failed?: 1]
 
-  alias Doctrans.Documents.{Chunk, Document, Page}
-  alias Doctrans.Processing.Run
+  alias Doctrans.Documents.{Chunk, Document, Page, Revision}
   alias Doctrans.Repo
 
   @doc """
@@ -115,7 +114,7 @@ defmodule Doctrans.Documents.Pages do
   @spec update_page_extraction(Page.t(), map()) ::
           {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
   def update_page_extraction(%Page{} = page, attrs) do
-    Run.with_page(page, fn current ->
+    Revision.with_page(page, fn current ->
       current
       |> Page.extraction_changeset(attrs)
       |> Repo.update()
@@ -129,7 +128,7 @@ defmodule Doctrans.Documents.Pages do
   @spec update_page_translation(Page.t(), map()) ::
           {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
   def update_page_translation(%Page{} = page, attrs) do
-    Run.with_page(page, fn current ->
+    Revision.with_page(page, fn current ->
       current
       |> Page.translation_changeset(attrs)
       |> Repo.update()

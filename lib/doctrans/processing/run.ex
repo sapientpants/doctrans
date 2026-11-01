@@ -1,8 +1,14 @@
 defmodule Doctrans.Processing.Run do
-  @moduledoc "Stored source paths, model choices, and transactional processing-run guards."
-  import Ecto.Query
+  @moduledoc """
+  Stored source paths, model choices, and whether a document's run is still live.
+
+  The transactional guards (`lock/1`, `current?/2`, `with_current/2`,
+  `with_page/2`) live in `Doctrans.Documents.Revision`, which owns the
+  revision columns they compare; they are delegated here so the processing
+  layer keeps one entry point for run concerns.
+  """
   alias Doctrans.Config.OpenAI
-  alias Doctrans.Documents.{Document, Formats, Layout, Page, Pages}
+  alias Doctrans.Documents.{Document, Formats, Layout, Page, Revision}
   alias Doctrans.Jobs.{Keys, LlmProcessingJob}
   alias Doctrans.Processing.JobQuery
   alias Doctrans.Repo
@@ -18,24 +24,6 @@ defmodule Doctrans.Processing.Run do
   def active?(document_id) do
     document_id
     |> JobQuery.document_work_query([LlmProcessingJob])
-    |> Repo.exists?()
-  end
-
-  @doc """
-  True when a failed page of the document still has an active LLM job.
-
-  A scheduled or retryable job may still turn the page into a success, so its
-  failure is not terminal for the document yet.
-  """
-  @spec retry_pending?(Ecto.UUID.t()) :: boolean()
-  def retry_pending?(document_id) do
-    failed_page_ids =
-      document_id
-      |> Pages.failed_pages_query()
-      |> select([p], type(p.id, :string))
-
-    failed_page_ids
-    |> JobQuery.page_jobs_query(worker: LlmProcessingJob)
     |> Repo.exists?()
   end
 
@@ -120,43 +108,8 @@ defmodule Doctrans.Processing.Run do
   def pages_dir(%{processing_run_id: nil} = document), do: Layout.legacy_pages_dir(document.id)
   def pages_dir(document), do: Layout.pages_dir(document.id, document.processing_run_id)
 
-  @spec lock(Ecto.UUID.t()) :: Document.t() | nil
-  def lock(document_id) do
-    from(d in Document, where: d.id == ^document_id, lock: "FOR UPDATE") |> Repo.one()
-  end
-
-  @spec current?(Document.t() | nil, Ecto.UUID.t() | nil) :: boolean() | nil
-  def current?(document, run_id), do: document && document.processing_run_id == run_id
-
-  @spec with_current(Document.t(), (Document.t() -> result)) :: result | {:error, term()}
-        when result: var
-  def with_current(document, fun) do
-    Repo.transaction(fn ->
-      current = lock(document.id)
-
-      if current?(current, document.processing_run_id),
-        do: fun.(current),
-        else: Repo.rollback(:obsolete_run)
-    end)
-    |> unwrap()
-  end
-
-  # A full restart creates new page IDs. Locking the parent serializes page writes
-  # with replacement; checking the content revision also fences single-page resets.
-  @spec with_page(Page.t(), (Page.t() -> result)) :: result | {:error, term()} when result: var
-  def with_page(page, fun) do
-    Repo.transaction(fn ->
-      document = lock(page.document_id)
-      current = Repo.one(from p in Page, where: p.id == ^page.id, lock: "FOR UPDATE")
-
-      if document && current && current.content_revision == page.content_revision &&
-           current.processing_generation == page.processing_generation,
-         do: fun.(current),
-         else: Repo.rollback(:obsolete_run)
-    end)
-    |> unwrap()
-  end
-
-  defp unwrap({:ok, result}), do: result
-  defp unwrap(error), do: error
+  defdelegate lock(document_id), to: Revision
+  defdelegate current?(document, run_id), to: Revision
+  defdelegate with_current(document, fun), to: Revision
+  defdelegate with_page(page, fun), to: Revision
 end

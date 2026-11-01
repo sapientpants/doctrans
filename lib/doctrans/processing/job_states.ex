@@ -20,6 +20,7 @@ defmodule Doctrans.Processing.JobStates do
 
   import Ecto.Query
 
+  alias Doctrans.Documents.Pages
   alias Doctrans.Jobs.{EmbeddingJob, LlmProcessingJob}
   alias Doctrans.Processing.JobQuery
   alias Doctrans.Repo
@@ -27,6 +28,24 @@ defmodule Doctrans.Processing.JobStates do
   @rank %{idle: 0, queued: 1, retrying: 2, running: 3}
 
   @type activity :: :idle | :queued | :running | :retrying
+
+  @doc """
+  True when a failed page of the document still has an active LLM job.
+
+  A scheduled or retryable job may still turn the page into a success, so its
+  failure is not terminal for the document yet.
+  """
+  @spec retry_pending?(Ecto.UUID.t()) :: boolean()
+  def retry_pending?(document_id) do
+    failed_page_ids =
+      document_id
+      |> Pages.failed_pages_query()
+      |> select([p], type(p.id, :string))
+
+    failed_page_ids
+    |> JobQuery.page_jobs_query(worker: LlmProcessingJob)
+    |> Repo.exists?()
+  end
 
   @doc """
   Reports the live activity of the document's content and indexing pipelines.

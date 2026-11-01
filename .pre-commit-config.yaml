@@ -200,6 +200,20 @@ repos:
         # test/support is on elixirc_paths under MIX_ENV=test, so it feeds the graph too.
         files: ^(lib/|test/support/|mix\.exs$)
 
+      # Cross-context runtime cycles. The gate above ignores runtime edges, which is
+      # how `Documents` came to depend on `Processing.Run` for its basic writes
+      # (#203) without anything failing. Three cycles are expected: the web layer
+      # (router, layouts and the LiveViews reference each other by design), the
+      # job workers and the processors that enqueue them, and the three schemas
+      # that name each other in associations. A fourth means a context has
+      # started leaning on a layer above it: break it, do not raise the bound.
+      - id: xref-runtime-cycles
+        name: Check for cross-context dependency cycles
+        entry: mix xref graph --format cycles --fail-above 3
+        language: system
+        pass_filenames: false
+        files: ^(lib/|test/support/|mix\.exs$)
+
       # 3.8. Asset bundle build. Nothing else in the gate compiles `assets/`: a syntax
       # error in app.js or theme.js, an import that resolves to nothing, or a stylesheet
       # `@import` naming a file that is not there all survive every check above and first
