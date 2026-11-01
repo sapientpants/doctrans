@@ -285,7 +285,7 @@ defmodule DoctransWeb.SearchLive do
                 <img
                   :if={result.image_path}
                   src={"/uploads/#{result.image_path}"}
-                  alt={"Page #{result.page_number}"}
+                  alt={gettext("Page %{number}", number: result.page_number)}
                   class="max-w-full max-h-full object-contain"
                 />
                 <div

@@ -67,6 +67,28 @@ defmodule DoctransWeb.PrivacyCopy do
   end
 
   @doc """
+  The `<meta name="description">` of every page.
+
+  Rendered from the root layout, so it reaches search engines and link
+  previews, which are precisely the readers who never see the dashboard copy
+  that already distinguishes the two cases. The Open Graph description
+  alongside it reuses `tagline/0`.
+  """
+  @spec meta_description() :: String.t()
+  def meta_description do
+    if Inference.local?() do
+      gettext(
+        "Translate PDF, Word, and OpenDocument files. All processing happens locally on your device."
+      )
+    else
+      gettext(
+        "Translate PDF, Word, and OpenDocument files. Document content is sent to %{host} for processing.",
+        host: destination()
+      )
+    end
+  end
+
+  @doc """
   The icon that accompanies `upload_notice/0`.
 
   A closed padlock states a guarantee, so it may only appear beside the local

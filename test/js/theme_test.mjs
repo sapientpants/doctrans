@@ -1,10 +1,22 @@
 import assert from "node:assert/strict"
-import {readFileSync} from "node:fs"
+import {existsSync, readFileSync} from "node:fs"
 import test from "node:test"
 import vm from "node:vm"
 
 const storageKey = "phx:theme"
-const source = name => readFileSync(new URL(`../../assets/js/${name}.js`, import.meta.url), "utf8")
+const assetsDir = new URL("../../assets/js/", import.meta.url)
+
+// Resolves a relative import the way esbuild does for this tree: against the
+// importing file, with `.js` implied and a directory standing for its
+// `index.js`. `app.js` pulls its hooks in through `./hooks`, and those modules
+// reach back for `../theme_sync`, so the linker cannot name every file.
+const resolve = (specifier, from) => {
+  const base = new URL(specifier, from)
+  for (const candidate of [`${base.href}.js`, `${base.href}/index.js`]) {
+    if (existsSync(new URL(candidate))) return new URL(candidate)
+  }
+  throw new Error(`cannot resolve ${specifier} from ${from}`)
+}
 
 // These small substitutes expose only the browser boundaries used by the real
 // modules. No theme selection or synchronization logic is reproduced here.
@@ -72,19 +84,24 @@ async function browser({stored, initialTheme, denyRead = false, denyWrite = fals
     "phoenix-colocated/doctrans": {hooks: {}},
     "../vendor/topbar": {default: {config() {}, show() {}, hide() {}}},
   }
-  const load = name => {
-    if (!modules.has(name)) modules.set(name, new vm.SourceTextModule(source(name), {context}))
-    return modules.get(name)
+  const load = url => {
+    if (!modules.has(url.href)) {
+      const module = new vm.SourceTextModule(readFileSync(url, "utf8"), {context, identifier: url.href})
+      modules.set(url.href, module)
+    }
+    return modules.get(url.href)
   }
-  const link = async specifier => {
-    if (specifier === "./theme_sync") return load("theme_sync")
-    assert.ok(Object.hasOwn(externals, specifier), `unexpected dependency: ${specifier}`)
-    const exports = externals[specifier]
-    return new vm.SyntheticModule(Object.keys(exports), function () {
-      for (const [name, value] of Object.entries(exports)) this.setExport(name, value)
-    }, {context})
+  const link = async (specifier, referencing) => {
+    if (Object.hasOwn(externals, specifier)) {
+      const exports = externals[specifier]
+      return new vm.SyntheticModule(Object.keys(exports), function () {
+        for (const [name, value] of Object.entries(exports)) this.setExport(name, value)
+      }, {context})
+    }
+    assert.ok(specifier.startsWith("./") || specifier.startsWith("../"), `unexpected dependency: ${specifier}`)
+    return load(resolve(specifier, referencing.identifier))
   }
-  const theme = load("theme")
+  const theme = load(resolve("./theme", assetsDir))
   await theme.link(link)
   await theme.evaluate()
 
@@ -102,7 +119,7 @@ async function browser({stored, initialTheme, denyRead = false, denyWrite = fals
       }
     },
     async loadApp() {
-      const app = load("app")
+      const app = load(resolve("./app", assetsDir))
       await app.link(link)
       await app.evaluate()
       return hooks

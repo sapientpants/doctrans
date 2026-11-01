@@ -99,10 +99,14 @@
       <%!-- Main content - stacked tabs below lg, split screen at lg: and up --%>
       <div class="flex flex-1 flex-col lg:flex-row fitscreen:min-h-0 fitscreen:overflow-hidden">
         <%!-- Left panel - Page image --%>
+        <%!-- `motion-reduce:` on the panels and the jump button below: decorative
+             motion only. The loading spinner is deliberately left alone, since it
+             is the only signal that an answer is coming, and freezing it removes
+             feedback rather than reducing motion. --%>
         <div
           id="original-panel"
           class={[
-            "w-full flex-col bg-base-200 transition-all duration-200",
+            "w-full flex-col bg-base-200 transition-all duration-200 motion-reduce:transition-none",
             "lg:flex lg:border-r lg:border-base-300 fitscreen:min-h-0",
             if(@view_tab == :original, do: "flex", else: "hidden"),
             if(@chat_open, do: "lg:w-2/5", else: "lg:w-1/2")
@@ -121,7 +125,7 @@
         <div
           id="translated-panel"
           class={[
-            "w-full flex-col transition-all duration-200",
+            "w-full flex-col transition-all duration-200 motion-reduce:transition-none",
             "lg:flex fitscreen:min-h-0",
             if(@view_tab == :translated, do: "flex", else: "hidden"),
             if(@chat_open, do: "lg:w-2/5", else: "lg:w-1/2")

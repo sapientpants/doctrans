@@ -24,6 +24,9 @@ defmodule DoctransWeb.PrivacyCopyTest do
                "Upload a document to get started. All processing happens locally on your device."
 
       assert PrivacyCopy.upload_notice() == "Your documents never leave your device"
+
+      assert PrivacyCopy.meta_description() ==
+               "Translate PDF, Word, and OpenDocument files. All processing happens locally on your device."
     end
 
     test "the notice is marked with a closed padlock" do
@@ -40,7 +43,8 @@ defmodule DoctransWeb.PrivacyCopyTest do
       for copy <- [
             PrivacyCopy.tagline(),
             PrivacyCopy.empty_state(),
-            PrivacyCopy.upload_notice()
+            PrivacyCopy.upload_notice(),
+            PrivacyCopy.meta_description()
           ] do
         assert copy =~ "api.example.com"
         refute copy =~ "never leave"
