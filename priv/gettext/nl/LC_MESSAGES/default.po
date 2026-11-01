@@ -11,22 +11,17 @@ msgid_plural "%{count} pages"
 msgstr[0] "%{count} pagina"
 msgstr[1] "%{count} pagina's"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:232
+#: lib/doctrans_web/live/document_live/upload_components.ex:238
 #, elixir-autogen, elixir-format
 msgid "+ Add more files"
 msgstr "+ Meer bestanden toevoegen"
 
-#: lib/doctrans_web/live/document_live/components.ex:191
+#: lib/doctrans_web/live/document_live/components.ex:193
 #, elixir-autogen, elixir-format
 msgid "A-Z"
 msgstr "A-Z"
 
-#: lib/doctrans_web/components/core_components.ex:181
-#, elixir-autogen, elixir-format
-msgid "Actions"
-msgstr "Acties"
-
-#: lib/doctrans_web/live/document_live/viewer_components.ex:90
+#: lib/doctrans_web/live/document_live/viewer_components.ex:91
 #, elixir-autogen, elixir-format
 msgid "An error occurred processing this page"
 msgstr "Er is een fout opgetreden bij het verwerken van deze pagina"
@@ -36,7 +31,7 @@ msgstr "Er is een fout opgetreden bij het verwerken van deze pagina"
 msgid "Are you sure you want to delete this document? This cannot be undone."
 msgstr "Weet u zeker dat u dit document wilt verwijderen? Dit kan niet ongedaan worden gemaakt."
 
-#: lib/doctrans_web/components/layouts.ex:101
+#: lib/doctrans_web/components/layouts.ex:99
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
 msgstr "Poging tot opnieuw verbinden"
@@ -47,33 +42,33 @@ msgid "Back"
 msgstr "Terug"
 
 #: lib/doctrans_web/live/document_live/reprocess_modal.ex:355
-#: lib/doctrans_web/live/document_live/upload_components.ex:142
+#: lib/doctrans_web/live/document_live/upload_components.ex:148
 #, elixir-autogen, elixir-format
 msgid "Cancel"
 msgstr "Annuleren"
 
-#: lib/doctrans_web/live/document_live/components.ex:166
+#: lib/doctrans_web/live/document_live/components.ex:168
 #: lib/doctrans_web/live/document_live/status_panel.ex:213
 #, elixir-autogen, elixir-format
 msgid "Completed"
 msgstr "Voltooid"
 
-#: lib/doctrans_web/live/document_live/index.ex:78
+#: lib/doctrans_web/live/document_live/index.ex:70
 #, elixir-autogen, elixir-format
 msgid "Doctrans"
 msgstr "Doctrans"
 
-#: lib/doctrans_web/live/document_live/index.ex:304
+#: lib/doctrans_web/live/document_live/index.ex:292
 #, elixir-autogen, elixir-format
 msgid "Document deleted successfully"
 msgstr "Document succesvol verwijderd"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "Dutch"
 msgstr "Nederlands"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "English"
 msgstr "Engels"
@@ -83,12 +78,12 @@ msgstr "Engels"
 msgid "Enter a search term to find content across all your documents."
 msgstr "Voer een zoekterm in om inhoud in al uw documenten te vinden."
 
-#: lib/doctrans_web/live/document_live/components.ex:167
+#: lib/doctrans_web/live/document_live/components.ex:169
 #, elixir-autogen, elixir-format
 msgid "Error"
 msgstr "Fout"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:75
+#: lib/doctrans_web/live/document_live/viewer_components.ex:76
 #, elixir-autogen, elixir-format
 msgid "Extracting text from page..."
 msgstr "Tekst uit pagina extraheren..."
@@ -98,37 +93,37 @@ msgstr "Tekst uit pagina extraheren..."
 msgid "Find content across all documents"
 msgstr "Zoek inhoud in alle documenten"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "French"
 msgstr "Frans"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "German"
 msgstr "Duits"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "Italian"
 msgstr "Italiaans"
 
-#: lib/doctrans_web/live/document_live/components.ex:200
+#: lib/doctrans_web/live/document_live/components.ex:202
 #, elixir-autogen, elixir-format
 msgid "Name (A-Z)"
 msgstr "Naam (A-Z)"
 
-#: lib/doctrans_web/live/document_live/components.ex:200
+#: lib/doctrans_web/live/document_live/components.ex:202
 #, elixir-autogen, elixir-format
 msgid "Name (Z-A)"
 msgstr "Naam (Z-A)"
 
-#: lib/doctrans_web/live/document_live/components.ex:191
+#: lib/doctrans_web/live/document_live/components.ex:193
 #, elixir-autogen, elixir-format
 msgid "Newest"
 msgstr "Nieuwste"
 
-#: lib/doctrans_web/live/document_live/components.ex:200
+#: lib/doctrans_web/live/document_live/components.ex:202
 #, elixir-autogen, elixir-format
 msgid "Newest First"
 msgstr "Nieuwste eerst"
@@ -139,7 +134,7 @@ msgstr "Nieuwste eerst"
 msgid "Next"
 msgstr "Volgende"
 
-#: lib/doctrans_web/live/document_live/index.ex:172
+#: lib/doctrans_web/live/document_live/index.ex:164
 #, elixir-autogen, elixir-format
 msgid "No documents yet"
 msgstr "Nog geen documenten"
@@ -149,7 +144,7 @@ msgstr "Nog geen documenten"
 msgid "No files were uploaded"
 msgstr "Geen bestanden geüpload"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:65
+#: lib/doctrans_web/live/document_live/viewer_components.ex:66
 #, elixir-autogen, elixir-format
 msgid "No page selected"
 msgstr "Geen pagina geselecteerd"
@@ -159,12 +154,12 @@ msgstr "Geen pagina geselecteerd"
 msgid "No results found"
 msgstr "Geen resultaten gevonden"
 
-#: lib/doctrans_web/live/document_live/components.ex:191
+#: lib/doctrans_web/live/document_live/components.ex:193
 #, elixir-autogen, elixir-format
 msgid "Oldest"
 msgstr "Oudste"
 
-#: lib/doctrans_web/live/document_live/components.ex:200
+#: lib/doctrans_web/live/document_live/components.ex:202
 #, elixir-autogen, elixir-format
 msgid "Oldest First"
 msgstr "Oudste eerst"
@@ -175,7 +170,7 @@ msgid "Original Content"
 msgstr "Originele inhoud"
 
 #: lib/doctrans_web/live/document_live/page_viewer.ex:142
-#: lib/doctrans_web/live/document_live/show.html.heex:113
+#: lib/doctrans_web/live/document_live/show.html.heex:116
 #, elixir-autogen, elixir-format
 msgid "Original Page"
 msgstr "Originele pagina"
@@ -185,23 +180,24 @@ msgstr "Originele pagina"
 msgid "Page %{current} of %{total}"
 msgstr "Pagina %{current} van %{total}"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:39
+#: lib/doctrans_web/live/document_live/viewer_components.ex:38
+#: lib/doctrans_web/live/search_live.ex:288
 #: lib/doctrans_web/live/search_live.ex:298
 #, elixir-autogen, elixir-format
 msgid "Page %{number}"
 msgstr "Pagina %{number}"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:48
+#: lib/doctrans_web/live/document_live/viewer_components.ex:47
 #, elixir-autogen, elixir-format
 msgid "Page image not available"
 msgstr "Pagina-afbeelding niet beschikbaar"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "Polish"
 msgstr "Pools"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "Portuguese"
 msgstr "Portugees"
@@ -212,14 +208,14 @@ msgstr "Portugees"
 msgid "Previous"
 msgstr "Vorige"
 
-#: lib/doctrans_web/live/document_live/components.ex:163
 #: lib/doctrans_web/live/document_live/components.ex:165
+#: lib/doctrans_web/live/document_live/components.ex:167
 #: lib/doctrans_web/live/document_live/status_panel.ex:210
 #, elixir-autogen, elixir-format
 msgid "Processing"
 msgstr "Verwerken"
 
-#: lib/doctrans_web/live/document_live/components.ex:164
+#: lib/doctrans_web/live/document_live/components.ex:166
 #: lib/doctrans_web/live/document_live/status_panel.ex:209
 #, elixir-autogen, elixir-format
 msgid "Queued"
@@ -230,14 +226,14 @@ msgstr "In wachtrij"
 msgid "Search"
 msgstr "Zoeken"
 
-#: lib/doctrans_web/live/document_live/index.ex:93
+#: lib/doctrans_web/live/document_live/index.ex:85
 #: lib/doctrans_web/live/search_live.ex:223
 #: lib/doctrans_web/live/search_live.ex:339
 #, elixir-autogen, elixir-format
 msgid "Search documents"
 msgstr "Documenten zoeken"
 
-#: lib/doctrans_web/live/document_live/index.ex:102
+#: lib/doctrans_web/live/document_live/index.ex:94
 #: lib/doctrans_web/live/search_live.ex:232
 #, elixir-autogen, elixir-format
 msgid "Search..."
@@ -248,32 +244,32 @@ msgstr "Zoeken..."
 msgid "Searching..."
 msgstr "Zoeken..."
 
-#: lib/doctrans_web/live/document_live/show.html.heex:148
+#: lib/doctrans_web/live/document_live/show.html.heex:151
 #, elixir-autogen, elixir-format
 msgid "Show Original"
 msgstr "Origineel tonen"
 
-#: lib/doctrans_web/components/layouts.ex:75
+#: lib/doctrans_web/components/layouts.ex:73
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
 msgstr "Er is iets misgegaan!"
 
-#: lib/doctrans_web/live/document_live/components.ex:194
+#: lib/doctrans_web/live/document_live/components.ex:196
 #, elixir-autogen, elixir-format
 msgid "Sort"
 msgstr "Sorteren"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "Spanish"
 msgstr "Spaans"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:150
+#: lib/doctrans_web/live/document_live/upload_components.ex:156
 #, elixir-autogen, elixir-format
 msgid "Start Translation"
 msgstr "Vertaling starten"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:128
+#: lib/doctrans_web/live/document_live/upload_components.ex:134
 #, elixir-autogen, elixir-format
 msgid "Target Language"
 msgstr "Doeltaal"
@@ -283,7 +279,7 @@ msgstr "Doeltaal"
 msgid "Translated Content"
 msgstr "Vertaalde inhoud"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:85
+#: lib/doctrans_web/live/document_live/viewer_components.ex:86
 #, elixir-autogen, elixir-format
 msgid "Translating content..."
 msgstr "Inhoud vertalen..."
@@ -293,76 +289,76 @@ msgstr "Inhoud vertalen..."
 msgid "Try a different search term."
 msgstr "Probeer een andere zoekterm."
 
-#: lib/doctrans_web/live/document_live/components.ex:169
+#: lib/doctrans_web/live/document_live/components.ex:171
 #, elixir-autogen, elixir-format
 msgid "Unknown"
 msgstr "Onbekend"
 
-#: lib/doctrans_web/live/document_live/index.ex:158
+#: lib/doctrans_web/live/document_live/index.ex:150
 #, elixir-autogen, elixir-format
 msgid "Upload"
 msgstr "Uploaden"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:53
+#: lib/doctrans_web/live/document_live/upload_components.ex:59
 #, elixir-autogen, elixir-format
 msgid "Upload New Document"
 msgstr "Nieuw document uploaden"
 
-#: lib/doctrans_web/live/document_live/components.ex:162
+#: lib/doctrans_web/live/document_live/components.ex:164
 #, elixir-autogen, elixir-format
 msgid "Uploading"
 msgstr "Uploaden"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:70
-#: lib/doctrans_web/live/document_live/viewer_components.ex:80
+#: lib/doctrans_web/live/document_live/viewer_components.ex:71
+#: lib/doctrans_web/live/document_live/viewer_components.ex:81
 #, elixir-autogen, elixir-format
 msgid "Waiting to process..."
 msgstr "Wachten op verwerking..."
 
-#: lib/doctrans_web/components/layouts.ex:69
+#: lib/doctrans_web/components/layouts.ex:67
 #, elixir-autogen, elixir-format
 msgid "We can't find the internet"
 msgstr "Geen internetverbinding gevonden"
 
-#: lib/doctrans_web/live/document_live/components.ex:191
+#: lib/doctrans_web/live/document_live/components.ex:193
 #, elixir-autogen, elixir-format
 msgid "Z-A"
 msgstr "Z-A"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:165
+#: lib/doctrans_web/live/document_live/upload_components.ex:171
 #, elixir-autogen, elixir-format
 msgid "browse"
 msgstr "bladeren"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "Danish"
 msgstr "Deens"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "Norwegian"
 msgstr "Noors"
 
-#: lib/doctrans_web/live/document_live/components.ex:211
+#: lib/doctrans_web/live/document_live/components.ex:213
 #, elixir-autogen, elixir-format
 msgid "Swedish"
 msgstr "Zweeds"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:343
+#: lib/doctrans_web/live/document_live/upload_components.ex:349
 #, elixir-autogen, elixir-format
 msgid "Document uploaded! Processing will begin shortly."
 msgid_plural "%{count} documents uploaded! Processing will begin shortly."
 msgstr[0] "Document geüpload! Verwerking begint binnenkort."
 msgstr[1] "%{count} documenten geüpload! Verwerking begint binnenkort."
 
-#: lib/doctrans_web/live/document_live/show.html.heex:208
-#: lib/doctrans_web/live/document_live/upload_components.ex:64
+#: lib/doctrans_web/live/document_live/show.html.heex:211
+#: lib/doctrans_web/live/document_live/upload_components.ex:70
 #, elixir-autogen, elixir-format
 msgid "Documents"
 msgstr "Documenten"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:163
+#: lib/doctrans_web/live/document_live/upload_components.ex:169
 #, elixir-autogen, elixir-format
 msgid "Drag and drop documents here, or"
 msgstr "Sleep documenten hierheen, of"
@@ -433,7 +429,7 @@ msgstr "Toon %{start}-%{end} van %{total} resultaten voor \"%{query}\""
 msgid "Translation Model"
 msgstr "Translation Model"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:173
+#: lib/doctrans_web/live/document_live/upload_components.ex:179
 #, elixir-autogen, elixir-format
 msgid "PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Up to 10 files"
 msgstr "PDF, Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) - Tot 10 bestanden"
@@ -450,13 +446,13 @@ msgstr "Stel vragen over dit document"
 
 #: lib/doctrans_web/live/document_live/chat_components.ex:46
 #: lib/doctrans_web/live/document_live/chat_components.ex:56
-#: lib/doctrans_web/live/document_live/show.html.heex:65
+#: lib/doctrans_web/live/document_live/show.html.heex:64
 #, elixir-autogen, elixir-format
 msgid "Chat"
 msgstr "Chat"
 
-#: lib/doctrans_web/live/document_live/show.html.heex:59
-#: lib/doctrans_web/live/document_live/show.html.heex:62
+#: lib/doctrans_web/live/document_live/show.html.heex:58
+#: lib/doctrans_web/live/document_live/show.html.heex:61
 #, elixir-autogen, elixir-format
 msgid "Chat with document"
 msgstr "Chat met document"
@@ -488,7 +484,7 @@ msgstr "Privé documentvertaling aangedreven door lokale AI"
 msgid "Send message"
 msgstr "Bericht verzenden"
 
-#: lib/doctrans_web/live/document_live/chat_session.ex:163
+#: lib/doctrans_web/live/document_live/chat_session.ex:271
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Sorry, er is een fout opgetreden. Probeer het opnieuw."
@@ -538,7 +534,7 @@ msgstr "De chat wordt op dit apparaat opgeslagen. De laatste 100 berichten worde
 msgid "The last question has no saved answer. Send it again to retry."
 msgstr "De laatste vraag heeft geen opgeslagen antwoord. Verstuur deze opnieuw om het nogmaals te proberen."
 
-#: lib/doctrans_web/live/document_live/show.html.heex:80
+#: lib/doctrans_web/live/document_live/show.html.heex:79
 #, elixir-autogen, elixir-format
 msgid "Document processing"
 msgstr "Documentverwerking"
@@ -548,8 +544,8 @@ msgstr "Documentverwerking"
 msgid "Document queued for reprocessing"
 msgstr "Document in de wachtrij voor herverwerking"
 
-#: lib/doctrans_web/live/document_live/show.ex:403
-#: lib/doctrans_web/live/document_live/show.html.heex:93
+#: lib/doctrans_web/live/document_live/show.ex:318
+#: lib/doctrans_web/live/document_live/show.html.heex:92
 #, elixir-autogen, elixir-format
 msgid "Original upload unavailable. Re-upload this document to process it again."
 msgstr "Het oorspronkelijke bestand is niet beschikbaar. Upload dit document opnieuw om het opnieuw te verwerken."
@@ -559,7 +555,7 @@ msgstr "Het oorspronkelijke bestand is niet beschikbaar. Upload dit document opn
 msgid "Preparing pages…"
 msgstr "Pagina’s voorbereiden…"
 
-#: lib/doctrans_web/live/document_live/components.ex:109
+#: lib/doctrans_web/live/document_live/components.ex:111
 #, elixir-autogen, elixir-format
 msgid "Processing failed. You can reprocess the document when its jobs have finished."
 msgstr "De verwerking is mislukt. Je kunt het document opnieuw verwerken zodra alle taken zijn afgerond."
@@ -577,7 +573,7 @@ msgid "Queuing…"
 msgstr "In wachtrij plaatsen…"
 
 #: lib/doctrans_web/live/document_live/reprocess_modal.ex:286
-#: lib/doctrans_web/live/document_live/show.ex:400
+#: lib/doctrans_web/live/document_live/show.ex:315
 #, elixir-autogen, elixir-format
 msgid "Reprocess document"
 msgstr "Document opnieuw verwerken"
@@ -612,19 +608,19 @@ msgstr "Opnieuw proberen"
 msgid "Retrying..."
 msgstr "Bezig met opnieuw proberen..."
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:362
+#: lib/doctrans_web/live/document_live/upload_components.ex:368
 #, elixir-autogen, elixir-format
 msgid "Maximum %{max} files can be uploaded at once"
 msgstr "Maximaal %{max} bestanden kunnen tegelijk worden geüpload"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:319
+#: lib/doctrans_web/live/document_live/upload_components.ex:325
 #, elixir-autogen, elixir-format
 msgid "This file is still uploading. Submit again to finish it."
 msgid_plural "These files are still uploading. Submit again to finish them."
 msgstr[0] "Dit bestand wordt nog geüpload. Verstuur opnieuw om het te voltooien."
 msgstr[1] "Deze bestanden worden nog geüpload. Verstuur opnieuw om ze te voltooien."
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:298
+#: lib/doctrans_web/live/document_live/upload_components.ex:304
 #, elixir-autogen, elixir-format
 msgid "This file was not uploaded"
 msgid_plural "These files were not uploaded"
@@ -642,7 +638,7 @@ msgid "Back to documents"
 msgstr "Terug naar documenten"
 
 #: lib/doctrans_web/components/core_components.ex:76
-#: lib/doctrans_web/components/core_components.ex:302
+#: lib/doctrans_web/components/core_components.ex:152
 #, elixir-autogen, elixir-format
 msgid "Close"
 msgstr "Sluiten"
@@ -657,38 +653,38 @@ msgstr "%{title} verwijderen"
 msgid "Open %{title}"
 msgstr "%{title} openen"
 
-#: lib/doctrans_web/live/document_live/viewer_components.ex:15
+#: lib/doctrans_web/live/document_live/viewer_components.ex:14
 #, elixir-autogen, elixir-format
 msgid "Page"
 msgstr "Pagina"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:222
+#: lib/doctrans_web/live/document_live/upload_components.ex:228
 #, elixir-autogen, elixir-format
 msgid "Remove %{file}"
 msgstr "%{file} verwijderen"
 
-#: lib/doctrans_web/live/document_live/show.html.heex:142
-#: lib/doctrans_web/live/document_live/show.html.heex:143
+#: lib/doctrans_web/live/document_live/show.html.heex:145
+#: lib/doctrans_web/live/document_live/show.html.heex:146
 #, elixir-autogen, elixir-format
 msgid "Reprocess page"
 msgstr "Pagina opnieuw verwerken"
 
-#: lib/doctrans_web/live/document_live/index.ex:126
+#: lib/doctrans_web/live/document_live/index.ex:118
 #, elixir-autogen, elixir-format
 msgid "Sort documents"
 msgstr "Documenten sorteren"
 
-#: lib/doctrans_web/components/layouts.ex:178
+#: lib/doctrans_web/components/layouts.ex:176
 #, elixir-autogen, elixir-format
 msgid "Use dark theme"
 msgstr "Donker thema gebruiken"
 
-#: lib/doctrans_web/components/layouts.ex:166
+#: lib/doctrans_web/components/layouts.ex:164
 #, elixir-autogen, elixir-format
 msgid "Use light theme"
 msgstr "Licht thema gebruiken"
 
-#: lib/doctrans_web/components/layouts.ex:154
+#: lib/doctrans_web/components/layouts.ex:152
 #, elixir-autogen, elixir-format
 msgid "Use system theme"
 msgstr "Systeemthema gebruiken"
@@ -734,17 +730,17 @@ msgstr "Nieuwe berichten"
 msgid "Chat transcript"
 msgstr "Chattranscript"
 
-#: lib/doctrans_web/components/layouts.ex:146
+#: lib/doctrans_web/components/layouts.ex:144
 #, elixir-autogen, elixir-format
 msgid "Theme"
 msgstr "Thema"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:114
+#: lib/doctrans_web/live/document_live/upload_components.ex:120
 #, elixir-autogen, elixir-format
 msgid "Source Language"
 msgstr "Brontaal"
 
-#: lib/doctrans_web/live/document_live/upload_components.ex:264
+#: lib/doctrans_web/live/document_live/upload_components.ex:270
 #, elixir-autogen, elixir-format
 msgid "Detect automatically"
 msgstr "Automatisch detecteren"
@@ -811,7 +807,7 @@ msgstr "Nieuwe poging"
 msgid "Stop processing"
 msgstr "Verwerking stoppen"
 
-#: lib/doctrans_web/live/document_live/components.ex:168
+#: lib/doctrans_web/live/document_live/components.ex:170
 #: lib/doctrans_web/live/document_live/status_panel.ex:214
 #, elixir-autogen, elixir-format
 msgid "Stopped"
@@ -846,3 +842,13 @@ msgstr "De verwerking wordt met de huidige instellingen mogelijk niet voltooid"
 #, elixir-autogen, elixir-format
 msgid "Processing status"
 msgstr "Status van verwerking"
+
+#: lib/doctrans_web/privacy_copy.ex:80
+#, elixir-autogen, elixir-format
+msgid "Translate PDF, Word, and OpenDocument files. All processing happens locally on your device."
+msgstr "Vertaal PDF-, Word- en OpenDocument-bestanden. Alle verwerking gebeurt lokaal op uw apparaat."
+
+#: lib/doctrans_web/privacy_copy.ex:84
+#, elixir-autogen, elixir-format
+msgid "Translate PDF, Word, and OpenDocument files. Document content is sent to %{host} for processing."
+msgstr "Vertaal PDF-, Word- en OpenDocument-bestanden. Documentinhoud wordt voor verwerking naar %{host} gestuurd."

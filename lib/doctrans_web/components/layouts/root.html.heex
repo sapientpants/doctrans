@@ -4,15 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <meta
-      name="description"
-      content="Translate PDF, Word, and OpenDocument files. Processing stays on your device when you use a local inference server."
-    />
+    <%!-- Both descriptions come from `PrivacyCopy`: whether documents stay on this
+    device is a configuration fact, and a hardcoded promise here would outlive the
+    configuration it was true for. --%>
+    <meta name="description" content={PrivacyCopy.meta_description()} />
     <meta property="og:title" content="Doctrans" />
-    <meta
-      property="og:description"
-      content="Privacy-first document translation powered by the AI inference server you configure."
-    />
+    <meta property="og:description" content={PrivacyCopy.tagline()} />
     <.live_title default="Doctrans" suffix=" · Doctrans">
       {assigns[:page_title]}
     </.live_title>

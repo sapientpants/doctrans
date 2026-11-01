@@ -456,18 +456,3 @@
 .zoom-150 { transform: scale(1.5); transform-origin: top left; }
 .zoom-175 { transform: scale(1.75); transform-origin: top left; }
 .zoom-200 { transform: scale(2); transform-origin: top left; }
-
-/* Decorative motion only. The loading spinner is deliberately left alone: it is
-   the only signal that an answer is coming, and freezing it removes feedback
-   rather than reducing motion. */
-@media (prefers-reduced-motion: reduce) {
-  #chat-jump-to-latest,
-  #original-panel,
-  #translated-panel {
-    transition: none;
-  }
-
-  #chat-jump-to-latest:hover {
-    transform: none;
-  }
-}

@@ -144,7 +144,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
           <button
             id="chat-jump-to-latest"
             type="button"
-            class="btn btn-primary btn-sm gap-1 rounded-full shadow-lg transition-transform hover:scale-105 lg:btn-xs"
+            class="btn btn-primary btn-sm gap-1 rounded-full shadow-lg transition-transform hover:scale-105 motion-reduce:transition-none motion-reduce:hover:scale-100 lg:btn-xs"
           >
             <.icon name="hero-arrow-down" class="w-3.5 h-3.5" />
             {gettext("New messages")}
