@@ -258,27 +258,57 @@ defmodule Doctrans.Search do
     end
   end
 
+  # Retrieval within one document is exact, by construction of the SQL.
+  #
+  # The HNSW indexes on `chunks.embedding` and `pages.embedding` answer
+  # `ORDER BY embedding <=> query` approximately: the scan collects
+  # `hnsw.ef_search` candidates (40 by default) from the whole index and Postgres
+  # applies the WHERE clause to those afterwards (pgvector, "Filtering"). The
+  # candidates are the rows nearest the query across every document, plus the
+  # index entries of rows that have since been deleted or rolled back and not yet
+  # vacuumed, so when enough of them outrank this document's rows the row we want
+  # falls outside the set and the query comes back short -- no error, just a
+  # missing match. Whether the planner takes that path depends on its statistics
+  # at the time, which is why the miss only showed up intermittently (#184).
+  #
+  # A document's own rows are few and reachable through the `document_id` btree,
+  # so these queries collect them, with their distances, in a MATERIALIZED CTE
+  # that has no ORDER BY the approximate index could serve, and rank them
+  # afterwards. The library-wide search in `HybridQuery` is where the HNSW index
+  # belongs, and still uses it.
+  #
   # Static heredoc; every value reaches Postgres as a bound parameter ($1..$4) via
   # Repo.query/2. Flagged only because the query is bound to a variable named `sql`.
   # sobelow_skip ["SQL.Query"]
   defp execute_chunk_search(document_id, query_embedding, limit, min_similarity) do
     sql = """
+    WITH candidates AS MATERIALIZED (
+      SELECT
+        c.id as chunk_id,
+        c.page_id,
+        p.page_number,
+        c.content as original_markdown,
+        c.chunk_index,
+        p.content_revision,
+        c.embedding <=> $1::vector as distance
+      FROM chunks c
+      JOIN pages p ON c.page_id = p.id
+      WHERE p.document_id = $2
+        AND p.extraction_status = 'completed'
+        AND c.embedding IS NOT NULL
+    )
     SELECT
-      c.id as chunk_id,
-      c.page_id,
-      p.page_number,
-      c.content as original_markdown,
+      chunk_id,
+      page_id,
+      page_number,
+      original_markdown,
       NULL::text as translated_markdown,
-      c.chunk_index,
-      p.content_revision,
-      1 - (c.embedding <=> $1::vector) as similarity
-    FROM chunks c
-    JOIN pages p ON c.page_id = p.id
-    WHERE p.document_id = $2
-      AND p.extraction_status = 'completed'
-      AND c.embedding IS NOT NULL
-      AND (1 - (c.embedding <=> $1::vector)) >= $4
-    ORDER BY c.embedding <=> $1::vector ASC
+      chunk_index,
+      content_revision,
+      1 - distance as similarity
+    FROM candidates
+    WHERE 1 - distance >= $4
+    ORDER BY distance ASC
     LIMIT $3
     """
 
@@ -295,23 +325,35 @@ defmodule Doctrans.Search do
     end
   end
 
+  # Exact for the same reason as `execute_chunk_search/4`; see the note there.
+  #
   # Static heredoc; $1..$4 are bound parameters, nothing is interpolated into the SQL.
   # sobelow_skip ["SQL.Query"]
   defp execute_page_search(document_id, query_embedding, limit, min_similarity) do
     sql = """
+    WITH candidates AS MATERIALIZED (
+      SELECT
+        p.id as page_id,
+        p.page_number,
+        p.original_markdown,
+        p.translated_markdown,
+        p.content_revision,
+        p.embedding <=> $1::vector as distance
+      FROM pages p
+      WHERE p.document_id = $2
+        AND p.extraction_status = 'completed'
+        AND p.embedding IS NOT NULL
+    )
     SELECT
-      p.id as page_id,
-      p.page_number,
-      p.original_markdown,
-      p.translated_markdown,
-      p.content_revision,
-      1 - (p.embedding <=> $1::vector) as similarity
-    FROM pages p
-    WHERE p.document_id = $2
-      AND p.extraction_status = 'completed'
-      AND p.embedding IS NOT NULL
-      AND (1 - (p.embedding <=> $1::vector)) >= $4
-    ORDER BY p.embedding <=> $1::vector ASC
+      page_id,
+      page_number,
+      original_markdown,
+      translated_markdown,
+      content_revision,
+      1 - distance as similarity
+    FROM candidates
+    WHERE 1 - distance >= $4
+    ORDER BY distance ASC
     LIMIT $3
     """
 
