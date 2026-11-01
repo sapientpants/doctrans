@@ -15,7 +15,7 @@ defmodule Doctrans.Chat.Conversations do
   import Ecto.Query
   alias Doctrans.Chat
   alias Doctrans.Chat.{Message, Session}
-  alias Doctrans.Processing.Run
+  alias Doctrans.Documents.Revision
   alias Doctrans.Repo
 
   @context_fields ~w(page_id page_number chunk_index content_revision similarity original_markdown translated_markdown)a
@@ -71,7 +71,7 @@ defmodule Doctrans.Chat.Conversations do
           Doctrans.Documents.Document.t()
         ) :: {:ok, Message.t()} | {:error, term()}
   def finish(question, role, content, context, document) do
-    Run.with_current(document, fn _current ->
+    Revision.with_current(document, fn _current ->
       finish(question, role, content, context)
     end)
   end

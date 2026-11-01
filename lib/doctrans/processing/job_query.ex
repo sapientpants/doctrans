@@ -27,10 +27,11 @@ defmodule Doctrans.Processing.JobQuery do
 
   ## Compile-time use
 
-  Call this module from function bodies only. The job modules reach `Run` at
-  runtime and `Run` reaches this module, so a module attribute reading a list
-  from here would close a compile-connected cycle. Guards and attributes that
-  need a state list should restate what the query already guarantees instead.
+  Call this module from function bodies only. The job modules reach `Run` and
+  `JobStates` at runtime and both reach this module, so a module attribute
+  reading a list from here would close a compile-connected cycle. Guards and
+  attributes that need a state list should restate what the query already
+  guarantees instead.
   """
 
   import Ecto.Query

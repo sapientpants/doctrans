@@ -17,7 +17,7 @@ defmodule Doctrans.Processing.Completion do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.Run
+  alias Doctrans.Processing.{JobStates, Run}
 
   @doc """
   Resolves the document state from its pages and applies terminal transitions.
@@ -78,7 +78,7 @@ defmodule Doctrans.Processing.Completion do
   # diagnostic a failing page job already recorded.
   defp settle_failed_document(document) do
     cond do
-      Run.retry_pending?(document.id) ->
+      JobStates.retry_pending?(document.id) ->
         :retrying
 
       document.status == "error" ->
