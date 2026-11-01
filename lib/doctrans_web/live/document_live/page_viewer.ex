@@ -17,7 +17,7 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
 
   def apply_params(socket, %{"page" => page_str}) do
     case Integer.parse(page_str) do
-      {page_number, _} -> goto_page(socket, clamp_page(socket, page_number))
+      {page_number, _} -> goto_page(socket, page_number)
       :error -> socket
     end
   end
@@ -25,19 +25,16 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
   def apply_params(socket, _params), do: socket
 
   def handle_event("prev_page", _params, socket) do
-    new_page_number = max(1, socket.assigns.current_page_number - 1)
-    {:noreply, goto_page(socket, new_page_number)}
+    {:noreply, goto_page(socket, socket.assigns.current_page_number - 1)}
   end
 
   def handle_event("next_page", _params, socket) do
-    max_page = socket.assigns.document.total_pages || 1
-    new_page_number = min(max_page, socket.assigns.current_page_number + 1)
-    {:noreply, goto_page(socket, new_page_number)}
+    {:noreply, goto_page(socket, socket.assigns.current_page_number + 1)}
   end
 
   def handle_event("goto_page", %{"page" => page_str}, socket) do
     case Integer.parse(page_str) do
-      {page_number, _} -> {:noreply, goto_page(socket, clamp_page(socket, page_number))}
+      {page_number, _} -> {:noreply, goto_page(socket, page_number)}
       :error -> {:noreply, socket}
     end
   end
@@ -75,17 +72,20 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
     {:noreply, assign(socket, :zoom_level, new_zoom)}
   end
 
-  # `pages.page_number` is an int4: a value past that range makes Postgres raise
-  # `numeric_out_of_range` rather than simply miss, taking the LiveView -- and
-  # the chat session with it -- down. `apply_params/2` clamped already; the
-  # event handler did not, so both now go through here.
-  defp clamp_page(socket, page_number) do
-    max_page = socket.assigns.document.total_pages || 1
-    max(1, min(page_number, max_page))
-  end
+  @doc """
+  Shows `page_number`, clamped to the document's pages.
 
-  defp goto_page(socket, page_number) do
+  Every page change goes through here, whatever asked for it: a URL param, a
+  control, or `Show` keeping its place after the document was re-read. The
+  clamp is not only for a page that does not exist. `pages.page_number` is an
+  int4, and a value past that range makes Postgres raise `numeric_out_of_range`
+  rather than simply miss, taking the LiveView -- and the chat session with it
+  -- down. A document still counting its pages has none to show, so it pins
+  the viewer to page 1.
+  """
+  def goto_page(socket, page_number) do
     document = socket.assigns.document
+    page_number = max(1, min(page_number, document.total_pages || 1))
     page = Documents.get_page_by_number(document.id, page_number)
 
     socket

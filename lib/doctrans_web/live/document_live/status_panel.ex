@@ -22,16 +22,12 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
   alias Doctrans.Search.Reindex
   alias DoctransWeb.ErrorMessages
 
-  @doc "Assigns the document's processing status for the first time."
-  @spec init(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
-  def init(socket), do: refresh(socket)
-
   @doc """
-  Recomputes the status from the current document.
+  Computes the status from the current document.
 
-  Called from the debounced progress refresh, which already runs on mount and
-  on every `{:document_updated, _}` and `{:page_updated, _}`, so the panel
-  follows the pipelines live without a subscription of its own.
+  Called from the debounced progress refresh, which runs on mount and on every
+  `{:document_updated, _}` and `{:page_updated, _}`, so the panel is initialised
+  and then follows the pipelines live without a subscription of its own.
   """
   @spec refresh(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
   def refresh(%{assigns: %{document: nil}} = socket), do: socket
