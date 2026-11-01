@@ -130,7 +130,9 @@ defmodule DoctransWeb.DocumentLive.UploadReadiness do
           </p>
           <%!-- Each line carries its own consequence and its own remediation: a
                 missing embedding model costs search while translation still
-                works, and one heading cannot say that for all of them. --%>
+                works, and one heading cannot say that for all of them.
+                `data-readiness-problem` is read by the tests alone: it names the
+                problem so an assertion is on the code, not on the prose. --%>
           <ul class="mt-1 space-y-1">
             <li
               :for={problem <- @problems}

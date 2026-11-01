@@ -6,10 +6,20 @@ defmodule Doctrans.Resilience.CircuitBreakerTest do
   alias Doctrans.Resilience.CircuitBreaker
 
   setup do
-    # Reset fuses before each test
+    # The fuses are VM-global and several cases below leave one blown. Reset
+    # on the way in so a case starts from a closed circuit, and on the way out
+    # so the last case here does not hand an open one to the next module: a
+    # blown fuse only refreshes after a minute, which is long enough for a
+    # test that calls the real `OpenAI` module against Bypass to see
+    # `:circuit_open` instead of the status it set up.
+    reset_fuses()
+    on_exit(&reset_fuses/0)
+    :ok
+  end
+
+  defp reset_fuses do
     CircuitBreaker.reset(:openai_api)
     CircuitBreaker.reset(:embedding_api)
-    :ok
   end
 
   describe "install_fuses/0" do

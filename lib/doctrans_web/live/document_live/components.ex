@@ -98,6 +98,8 @@ defmodule DoctransWeb.DocumentLive.Components do
         value={if @document.total_pages || @document.status == "queued", do: @progress, else: nil}
         max="100"
       />
+      <%!-- `data-failed-pages` is read by the tests alone: it carries the page
+            numbers so an assertion is on them, not on the translated prose. --%>
       <p
         :if={@document.status == "error"}
         id={"#{@id}-failure"}

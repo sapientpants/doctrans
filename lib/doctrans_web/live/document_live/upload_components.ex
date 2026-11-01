@@ -1,6 +1,12 @@
 defmodule DoctransWeb.DocumentLive.UploadComponents do
   @moduledoc """
   The upload dialog and the per-file feedback it renders.
+
+  Nothing in the page reads `data-entry-error`, `data-failed-upload` or
+  `data-pending-upload`: they are the test contract for the per-file
+  feedback, so the suite can assert on which file a message belongs to
+  instead of on translated prose. Renaming one is a change to the tests as
+  well.
   """
   use DoctransWeb, :html
 

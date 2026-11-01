@@ -56,6 +56,8 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
     assigns = assign(assigns, :state, page_state(assigns.page, assigns.show_original))
 
     ~H"""
+    <%!-- `data-page-state` is read by the tests alone: it names the branch below
+          so an assertion is on the state, not on the prose it renders. --%>
     <div id="page-content" data-page-state={@state}>
       <%= case @state do %>
         <% :no_page -> %>

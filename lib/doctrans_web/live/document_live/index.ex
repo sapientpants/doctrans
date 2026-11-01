@@ -178,7 +178,8 @@ defmodule DoctransWeb.DocumentLive.Index do
              driven by. It is the one piece of list state the page cannot show on
              its own -- a stream is not countable from the DOM alone -- and without
              it a count that drifts away from the cards on screen stays invisible
-             until it happens to cross zero and the empty state misfires. --%>
+             until it happens to cross zero and the empty state misfires. Only
+             the tests read it. --%>
         <div
           id="documents"
           data-documents-count={@documents_count}
