@@ -1,6 +1,7 @@
 defmodule DoctransWeb.DocumentLive.ReprocessingTest do
   # Sync: every test points the global `:openai` application env at a Bypass
-  # server, which the model list the reprocess dialog fetches is read from.
+  # server, which the model list the reprocess dialog fetches is read from, and
+  # resets the `:openai_api` fuse that fetch is asked against.
   use DoctransWeb.ConnCase, async: false
   import Doctrans.Fixtures
   alias Doctrans.Documents
@@ -8,6 +9,10 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
   alias Doctrans.TestEnv
 
   setup do
+    # The dialog's model list comes from the real `OpenAI.list_models/0`, which
+    # a fuse an earlier test blew would answer with `:circuit_open` instead of
+    # the stub below (#193).
+    TestEnv.reset_fuses()
     bypass = Bypass.open()
 
     TestEnv.put_env(
@@ -52,6 +57,12 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
       render_async(view)
       assert has_element?(view, "#document-reprocess-form")
       model = "vision"
+
+      # Submitting a model the selects do not offer fails inside `form/3`, which
+      # would report the submit rather than the model list that never arrived.
+      refute has_element?(view, "#reprocess-model-error")
+      assert has_element?(view, "#extraction-model-select option[value='#{model}']")
+      assert has_element?(view, "#translation-model-select option[value='#{model}']")
 
       view
       |> form("#document-reprocess-form", %{extraction_model: model, translation_model: model})

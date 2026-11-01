@@ -1,5 +1,6 @@
 defmodule DoctransWeb.DocumentLive.ConfigTest do
-  # Sync: the test overrides the global `:openai` application env.
+  # Sync: the test overrides the global `:openai` application env and resets the
+  # fuse the model fetch is asked against.
   use DoctransWeb.ConnCase, async: false
 
   import Doctrans.Fixtures
@@ -7,6 +8,7 @@ defmodule DoctransWeb.DocumentLive.ConfigTest do
   alias Doctrans.TestEnv
 
   test "reprocess selections use configured vision and translation models", %{conn: conn} do
+    TestEnv.reset_fuses()
     bypass = Bypass.open()
 
     TestEnv.put_env(:openai,

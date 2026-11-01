@@ -1,6 +1,7 @@
 defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   # Sync: every test points the global `:openai` application env at a Bypass
-  # server, and one overrides the global `:embedding` env.
+  # server, one overrides the global `:embedding` env, and all reset the fuse
+  # the model fetch is asked against.
   use DoctransWeb.ConnCase, async: false
 
   import Doctrans.Fixtures
@@ -14,6 +15,10 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   alias Phoenix.LiveView.Channel
 
   setup do
+    # A blown `:openai_api` fuse answers the model fetch with `:circuit_open`
+    # before the Bypass server is asked, so the tests below would see the
+    # failure alert whatever they stubbed (#193).
+    TestEnv.reset_fuses()
     bypass = Bypass.open()
 
     TestEnv.put_env(

@@ -13,6 +13,12 @@ defmodule Doctrans.TestEnvTest do
     assert Application.fetch_env(:doctrans, :test_env_guard_probe) == previous
   end
 
+  test "an async case cannot reset the circuit breakers" do
+    assert_raise ArgumentError, ~r/reset_fuses\/0 was called from an async test/, fn ->
+      TestEnv.reset_fuses()
+    end
+  end
+
   test "a process with no case registration cannot change global configuration" do
     task =
       Task.async(fn ->

@@ -348,8 +348,11 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
   end
 
   # The reprocess dialog asks the model endpoint as it opens; the answer is not
-  # what these tests are about, so it is stubbed rather than left to fail.
+  # what these tests are about, so it is stubbed rather than left to fail. The
+  # fuse in front of it is reset for the same reason: blown, it fails the fetch
+  # before the stub is asked.
   defp stub_model_list(_context) do
+    TestEnv.reset_fuses()
     bypass = Bypass.open()
 
     Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
