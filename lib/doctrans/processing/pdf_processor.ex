@@ -16,7 +16,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   alias Doctrans.Config.PdfExtraction
   alias Doctrans.Deps
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
+  alias Doctrans.Documents.{Layout, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.{Completion, Run}
 
@@ -181,7 +181,7 @@ defmodule Doctrans.Processing.PdfProcessor do
     page = Documents.get_page_by_number(document.id, page_number)
 
     if page && is_binary(page.image_path) &&
-         File.regular?(Path.join(Documents.uploads_dir(), page.image_path)) do
+         File.regular?(Layout.absolute(page.image_path)) do
       {:ok, page}
     else
       extract_and_save_page(document, page, pdf_path, pages_dir, page_number, deadline)
@@ -191,7 +191,7 @@ defmodule Doctrans.Processing.PdfProcessor do
   defp extract_and_save_page(document, page, pdf_path, pages_dir, page_number, deadline) do
     case Deps.pdf_extractor().extract_page(pdf_path, pages_dir, page_number, deadline: deadline) do
       {:ok, image_path} ->
-        relative_path = Path.relative_to(image_path, Documents.uploads_dir())
+        relative_path = Layout.relative(image_path)
         save_current_page(document, page, %{page_number: page_number, image_path: relative_path})
 
       {:error, reason} ->

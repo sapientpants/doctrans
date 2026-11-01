@@ -6,7 +6,6 @@ defmodule Doctrans.Application do
   use Application
 
   alias Doctrans.Config.Uploads
-  alias Doctrans.Documents
   alias Doctrans.Resilience.CircuitBreaker
 
   @impl true
@@ -19,7 +18,7 @@ defmodule Doctrans.Application do
     # is usable and reported healthy before the first document arrives.
     # Both return the root; discarded to satisfy the unmatched_return check.
     _ = Uploads.validate_root!()
-    _ = Documents.ensure_uploads_dir!()
+    _ = Uploads.ensure_root!()
 
     children = [
       DoctransWeb.Telemetry,

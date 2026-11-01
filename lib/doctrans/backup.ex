@@ -39,8 +39,7 @@ defmodule Doctrans.Backup do
 
   import Ecto.Query
 
-  alias Doctrans.Config.Uploads
-  alias Doctrans.Documents.{Document, Page}
+  alias Doctrans.Documents.{Document, Layout, Page}
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
@@ -62,10 +61,10 @@ defmodule Doctrans.Backup do
   """
   @spec verify() :: report()
   def verify do
-    # Resolved on every call rather than memoized, like `Uploads.upload_dir/0`
-    # itself: the report has to describe the root the running application would
-    # use, not one captured when this module was first loaded.
-    root = Uploads.upload_dir()
+    # Resolved on every call rather than memoized, like `Layout.root/0` itself:
+    # the report has to describe the root the running application would use, not
+    # one captured when this module was first loaded.
+    root = Layout.root()
 
     documents = Repo.all(documents_query())
     page_paths = Repo.all(pages_query())
@@ -166,7 +165,9 @@ defmodule Doctrans.Backup do
   defp relative(path, root), do: Path.relative_to(path, root)
 
   defp extra(root, document_ids) do
-    case File.ls(Path.join(root, "documents")) do
+    documents_dir = Layout.documents_dir()
+
+    case File.ls(documents_dir) do
       {:ok, entries} ->
         entries
         # An entry name is whatever the filesystem holds — a stray file, a
@@ -174,7 +175,9 @@ defmodule Doctrans.Backup do
         # parsed into a UUID or an atom.
         |> Enum.reject(&MapSet.member?(document_ids, &1))
         |> Enum.sort()
-        |> Enum.map(&{:orphaned_document_dir, [path: Path.join("documents", &1)]})
+        |> Enum.map(
+          &{:orphaned_document_dir, [path: relative(Path.join(documents_dir, &1), root)]}
+        )
 
       # A root with no `documents/` directory has simply never held one; that is
       # consistent with an empty library, not a failure to read the root.

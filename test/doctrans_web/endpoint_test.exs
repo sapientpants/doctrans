@@ -1,7 +1,7 @@
 defmodule DoctransWeb.EndpointTest do
   use DoctransWeb.ConnCase, async: true
 
-  alias Doctrans.Documents
+  alias Doctrans.Documents.Layout
 
   # Every path below is built from the configured storage root, which the test
   # environment deliberately places outside the application directory: serving
@@ -10,7 +10,7 @@ defmodule DoctransWeb.EndpointTest do
   describe "uploaded page caching" do
     setup do
       directory = "documents/#{Uniq.UUID.uuid7()}/pages"
-      path = Path.join(Documents.uploads_dir(), directory)
+      path = Path.join(Layout.root(), directory)
       File.mkdir_p!(path)
       on_exit(fn -> File.rm_rf!(path) end)
       File.write!(Path.join(path, "page-01.png"), "page image content")
@@ -44,7 +44,7 @@ defmodule DoctransWeb.EndpointTest do
   test "only generated images are served from legacy and run directories" do
     directory = "documents/#{Uniq.UUID.uuid7()}"
     run = "runs/#{Uniq.UUID.uuid7()}"
-    root = Path.join(Documents.uploads_dir(), directory)
+    root = Path.join(Layout.root(), directory)
     on_exit(fn -> File.rm_rf!(root) end)
 
     images = ["pages/page-01.png", "#{run}/pages/page-002.png"]

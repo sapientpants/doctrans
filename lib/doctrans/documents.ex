@@ -9,8 +9,7 @@ defmodule Doctrans.Documents do
 
   import Ecto.Query
 
-  alias Doctrans.Config.Uploads
-  alias Doctrans.Documents.{Document, Page, Pages, Summary, Topics}
+  alias Doctrans.Documents.{Document, Layout, Page, Pages, Summary, Topics}
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
   alias Doctrans.Validation
@@ -28,6 +27,7 @@ defmodule Doctrans.Documents do
   defdelegate update_page_extraction(page, attrs), to: Pages
   defdelegate update_page_translation(page, attrs), to: Pages
   defdelegate completion_state(document_id), to: Pages
+  defdelegate embeddings_ready?(document), to: Pages
   defdelegate failed_page_numbers(document_id), to: Pages
   defdelegate reset_page_for_reprocessing(page), to: Pages
 
@@ -153,43 +153,6 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
-  Returns true when the document has embeddings ready to answer questions.
-
-  Prefers chunk-level embeddings and falls back to page-level ones, which is the
-  granularity documents indexed before chunking still carry.
-  """
-  @spec embeddings_ready?(Document.t() | Ecto.UUID.t()) :: boolean()
-  def embeddings_ready?(%Document{id: document_id}), do: embeddings_ready?(document_id)
-
-  def embeddings_ready?(document_id) do
-    chunks_embedded?(document_id) or pages_embedded?(document_id)
-  end
-
-  # Reached through the page association rather than by naming `Chunk`, which this
-  # module can no longer afford to alias: Credo's `ModuleDependencies` check caps a
-  # module at `max_deps: 10` first-party dependencies (`.credo.exs`), and aliasing
-  # `Topics` for the cross-tab broadcasts put `Documents` at the ceiling. Going
-  # through `Page has_many :chunks` is equivalent -- same inner join, same three
-  # predicates, same `exists?` -- so re-adding the alias would fail the build for
-  # nothing.
-  defp chunks_embedded?(document_id) do
-    Page
-    |> where([p], p.document_id == ^document_id)
-    |> join(:inner, [p], c in assoc(p, :chunks))
-    |> where([_p, c], c.embedding_status == "completed")
-    |> where([_p, c], not is_nil(c.embedding))
-    |> Repo.exists?()
-  end
-
-  defp pages_embedded?(document_id) do
-    Page
-    |> where([p], p.document_id == ^document_id)
-    |> where([p], p.embedding_status == "completed")
-    |> where([p], not is_nil(p.embedding))
-    |> Repo.exists?()
-  end
-
-  @doc """
   Gets a single document by ID.
 
   Raises `Ecto.NoResultsError` if the Document does not exist.
@@ -306,7 +269,7 @@ defmodule Doctrans.Documents do
   defp delete_locked_document(document) do
     # Delete files first (best-effort; a failure here must not prevent the
     # database row from being removed)
-    document_dir = document_upload_dir(document.id)
+    document_dir = Layout.document_dir(document.id)
 
     if File.exists?(document_dir) do
       Logger.info("Deleting document files at #{document_dir}")
@@ -324,50 +287,5 @@ defmodule Doctrans.Documents do
 
     # Delete from database (pages cascade automatically)
     Repo.delete(document, allow_stale: true) |> Doctrans.Errors.result()
-  end
-
-  @doc """
-  Returns the upload directory for a document.
-  """
-  @spec document_upload_dir(Ecto.UUID.t()) :: String.t()
-  def document_upload_dir(document_id) do
-    Path.join([uploads_dir(), "documents", to_string(document_id)])
-  end
-
-  @doc """
-  Returns the base uploads directory.
-  """
-  @spec uploads_dir() :: String.t()
-  def uploads_dir do
-    Uploads.upload_dir()
-  end
-
-  @doc """
-  Ensures the configured storage root exists.
-
-  A nondefault `DOCTRANS_DATA_DIR` normally points at an empty volume, so the
-  root is created at startup: uploads create their own subdirectories, but the
-  filesystem health check probes the root itself and would otherwise report a
-  missing directory until the first document arrived.
-
-  Failure names the setting to correct: this runs from `Doctrans.Application`
-  before the supervision tree starts, where a bare filesystem error would reach
-  the operator as an unexplained boot crash.
-  """
-  # The path is the configured storage root; no request value contributes to it.
-  # sobelow_skip ["Traversal.FileModule"]
-  @spec ensure_uploads_dir!() :: String.t()
-  def ensure_uploads_dir! do
-    dir = uploads_dir()
-
-    case File.mkdir_p(dir) do
-      :ok ->
-        dir
-
-      {:error, reason} ->
-        raise "could not create the storage root #{dir}: #{:file.format_error(reason)}. " <>
-                "Set DOCTRANS_DATA_DIR to a directory the application can write, " <>
-                "or unset it to use the default inside the application directory."
-    end
   end
 end

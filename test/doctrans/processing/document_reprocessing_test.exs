@@ -4,7 +4,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   import Doctrans.Fixtures
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Chunk, Page}
+  alias Doctrans.Documents.{Chunk, Layout, Page}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
 
   alias Doctrans.Processing.{
@@ -26,7 +26,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     document =
       document_fixture(%{status: "completed", total_pages: 1, original_filename: "report.docx"})
 
-    directory = Documents.document_upload_dir(document.id)
+    directory = Layout.document_dir(document.id)
     File.mkdir_p!(Path.join(directory, "pages"))
     source = Run.source_path(document)
     File.write!(source, "original office bytes")
@@ -39,7 +39,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
         translation_status: "completed",
         original_markdown: "Old OCR",
         translated_markdown: "Old translation",
-        image_path: Path.relative_to(old_image, Documents.uploads_dir())
+        image_path: Path.relative_to(old_image, Layout.root())
       })
 
     on_exit(fn -> File.rm_rf(directory) end)
@@ -119,7 +119,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       assert :ok = RunCleanupJob.perform(%Oban.Job{args: Run.args(run)})
       refute File.exists?(c.old_image)
       assert File.exists?(c.source)
-      assert Enum.all?(pages, &File.regular?(Path.join(Documents.uploads_dir(), &1.image_path)))
+      assert Enum.all?(pages, &File.regular?(Path.join(Layout.root(), &1.image_path)))
     end)
   end
 

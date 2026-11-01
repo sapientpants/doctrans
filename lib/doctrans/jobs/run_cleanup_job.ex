@@ -2,6 +2,7 @@ defmodule Doctrans.Jobs.RunCleanupJob do
   @moduledoc "Removes superseded derived files while preserving the original upload."
   use Oban.Worker, queue: :pdf_extraction, max_attempts: 5
   alias Doctrans.Documents
+  alias Doctrans.Documents.Layout
   alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.Run
 
@@ -16,24 +17,22 @@ defmodule Doctrans.Jobs.RunCleanupJob do
   end
 
   defp clean(document) do
-    document.id
-    |> Documents.document_upload_dir()
-    |> stale_paths(document)
+    document
+    |> stale_paths()
     |> remove_all()
   end
 
   # Only fixed generated subdirectories and validated UUID run directories are
   # listed. The retained original.<extension> is never a cleanup target.
-  defp stale_paths(directory, document) do
-    runs = Path.join(directory, "runs")
-
-    stale_run_dirs(runs, document) ++
-      legacy_pages_dir(directory, document) ++ converted_pdf(directory, document)
+  defp stale_paths(document) do
+    stale_run_dirs(document) ++ legacy_pages_dir(document) ++ converted_pdf(document)
   end
 
   # `runs` is a fixed subdirectory of the configured document directory, and only
   # entries that cast as UUIDs are returned.
-  defp stale_run_dirs(runs, document) do
+  defp stale_run_dirs(document) do
+    runs = Layout.runs_dir(document.id)
+
     entries =
       case File.ls(runs) do
         {:ok, entries} -> entries
@@ -48,13 +47,15 @@ defmodule Doctrans.Jobs.RunCleanupJob do
     |> Enum.map(&Path.join(runs, &1))
   end
 
-  defp legacy_pages_dir(directory, document) do
-    if document.processing_run_id, do: [Path.join(directory, "pages")], else: []
+  defp legacy_pages_dir(document) do
+    if document.processing_run_id, do: [Layout.legacy_pages_dir(document.id)], else: []
   end
 
-  defp converted_pdf(directory, document) do
+  # A converted office document left its PDF beside the original before runs
+  # existed; one converted inside a run is removed with that run's directory.
+  defp converted_pdf(document) do
     if Path.extname(Run.source_path(document) || "") != ".pdf",
-      do: [Path.join(directory, "original.pdf")],
+      do: [Layout.original_path(document.id, ".pdf")],
       else: []
   end
 

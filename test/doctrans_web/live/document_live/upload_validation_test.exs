@@ -4,6 +4,7 @@ defmodule DoctransWeb.DocumentLive.UploadValidationTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Layout
   alias Doctrans.Processing.PdfExtractorMock
   alias Doctrans.TestEnv
   alias DoctransWeb.DocumentLive.UploadIntake
@@ -61,7 +62,7 @@ defmodule DoctransWeb.DocumentLive.UploadValidationTest do
 
       stored_content =
         document.id
-        |> Documents.document_upload_dir()
+        |> Layout.document_dir()
         |> Path.join("original.pdf")
         |> File.read!()
 

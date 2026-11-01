@@ -2,7 +2,7 @@ defmodule Doctrans.DocumentsTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Summary}
+  alias Doctrans.Documents.{Document, Layout, Summary}
 
   import Doctrans.Fixtures
 
@@ -320,7 +320,7 @@ defmodule Doctrans.DocumentsTest do
     test "deletes document when directory exists" do
       doc = document_fixture()
       # Create directory
-      dir = Documents.document_upload_dir(doc.id)
+      dir = Layout.document_dir(doc.id)
       File.mkdir_p!(dir)
 
       assert {:ok, _} = Documents.delete_document(doc)
@@ -330,25 +330,11 @@ defmodule Doctrans.DocumentsTest do
     test "deletes document when directory does not exist" do
       doc = document_fixture()
       # Don't create directory
-      dir = Documents.document_upload_dir(doc.id)
+      dir = Layout.document_dir(doc.id)
       refute File.exists?(dir)
 
       assert {:ok, _} = Documents.delete_document(doc)
       assert is_nil(Documents.get_document(doc.id))
-    end
-  end
-
-  describe "document_upload_dir/1" do
-    test "returns correct path" do
-      path = Documents.document_upload_dir("test-id")
-      assert String.ends_with?(path, "documents/test-id")
-    end
-  end
-
-  describe "uploads_dir/0" do
-    test "returns configured upload directory" do
-      configured = Application.fetch_env!(:doctrans, :uploads) |> Keyword.fetch!(:upload_dir)
-      assert Documents.uploads_dir() == configured
     end
   end
 end

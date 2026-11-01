@@ -16,8 +16,7 @@ defmodule Doctrans.Documents.Sweeper do
 
   import Ecto.Query
 
-  alias Doctrans.Documents
-  alias Doctrans.Documents.Document
+  alias Doctrans.Documents.{Document, Layout}
   alias Doctrans.Repo
 
   @default_grace_period_hours 24
@@ -34,8 +33,7 @@ defmodule Doctrans.Documents.Sweeper do
   @spec find_orphaned_directories(keyword()) :: [String.t()]
   def find_orphaned_directories(opts \\ []) do
     grace_period_hours = Keyword.get(opts, :grace_period_hours, @default_grace_period_hours)
-    uploads_dir = Documents.uploads_dir()
-    documents_dir = Path.join(uploads_dir, "documents")
+    documents_dir = Layout.documents_dir()
 
     case File.ls(documents_dir) do
       {:ok, entries} ->

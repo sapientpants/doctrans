@@ -18,6 +18,7 @@ defmodule DoctransWeb.DocumentLive.UploadCorruptPdfTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.Layout
   alias Doctrans.Processing.{PdfExtractor, PdfExtractorMock}
   alias Doctrans.TestEnv
 
@@ -67,7 +68,7 @@ defmodule DoctransWeb.DocumentLive.UploadCorruptPdfTest do
 
     stored =
       document.id
-      |> Documents.document_upload_dir()
+      |> Layout.document_dir()
       |> Path.join("original.pdf")
       |> File.read!()
 

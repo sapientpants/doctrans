@@ -60,6 +60,35 @@ defmodule Doctrans.Config.Uploads do
     dir
   end
 
+  @doc """
+  Creates the storage root if it does not exist yet, and returns it.
+
+  A nondefault `DOCTRANS_DATA_DIR` normally points at an empty volume, so the
+  root is created at startup: uploads create their own subdirectories, but the
+  filesystem health check probes the root itself and would otherwise report a
+  missing directory until the first document arrived.
+
+  Failure names the setting to correct: this runs from `Doctrans.Application`
+  before the supervision tree starts, where a bare filesystem error would reach
+  the operator as an unexplained boot crash.
+  """
+  # The path is the configured storage root; no request value contributes to it.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec ensure_root!() :: String.t()
+  def ensure_root! do
+    dir = upload_dir()
+
+    case File.mkdir_p(dir) do
+      :ok ->
+        dir
+
+      {:error, reason} ->
+        raise "could not create the storage root #{dir}: #{:file.format_error(reason)}. " <>
+                "Set DOCTRANS_DATA_DIR to a directory the application can write, " <>
+                "or unset it to use the default inside the application directory."
+    end
+  end
+
   @spec max_file_size() :: pos_integer()
   def max_file_size, do: Config.fetch!(:uploads, :max_file_size)
 

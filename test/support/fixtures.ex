@@ -6,7 +6,7 @@ defmodule Doctrans.Fixtures do
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Page
+  alias Doctrans.Documents.{Layout, Page}
   alias Doctrans.Documents.Pages
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
@@ -107,7 +107,7 @@ defmodule Doctrans.Fixtures do
     path = Run.source_path(document)
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, contents)
-    on_exit(fn -> File.rm_rf(Documents.document_upload_dir(document.id)) end)
+    on_exit(fn -> File.rm_rf(Layout.document_dir(document.id)) end)
     path
   end
 

@@ -2,8 +2,7 @@ defmodule Doctrans.Processing.Run do
   @moduledoc "Stored source paths, model choices, and transactional processing-run guards."
   import Ecto.Query
   alias Doctrans.Config.OpenAI
-  alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Formats, Page, Pages}
+  alias Doctrans.Documents.{Document, Formats, Layout, Page, Pages}
   alias Doctrans.Jobs.{Keys, LlmProcessingJob}
   alias Doctrans.Processing.JobQuery
   alias Doctrans.Repo
@@ -93,7 +92,7 @@ defmodule Doctrans.Processing.Run do
     extension = document.source_extension || Formats.extension(document.original_filename)
 
     if Formats.supported?(extension) do
-      Path.join(Documents.document_upload_dir(document.id), "original" <> extension)
+      Layout.original_path(document.id, extension)
     end
   end
 
@@ -111,16 +110,15 @@ defmodule Doctrans.Processing.Run do
     end
   end
 
+  # A document without a run predates runs: its derived files sit directly in
+  # its document directory, where `Doctrans.Documents.Layout` calls them legacy.
   @spec output_dir(Document.t()) :: String.t()
-  def output_dir(%{processing_run_id: nil} = document),
-    do: Documents.document_upload_dir(document.id)
-
-  def output_dir(document),
-    do:
-      Path.join([Documents.document_upload_dir(document.id), "runs", document.processing_run_id])
+  def output_dir(%{processing_run_id: nil} = document), do: Layout.document_dir(document.id)
+  def output_dir(document), do: Layout.run_dir(document.id, document.processing_run_id)
 
   @spec pages_dir(Document.t()) :: String.t()
-  def pages_dir(document), do: Path.join(output_dir(document), "pages")
+  def pages_dir(%{processing_run_id: nil} = document), do: Layout.legacy_pages_dir(document.id)
+  def pages_dir(document), do: Layout.pages_dir(document.id, document.processing_run_id)
 
   @spec lock(Ecto.UUID.t()) :: Document.t() | nil
   def lock(document_id) do

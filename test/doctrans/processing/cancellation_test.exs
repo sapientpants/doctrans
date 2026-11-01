@@ -5,7 +5,7 @@ defmodule Doctrans.Processing.CancellationTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Page, Topics}
+  alias Doctrans.Documents.{Document, Layout, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
   alias Doctrans.Processing.{Cancellation, Completion, DocumentReprocessing, Run}
 
@@ -240,7 +240,7 @@ defmodule Doctrans.Processing.CancellationTest do
     test "cancels the waiting jobs, then deletes the document and its files" do
       Oban.Testing.with_testing_mode(:manual, fn ->
         doc = document_with_pages_fixture(%{}, 2)
-        dir = Documents.document_upload_dir(doc.id)
+        dir = Layout.document_dir(doc.id)
         File.mkdir_p!(dir)
         on_exit(fn -> File.rm_rf!(dir) end)
 

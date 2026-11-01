@@ -23,7 +23,7 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   alias Doctrans.Deps
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
+  alias Doctrans.Documents.{Layout, Topics}
   alias Doctrans.Errors
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Processing.Completion
@@ -164,7 +164,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     # alone, so every page may call it.
     with :ok <- Completion.update_document_status_to_processing(page),
          {:ok, page} <- mark_stage(page, :extraction, "processing") do
-      image_path = Path.join(Documents.uploads_dir(), page.image_path)
+      image_path = Layout.absolute(page.image_path)
 
       case Deps.openai().extract_markdown(image_path, model_opts(opts, :extraction_model)) do
         {:ok, markdown} -> save_extraction(page, markdown, opts)

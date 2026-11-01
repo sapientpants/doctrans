@@ -11,7 +11,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
+  alias Doctrans.Documents.{Layout, Topics}
 
   import Doctrans.Fixtures
 
@@ -505,7 +505,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       end)
 
       assert [document] = Documents.list_documents()
-      directory = Documents.document_upload_dir(document.id)
+      directory = Layout.document_dir(document.id)
       on_exit(fn -> File.rm_rf!(directory) end)
       assert document.original_filename == "retained.pdf"
       assert File.read!(Path.join(directory, "original.pdf")) == "%PDF-1.7\nretained source bytes"
