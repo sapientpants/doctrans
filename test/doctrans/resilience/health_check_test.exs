@@ -5,13 +5,17 @@ defmodule Doctrans.Resilience.HealthCheckTest do
   The checks exist to describe a broken deployment, so every test here drives
   one of the failures they are meant to report -- an API that answers with an
   error status, an unreachable endpoint, a storage root that is missing or
-  read-only -- rather than only the happy path. The OpenAI probe talks to a
-  local Bypass server, so no test reaches the network.
+  read-only -- rather than only the happy path. The OpenAI probe goes through
+  `Doctrans.Deps.openai/0`, which the suite points at `OpenAIMock`; these tests
+  forward the mock to the real client, which talks to a local Bypass server, so
+  the client's own failure paths are what is exercised and no test reaches the
+  network.
   """
 
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Config.Uploads
+  alias Doctrans.Processing.{OpenAI, OpenAIMock}
   alias Doctrans.Resilience.CircuitBreaker
   alias Doctrans.Resilience.HealthCheck
   alias Doctrans.TestEnv
@@ -23,6 +27,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
   @completed [:doctrans, :health_check, :completed]
 
   setup do
+    Mox.stub_with(OpenAIMock, OpenAI)
     CircuitBreaker.reset(:openai_api)
     bypass = Bypass.open()
     put_openai_env(base_url: "http://localhost:#{bypass.port}", api_key: "sk-test-123")

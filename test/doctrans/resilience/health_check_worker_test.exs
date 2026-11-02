@@ -7,13 +7,15 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
   suite. These tests therefore start their own instance instead: the module
   reads its settings from the application environment at `init/1`, so
   `Doctrans.TestEnv` sets them for the test and the instance is started
-  unnamed, next to the disabled one. The OpenAI probe reaches a local Bypass
-  server and the database probe runs on the shared sandbox connection, so a
-  cycle is driven end to end without touching the network.
+  unnamed, next to the disabled one. The OpenAI probe is forwarded from
+  `OpenAIMock` to the real client, which reaches a local Bypass server, and the
+  database probe runs on the shared sandbox connection, so a cycle is driven
+  end to end without touching the network.
   """
 
   use Doctrans.DataCase, async: false
 
+  alias Doctrans.Processing.{OpenAI, OpenAIMock}
   alias Doctrans.Resilience.CircuitBreaker
   alias Doctrans.Resilience.HealthCheckWorker
   alias Doctrans.TestEnv
@@ -22,6 +24,7 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
   @all_completed [:doctrans, :health_check, :all_completed]
 
   setup do
+    Mox.stub_with(OpenAIMock, OpenAI)
     CircuitBreaker.reset(:openai_api)
     CircuitBreaker.reset(:embedding_api)
 

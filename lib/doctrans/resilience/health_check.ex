@@ -21,7 +21,7 @@ defmodule Doctrans.Resilience.HealthCheck do
   """
 
   alias Doctrans.Config.Uploads
-  alias Doctrans.Processing.OpenAI
+  alias Doctrans.Deps
   alias Doctrans.Repo
 
   @typedoc "One verdict per checked dependency."
@@ -61,12 +61,14 @@ defmodule Doctrans.Resilience.HealthCheck do
   Checks OpenAI API availability.
 
   Returns `{:ok, %{available: true, models: [...], circuit: :ok}}` on success,
-  or `{:error, reason}` on failure. The probe is `OpenAI.list_models/0`, the
-  same call the reprocess modal makes: it asks the `:openai_api` fuse first, so
-  a blown circuit reports `{:error, :circuit_open}` without a request, and it
-  authenticates the way every other client call does, sending no header at all
-  when no key is configured. The check inherits the probe's retry policy, so an
-  unreachable endpoint is reported after Req's safe-GET retries, not before.
+  or `{:error, reason}` on failure. The probe is `list_models/0` on the client
+  `Doctrans.Deps.openai/0` resolves (`Doctrans.Processing.OpenAI` outside
+  tests), the same call the reprocess modal makes: it asks the `:openai_api`
+  fuse first, so a blown circuit reports `{:error, :circuit_open}` without a
+  request, and it authenticates the way every other client call does, sending
+  no header at all when no key is configured. The check inherits the probe's
+  retry policy, so an unreachable endpoint is reported after Req's safe-GET
+  retries, not before.
   """
   @spec check_openai() :: {:ok, map()} | {:error, term()}
   def check_openai do
@@ -74,7 +76,7 @@ defmodule Doctrans.Resilience.HealthCheck do
 
     result =
       try do
-        case OpenAI.list_models() do
+        case Deps.openai().list_models() do
           {:ok, models} -> {:ok, %{available: true, models: models, circuit: :ok}}
           {:error, _reason} = error -> error
         end

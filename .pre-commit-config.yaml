@@ -265,6 +265,17 @@ repos:
         pass_filenames: false
         files: ^(lib/.*\.(ex|exs|heex)|scripts/check_raw_call_sites\.exs)$
 
+      # 5.3. OpenAI client call-site register. Every call into the model API goes
+      # through `Deps.openai/0`, the seam tests replace with `OpenAIMock`; a module
+      # that names `Doctrans.Processing.OpenAI` directly drags its tests back onto a
+      # real HTTP server, a global env override and a fuse reset (#193, #207).
+      - id: check-openai-call-sites
+        name: Check OpenAI client call sites
+        entry: elixir scripts/check_openai_call_sites.exs
+        language: system
+        pass_filenames: false
+        files: ^(lib/.*\.(ex|exs|heex)|scripts/check_openai_call_sites\.exs)$
+
       # 5.45. Dialyzer suppression register. Narrow `{file, class, line}` keys, an
       # owner, an expiry, an upstream link, and a rationale per entry, capped at 8.
       # `always_run` because the expiry is a date, not a file change: a register nobody

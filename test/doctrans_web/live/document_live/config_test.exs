@@ -1,32 +1,25 @@
 defmodule DoctransWeb.DocumentLive.ConfigTest do
-  # Sync: the test overrides the global `:openai` application env and resets the
-  # fuse the model fetch is asked against.
+  # Sync: the test overrides the global `:openai` application env, which is
+  # where the configured model names are read from.
   use DoctransWeb.ConnCase, async: false
 
   import Doctrans.Fixtures
 
+  alias Doctrans.Processing.OpenAIMock
   alias Doctrans.TestEnv
 
   test "reprocess selections use configured vision and translation models", %{conn: conn} do
-    TestEnv.reset_fuses()
-    bypass = Bypass.open()
-
-    TestEnv.put_env(:openai,
-      base_url: "http://localhost:#{bypass.port}",
-      vision_model: "custom-vision",
-      chat_model: "custom-chat",
-      translation_model: "custom-translation"
+    TestEnv.put_env(
+      :openai,
+      Keyword.merge(Application.fetch_env!(:doctrans, :openai),
+        vision_model: "custom-vision",
+        chat_model: "custom-chat",
+        translation_model: "custom-translation"
+      )
     )
 
-    Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
-      conn
-      |> Plug.Conn.put_resp_content_type("application/json")
-      |> Plug.Conn.resp(
-        200,
-        Jason.encode!(%{
-          data: Enum.map(~w(custom-vision custom-chat custom-translation), &%{id: &1})
-        })
-      )
+    Mox.stub(OpenAIMock, :list_models, fn ->
+      {:ok, ~w(custom-vision custom-chat custom-translation)}
     end)
 
     document = document_with_pages_fixture(%{}, 1)
