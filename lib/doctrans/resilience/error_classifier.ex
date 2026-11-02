@@ -18,6 +18,11 @@ defmodule Doctrans.Resilience.ErrorClassifier do
     - Validation errors
     - File not found
     - Model not found
+    - Extraction limits (page count, page size, image size) and missing tools
+
+  A reason of the shape `{tag, [reason: nested]}` is classified by the nested
+  reason, so a wrapper such as `{:pdf_extraction_failed, [reason: nested]}` is
+  as retryable as the failure it carries.
 
   - `:unknown` - Unrecognized errors (treated as retryable by default)
   """
@@ -62,6 +67,16 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   def classify({:inference_response_too_large, _}), do: :permanent
   def classify(:page_not_found), do: :permanent
   def classify(:soffice_not_found), do: :permanent
+  def classify(:document_file_not_found), do: :permanent
+  def classify({:unsupported_format, _}), do: :permanent
+
+  # Extraction failures that cannot come out differently on a retry: the
+  # document has the page count and page sizes it has, and no number of attempts
+  # installs poppler.
+  def classify({:pdf_too_many_pages, _}), do: :permanent
+  def classify({:pdf_page_too_large, _}), do: :permanent
+  def classify({:page_image_too_large, _}), do: :permanent
+  def classify({:poppler_not_found, _}), do: :permanent
 
   # Explicit timeout atoms
   def classify(:timeout), do: :retryable
@@ -105,6 +120,16 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   end
 
   def classify({:error, reason}) when is_binary(reason), do: classify(reason)
+
+  # A wrapper such as `{:pdf_extraction_failed, [reason: nested]}` says where
+  # the failure happened; the nested reason says what it was, and that is what
+  # decides whether a retry can change the answer.
+  def classify({tag, bindings}) when is_atom(tag) and is_list(bindings) do
+    case Keyword.fetch(bindings, :reason) do
+      {:ok, nested} -> classify(nested)
+      :error -> :unknown
+    end
+  end
 
   # String error messages (common patterns)
   def classify(error) when is_binary(error) do

@@ -46,8 +46,43 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
                :permanent
 
       assert ErrorClassifier.classify(:document_not_found) == :permanent
+      assert ErrorClassifier.classify(:document_file_not_found) == :permanent
       assert ErrorClassifier.classify(:page_not_found) == :permanent
       assert ErrorClassifier.classify(:soffice_not_found) == :permanent
+      assert ErrorClassifier.classify({:unsupported_format, [format: ".txt"]}) == :permanent
+    end
+
+    test "classifies extraction limits and missing tools as permanent" do
+      assert ErrorClassifier.classify({:pdf_too_many_pages, [pages: 9999, limit: 1000]}) ==
+               :permanent
+
+      assert ErrorClassifier.classify({:pdf_page_too_large, [page_number: 1]}) == :permanent
+
+      assert ErrorClassifier.classify(
+               {:page_image_too_large, [page_number: 1, size: 1, limit: 1]}
+             ) ==
+               :permanent
+
+      assert ErrorClassifier.classify({:poppler_not_found, [command: "pdftoppm"]}) == :permanent
+    end
+
+    test "classifies a wrapped reason by the reason it carries" do
+      assert ErrorClassifier.classify(
+               {:pdf_extraction_failed, [reason: {:pdf_too_many_pages, [pages: 9, limit: 1]}]}
+             ) == :permanent
+
+      assert ErrorClassifier.classify({:pdf_extraction_failed, [reason: :pdf_command_timeout]}) ==
+               :unknown
+
+      assert ErrorClassifier.classify({:pdf_extraction_failed, [reason: :timeout]}) == :retryable
+
+      # Nesting is followed all the way down.
+      assert ErrorClassifier.classify(
+               {:outer, [reason: {:inner, [reason: {:http_error, [status: 404]}]}]}
+             ) == :permanent
+
+      # A pair without a nested reason says nothing about retryability.
+      assert ErrorClassifier.classify({:pdf_command_failed, [exit_status: 1]}) == :unknown
     end
 
     test "classifies HTTP 5xx errors as retryable" do
