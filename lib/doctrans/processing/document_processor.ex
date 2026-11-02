@@ -24,19 +24,15 @@ defmodule Doctrans.Processing.DocumentProcessor do
   Supports PDF, Word (.docx, .doc), OpenDocument (.odt), and Rich Text Format (.rtf).
   Non-PDF documents are converted to PDF before extraction.
 
-  Returns `:ok`, `:cancelled`, or `{:error, reason}`.
+  Returns `:ok` or `{:error, reason}`.
   """
-  @spec extract_document(
-          Ecto.UUID.t(),
-          String.t(),
-          MapSet.t(Ecto.UUID.t()),
-          Documents.Document.t() | nil
-        ) :: :ok | :cancelled | {:error, Doctrans.Errors.reason()}
-  def extract_document(document_id, file_path, cancelled_documents, document \\ nil) do
+  @spec extract_document(Ecto.UUID.t(), String.t(), Documents.Document.t() | nil) ::
+          :ok | {:error, Doctrans.Errors.reason()}
+  def extract_document(document_id, file_path, document \\ nil) do
     document = document || Documents.get_document(document_id)
 
     with {:ok, document} <- prepare_document(document) do
-      process_source(document_id, file_path, cancelled_documents, document)
+      process_source(document_id, file_path, document)
     end
   end
 
@@ -50,15 +46,15 @@ defmodule Doctrans.Processing.DocumentProcessor do
     end
   end
 
-  defp process_source(document_id, file_path, cancelled_documents, document) do
+  defp process_source(document_id, file_path, document) do
     extension = Formats.extension(file_path)
 
     cond do
       extension == ".pdf" ->
-        PdfProcessor.extract_document(document_id, file_path, cancelled_documents, document)
+        PdfProcessor.extract_document(document_id, file_path, document)
 
       extension in Formats.convertible_extensions() ->
-        extract_convertible_document(document_id, file_path, cancelled_documents, document)
+        convert_and_extract(document_id, file_path, document)
 
       true ->
         Logger.error("Unsupported file format: #{extension}")
@@ -66,21 +62,10 @@ defmodule Doctrans.Processing.DocumentProcessor do
     end
   end
 
-  # The job path is the fixed original.<validated extension> path created during upload;
-  # the File calls themselves live in do_convert_and_extract/4.
-  defp extract_convertible_document(document_id, file_path, cancelled_documents, document) do
-    if MapSet.member?(cancelled_documents, document_id) do
-      Logger.info("Document #{document_id} was cancelled, skipping conversion")
-
-      :cancelled
-    else
-      do_convert_and_extract(document_id, file_path, cancelled_documents, document)
-    end
-  end
-
-  # Source is the stored original upload; output is a directory derived from persisted UUIDs.
+  # The job path is the fixed original.<validated extension> path created during
+  # upload, the stored original; output is a directory derived from persisted UUIDs.
   # sobelow_skip ["Traversal.FileModule"]
-  defp do_convert_and_extract(document_id, file_path, cancelled_documents, document) do
+  defp convert_and_extract(document_id, file_path, document) do
     output_dir = if document, do: Run.output_dir(document), else: Path.dirname(file_path)
     File.mkdir_p!(output_dir)
 
@@ -88,7 +73,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
     case Deps.document_converter().convert_to_pdf(file_path, output_dir) do
       {:ok, pdf_path} ->
-        PdfProcessor.extract_document(document_id, pdf_path, cancelled_documents, document)
+        PdfProcessor.extract_document(document_id, pdf_path, document)
 
       {:error, reason} ->
         Logger.error("Failed to convert document #{document_id}: #{inspect(reason)}")

@@ -50,8 +50,8 @@ defmodule Doctrans.Processing.LlmProcessor do
   - `:generation` - The page generation this run was queued for; a page that
     has moved on is skipped
   """
-  @spec process_page(Ecto.UUID.t(), MapSet.t(Ecto.UUID.t()), keyword()) :: outcome()
-  def process_page(page_id, cancelled_documents, opts \\ []) do
+  @spec process_page(Ecto.UUID.t(), keyword()) :: outcome()
+  def process_page(page_id, opts \\ []) do
     generation = Keyword.fetch(opts, :generation)
     opts = Map.to_list(Run.choices(opts))
 
@@ -60,9 +60,8 @@ defmodule Doctrans.Processing.LlmProcessor do
         {:cancel, :page_not_found}
 
       page ->
-        if MapSet.member?(cancelled_documents, page.document_id) ||
-             (generation != :error && generation != {:ok, page.processing_generation}) do
-          Logger.info("Document #{page.document_id} was cancelled, skipping page #{page_id}")
+        if generation != :error && generation != {:ok, page.processing_generation} do
+          Logger.info("Page #{page_id} has moved on to a newer generation, skipping it")
           :ok
         else
           page |> do_process_page(opts) |> settle_obsolete_run(page)
@@ -275,7 +274,7 @@ defmodule Doctrans.Processing.LlmProcessor do
   end
 
   # Writes a stage status under the run guard and announces it. The guard's
-  # `{:error, :obsolete_run}` is returned as is, for `process_page/3` to settle.
+  # `{:error, :obsolete_run}` is returned as is, for `process_page/2` to settle.
   @spec mark_stage(Documents.Page.t(), stage(), String.t()) ::
           {:ok, Documents.Page.t()} | {:error, Errors.reason()}
   defp mark_stage(page, stage, status) do

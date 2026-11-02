@@ -26,27 +26,6 @@ defmodule Doctrans.Processing.PdfExtractorStub do
   end
 
   @impl true
-  def page_image_path(output_dir, page_number) do
-    padded = String.pad_leading(to_string(page_number), 2, "0")
-    path = Path.join(output_dir, "page-#{padded}.png")
-
-    if File.exists?(path) do
-      path
-    else
-      nil
-    end
-  end
-
-  @impl true
-  def list_page_images(output_dir) do
-    pattern = Path.join(output_dir, "page-*.png")
-
-    pattern
-    |> Path.wildcard()
-    |> Enum.sort()
-  end
-
-  @impl true
   def available? do
     true
   end

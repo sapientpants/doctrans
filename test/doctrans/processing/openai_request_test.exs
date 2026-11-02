@@ -4,19 +4,19 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
   local Bypass server, covering request building, response parsing, and the
   circuit-breaker error path.
 
-  `async: false`: the `:openai` and `:embedding` settings and Req's default
-  options are VM-global, and the `:openai_api` fuse is shared.
+  `async: false`: the `:openai` settings and Req's default options are
+  VM-global, and the `:openai_api` fuse is shared. The embedding client has its
+  own suite, `Doctrans.Search.EmbeddingRequestTest`.
   """
 
   use Doctrans.EnvCase, async: false
 
   alias Doctrans.Processing.OpenAI
-  alias Doctrans.Resilience.CircuitBreaker
+  alias Doctrans.Resilience.{CircuitBreaker, FuseProbe}
   alias Doctrans.TestEnv
 
   setup do
     CircuitBreaker.reset(:openai_api)
-    CircuitBreaker.reset(:embedding_api)
     prev_req = Application.fetch_env(:req, :default_options)
     # Exercise the real retry path without spending seconds on backoff in tests
     # whose assertions concern the resulting HTTP contract.
@@ -34,15 +34,8 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       translation_model: "test-translation-model"
     )
 
-    TestEnv.put_env(:embedding,
-      base_url: url,
-      api_key: "sk-embed-456",
-      model: "test-embed-model"
-    )
-
     on_exit(fn ->
       CircuitBreaker.reset(:openai_api)
-      CircuitBreaker.reset(:embedding_api)
 
       case prev_req do
         {:ok, value} -> Application.put_env(:req, :default_options, value)
@@ -61,7 +54,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     setup %{tmp_dir: tmp_dir} do
       image_path = Path.join(tmp_dir, "page.png")
       File.write!(image_path, "test image")
-      watch_fuse_failures()
+      FuseProbe.watch_failures()
       %{image_path: image_path}
     end
 
@@ -159,42 +152,6 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     json(conn, 200, %{
       "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "hello"}}]
     })
-  end
-
-  # Forwards every circuit-breaker failure to the test as `{:circuit_failure, fuse}`.
-  defp watch_fuse_failures do
-    test_pid = self()
-    handler_id = {__MODULE__, make_ref()}
-
-    :ok =
-      :telemetry.attach(
-        handler_id,
-        [:doctrans, :circuit_breaker, :failure],
-        fn _event, _measurements, metadata, pid ->
-          send(pid, {:circuit_failure, metadata.fuse_name})
-        end,
-        test_pid
-      )
-
-    on_exit(fn -> :telemetry.detach(handler_id) end)
-  end
-
-  # Blows `fuse_name` directly: `:embedding_api` opens after 3 failures in 30 s
-  # and `:openai_api` after 5 in 60 s, so six melts cover both.
-  defp blow(fuse_name) do
-    for _ <- 1..6, do: :fuse.melt(fuse_name)
-    assert CircuitBreaker.status(fuse_name) == :blown
-    :ok
-  end
-
-  # Drains the request notifications already in the mailbox so a `refute_received`
-  # that follows speaks to the next call alone.
-  defp flush_requests do
-    receive do
-      :http_request -> flush_requests()
-    after
-      0 -> :ok
-    end
   end
 
   defp json(conn, status, payload) do
@@ -749,151 +706,10 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     end
   end
 
-  describe "embed/2" do
-    test "uses the shared endpoint without inserting a double slash", %{bypass: bypass} do
-      TestEnv.put_env(:embedding, base_url: nil, model: "embed")
-
-      Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
-        json(conn, 200, %{"data" => [%{"embedding" => List.duplicate(0.1, 1024)}]})
-      end)
-
-      assert {:ok, _embedding} = OpenAI.embed("text")
-    end
-
-    test "returns truncated embedding vector", %{bypass: bypass, test_pid: test_pid} do
-      vector = Enum.map(1..1500, &(&1 / 2))
-
-      Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
-        {:ok, body, conn} = Plug.Conn.read_body(conn)
-        send(test_pid, {:embed_request, conn.req_headers, body})
-        json(conn, 200, %{"data" => [%{"embedding" => vector}]})
-      end)
-
-      assert {:ok, result} = OpenAI.embed("some text")
-      assert Pgvector.to_list(result) == Enum.map(1..1024, &(&1 / 2))
-
-      assert_receive {:embed_request, headers, body}
-      assert {"authorization", "Bearer sk-embed-456"} in headers
-      request = Jason.decode!(body)
-      assert request["model"] == "test-embed-model"
-      assert request["input"] == "some text"
-    end
-
-    test "prefers model from opts over config", %{bypass: bypass, test_pid: test_pid} do
-      vector = List.duplicate(0.1, 1024)
-
-      Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
-        {:ok, body, conn} = Plug.Conn.read_body(conn)
-        send(test_pid, {:embed_request, body})
-        json(conn, 200, %{"data" => [%{"embedding" => vector}]})
-      end)
-
-      assert {:ok, result} = OpenAI.embed("text", model: "custom-embed")
-      assert length(Pgvector.to_list(result)) == 1024
-
-      assert_receive {:embed_request, body}
-      assert Jason.decode!(body)["model"] == "custom-embed"
-    end
-
-    test "returns error when the vector is too short", %{bypass: bypass} do
-      Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
-        json(conn, 200, %{"data" => [%{"embedding" => [0.1, 0.2, 0.3]}]})
-      end)
-
-      assert {:error, reason} = OpenAI.embed("text")
-      assert {:embedding_too_short, [expected: 1024, actual: 3]} = reason
-    end
-
-    test "returns error on non-200 status", %{bypass: bypass} do
-      # stub (not expect): :transient retries POSTs on 5xx, so the route may hit multiple times
-      Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
-        json(conn, 500, %{"error" => "boom"})
-      end)
-
-      assert {:error, {:http_error, [status: 500]}} = OpenAI.embed("text")
-    end
-
-    test "returns error for invalid body", %{bypass: bypass} do
-      Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
-        json(conn, 200, %{"unexpected" => true})
-      end)
-
-      assert {:error, :invalid_embedding_response} = OpenAI.embed("text")
-    end
-
-    test "reports a malformed 200 without counting it against the fuse", %{bypass: bypass} do
-      watch_fuse_failures()
-
-      Bypass.expect(bypass, "POST", "/v1/embeddings", fn conn ->
-        json(conn, 200, %{"unexpected" => true})
-      end)
-
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          assert {:error, :invalid_embedding_response} = OpenAI.embed("text")
-        end)
-
-      assert log =~ "API call failed"
-      refute_received {:circuit_failure, :embedding_api}
-    end
-
-    # The ask used to live in `Search.Indexer` alone, so search and chat
-    # retrieval, which call this directly, kept sending requests -- and melting
-    # the fuse further -- after it had blown. Every caller is held off now.
-    test "rejects the call without reaching the API when :embedding_api is blown", %{
-      bypass: bypass,
-      test_pid: test_pid
-    } do
-      Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
-        send(test_pid, :http_request)
-        json(conn, 200, %{"data" => [%{"embedding" => List.duplicate(0.1, 1024)}]})
-      end)
-
-      blow(:embedding_api)
-
-      assert {:error, :circuit_open} = OpenAI.embed("text")
-      refute_received :http_request
-    end
-
-    test "a server that keeps failing blows :embedding_api and is then left alone", %{
-      bypass: bypass,
-      test_pid: test_pid
-    } do
-      Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
-        send(test_pid, :http_request)
-        json(conn, 500, %{"error" => "boom"})
-      end)
-
-      for _ <- 1..4, do: assert({:error, _} = OpenAI.embed("text"))
-      assert CircuitBreaker.status(:embedding_api) == :blown
-
-      flush_requests()
-      assert {:error, :circuit_open} = OpenAI.embed("text")
-      refute_received :http_request
-    end
-
-    test "keeps an echoed request body out of the error log", %{bypass: bypass} do
-      # A 4xx from an OpenAI-compatible server commonly quotes the input it
-      # rejected. For an embedding call that input is the user's search text, so
-      # it must not reach the log level production actually runs at.
-      Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
-        json(conn, 400, %{"error" => %{"message" => "invalid input: my-secret-query"}})
-      end)
-
-      log =
-        ExUnit.CaptureLog.capture_log([level: :info], fn ->
-          assert {:error, _reason} = OpenAI.embed("my-secret-query")
-        end)
-
-      refute log =~ "my-secret-query"
-      assert log =~ "API call failed"
-    end
-  end
-
   describe "endpoint URLs in the debug log" do
     # These URLs are logged before Req ever sees them, so Req's own header
-    # redaction does not cover them, and dev runs at :debug. The chat and
-    # embedding lines are separate call sites and each needs its own guard.
+    # redaction does not cover them, and dev runs at :debug. The embedding line
+    # is a separate call site with its own guard in `EmbeddingRequestTest`.
     setup do
       # The suite runs Logger at :warning, which drops these lines before any
       # capture handler sees them; dev runs at :debug, which is the case at issue.
@@ -926,24 +742,6 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         assert log =~ "OpenAI request:"
         refute log =~ "s3cret"
       end
-
-      test "the embedding request line carries no credentials from #{shape} endpoint", %{
-        bypass: bypass
-      } do
-        configure_endpoints("#{unquote(scheme)}user:s3cret@localhost:#{bypass.port}")
-
-        Bypass.stub(bypass, "POST", "/v1/embeddings", fn conn ->
-          json(conn, 200, %{"data" => [%{"embedding" => List.duplicate(0.1, 1024)}]})
-        end)
-
-        log =
-          ExUnit.CaptureLog.capture_log([level: :debug], fn ->
-            attempt(fn -> OpenAI.embed("text") end)
-          end)
-
-        assert log =~ "Embedding POST"
-        refute log =~ "s3cret"
-      end
     end
 
     # A scheme-less base URL cannot be requested at all; the log line under test
@@ -961,11 +759,6 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         base_url: base_url,
         api_key: "sk-test-123",
         chat_model: "test-chat-model"
-      )
-
-      TestEnv.put_env(:embedding,
-        base_url: base_url,
-        model: "test-embedding-model"
       )
     end
   end
@@ -1008,7 +801,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     end
 
     test "reports a malformed 200 without counting it against the fuse", %{bypass: bypass} do
-      watch_fuse_failures()
+      FuseProbe.watch_failures()
 
       Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
         json(conn, 200, %{"data" => "not-a-list"})
@@ -1032,7 +825,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 200, %{"data" => [%{"id" => "model-a"}]})
       end)
 
-      blow(:openai_api)
+      FuseProbe.blow(:openai_api)
 
       assert {:error, :circuit_open} = OpenAI.list_models()
       refute_received :http_request

@@ -33,6 +33,8 @@ defmodule Doctrans.Processing.SourceLanguage do
   # rather than taken at its word.
   @code_pattern ~r/\b[a-z]{2}\b/
 
+  # The fallback recorded when detection learns nothing; `config :doctrans,
+  # :defaults, source_language:` overrides it.
   @fallback_language "de"
 
   @doc """

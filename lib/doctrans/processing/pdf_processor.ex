@@ -23,23 +23,16 @@ defmodule Doctrans.Processing.PdfProcessor do
   @doc """
   Extracts pages from a PDF and creates page records progressively.
 
-  Returns `:ok`, `:cancelled`, or `{:error, reason}`.
+  Returns `:ok` or `{:error, reason}`. Cancellation is not a concern here:
+  `Doctrans.Processing.Cancellation` cancels the job, and a run the document has
+  moved on from is fenced by `Run`.
   """
   # pdf_path is the stored original upload or the converter output in the same document
   # directory; the File calls themselves live further down the do_extract/3 chain.
-  @spec extract_document(
-          Ecto.UUID.t(),
-          String.t(),
-          MapSet.t(Ecto.UUID.t()),
-          Documents.Document.t() | nil
-        ) :: :ok | :cancelled | {:error, Doctrans.Errors.reason()}
-  def extract_document(document_id, pdf_path, cancelled_documents, document \\ nil) do
-    if MapSet.member?(cancelled_documents, document_id) do
-      Logger.info("Document #{document_id} was cancelled, skipping PDF extraction")
-      :cancelled
-    else
-      do_extract(document_id, pdf_path, document || Documents.get_document(document_id))
-    end
+  @spec extract_document(Ecto.UUID.t(), String.t(), Documents.Document.t() | nil) ::
+          :ok | {:error, Doctrans.Errors.reason()}
+  def extract_document(document_id, pdf_path, document \\ nil) do
+    do_extract(document_id, pdf_path, document || Documents.get_document(document_id))
   end
 
   defp do_extract(document_id, pdf_path, document) do

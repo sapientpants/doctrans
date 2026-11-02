@@ -144,7 +144,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       end
 
       assert :completed =
-               Completion.check_document_completion(run.id)
+               Completion.check_document_completion_unguarded(run.id)
 
       # Simulate rescue after page jobs finished but extraction was not acknowledged.
       Repo.update_all(from(j in Oban.Job), set: [state: "completed"])
@@ -226,7 +226,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       end
 
       # Settled pages with a discarded failure are a terminal partial failure.
-      assert :failed = Completion.check_document_completion(run.id)
+      assert :failed = Completion.check_document_completion_unguarded(run.id)
       assert Documents.get_document!(run.id).status == "error"
       assert Documents.get_document!(run.id).error_message == failed.error_message
 

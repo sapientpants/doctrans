@@ -26,11 +26,9 @@ defmodule Doctrans.Jobs.EmbeddingJob do
       states: [:available, :scheduled, :executing, :retryable, :suspended]
     ]
 
-  require Logger
-
   alias Doctrans.Documents.Page
   alias Doctrans.Errors
-  alias Doctrans.Jobs.Keys
+  alias Doctrans.Jobs.{Keys, RetryTelemetry}
   alias Doctrans.Search.Indexer
 
   @page_id_key Keys.page_id()
@@ -63,28 +61,10 @@ defmodule Doctrans.Jobs.EmbeddingJob do
     |> report_retry(job, page_id)
   end
 
-  # Indexing no longer owns its retry loop, so the retry series the dashboard
-  # charts (`type: :embedding`, alongside :extraction and :translation) has to be
-  # emitted from the layer that does own it — here.
+  # Indexing owns no retry loop, so its retry series is reported from the layer
+  # that does own it -- here, through the one emission site every job shares.
   defp report_retry({:error, reason} = outcome, %Oban.Job{} = job, page_id) do
-    if job.attempt >= job.max_attempts do
-      Logger.error(
-        "Indexing exhausted #{job.max_attempts} attempts for page #{page_id}: #{inspect(reason)}"
-      )
-
-      :telemetry.execute(
-        [:doctrans, :retry, :exhausted],
-        %{count: 1},
-        %{type: :embedding, page_id: page_id}
-      )
-    else
-      :telemetry.execute(
-        [:doctrans, :retry, :attempt],
-        %{count: 1},
-        %{type: :embedding, page_id: page_id, attempt: job.attempt}
-      )
-    end
-
+    :ok = RetryTelemetry.report(job, :embedding, page_id, reason)
     outcome
   end
 

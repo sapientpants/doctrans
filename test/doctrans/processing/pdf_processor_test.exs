@@ -11,7 +11,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.ResumablePdfExtractorStub
 
-  describe "extract_document/3" do
+  describe "extract_document/2" do
     test "waits for all expected pages when processing catches up with PDF extraction" do
       ResumablePdfExtractorStub.install()
 
@@ -26,7 +26,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
             Process.put(:pause_pdf_page, {2, owner})
 
             Oban.Testing.with_testing_mode(:manual, fn ->
-              PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+              PdfProcessor.extract_document(document.id, pdf_path)
             end)
           end)
 
@@ -35,20 +35,20 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         assert [first_page] = Documents.list_pages(document.id)
         complete_page(first_page)
 
-        assert Completion.check_document_completion(document.id) == :incomplete
+        assert Completion.check_document_completion_unguarded(document.id) == :incomplete
         assert Documents.get_document!(document.id).status == "processing"
         refute_received {:document_updated, %{status: "completed"}}
 
         send(task.pid, :resume_pdf)
         assert Task.await(task) == :ok
         assert length(Documents.list_pages(document.id)) == 3
-        assert Completion.check_document_completion(document.id) == :incomplete
+        assert Completion.check_document_completion_unguarded(document.id) == :incomplete
 
         for page <- Documents.list_pages(document.id), page.page_number > 1 do
           complete_page(page)
         end
 
-        assert Completion.check_document_completion(document.id) == :completed
+        assert Completion.check_document_completion_unguarded(document.id) == :completed
         assert Documents.get_document!(document.id).status == "completed"
         assert_received {:document_updated, %{status: "completed"}}
       end)
@@ -58,7 +58,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
       Oban.Testing.with_testing_mode(:manual, fn ->
         document = document_fixture(%{status: "extracting"})
         pdf_path = create_temp_pdf()
-        assert :ok = PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+        assert :ok = PdfProcessor.extract_document(document.id, pdf_path)
 
         updated_doc = Documents.get_document_with_pages(document.id)
         assert updated_doc.total_pages == 3
@@ -86,7 +86,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         Process.put(:fail_pdf_page, 2)
 
         assert {:error, {:pdf_extraction_failed, _}} =
-                 PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+                 PdfProcessor.extract_document(document.id, pdf_path)
 
         assert File.exists?(pdf_path)
         failed_document = Documents.get_document!(document.id)
@@ -100,7 +100,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         Process.delete(:fail_pdf_page)
 
         Topics.subscribe_document(document.id)
-        assert :ok = PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+        assert :ok = PdfProcessor.extract_document(document.id, pdf_path)
         resumed_document = Documents.get_document!(document.id)
         assert resumed_document.status == "processing"
         assert resumed_document.error_message == nil
@@ -136,7 +136,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
           })
 
         pdf_path = create_temp_pdf()
-        assert :ok = PdfProcessor.extract_document(document.id, pdf_path, MapSet.new())
+        assert :ok = PdfProcessor.extract_document(document.id, pdf_path)
 
         pages = Documents.list_pages(document.id)
         assert Enum.map(pages, & &1.id) == [completed.id, pending.id, translating.id]
@@ -164,7 +164,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         job |> Ecto.Changeset.change(state: "retryable", attempt: 1) |> Repo.update!()
 
         assert :ok =
-                 PdfProcessor.extract_document(document.id, create_temp_pdf(), MapSet.new())
+                 PdfProcessor.extract_document(document.id, create_temp_pdf())
 
         assert Documents.get_page!(page.id).extraction_status == "processing"
         assert Repo.get!(Oban.Job, job.id).state == "retryable"
@@ -172,28 +172,11 @@ defmodule Doctrans.Processing.PdfProcessorTest do
       end)
     end
 
-    test "skips cancelled documents" do
-      document = document_fixture(%{status: "extracting"})
-      pdf_path = create_temp_pdf()
-      cancelled = MapSet.new([document.id])
-
-      result = PdfProcessor.extract_document(document.id, pdf_path, cancelled)
-
-      assert result == :cancelled
-
-      # Cancelling processing preserves the original PDF
-      assert File.exists?(pdf_path)
-
-      # No pages should be created
-      pages = Documents.list_pages(document.id)
-      assert pages == []
-    end
-
     test "handles non-existent document" do
       fake_id = Ecto.UUID.generate()
       pdf_path = create_temp_pdf()
 
-      result = PdfProcessor.extract_document(fake_id, pdf_path, MapSet.new())
+      result = PdfProcessor.extract_document(fake_id, pdf_path)
 
       assert {:error, :document_not_found} = result
     end

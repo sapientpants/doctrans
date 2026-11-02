@@ -229,7 +229,7 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
 
       # Leaving the file behind would make a lower :dpi setting take no effect,
       # because extraction treats a stored image as a finished page.
-      assert PdfExtractor.page_image_path(pages_dir, 1) == nil
+      assert Path.wildcard(Path.join(pages_dir, "page-*.png")) == []
     end
 
     test "an image within :max_image_bytes is kept", %{dir: dir, config: config} do

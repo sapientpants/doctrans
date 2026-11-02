@@ -67,6 +67,13 @@ defmodule Doctrans.Processing.SubprocessTest do
       assert Subprocess.classify({:subprocess_owner_down, :killed}, @tags) ==
                {:error, {:tool_start_failed, [error: ":killed"]}}
     end
+
+    test "an owner that raised is reported by its message, without the stacktrace" do
+      down = {:subprocess_owner_down, {%RuntimeError{message: "boom"}, [{Kernel, :+, 2, []}]}}
+
+      assert Subprocess.classify(down, @tags) ==
+               {:error, {:tool_start_failed, [error: "boom"]}}
+    end
   end
 
   defp script(dir, body) do

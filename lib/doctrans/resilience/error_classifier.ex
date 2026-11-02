@@ -5,6 +5,12 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   Used to determine whether an operation should be retried or
   immediately marked as failed.
 
+  Every caller hands over a `Doctrans.Errors.reason/0`, the shape
+  `Doctrans.Errors.normalize/1` produces: an atom, or a `{tag, bindings}` pair.
+  A transport failure arrives as `{:transport_error, [reason: _]}` and an HTTP
+  status as `{:http_error, [status: _]}`; the raw exceptions and `{:error, _}`
+  wrappers they came from are normalized before they get here.
+
   ## Classifications
 
   - `:retryable` - Transient errors that may succeed on retry:
@@ -37,7 +43,7 @@ defmodule Doctrans.Resilience.ErrorClassifier do
       iex> ErrorClassifier.classify(:timeout)
       :retryable
 
-      iex> ErrorClassifier.classify({:error, %Req.TransportError{reason: :timeout}})
+      iex> ErrorClassifier.classify({:transport_error, [reason: :econnrefused]})
       :retryable
 
       iex> ErrorClassifier.classify({:http_error, [status: 404]})
@@ -45,12 +51,8 @@ defmodule Doctrans.Resilience.ErrorClassifier do
 
       iex> ErrorClassifier.classify({:http_error, [status: 500]})
       :retryable
-
-  HTTP failures arrive in the shape `Doctrans.Errors.normalize/1` gives them,
-  `{:http_error, [status: status]}`; the source shape `{:http_error, status}` is
-  normalized before it gets here.
   """
-  @spec classify(term()) :: classification()
+  @spec classify(Doctrans.Errors.reason() | term()) :: classification()
   def classify(error)
 
   def classify({:transport_error, _}), do: :retryable
@@ -78,20 +80,7 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   def classify({:page_image_too_large, _}), do: :permanent
   def classify({:poppler_not_found, _}), do: :permanent
 
-  # Explicit timeout atoms
   def classify(:timeout), do: :retryable
-  def classify({:error, :timeout}), do: :retryable
-
-  # Req transport errors
-  def classify({:error, %Req.TransportError{reason: :timeout}}), do: :retryable
-  def classify({:error, %Req.TransportError{reason: :econnrefused}}), do: :retryable
-  def classify({:error, %Req.TransportError{reason: :econnreset}}), do: :retryable
-  def classify({:error, %Req.TransportError{reason: :closed}}), do: :retryable
-  def classify({:error, %Req.TransportError{reason: :nxdomain}}), do: :retryable
-  def classify({:error, %Req.TransportError{}}), do: :retryable
-
-  # Raw transport error patterns
-  def classify(%Req.TransportError{}), do: :retryable
 
   # HTTP status codes
   def classify({:http_error, bindings}) when is_list(bindings) do
@@ -103,24 +92,6 @@ defmodule Doctrans.Resilience.ErrorClassifier do
     end
   end
 
-  # File errors
-  def classify({:error, :enoent}), do: :permanent
-  def classify({:error, :eacces}), do: :permanent
-  def classify({:error, :enotdir}), do: :permanent
-
-  # Generic error tuples
-  def classify({:error, atom_reason}) when is_atom(atom_reason) do
-    case atom_reason do
-      :econnrefused -> :retryable
-      :econnreset -> :retryable
-      :closed -> :retryable
-      :nxdomain -> :retryable
-      _ -> :unknown
-    end
-  end
-
-  def classify({:error, reason}) when is_binary(reason), do: classify(reason)
-
   # A wrapper such as `{:pdf_extraction_failed, [reason: nested]}` says where
   # the failure happened; the nested reason says what it was, and that is what
   # decides whether a retry can change the answer.
@@ -131,40 +102,8 @@ defmodule Doctrans.Resilience.ErrorClassifier do
     end
   end
 
-  # String error messages (common patterns)
-  def classify(error) when is_binary(error) do
-    cond do
-      retryable_string?(error) -> :retryable
-      permanent_string?(error) -> :permanent
-      true -> :unknown
-    end
-  end
-
   # Catch-all
   def classify(_), do: :unknown
-
-  defp retryable_string?(error) do
-    retryable_patterns = [
-      "timeout",
-      "timed out",
-      "connection refused",
-      "connection reset",
-      "503",
-      "502",
-      "500",
-      "429",
-      "rate limit"
-    ]
-
-    Enum.any?(retryable_patterns, &String.contains?(error, &1))
-  end
-
-  defp permanent_string?(error) do
-    permanent_patterns = ["not found", "404", "400", "invalid"]
-    model_not_found = String.contains?(error, "model") and String.contains?(error, "not")
-
-    Enum.any?(permanent_patterns, &String.contains?(error, &1)) or model_not_found
-  end
 
   @doc """
   Returns true if the error is classified as retryable.
@@ -179,7 +118,7 @@ defmodule Doctrans.Resilience.ErrorClassifier do
       iex> ErrorClassifier.retryable?({:http_error, [status: 404]})
       false
   """
-  @spec retryable?(term()) :: boolean()
+  @spec retryable?(Doctrans.Errors.reason() | term()) :: boolean()
   def retryable?(error) do
     case classify(error) do
       :retryable -> true

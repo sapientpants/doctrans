@@ -8,7 +8,7 @@ defmodule Doctrans.Processing.CompletionTest do
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.Completion
 
-  describe "check_document_completion/1" do
+  describe "check_document_completion_unguarded/1" do
     setup do
       document = document_fixture(%{status: "processing", total_pages: 2})
       failed = page_fixture(document, %{page_number: 1, extraction_status: "error"})
@@ -19,7 +19,7 @@ defmodule Doctrans.Processing.CompletionTest do
     test "a failed page never completes the document", %{document: document, failed: failed} do
       completed_page_fixture(document, %{page_number: 2})
 
-      assert Completion.check_document_completion(document.id) == :failed
+      assert Completion.check_document_completion_unguarded(document.id) == :failed
 
       settled = Documents.get_document!(document.id)
       assert settled.status == "error"
@@ -36,7 +36,7 @@ defmodule Doctrans.Processing.CompletionTest do
           |> LlmProcessingJob.new()
           |> Oban.insert()
 
-        assert Completion.check_document_completion(document.id) == :retrying
+        assert Completion.check_document_completion_unguarded(document.id) == :retrying
       end)
 
       assert Documents.get_document!(document.id).status == "processing"
@@ -47,7 +47,7 @@ defmodule Doctrans.Processing.CompletionTest do
       failed: failed
     } do
       completed_page_fixture(document, %{page_number: 2})
-      assert Completion.check_document_completion(document.id) == :failed
+      assert Completion.check_document_completion_unguarded(document.id) == :failed
 
       {:ok, failed} =
         Documents.update_page_extraction(failed, %{
@@ -61,7 +61,7 @@ defmodule Doctrans.Processing.CompletionTest do
           translated_markdown: "# Recovered translation"
         })
 
-      assert Completion.check_document_completion(document.id) == :completed
+      assert Completion.check_document_completion_unguarded(document.id) == :completed
 
       reconciled = Documents.get_document!(document.id)
       assert reconciled.status == "completed"
@@ -71,7 +71,7 @@ defmodule Doctrans.Processing.CompletionTest do
     test "unfinished pages leave the document alone", %{document: document} do
       page_fixture(document, %{page_number: 2, extraction_status: "processing"})
 
-      assert Completion.check_document_completion(document.id) == :incomplete
+      assert Completion.check_document_completion_unguarded(document.id) == :incomplete
       assert Documents.get_document!(document.id).status == "processing"
     end
   end
@@ -80,14 +80,15 @@ defmodule Doctrans.Processing.CompletionTest do
     test "moves a document out of its pre-processing states once" do
       for status <- ~w(uploading extracting queued) do
         document = document_fixture(%{status: status})
+        page = page_fixture(document)
         :ok = Topics.subscribe_document(document.id)
 
-        assert :ok = Completion.update_document_status_to_processing(document.id)
+        assert :ok = Completion.update_document_status_to_processing(page)
         assert Documents.get_document!(document.id).status == "processing"
         assert_receive {:document_updated, %{id: id, status: "processing"}} when id == document.id
 
         # A second page starting does not announce a transition that already happened.
-        assert :ok = Completion.update_document_status_to_processing(document.id)
+        assert :ok = Completion.update_document_status_to_processing(page)
         refute_receive {:document_updated, _}
       end
     end
@@ -95,8 +96,9 @@ defmodule Doctrans.Processing.CompletionTest do
     test "leaves settled and cancelled documents where they are" do
       for status <- ~w(completed error cancelled) do
         document = document_fixture(%{status: status})
+        page = page_fixture(document)
 
-        assert :ok = Completion.update_document_status_to_processing(document.id)
+        assert :ok = Completion.update_document_status_to_processing(page)
         assert Documents.get_document!(document.id).status == status
       end
     end

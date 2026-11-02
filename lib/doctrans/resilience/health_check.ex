@@ -7,6 +7,10 @@ defmodule Doctrans.Resilience.HealthCheck do
   - Database connection
   - File system (uploads directory)
 
+  Each check runs under the same scaffold: it is timed, a raise inside it is
+  normalized into an `{:error, _}` rather than crashing the caller, and a
+  `[:doctrans, :health_check, :completed]` event reports the outcome.
+
   ## Usage
 
       iex> HealthCheck.check_all()
@@ -72,27 +76,12 @@ defmodule Doctrans.Resilience.HealthCheck do
   """
   @spec check_openai() :: {:ok, map()} | {:error, term()}
   def check_openai do
-    start_time = System.monotonic_time(:millisecond)
-
-    result =
-      try do
-        case Deps.openai().list_models() do
-          {:ok, models} -> {:ok, %{available: true, models: models, circuit: :ok}}
-          {:error, _reason} = error -> error
-        end
-      rescue
-        e -> {:error, Doctrans.Errors.normalize(e)}
+    probe(:openai, fn ->
+      case Deps.openai().list_models() do
+        {:ok, models} -> {:ok, %{available: true, models: models, circuit: :ok}}
+        {:error, _reason} = error -> error
       end
-
-    duration = System.monotonic_time(:millisecond) - start_time
-
-    :telemetry.execute(
-      [:doctrans, :health_check, :completed],
-      %{duration_ms: duration},
-      %{check: :openai, result: elem(result, 0)}
-    )
-
-    result
+    end)
   end
 
   @doc """
@@ -102,26 +91,11 @@ defmodule Doctrans.Resilience.HealthCheck do
   """
   @spec check_database() :: :ok | {:error, term()}
   def check_database do
-    start_time = System.monotonic_time(:millisecond)
-
-    result =
-      try do
-        # Simple query to check connectivity
-        _ = Repo.query!("SELECT 1")
-        :ok
-      rescue
-        e -> {:error, Doctrans.Errors.normalize(e)}
-      end
-
-    duration = System.monotonic_time(:millisecond) - start_time
-
-    :telemetry.execute(
-      [:doctrans, :health_check, :completed],
-      %{duration_ms: duration},
-      %{check: :database, result: if(result == :ok, do: :ok, else: :error)}
-    )
-
-    result
+    probe(:database, fn ->
+      # Simple query to check connectivity
+      _ = Repo.query!("SELECT 1")
+      :ok
+    end)
   end
 
   @doc """
@@ -130,45 +104,59 @@ defmodule Doctrans.Resilience.HealthCheck do
   Returns `:ok` on success, or `{:error, reason}` on failure.
   """
   @spec check_filesystem() :: :ok | {:error, term()}
+  def check_filesystem do
+    probe(:filesystem, fn ->
+      uploads_dir = Uploads.upload_dir()
+
+      with :ok <- storage_root_present(uploads_dir) do
+        write_probe_file(uploads_dir)
+      end
+    end)
+  end
+
   # The probe path uses the configured upload root and a server-generated timestamp.
   # sobelow_skip ["Traversal.FileModule"]
-  def check_filesystem do
-    start_time = System.monotonic_time(:millisecond)
+  defp storage_root_present(uploads_dir) do
+    if File.dir?(uploads_dir),
+      do: :ok,
+      else: {:error, {:uploads_directory_missing, [path: uploads_dir]}}
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp write_probe_file(uploads_dir) do
+    test_file = Path.join(uploads_dir, ".health_check_#{System.os_time(:nanosecond)}")
+
+    case File.write(test_file, "health check") do
+      :ok ->
+        _ = File.rm(test_file)
+        :ok
+
+      {:error, reason} ->
+        {:error, {:uploads_directory_unwritable, [reason: reason]}}
+    end
+  end
+
+  # The scaffold every check shares: timed, raise-safe, and reported once.
+  defp probe(name, fun) do
+    started = System.monotonic_time(:millisecond)
 
     result =
       try do
-        uploads_dir = Uploads.upload_dir()
-
-        # Check directory exists
-        unless File.dir?(uploads_dir) do
-          throw({:error, {:uploads_directory_missing, [path: uploads_dir]}})
-        end
-
-        # Try to write a test file
-        test_file = Path.join(uploads_dir, ".health_check_#{System.os_time(:nanosecond)}")
-
-        case File.write(test_file, "health check") do
-          :ok ->
-            _ = File.rm(test_file)
-            :ok
-
-          {:error, reason} ->
-            {:error, {:uploads_directory_unwritable, [reason: reason]}}
-        end
+        fun.()
       rescue
         e -> {:error, Doctrans.Errors.normalize(e)}
-      catch
-        {:error, reason} -> {:error, reason}
       end
-
-    duration = System.monotonic_time(:millisecond) - start_time
 
     :telemetry.execute(
       [:doctrans, :health_check, :completed],
-      %{duration_ms: duration},
-      %{check: :filesystem, result: if(result == :ok, do: :ok, else: :error)}
+      %{duration_ms: System.monotonic_time(:millisecond) - started},
+      %{check: name, result: outcome(result)}
     )
 
     result
   end
+
+  defp outcome(:ok), do: :ok
+  defp outcome({:ok, _}), do: :ok
+  defp outcome({:error, _}), do: :error
 end

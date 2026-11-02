@@ -32,6 +32,8 @@ defmodule DoctransWeb.DocumentLive.Index do
       # the language, so starting the picker on it would put a guess in front of
       # the user as though they had made it.
       |> assign(:source_language, "")
+      # The picker's preselection; `config :doctrans, :defaults, target_language:`
+      # overrides it.
       |> assign(:target_language, defaults[:target_language] || "en")
       |> assign(:sort_by, :inserted_at)
       |> assign(:sort_dir, :desc)

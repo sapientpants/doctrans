@@ -39,7 +39,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       fail_extraction(:timeout)
 
       assert {:error, {:page_extraction_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id, MapSet.new())
+               LlmProcessor.process_page(context.page.id)
 
       assert bindings[:page_number] == context.page.page_number
       assert bindings[:reason] == :timeout
@@ -67,10 +67,10 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
 
     test "the next attempt resumes the errored stage and completes the page", context do
       fail_extraction(:timeout)
-      assert {:error, _} = LlmProcessor.process_page(context.page.id, MapSet.new())
+      assert {:error, _} = LlmProcessor.process_page(context.page.id)
       recover(:extract_markdown)
 
-      assert :ok = LlmProcessor.process_page(context.page.id, MapSet.new())
+      assert :ok = LlmProcessor.process_page(context.page.id)
 
       # The attempt that ran after the failure is the one whose markdown lands
       # on the page.
@@ -88,12 +88,12 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
     end
 
     test "a permanent failure is cancelled rather than retried", context do
-      reason = "HTTP 404: Model not found"
+      reason = {:http_error, [status: 404]}
       assert ErrorClassifier.classify(reason) == :permanent
       fail_extraction(reason)
 
       assert {:cancel, {:page_extraction_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id, MapSet.new())
+               LlmProcessor.process_page(context.page.id)
 
       assert bindings[:page_number] == context.page.page_number
       assert bindings[:reason] == reason
@@ -110,7 +110,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       fail_extraction(reason)
 
       assert {:error, {:page_extraction_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id, MapSet.new())
+               LlmProcessor.process_page(context.page.id)
 
       assert bindings[:reason] == reason
       assert Documents.get_page!(context.page.id).extraction_status == "error"
@@ -122,7 +122,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       # The breaker closes on its own; the backoff before the next attempt is
       # the wait for it, which is why this is a retry and not a cancel.
       assert {:error, {:page_extraction_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id, MapSet.new())
+               LlmProcessor.process_page(context.page.id)
 
       assert bindings[:reason] == :circuit_open
       assert_calls(extract_markdown: 1)
@@ -146,7 +146,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       fail_translation(:timeout)
 
       assert {:error, {:page_translation_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id, MapSet.new())
+               LlmProcessor.process_page(context.page.id)
 
       assert bindings[:page_number] == context.page.page_number
       assert bindings[:reason] == :timeout
@@ -169,10 +169,10 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
     test "the next attempt resumes at translation without paying for the image again",
          context do
       fail_translation(:timeout)
-      assert {:error, _} = LlmProcessor.process_page(context.page.id, MapSet.new())
+      assert {:error, _} = LlmProcessor.process_page(context.page.id)
       recover(:translate)
 
-      assert :ok = LlmProcessor.process_page(context.page.id, MapSet.new())
+      assert :ok = LlmProcessor.process_page(context.page.id)
 
       # The retry repeats the same request: the source text and the document's
       # target language both survive into the attempt that succeeds.
@@ -188,12 +188,12 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
     end
 
     test "a permanent failure is cancelled rather than retried", context do
-      reason = "HTTP 400: Invalid request"
+      reason = {:http_error, [status: 400]}
       assert ErrorClassifier.classify(reason) == :permanent
       fail_translation(reason)
 
       assert {:cancel, {:page_translation_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id, MapSet.new())
+               LlmProcessor.process_page(context.page.id)
 
       assert bindings[:reason] == reason
       assert_calls(translate: 1)
@@ -252,7 +252,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
     end
 
     test "a permanent failure cancels the job and fails the document at once", context do
-      fail_extraction("HTTP 404: Model not found")
+      fail_extraction({:http_error, [status: 404]})
 
       assert {:cancel, _} = perform_page_job(context.page, attempt: 1)
 
@@ -269,7 +269,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       stale_generation = context.page.processing_generation
 
       assert {:error, _} =
-               LlmProcessor.process_page(context.page.id, MapSet.new(),
+               LlmProcessor.process_page(context.page.id,
                  generation: stale_generation
                )
 
@@ -280,7 +280,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       # the job reports success rather than running: Oban must not retry work a
       # newer generation owns.
       assert :ok =
-               LlmProcessor.process_page(context.page.id, MapSet.new(),
+               LlmProcessor.process_page(context.page.id,
                  generation: stale_generation
                )
 
@@ -299,7 +299,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
 
       # The run guard refuses the stale write, and the run reports success:
       # there is no retry to schedule for work the reset's generation now owns.
-      assert :ok = LlmProcessor.process_page(context.page.id, MapSet.new())
+      assert :ok = LlmProcessor.process_page(context.page.id)
       assert_calls(extract_markdown: 1)
 
       saved = Documents.get_page!(context.page.id)
@@ -315,7 +315,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       # page, so a deletion there lands in the window the rescue exists for.
       delete_document_after_indexing(context.document)
 
-      assert :ok = LlmProcessor.process_page(context.page.id, MapSet.new())
+      assert :ok = LlmProcessor.process_page(context.page.id)
 
       assert Documents.get_document(context.document.id) == nil
       assert Documents.get_page(context.page.id) == nil

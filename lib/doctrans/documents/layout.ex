@@ -14,8 +14,8 @@ defmodule Doctrans.Documents.Layout do
   (`Doctrans.Jobs.RunCleanupJob`, `Doctrans.Documents.Sweeper`) and the restore
   check (`Doctrans.Backup`) all build paths through this module, so the layout is
   spelled out once. Page image filenames are deliberately not modelled here:
-  `pdftoppm` names them, and `Doctrans.Processing.PdfExtractor.page_image_path/2`
-  only globs for them. The URL allow-list in `DoctransWeb.Plugs.UploadImages`
+  `pdftoppm` names them, and `Doctrans.Processing.PdfExtractor` only globs for
+  them. The URL allow-list in `DoctransWeb.Plugs.UploadImages`
   mirrors the layout on purpose; it decides what is served, not where it is.
 
   Nothing here touches the filesystem. The root is read on every call, like

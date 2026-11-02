@@ -20,7 +20,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       File.mkdir_p!(Path.dirname(full_path))
       File.write!(full_path, "fake image")
 
-      result = LlmProcessor.process_page(page.id, MapSet.new())
+      result = LlmProcessor.process_page(page.id)
 
       assert result == :ok
 
@@ -30,20 +30,6 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       assert updated_page.translation_status == "completed"
       assert updated_page.original_markdown != nil
       assert updated_page.translated_markdown != nil
-    end
-
-    test "skips pages from cancelled documents" do
-      document = document_fixture(%{status: "processing"})
-      page = page_fixture(document, %{page_number: 1})
-      cancelled = MapSet.new([document.id])
-
-      result = LlmProcessor.process_page(page.id, cancelled)
-
-      assert result == :ok
-
-      # Page status should not change
-      updated_page = Documents.get_page!(page.id)
-      assert updated_page.extraction_status == "pending"
     end
 
     test "only translates if extraction already complete" do
@@ -57,7 +43,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
           original_markdown: "# Test Content"
         })
 
-      result = LlmProcessor.process_page(page.id, MapSet.new())
+      result = LlmProcessor.process_page(page.id)
 
       assert result == :ok
 
@@ -71,7 +57,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
     test "cancels for a non-existent page" do
       fake_id = Ecto.UUID.generate()
 
-      result = LlmProcessor.process_page(fake_id, MapSet.new())
+      result = LlmProcessor.process_page(fake_id)
 
       assert {:cancel, :page_not_found} = result
     end
@@ -93,7 +79,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       # Configure stub to return circuit open error
       fail_extraction(:circuit_open)
 
-      result = LlmProcessor.process_page(page.id, MapSet.new())
+      result = LlmProcessor.process_page(page.id)
 
       assert {:error, _} = result
 
@@ -109,10 +95,10 @@ defmodule Doctrans.Processing.LlmProcessorTest do
 
       setup_image_file(page)
 
-      # Configure stub to return permanent error (404)
-      fail_extraction("HTTP 404: Model not found")
+      # A 404 arrives normalized, the way the client reports every failure.
+      fail_extraction({:http_error, [status: 404]})
 
-      result = LlmProcessor.process_page(page.id, MapSet.new())
+      result = LlmProcessor.process_page(page.id)
 
       assert {:cancel, _} = result
 
@@ -137,7 +123,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
       # Configure stub: extraction succeeds, translation fails
       fail_translation(:circuit_open)
 
-      result = LlmProcessor.process_page(page.id, MapSet.new())
+      result = LlmProcessor.process_page(page.id)
 
       assert {:error, _} = result
 
@@ -153,10 +139,10 @@ defmodule Doctrans.Processing.LlmProcessorTest do
 
       setup_image_file(page)
 
-      # Configure stub: extraction succeeds, translation returns permanent error
-      fail_translation("HTTP 400: Invalid request")
+      # Extraction succeeds; translation fails with a normalized 400.
+      fail_translation({:http_error, [status: 400]})
 
-      result = LlmProcessor.process_page(page.id, MapSet.new())
+      result = LlmProcessor.process_page(page.id)
 
       assert {:cancel, _} = result
 

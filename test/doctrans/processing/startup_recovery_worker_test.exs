@@ -1,14 +1,14 @@
-defmodule Doctrans.Processing.WorkerTest do
-  # The application's Worker owns the registered name and already has a startup
+defmodule Doctrans.Processing.StartupRecoveryWorkerTest do
+  # The application's worker owns the registered name and already has a startup
   # recovery pass in flight, so these cases drive an unnamed instance of their
   # own: the GenServer callbacks are then exercised against a mailbox nothing
   # else writes to, and the instance is stopped with the test. The boot-time
   # pass itself, which a test cannot hand a sandbox connection to in time, is
-  # covered by `worker_startup_test.exs`.
+  # covered by `startup_recovery_worker_boot_test.exs`.
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
-  alias Doctrans.Processing.{StartupRecovery, Worker}
+  alias Doctrans.Processing.{StartupRecovery, StartupRecoveryWorker}
   alias Ecto.Adapters.SQL.Sandbox
 
   import Doctrans.Fixtures
@@ -20,7 +20,7 @@ defmodule Doctrans.Processing.WorkerTest do
       start_supervised!(
         %{
           id: :worker_under_test,
-          start: {GenServer, :start_link, [Worker, []]}
+          start: {GenServer, :start_link, [StartupRecoveryWorker, []]}
         },
         restart: :temporary
       )
@@ -47,7 +47,7 @@ defmodule Doctrans.Processing.WorkerTest do
         |> Ecto.Changeset.change(embedding_status: "completed")
         |> Repo.update!()
 
-        assert Worker.recover_now(worker) == :ok
+        assert StartupRecoveryWorker.recover_now(worker) == :ok
 
         assert Documents.get_document!(document.id).status == "completed"
 

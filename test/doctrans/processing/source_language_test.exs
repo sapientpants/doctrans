@@ -37,7 +37,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
             send(owner, {:ready, self()})
 
             receive do
-              :go -> LlmProcessor.process_page(page.id, MapSet.new())
+              :go -> LlmProcessor.process_page(page.id)
             end
           end)
         end
@@ -72,7 +72,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
     test "a retry re-reads the document's own language and ignores a changed app default" do
       {document, page} = staged_page(%{source_language: "fr", target_language: "en"})
 
-      assert :ok = LlmProcessor.process_page(page.id, MapSet.new())
+      assert :ok = LlmProcessor.process_page(page.id)
       assert Documents.get_page!(page.id).translated_markdown =~ "Translated fr to en"
 
       # Move the app-wide default out from under the document. A retry that
@@ -90,7 +90,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
           translated_markdown: nil
         })
 
-      assert :ok = LlmProcessor.process_page(page.id, MapSet.new())
+      assert :ok = LlmProcessor.process_page(page.id)
 
       retried = Documents.get_page!(page.id)
       assert retried.translation_status == "completed"
@@ -108,7 +108,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
 
       {document, page} = staged_page(%{source_language: nil, target_language: "en"})
 
-      assert :ok = LlmProcessor.process_page(page.id, MapSet.new())
+      assert :ok = LlmProcessor.process_page(page.id)
 
       # The detected language is recorded on the document, so every later page
       # and every retry reads the same answer...
@@ -124,7 +124,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
 
       {document, page} = staged_page(%{source_language: "nl", target_language: "en"})
 
-      assert :ok = LlmProcessor.process_page(page.id, MapSet.new())
+      assert :ok = LlmProcessor.process_page(page.id)
 
       assert Documents.get_document!(document.id).source_language == "nl"
 
@@ -139,7 +139,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
       {document, [first, second]} =
         staged_pages(%{source_language: nil, target_language: "en"}, 2)
 
-      assert :ok = LlmProcessor.process_page(first.id, MapSet.new())
+      assert :ok = LlmProcessor.process_page(first.id)
       assert Documents.get_document!(document.id).source_language == "fr"
       assert Documents.get_page!(first.id).translated_markdown =~ "Translated fr to en"
 
@@ -149,7 +149,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
       # which is what makes "no second call" an assertion rather than a hope.
       OpenAIProbe.install()
 
-      assert :ok = LlmProcessor.process_page(second.id, MapSet.new())
+      assert :ok = LlmProcessor.process_page(second.id)
 
       assert_receive {:translate_languages, {"fr", "en"}}, 5_000
       refute_received {:detect_language, _opts}
@@ -171,7 +171,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
 
         {document, page} = staged_page(%{source_language: nil, target_language: "en"})
 
-        assert :ok = LlmProcessor.process_page(page.id, MapSet.new())
+        assert :ok = LlmProcessor.process_page(page.id)
 
         stored = Documents.get_document!(document.id).source_language
 
@@ -190,7 +190,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
 
       # The failure is logged, not raised: a document one cannot detect is
       # still a document the user gets back translated.
-      log = capture_log(fn -> assert :ok = LlmProcessor.process_page(page.id, MapSet.new()) end)
+      log = capture_log(fn -> assert :ok = LlmProcessor.process_page(page.id) end)
       assert log =~ "Language detection failed"
 
       assert Documents.get_document!(document.id).source_language == "pl"

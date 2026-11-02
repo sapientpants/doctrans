@@ -2,14 +2,17 @@ defmodule Doctrans.Processing.OpenAI do
   @moduledoc """
   OpenAI-compatible API client for LLM interactions.
 
-  Handles extraction, translation, chat, streaming, embedding, and
-  model listing against OpenAI-compatible API endpoints.
+  Handles extraction, translation, chat, streaming and model listing against
+  OpenAI-compatible API endpoints. Embeddings are `Doctrans.Search.Embedding`,
+  which owns its own endpoint and fuse.
 
   Every request goes out under `Doctrans.Processing.RequestBounds`, which caps
-  how long the endpoint may take in total and how much body it may return.
+  how long the endpoint may take in total and how much body it may return, and
+  every response is settled by `Doctrans.Processing.ApiFailure.resolve/4`, so a
+  failure is logged, classified and normalized in one place.
   """
 
-  alias Doctrans.Config.{Embedding, Inference, OpenAI}
+  alias Doctrans.Config.{Inference, OpenAI}
   alias Doctrans.Processing.{ApiFailure, Prompts, RequestBounds, SSECollector}
   alias Doctrans.Resilience.CircuitBreaker
 
@@ -17,7 +20,10 @@ defmodule Doctrans.Processing.OpenAI do
 
   @behaviour Doctrans.Processing.OpenAIBehaviour
 
-  @embedding_dimensions 1024
+  # The cap for a caller that states none of its own, which is extraction: a
+  # page of transcribed Markdown. Translation and language detection set their
+  # own below, and `Doctrans.Chat.Agent` sets its own too.
+  @default_max_tokens 4096
 
   @impl true
   @spec extract_markdown(String.t(), keyword()) ::
@@ -31,43 +37,20 @@ defmodule Doctrans.Processing.OpenAI do
 
     case File.read(path) do
       {:ok, image_data} ->
-        content = build_multimodal_content(image_path, image_data, opts)
+        content = build_multimodal_content(image_path, image_data)
         messages = [%{role: "user", content: content}]
         opts = with_default_model(opts, OpenAI.vision_model())
         request_body = build_request_body(Keyword.put(opts, :messages, messages))
 
         post_chat_completion(request_body, opts)
-        |> resolve_completion_response(:openai_api)
+        |> ApiFailure.resolve(:openai_api, &parse_chat_response/1)
 
       {:error, reason} ->
         {:error, {:image_unreadable, [reason: reason]}}
     end
   end
 
-  # Every way a call can fail -- a non-2xx, a transport error, or a 200 whose
-  # body does not parse -- is reported through `ApiFailure.handle/3`, so each
-  # failure is logged once at the source, classified once, and leaves in the
-  # normalized shape. A malformed body never melts the fuse: the classifier
-  # calls it permanent or unknown, not transient.
-  defp resolve_completion_response({:ok, %Req.Response{status: 200, body: body}}, fuse) do
-    body |> parse_chat_response() |> report_parse_failure(fuse)
-  end
-
-  defp resolve_completion_response({:ok, %Req.Response{status: status} = resp}, fuse) do
-    ApiFailure.handle(fuse, {:http_status, status, resp})
-  end
-
-  defp resolve_completion_response({:error, reason}, fuse) do
-    ApiFailure.handle(fuse, reason)
-  end
-
-  defp report_parse_failure(result, fuse, opts \\ [])
-  defp report_parse_failure({:ok, _} = result, _fuse, _opts), do: result
-
-  defp report_parse_failure({:error, _} = error, fuse, opts),
-    do: ApiFailure.handle(fuse, error, opts)
-
-  defp build_multimodal_content(image_path, image_data, opts) do
+  defp build_multimodal_content(image_path, image_data) do
     ext = Path.extname(image_path)
 
     mime_type =
@@ -80,10 +63,8 @@ defmodule Doctrans.Processing.OpenAI do
 
     encoded = Base.encode64(image_data)
 
-    text = Prompts.extract(opts)
-
     [
-      %{type: "text", text: text},
+      %{type: "text", text: Prompts.extract()},
       %{type: "image_url", image_url: %{url: "data:#{mime_type};base64,#{encoded}"}}
     ]
   end
@@ -94,7 +75,6 @@ defmodule Doctrans.Processing.OpenAI do
 
   def chat(messages, opts) when is_list(messages) do
     request_body = build_request_body(Keyword.put(opts, :messages, messages))
-    fuse = :openai_api
     url = api_url("/v1/chat/completions")
     key = api_key()
 
@@ -103,34 +83,32 @@ defmodule Doctrans.Processing.OpenAI do
     )
 
     post_chat_completion(request_body, opts)
-    |> resolve_completion_response(fuse)
+    |> ApiFailure.resolve(:openai_api, &parse_chat_response/1)
   end
 
   # One deadline and one size cap per call; Req's retries run inside it.
   defp bounds(opts),
     do: RequestBounds.new(Keyword.take(opts, [:timeout, :deadline, :max_response_bytes]))
 
+  # The fuse is asked, never melted, here: `ApiFailure` classifies each failure
+  # and melts for the ones that count.
   defp post_chat_completion(request_body, opts) do
-    CircuitBreaker.call(
-      :openai_api,
-      fn ->
-        build_base_req()
-        |> RequestBounds.post(bounds(opts),
-          url: api_url("/v1/chat/completions"),
-          json: request_body,
-          # :transient retries all methods (incl. POST) on 408/429/5xx and
-          # connection errors; chat-completion POSTs are safe to replay
-          retry: :transient,
-          # Req follows redirects by default, and a 307/308 replays the POST
-          # body at the Location host. That would send document text somewhere
-          # `Doctrans.Config.Inference` never classified, breaking the privacy
-          # claim the UI makes from it. An inference server has no cause to
-          # redirect; if one does, fail loudly rather than silently re-target.
-          redirect: false
-        )
-      end,
-      melt: false
-    )
+    CircuitBreaker.call(:openai_api, fn ->
+      build_base_req()
+      |> RequestBounds.post(bounds(opts),
+        url: api_url("/v1/chat/completions"),
+        json: request_body,
+        # :transient retries all methods (incl. POST) on 408/429/5xx and
+        # connection errors; chat-completion POSTs are safe to replay
+        retry: :transient,
+        # Req follows redirects by default, and a 307/308 replays the POST
+        # body at the Location host. That would send document text somewhere
+        # `Doctrans.Config.Inference` never classified, breaking the privacy
+        # claim the UI makes from it. An inference server has no cause to
+        # redirect; if one does, fail loudly rather than silently re-target.
+        redirect: false
+      )
+    end)
   end
 
   # Fail closed: a non-streaming completion must explicitly finish normally.
@@ -155,38 +133,23 @@ defmodule Doctrans.Processing.OpenAI do
   def chat_stream(messages, on_delta, opts \\ [])
 
   def chat_stream(messages, on_delta, opts) when is_list(messages) and is_function(on_delta, 1) do
-    CircuitBreaker.call(
-      :openai_api,
-      fn ->
-        do_chat_stream(messages, on_delta, opts)
-      end,
-      melt: false
-    )
+    CircuitBreaker.call(:openai_api, fn -> do_chat_stream(messages, on_delta, opts) end)
   end
 
   defp do_chat_stream(messages, on_delta, opts) do
-    fuse = :openai_api
     collector = SSECollector.new(on_delta)
 
-    case build_base_req()
-         |> RequestBounds.post(bounds(opts),
-           url: api_url("/v1/chat/completions"),
-           json: build_request_body(opts ++ [messages: messages, stream: true]),
-           retry: :transient,
-           # See post_chat_completion/2: a redirect would replay the document
-           # text at an endpoint the privacy copy never accounted for.
-           redirect: false,
-           collect: collect_sse(collector)
-         ) do
-      {:ok, %Req.Response{status: 200} = resp} ->
-        resp.body |> collected_content(collector) |> report_parse_failure(fuse)
-
-      {:ok, %Req.Response{} = resp} ->
-        ApiFailure.handle(fuse, {:http_status, resp.status, resp})
-
-      {:error, reason} ->
-        ApiFailure.handle(fuse, reason)
-    end
+    build_base_req()
+    |> RequestBounds.post(bounds(opts),
+      url: api_url("/v1/chat/completions"),
+      json: build_request_body(opts ++ [messages: messages, stream: true]),
+      retry: :transient,
+      # See post_chat_completion/2: a redirect would replay the document
+      # text at an endpoint the privacy copy never accounted for.
+      redirect: false,
+      collect: collect_sse(collector)
+    )
+    |> ApiFailure.resolve(:openai_api, &collected_content(&1, collector))
   end
 
   # Each raw chunk is fed into the SSE collector (kept in resp.body), which
@@ -279,109 +242,34 @@ defmodule Doctrans.Processing.OpenAI do
   @list_models_timeout 5_000
 
   # Asks the `:openai_api` fuse like every other call on that endpoint; a blown
-  # fuse answers `{:error, :circuit_open}` without a request. Never melts it,
-  # though: see `ApiFailure.handle/3` on `melt: false`.
+  # fuse answers `{:error, :circuit_open}` without a request. A failure here is
+  # never counted against the fuse either: see `ApiFailure.handle/3` on
+  # `melt: false`.
   @impl true
   @spec list_models() :: {:ok, [String.t()]} | {:error, Doctrans.Errors.reason()}
   def list_models do
-    CircuitBreaker.call(:openai_api, &do_list_models/0, melt: false)
+    CircuitBreaker.call(:openai_api, &do_list_models/0)
   end
 
   defp do_list_models do
-    fuse = :openai_api
-
-    case build_base_req()
-         |> RequestBounds.get(RequestBounds.new(timeout: @list_models_timeout),
-           url: api_url("/v1/models"),
-           retry: :safe_transient
-         ) do
-      {:ok, %Req.Response{status: 200, body: body}} ->
-        body |> parse_list_models_response() |> report_parse_failure(fuse, melt: false)
-
-      {:ok, %Req.Response{status: status} = resp} ->
-        ApiFailure.handle(fuse, {:http_status, status, resp}, melt: false)
-
-      {:error, reason} ->
-        ApiFailure.handle(fuse, reason, melt: false)
-    end
+    build_base_req()
+    |> RequestBounds.get(RequestBounds.new(timeout: @list_models_timeout),
+      url: api_url("/v1/models"),
+      retry: :safe_transient
+    )
+    |> ApiFailure.resolve(:openai_api, &parse_list_models_response/1, melt: false)
   end
 
-  defp parse_list_models_response(%{
-         "data" => models
-       })
-       when is_list(models) do
-    names = Enum.map(models, & &1["id"])
-    {:ok, names}
+  defp parse_list_models_response(%{"data" => models}) when is_list(models) do
+    {:ok, Enum.map(models, & &1["id"])}
   end
 
   defp parse_list_models_response(_body), do: {:error, :invalid_api_response}
 
-  @spec embed(String.t() | nil, keyword()) ::
-          {:ok, Pgvector.t() | nil} | {:error, Doctrans.Errors.reason()}
-  def embed(text, opts \\ [])
-
-  def embed(nil, _opts), do: {:ok, nil}
-  def embed("", _opts), do: {:ok, nil}
-
-  # The ask lives next to the melt, so every caller -- indexer, search, chat
-  # retrieval -- is held off a blown `:embedding_api` fuse without wrapping the
-  # call itself. `melt: false`: `ApiFailure.handle/3` classifies and melts.
-  def embed(text, opts) when is_binary(text) do
-    CircuitBreaker.call(:embedding_api, fn -> do_embed(text, opts) end, melt: false)
-  end
-
-  defp do_embed(text, opts) do
-    model = Keyword.get(opts, :model) || Embedding.model()
-    timeout = Keyword.get(opts, :timeout) || Embedding.timeout()
-    fuse = :embedding_api
-
-    Logger.debug(
-      "Embedding POST #{redact_url(embed_url("/v1/embeddings"))}, model: #{model}, api_key: #{if(embed_api_key(), do: "<set>", else: "<none>")}"
-    )
-
-    request = %{model: model, input: text}
-
-    case build_embed_base_req()
-         |> RequestBounds.post(embed_bounds(timeout),
-           url: embed_url("/v1/embeddings"),
-           json: request,
-           # Embedding POSTs are idempotent; replay them on transient failures
-           retry: :transient,
-           # An embedding request carries the chunk text it is embedding, so a
-           # followed redirect is document egress. See post_chat_completion/2.
-           redirect: false
-         ) do
-      {:ok, %Req.Response{status: 200, body: body}} ->
-        body |> parse_embed_response() |> report_parse_failure(fuse)
-
-      {:ok, %Req.Response{status: status} = resp} ->
-        ApiFailure.handle(fuse, {:http_status, status, resp})
-
-      {:error, reason} ->
-        ApiFailure.handle(fuse, reason)
-    end
-  end
-
-  defp parse_embed_response(%{
-         "data" => [%{"embedding" => embedding}]
-       })
-       when is_list(embedding) do
-    if length(embedding) >= @embedding_dimensions do
-      # Truncate to @embedding_dimensions for Matryoshka models that output
-      # more dimensions than we store (e.g., 4096 -> 1024)
-      {:ok, Pgvector.new(Enum.take(embedding, @embedding_dimensions))}
-    else
-      {:error,
-       {:embedding_too_short, [expected: @embedding_dimensions, actual: length(embedding)]}}
-    end
-  end
-
-  defp parse_embed_response(_body), do: {:error, :invalid_embedding_response}
-
   # Private helpers
 
   defp api_url(path) do
-    "#{base_url()}/#{String.trim_leading(path, "/")}"
+    "#{OpenAI.base_url()}/#{String.trim_leading(path, "/")}"
   end
 
   # The base URL is operator-supplied and may carry credentials. Req redacts its
@@ -390,40 +278,19 @@ defmodule Doctrans.Processing.OpenAI do
   # renders the same URLs into the privacy copy; one rule, one place.
   defp redact_url(url), do: Inference.redact_url(url)
 
-  defp base_url, do: OpenAI.base_url()
-
   defp api_key, do: OpenAI.api_key()
 
-  defp build_base_req, do: bearer_req(api_key())
-
-  defp embed_url(path) do
-    "#{embed_base_url()}/#{String.trim_leading(path, "/")}"
-  end
-
-  defp embed_base_url, do: Embedding.base_url()
-
-  defp embed_api_key, do: Embedding.api_key()
-
-  # Embeddings read the `:embedding` section, so a search box can be bounded on
-  # its own. Only `:timeout` differs by default -- a minute against five, spending
-  # the same total budget in shorter attempts until a deadline is set there.
-  defp embed_bounds(timeout) do
-    RequestBounds.new(
-      timeout: timeout,
-      deadline: Embedding.deadline(),
-      max_response_bytes: Embedding.max_response_bytes()
-    )
-  end
-
-  defp build_embed_base_req, do: bearer_req(embed_api_key())
-
   # No key, no header: an absent credential is not an empty one.
-  defp bearer_req(nil), do: Req.new()
-  defp bearer_req(key), do: Req.new(headers: [{"authorization", "Bearer #{key}"}])
+  defp build_base_req do
+    case api_key() do
+      nil -> Req.new()
+      key -> Req.new(headers: [{"authorization", "Bearer #{key}"}])
+    end
+  end
 
   defp build_request_body(options) do
     model = Keyword.get(options, :model) || OpenAI.chat_model()
-    max_tokens = Keyword.get(options, :max_tokens, default_max_tokens())
+    max_tokens = Keyword.get(options, :max_tokens, @default_max_tokens)
     messages = Keyword.fetch!(options, :messages)
     stream = Keyword.get(options, :stream, false)
     think = Keyword.get(options, :think, false)
@@ -460,11 +327,6 @@ defmodule Doctrans.Processing.OpenAI do
     else
       Keyword.put(opts, :model, default)
     end
-  end
-
-  defp default_max_tokens do
-    # Larger context for chat, smaller for extraction/translation
-    4096
   end
 
   # Strip markdown code fences that LLMs sometimes wrap their output in

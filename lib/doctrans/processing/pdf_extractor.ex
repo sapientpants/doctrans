@@ -46,9 +46,12 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   ## Options
 
-  - `:dpi` - Resolution in DPI (default: from config)
   - `:deadline` - a `System.monotonic_time(:millisecond)` value this render must
     finish by; the render gets whichever is smaller, it or the per-page timeout
+
+  The resolution is always the configured `:dpi`: `get_page_count/1` checked
+  the page geometry against that value, so a render at another would bypass
+  the pixel bound.
   """
   # output_dir is the generated document UUID/pages directory; output names use a fixed page prefix.
   # sobelow_skip ["Traversal.FileModule"]
@@ -58,7 +61,7 @@ defmodule Doctrans.Processing.PdfExtractor do
       File.mkdir_p!(output_dir)
 
       page = to_string(page_number)
-      args = ["-f", page, "-l", page] ++ render_args(pdf_path, output_dir, opts)
+      args = ["-f", page, "-l", page] ++ render_args(pdf_path, output_dir)
 
       with {:ok, _output} <- render(args, timeout),
            {:ok, path} <- locate_page_image(output_dir, page_number),
@@ -90,34 +93,6 @@ defmodule Doctrans.Processing.PdfExtractor do
   end
 
   @doc """
-  Returns the path to a specific page image.
-
-  Page numbers are 1-indexed.
-  """
-  @impl true
-  def page_image_path(output_dir, page_number) do
-    # pdftoppm generates files like page-01.png, page-02.png, etc.
-    # The number of digits depends on the total page count
-    pattern = Path.join(output_dir, "page-*.png")
-
-    pattern
-    |> Path.wildcard()
-    |> Enum.find(&(extract_page_number(&1) == page_number))
-  end
-
-  @doc """
-  Lists all page image paths in order.
-  """
-  @impl true
-  def list_page_images(output_dir) do
-    pattern = Path.join(output_dir, "page-*.png")
-
-    pattern
-    |> Path.wildcard()
-    |> Enum.sort_by(&extract_page_number/1)
-  end
-
-  @doc """
   Checks if the poppler commands extraction needs are available.
 
   Both are required: every extraction calls `pdfinfo` before it renders anything.
@@ -130,11 +105,9 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   # Private functions
 
-  defp render_args(pdf_path, output_dir, opts) do
-    ["-png", "-r", to_string(dpi(opts)), pdf_path, Path.join(output_dir, "page")]
+  defp render_args(pdf_path, output_dir) do
+    ["-png", "-r", to_string(PdfExtraction.dpi()), pdf_path, Path.join(output_dir, "page")]
   end
-
-  defp dpi(opts), do: Keyword.get(opts, :dpi, PdfExtraction.dpi())
 
   # Clamps a command's timeout to the caller's remaining document budget, so
   # per-page deadlines cannot add up past the job that contains them.
@@ -238,8 +211,15 @@ defmodule Doctrans.Processing.PdfExtractor do
     end
   end
 
+  # pdftoppm names its output page-01.png, page-02.png and so on, with as many
+  # digits as the page count needs, so the file is found by its number rather
+  # than by a name this module would have to agree with poppler on.
   defp locate_page_image(output_dir, page_number) do
-    case page_image_path(output_dir, page_number) do
+    output_dir
+    |> Path.join("page-*.png")
+    |> Path.wildcard()
+    |> Enum.find(&(extract_page_number(&1) == page_number))
+    |> case do
       nil -> {:error, :page_image_not_found}
       path -> {:ok, path}
     end
