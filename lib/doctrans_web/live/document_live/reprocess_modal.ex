@@ -5,7 +5,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   import Phoenix.LiveView, only: [put_flash: 3, start_async: 4, cancel_async: 2]
 
   alias Doctrans.Config
-  alias Doctrans.Processing.{DocumentReprocessing, OpenAI}
+  alias Doctrans.Deps
+  alias Doctrans.Processing.DocumentReprocessing
   alias DoctransWeb.ErrorMessages
 
   require Logger
@@ -159,12 +160,19 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   end
 
   # The model list is fetched off-process so a slow or unreachable server cannot
-  # stall the LiveView, which is also serving navigation, progress and chat.
+  # stall the LiveView, which is also serving navigation, progress and chat. The
+  # client is resolved inside the task, through the same seam every other
+  # `OpenAIBehaviour` call goes through, so a test stubs the list on
+  # `OpenAIMock` instead of standing up a server behind the real one.
   defp start_models_fetch(socket) do
     socket
     |> assign(:models_loading, true)
     |> cancel_async(:fetch_models)
-    |> start_async(:fetch_models, &OpenAI.list_models/0, supervisor: Doctrans.TaskSupervisor)
+    |> start_async(
+      :fetch_models,
+      fn -> Deps.openai().list_models() end,
+      supervisor: Doctrans.TaskSupervisor
+    )
   end
 
   # LiveView tracks one task per async name and discards the result of any task a

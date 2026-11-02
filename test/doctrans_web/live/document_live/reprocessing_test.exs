@@ -1,35 +1,14 @@
 defmodule DoctransWeb.DocumentLive.ReprocessingTest do
-  # Sync: every test points the global `:openai` application env at a Bypass
-  # server, which the model list the reprocess dialog fetches is read from, and
-  # resets the `:openai_api` fuse that fetch is asked against.
-  use DoctransWeb.ConnCase, async: false
+  use DoctransWeb.ConnCase, async: true
   import Doctrans.Fixtures
   alias Doctrans.Documents
   alias Doctrans.Documents.Layout
-  alias Doctrans.Processing.Run
-  alias Doctrans.TestEnv
+  alias Doctrans.Processing.{OpenAIMock, Run}
 
   setup do
-    # The dialog's model list comes from the real `OpenAI.list_models/0`, which
-    # a fuse an earlier test blew would answer with `:circuit_open` instead of
-    # the stub below (#193).
-    TestEnv.reset_fuses()
-    bypass = Bypass.open()
-
-    TestEnv.put_env(
-      :openai,
-      Keyword.put(
-        Application.fetch_env!(:doctrans, :openai),
-        :base_url,
-        "http://localhost:#{bypass.port}"
-      )
-    )
-
-    Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
-      conn
-      |> Plug.Conn.put_resp_content_type("application/json")
-      |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}, %{id: "translation"}]}))
-    end)
+    # The dialog's model list is the mock's answer: the fetch runs in a task the
+    # LiveView under test spawned, which carries this test's stubs (#193).
+    Mox.stub(OpenAIMock, :list_models, fn -> {:ok, ["vision", "translation"]} end)
 
     document = document_fixture(%{status: "completed", total_pages: 1})
     page_fixture(document, %{extraction_status: "completed", translation_status: "completed"})

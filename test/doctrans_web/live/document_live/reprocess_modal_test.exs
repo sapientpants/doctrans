@@ -1,50 +1,23 @@
 defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
-  # Sync: every test points the global `:openai` application env at a Bypass
-  # server, one overrides the global `:embedding` env, and all reset the fuse
-  # the model fetch is asked against.
-  use DoctransWeb.ConnCase, async: false
+  # The model list the dialog fetches is `OpenAIMock`'s answer. The fetch runs
+  # in a task the LiveView under test spawned, so it carries this test's stubs
+  # and nothing here touches the application env or the circuit breakers (#193).
+  # The one test that does, the embedding-model filter, lives in
+  # `ReprocessModalEmbeddingFilterTest`.
+  use DoctransWeb.ConnCase, async: true
 
   import Doctrans.Fixtures
   import ExUnit.CaptureLog
 
-  alias Doctrans.{Config, Documents, TestEnv}
+  alias Doctrans.{Config, Documents}
   alias Doctrans.Documents.{Layout, Pages, Topics}
-  alias Doctrans.Processing.Run
+  alias Doctrans.Processing.{OpenAIMock, Run}
   alias DoctransWeb.DocumentLive.ReprocessModal
   alias DoctransWeb.ErrorMessages
   alias Phoenix.LiveView.Channel
 
-  setup do
-    # A blown `:openai_api` fuse answers the model fetch with `:circuit_open`
-    # before the Bypass server is asked, so the tests below would see the
-    # failure alert whatever they stubbed (#193).
-    TestEnv.reset_fuses()
-    bypass = Bypass.open()
-
-    TestEnv.put_env(
-      :openai,
-      Keyword.put(
-        Application.fetch_env!(:doctrans, :openai),
-        :base_url,
-        "http://localhost:#{bypass.port}"
-      )
-    )
-
-    %{bypass: bypass}
-  end
-
-  test "opening restores the page's recorded models and the page is reprocessed", %{
-    conn: conn,
-    bypass: bypass
-  } do
-    Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
-      conn
-      |> Plug.Conn.put_resp_content_type("application/json")
-      |> Plug.Conn.resp(
-        200,
-        Jason.encode!(%{data: [%{id: "vision"}, %{id: "translation"}, %{id: "alternative"}]})
-      )
-    end)
+  test "opening restores the page's recorded models and the page is reprocessed", %{conn: conn} do
+    stub_models(["vision", "translation", "alternative"])
 
     document = document_fixture(%{total_pages: 1, status: "completed"})
     page = completed_page_fixture(document)
@@ -80,18 +53,10 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     assert reprocessed.translated_markdown != page.translated_markdown
   end
 
-  test "pages without model history use configured defaults", %{conn: conn, bypass: bypass} do
+  test "pages without model history use configured defaults", %{conn: conn} do
     extraction = Config.OpenAI.vision_model()
     translation = Config.OpenAI.translation_model()
-
-    Bypass.expect_once(bypass, "GET", "/v1/models", fn conn ->
-      conn
-      |> Plug.Conn.put_resp_content_type("application/json")
-      |> Plug.Conn.resp(
-        200,
-        Jason.encode!(%{data: Enum.map(Enum.uniq([extraction, translation]), &%{id: &1})})
-      )
-    end)
+    stub_models(Enum.uniq([extraction, translation]))
 
     document = document_fixture(%{total_pages: 1, status: "completed"})
     completed_page_fixture(document)
@@ -110,14 +75,9 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   for unavailable_field <- [:extraction_model, :translation_model] do
     @unavailable_field unavailable_field
     test "unavailable historical #{@unavailable_field} requires an explicit selection", %{
-      conn: conn,
-      bypass: bypass
+      conn: conn
     } do
-      Bypass.expect_once(bypass, "GET", "/v1/models", fn conn ->
-        conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "available"}]}))
-      end)
+      stub_models(["available"])
 
       document = document_fixture(%{total_pages: 1, status: "completed"})
       page = completed_page_fixture(document)
@@ -162,39 +122,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     end
   end
 
-  test "embedding models are excluded from both model lists", %{conn: conn, bypass: bypass} do
-    TestEnv.put_env(:embedding, model: "custom-vector-model")
-
-    models = ["vision", "text-embedding-3-small", "Qwen3-Embedding-8B", "custom-vector-model"]
-
-    Bypass.expect_once(bypass, "GET", "/v1/models", fn conn ->
-      conn
-      |> Plug.Conn.put_resp_content_type("application/json")
-      |> Plug.Conn.resp(200, Jason.encode!(%{data: Enum.map(models, &%{id: &1})}))
-    end)
-
-    document = document_fixture(%{total_pages: 1, status: "completed"})
-    completed_page_fixture(document)
-    {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-    view |> element("#show-reprocess") |> render_click()
-    render_async(view)
-
-    for selector <- ["#extraction-model-select", "#translation-model-select"] do
-      assert has_element?(view, "#{selector} option[value='vision']")
-
-      for model <- tl(models) do
-        refute has_element?(view, "#{selector} option[value='#{model}']")
-      end
-    end
-  end
-
-  test "model fetch failure leaves an error and disables submission", %{
-    conn: conn,
-    bypass: bypass
-  } do
-    Bypass.expect_once(bypass, "GET", "/v1/models", fn conn ->
-      Plug.Conn.resp(conn, 401, "unauthorized")
-    end)
+  test "model fetch failure leaves an error and disables submission", %{conn: conn} do
+    Mox.stub(OpenAIMock, :list_models, fn -> {:error, {:http_error, [status: 401]}} end)
 
     document = document_fixture(%{total_pages: 1, status: "completed"})
     completed_page_fixture(document)
@@ -208,9 +137,11 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     refute has_element?(view, "#extraction-model-select[disabled]")
   end
 
+  defp stub_models(models), do: Mox.stub(OpenAIMock, :list_models, fn -> {:ok, models} end)
+
   # Long enough that a fetch running inside the LiveView process would trip the
   # per-test timeout below instead of merely making the test slow, but under that
-  # timeout so a failing test is not held in teardown by a still-blocked plug.
+  # timeout so a failing test is not held in teardown by a still-blocked fetch.
   @held_request_timeout 8_000
 
   defp two_page_document do
@@ -225,17 +156,16 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     document
   end
 
-  # Answers `/v1/models` with `responses` in order, holding the first one until
-  # the test releases it. `Bypass.pass/1` keeps the verification pass quiet: the
-  # LiveView abandons the held request as soon as its fetch is cancelled, and the
-  # socket it kills takes the plug process with it once that process writes.
-  defp hold_models_request(bypass, responses) do
+  # Answers `list_models/0` with `responses` in order, holding the first one
+  # until the test releases it. The stub runs inside the fetch task, so the
+  # `{:models_requested, pid}` it sends names that task: cancelling the fetch
+  # kills it mid-hold, and the held answer is never produced.
+  defp hold_models_request(responses) do
     test_pid = self()
-    {:ok, counter} = Agent.start_link(fn -> 0 end)
-    Bypass.pass(bypass)
+    counter = call_counter()
 
-    Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
-      attempt = Agent.get_and_update(counter, &{&1 + 1, &1 + 1})
+    Mox.stub(OpenAIMock, :list_models, fn ->
+      attempt = counter.()
 
       if attempt == 1 do
         send(test_pid, {:models_requested, self()})
@@ -249,29 +179,27 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
 
       models = Enum.at(responses, attempt - 1, List.last(responses))
       send(test_pid, {:models_responded, attempt})
-
-      conn
-      |> Plug.Conn.put_resp_content_type("application/json")
-      |> Plug.Conn.resp(200, Jason.encode!(%{data: Enum.map(models, &%{id: &1})}))
+      {:ok, models}
     end)
   end
 
-  # Fails the first `/v1/models` call and serves a list to every one after it, so
-  # a test can drive the error alert and then its Retry control.
-  defp fail_then_serve_models(bypass) do
-    {:ok, counter} = Agent.start_link(fn -> 0 end)
+  # Fails the first `list_models/0` call and serves a list to every one after
+  # it, so a test can drive the error alert and then its Retry control.
+  defp fail_then_serve_models do
+    counter = call_counter()
 
-    Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
-      case Agent.get_and_update(counter, &{&1 + 1, &1 + 1}) do
-        1 ->
-          Plug.Conn.resp(conn, 401, "unauthorized")
-
-        _ ->
-          conn
-          |> Plug.Conn.put_resp_content_type("application/json")
-          |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}]}))
+    Mox.stub(OpenAIMock, :list_models, fn ->
+      case counter.() do
+        1 -> {:error, {:http_error, [status: 401]}}
+        _ -> {:ok, ["vision"]}
       end
     end)
+  end
+
+  # Numbers the calls a stub receives, across the tasks they run in.
+  defp call_counter do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    fn -> Agent.get_and_update(counter, &{&1 + 1, &1 + 1}) end
   end
 
   # `Channel.async_pids/1` is what `render_async/1` itself calls to find the
@@ -300,11 +228,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   end
 
   @tag timeout: 10_000
-  test "an unanswered model fetch leaves the rest of the LiveView responsive", %{
-    conn: conn,
-    bypass: bypass
-  } do
-    hold_models_request(bypass, [["vision"]])
+  test "an unanswered model fetch leaves the rest of the LiveView responsive", %{conn: conn} do
+    hold_models_request([["vision"]])
 
     document = two_page_document()
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
@@ -346,11 +271,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   end
 
   @tag timeout: 10_000
-  test "closing the modal drops its fetch, and reopening asks again", %{
-    conn: conn,
-    bypass: bypass
-  } do
-    hold_models_request(bypass, [["stale-model"], ["fresh-model"]])
+  test "closing the modal drops its fetch, and reopening asks again", %{conn: conn} do
+    hold_models_request([["stale-model"], ["fresh-model"]])
 
     document = two_page_document()
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
@@ -380,20 +302,17 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     assert has_element?(view, "#extraction-model-select option[value='fresh-model']")
     refute has_element?(view, "#reprocess-model-error")
 
-    # Waiting on the abandoned request being *answered* is what gives the refutes
-    # below their teeth: the stale payload demonstrably exists, and the render
-    # round-trip gives the LiveView a turn to mishandle it.
     # No assertion about the abandoned answer belongs here. Cancelling the task
-    # closes its socket, which kills the plug process still holding the request,
-    # so the stale body is never produced and no implementation could render it.
-    # The proof that cancelling works is the `{:DOWN, ...}` above; the proof that
-    # a stale payload would be rejected on arrival is the `handle_async/3` unit
-    # test against a closed modal.
+    # kills the process the held stub is waiting in, so the stale list is never
+    # produced and no implementation could render it. The proof that cancelling
+    # works is the `{:DOWN, ...}` above; the proof that a stale payload would be
+    # rejected on arrival is the `handle_async/3` unit test against a closed
+    # modal.
   end
 
   @tag timeout: 10_000
-  test "reopening over an in-flight fetch drops the earlier one", %{conn: conn, bypass: bypass} do
-    hold_models_request(bypass, [["stale-model"], ["fresh-model"]])
+  test "reopening over an in-flight fetch drops the earlier one", %{conn: conn} do
+    hold_models_request([["stale-model"], ["fresh-model"]])
 
     document = two_page_document()
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
@@ -414,11 +333,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   end
 
   @tag timeout: 10_000
-  test "a retry that arrives after the modal closed asks for nothing", %{
-    conn: conn,
-    bypass: bypass
-  } do
-    hold_models_request(bypass, [["vision"]])
+  test "a retry that arrives after the modal closed asks for nothing", %{conn: conn} do
+    hold_models_request([["vision"]])
 
     document = two_page_document()
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
@@ -548,8 +464,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     %Phoenix.LiveView.Socket{assigns: assigns}
   end
 
-  test "a failed model fetch can be retried from the modal", %{conn: conn, bypass: bypass} do
-    fail_then_serve_models(bypass)
+  test "a failed model fetch can be retried from the modal", %{conn: conn} do
+    fail_then_serve_models()
 
     document = document_fixture(%{total_pages: 1, status: "completed"})
     completed_page_fixture(document)
@@ -577,8 +493,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     refute has_element?(view, "#reprocess-submit-btn[disabled]")
   end
 
-  test "the document modal can retry a failed fetch too", %{conn: conn, bypass: bypass} do
-    fail_then_serve_models(bypass)
+  test "the document modal can retry a failed fetch too", %{conn: conn} do
+    fail_then_serve_models()
 
     document = document_fixture(%{total_pages: 1, status: "completed"})
     completed_page_fixture(document)
@@ -608,15 +524,14 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   # Clearing the error here would unmount the alert containing the button the
   # user just clicked, dropping focus to the body outside the dialog.
   @tag timeout: 10_000
-  test "retrying keeps the alert mounted until the answer lands", %{conn: conn, bypass: bypass} do
+  test "retrying keeps the alert mounted until the answer lands", %{conn: conn} do
     test_pid = self()
-    {:ok, counter} = Agent.start_link(fn -> 0 end)
-    Bypass.pass(bypass)
+    counter = call_counter()
 
-    Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
-      case Agent.get_and_update(counter, &{&1 + 1, &1 + 1}) do
+    Mox.stub(OpenAIMock, :list_models, fn ->
+      case counter.() do
         1 ->
-          Plug.Conn.resp(conn, 401, "unauthorized")
+          {:error, {:http_error, [status: 401]}}
 
         _ ->
           send(test_pid, {:models_requested, self()})
@@ -627,9 +542,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
             @held_request_timeout -> :ok
           end
 
-          conn
-          |> Plug.Conn.put_resp_content_type("application/json")
-          |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}]}))
+          {:ok, ["vision"]}
       end
     end)
 
@@ -658,11 +571,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   # push it regardless, and every extra push is a real request on an endpoint
   # that is already failing.
   @tag timeout: 10_000
-  test "retrying while a fetch is already in flight asks the server once", %{
-    conn: conn,
-    bypass: bypass
-  } do
-    hold_models_request(bypass, [["vision"]])
+  test "retrying while a fetch is already in flight asks the server once", %{conn: conn} do
+    hold_models_request([["vision"]])
 
     document = two_page_document()
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")

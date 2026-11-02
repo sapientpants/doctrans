@@ -16,10 +16,10 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
   are read out.
   """
   # Sync: the tests mount the dashboard, whose PubSub is global, and override the
-  # global `:uploads` and `:openai` application env.
+  # global `:uploads` application env.
   use DoctransWeb.ConnCase, async: false
 
-  alias Doctrans.Processing.PdfExtractorMock
+  alias Doctrans.Processing.{OpenAIMock, PdfExtractorMock}
   alias Doctrans.TestEnv
   alias DoctransWeb.DocumentLive.Components
 
@@ -347,29 +347,10 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
     end
   end
 
-  # The reprocess dialog asks the model endpoint as it opens; the answer is not
-  # what these tests are about, so it is stubbed rather than left to fail. The
-  # fuse in front of it is reset for the same reason: blown, it fails the fetch
-  # before the stub is asked.
+  # The reprocess dialog asks for the model list as it opens; the answer is not
+  # what these tests are about, so it is stubbed rather than left to the default.
   defp stub_model_list(_context) do
-    TestEnv.reset_fuses()
-    bypass = Bypass.open()
-
-    Bypass.stub(bypass, "GET", "/v1/models", fn conn ->
-      conn
-      |> Plug.Conn.put_resp_content_type("application/json")
-      |> Plug.Conn.resp(200, Jason.encode!(%{data: [%{id: "vision"}]}))
-    end)
-
-    TestEnv.put_env(
-      :openai,
-      Keyword.put(
-        Application.fetch_env!(:doctrans, :openai),
-        :base_url,
-        "http://localhost:#{bypass.port}"
-      )
-    )
-
+    Mox.stub(OpenAIMock, :list_models, fn -> {:ok, ["vision"]} end)
     :ok
   end
 
