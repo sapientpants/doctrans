@@ -28,13 +28,17 @@ defmodule OpenAICallSiteChecker do
     "lib/doctrans/search/embedding.ex" => "implements the embedding seam"
   }
 
-  # An `alias Doctrans.Processing.OpenAI`, bare or inside a multi-alias, or a call
-  # through the full module name. `\b` keeps `OpenAIBehaviour`, `OpenAIMock` and
-  # `Doctrans.Config.OpenAI` out of it.
+  # An `alias Doctrans.Processing.OpenAI`, bare or inside a multi-alias (which the
+  # formatter may spread over several lines), a call through the full module name
+  # or through a bare `alias Doctrans.Processing`, or a function capture of either.
+  # `\b` keeps `OpenAIBehaviour`, `OpenAIMock` and `Doctrans.Config.OpenAI` out of
+  # it; requiring `(` or a leading `&` keeps `Doctrans.Processing.OpenAI.embed/2`
+  # in a `@moduledoc` out of it.
   @patterns [
     ~r/\balias\s+Doctrans\.Processing\.OpenAI\b(?!\.)/,
     ~r/\balias\s+Doctrans\.Processing\.\{[^}]*\bOpenAI\b[^}]*\}/,
-    ~r/\bDoctrans\.Processing\.OpenAI\.\w+\(/
+    ~r/\b(?:Doctrans\.)?Processing\.OpenAI\.\w+\(/,
+    ~r/&(?:Doctrans\.)?Processing\.OpenAI\.\w+\/\d+/
   ]
 
   def run do
@@ -80,15 +84,31 @@ defmodule OpenAICallSiteChecker do
     |> Enum.flat_map(&matches/1)
   end
 
-  # Comment-only lines are dropped so that prose naming the module is not a site.
+  # Comment-only lines are blanked (not dropped, so line numbers hold) so that
+  # prose naming the module is not a site. The patterns then run over the whole
+  # file, so an alias block spread across lines is still one match.
   defp matches(file) do
-    file
-    |> File.read!()
-    |> String.split("\n")
-    |> Enum.with_index(1)
-    |> Enum.reject(fn {line, _n} -> line |> String.trim_leading() |> String.starts_with?("#") end)
-    |> Enum.filter(fn {line, _n} -> Enum.any?(@patterns, &Regex.match?(&1, line)) end)
-    |> Enum.map(fn {line, n} -> "#{file}:#{n}: #{String.trim(line)}" end)
+    text =
+      file
+      |> File.read!()
+      |> String.split("\n")
+      |> Enum.map_join("\n", fn line ->
+        if line |> String.trim_leading() |> String.starts_with?("#"), do: "", else: line
+      end)
+
+    @patterns
+    |> Enum.flat_map(&Regex.scan(&1, text, return: :index))
+    |> Enum.map(fn [{start, length} | _] -> {start, length} end)
+    |> Enum.sort()
+    |> Enum.uniq_by(fn {start, _length} -> line_number(text, start) end)
+    |> Enum.map(fn {start, length} ->
+      site = text |> binary_part(start, length) |> String.replace(~r/\s+/, " ")
+      "#{file}:#{line_number(text, start)}: #{site}"
+    end)
+  end
+
+  defp line_number(text, offset) do
+    length(:binary.matches(binary_part(text, 0, offset), "\n")) + 1
   end
 end
 
