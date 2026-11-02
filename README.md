@@ -278,7 +278,9 @@ translation. Translations remain available in the document viewer.
 
 Existing source embeddings remain usable without rebuilding: retrieval ignores legacy chunk
 translations, including those in saved chat context. To rebuild existing chunks and remove their
-old translation pairings, run `mix rechunk_documents` with the embedding server available.
+old translation pairings, run `mix rechunk_documents`: it clears each page's index and queues
+the page for indexing, which the running application carries out with the embedding server
+available.
 Previously generated chat answers are retained.
 
 Chunks are bounded in size whatever the source looks like. A paragraph longer than the target is
@@ -443,7 +445,7 @@ in `documents/<id>/pages/`). Where that root is, and why it should not be left a
 anything you intend to keep, is covered above under [Storage root](#storage-root).
 
 Only the chunks and embeddings are cheap enough to rebuild rather than carry: `mix rechunk_documents`
-rebuilds them across the library and **Retry indexing** does one document, both at the cost of
+queues a rebuild across the library and **Retry indexing** does one document, both at the cost of
 re-running the embedding model. Page images are *technically* derivable from the retained original,
 but only by reprocessing, which deletes every page row and re-runs extraction and translation — the
 Markdown goes with them. Back the page images up; they are data, not a cache.

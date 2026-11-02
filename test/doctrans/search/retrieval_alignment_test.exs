@@ -4,20 +4,17 @@ defmodule Doctrans.Search.RetrievalAlignmentTest do
   alias Doctrans.{Chat, Repo, Search}
   alias Doctrans.Documents.{Chunk, Page}
   alias Doctrans.Search.{Chunker, Indexer}
-  alias Mix.Tasks.RechunkDocuments
 
   import Doctrans.Fixtures
 
   for {scenario, source_words, translated_words} <- [
         {:expansion, 140, 220},
         {:contraction, 220, 140}
-      ],
-      path <- [:indexer, :maintenance] do
+      ] do
     @source_words source_words
     @translated_words translated_words
-    @path path
 
-    test "#{scenario} preserves source passages through #{path} indexing and chat" do
+    test "#{scenario} preserves source passages through indexing and chat" do
       source = passages(@source_words, ["Vermögen", "Schulden", "Bargeld"])
       translation = passages(@translated_words, ["Assets", "Liabilities", "Cash"])
       source_chunks = Chunker.chunk(source)
@@ -33,10 +30,7 @@ defmodule Doctrans.Search.RetrievalAlignmentTest do
           translated_markdown: translation
         })
 
-      case @path do
-        :indexer -> assert :ok = Indexer.index_page(page.id)
-        :maintenance -> RechunkDocuments.run([])
-      end
+      assert :ok = Indexer.index_page(page.id)
 
       chunks =
         Chunk
