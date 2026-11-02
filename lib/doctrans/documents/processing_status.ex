@@ -19,7 +19,7 @@ defmodule Doctrans.Documents.ProcessingStatus do
   import Doctrans.Documents.Page, only: [failed?: 1, settled?: 1]
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Page}
+  alias Doctrans.Documents.{Document, Page, Progress}
   alias Doctrans.Processing.JobStates
   alias Doctrans.Repo
 
@@ -34,6 +34,7 @@ defmodule Doctrans.Documents.ProcessingStatus do
     :document_id,
     :content,
     :index,
+    :progress,
     :failed_pages,
     :failed_page_count,
     :pages,
@@ -46,6 +47,7 @@ defmodule Doctrans.Documents.ProcessingStatus do
     :document_id,
     :content,
     :index,
+    :progress,
     :failed_pages,
     :failed_page_count,
     :pages,
@@ -59,6 +61,7 @@ defmodule Doctrans.Documents.ProcessingStatus do
           document_id: Ecto.UUID.t(),
           content: content(),
           index: index(),
+          progress: float(),
           failed_pages: [integer()],
           failed_page_count: non_neg_integer(),
           pages: %{
@@ -94,6 +97,10 @@ defmodule Doctrans.Documents.ProcessingStatus do
       document_id: document.id,
       content: content,
       index: index,
+      # The same arithmetic the dashboard card runs over its loaded pages, fed
+      # from this query instead: `indexable` is the count of completed
+      # extractions, which is also the first of the two steps progress counts.
+      progress: Progress.from_counts(counts.indexable, counts.translated, document.total_pages),
       failed_pages: Documents.failed_page_numbers(document.id),
       # Derived, never recounted: a second definition of failure is a second
       # answer, and the badge and the list would eventually disagree.

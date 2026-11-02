@@ -21,11 +21,13 @@ defmodule DoctransWeb.DocumentLive.Show do
 
   import DoctransWeb.DocumentLive.ViewerComponents
 
-  import DoctransWeb.DocumentLive.PageViewer,
-    only: [zoom_controls: 1, navigation: 1, view_tabs: 1, content_panel_label: 1]
-
   import DoctransWeb.DocumentLive.ReprocessModal,
-    only: [reprocess_modal: 1, can_reprocess?: 1, can_reprocess_document?: 1]
+    only: [
+      reprocess_modal: 1,
+      can_reprocess?: 1,
+      can_reprocess_document?: 1,
+      reprocess_document_hint: 2
+    ]
 
   import DoctransWeb.DocumentLive.StatusPanel, only: [status_panel: 1]
 
@@ -60,6 +62,12 @@ defmodule DoctransWeb.DocumentLive.Show do
     zoom_out
     select_view_tab
   )
+
+  # Trailing debounce on `{:page_updated, _}`. A run reports every page as it
+  # settles, and the status behind the panel is three queries, so a burst is
+  # folded into one refresh once it has gone quiet for this long. Short where
+  # `DocumentStream` coalesces for 1.5 s: this is one document, not a grid.
+  @progress_refresh_ms 100
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -110,11 +118,8 @@ defmodule DoctransWeb.DocumentLive.Show do
       |> assign(:document, document)
       |> assign(:source_available, Run.source_available?(document))
       |> assign(:progress_refresh_pending, false)
-      |> refresh_progress()
+      |> StatusPanel.refresh()
       |> PageViewer.init()
-      |> assign(:from, nil)
-      |> assign(:search_query, nil)
-      |> assign(:search_page, nil)
       |> ReprocessModal.init()
       |> ChatSession.init(document)
 
@@ -129,13 +134,15 @@ defmodule DoctransWeb.DocumentLive.Show do
   def handle_params(params, _uri, socket) do
     socket =
       socket
-      |> maybe_assign_from(params)
+      |> assign_origin(params)
       |> PageViewer.apply_params(params)
 
     {:noreply, socket}
   end
 
-  defp maybe_assign_from(socket, params) do
+  # Where the viewer was opened from, for the back link. `handle_params/3` runs
+  # on every mount, so these need no placeholder before it.
+  defp assign_origin(socket, params) do
     from = Map.get(params, "from")
     search_query = Map.get(params, "q")
     search_page = Map.get(params, "search_page")
@@ -227,7 +234,7 @@ defmodule DoctransWeb.DocumentLive.Show do
        |> assign(:document, document)
        |> assign(:source_available, Run.source_available?(document))
        |> PageViewer.goto_page(socket.assigns.current_page_number)
-       |> refresh_progress()}
+       |> StatusPanel.refresh()}
     else
       {:noreply, document_vanished(socket)}
     end
@@ -266,7 +273,7 @@ defmodule DoctransWeb.DocumentLive.Show do
         if socket.assigns.progress_refresh_pending do
           socket
         else
-          Process.send_after(self(), :refresh_progress, 100)
+          Process.send_after(self(), :refresh_progress, @progress_refresh_ms)
           assign(socket, :progress_refresh_pending, true)
         end
 
@@ -278,7 +285,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   end
 
   def handle_info(:refresh_progress, socket) do
-    {:noreply, socket |> assign(:progress_refresh_pending, false) |> refresh_progress()}
+    {:noreply, socket |> assign(:progress_refresh_pending, false) |> StatusPanel.refresh()}
   end
 
   # Streaming events from the chat turn in flight
@@ -286,35 +293,10 @@ defmodule DoctransWeb.DocumentLive.Show do
     ChatSession.handle_info(message, socket)
   end
 
-  defp refresh_progress(%{assigns: %{document: nil}} = socket), do: socket
-
-  defp refresh_progress(socket) do
-    case Documents.list_documents_with_progress(document_ids: [socket.assigns.document.id]) do
-      [summary] ->
-        socket
-        |> assign(:processing_progress, summary.progress)
-        |> assign(:failed_pages, summary.failed_pages)
-
-      [] ->
-        socket |> assign(:processing_progress, 0.0) |> assign(:failed_pages, [])
-    end
-    |> StatusPanel.refresh()
-  end
-
   # The document this viewer is on has gone: deleted in another tab, or already
   # gone by the time a `{:document_updated, _}` made us re-read it. A turn in
   # flight is stopped with it; `ChatSession.interrupt/1` says why it cannot wait.
   defp document_vanished(socket) do
     socket |> ChatSession.interrupt() |> assign(:document, nil)
-  end
-
-  # Names the reprocess-document button and fills its tooltip. The two must say
-  # the same thing: `aria-label` overrides `title` for the accessible name, so a
-  # tooltip-only explanation of why the button is disabled never reaches a
-  # screen reader.
-  defp reprocess_document_hint(true), do: gettext("Reprocess document")
-
-  defp reprocess_document_hint(false) do
-    gettext("Original upload unavailable. Re-upload this document to process it again.")
   end
 end

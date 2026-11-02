@@ -8,9 +8,10 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
   these tests assert the class tokens the markup ships (`hidden`/`flex`,
   `lg:flex`, `lg:w-1/2`) rather than a computed layout. Likewise, the chat's
   "keep following the answer only while the reader is already near the bottom"
-  behaviour lives entirely in the `ChatScroll` hook in `assets/js/app.js` and is
-  **not** exercised by this suite -- the tests below only pin that the hook is
-  wired up and that its affordance exists in the markup for it to toggle.
+  behaviour lives entirely in the `ChatScroll` hook in
+  `assets/js/hooks/chat_scroll.js` and is **not** exercised by this suite -- the
+  tests below only pin that the hook is wired up and that its affordance exists
+  in the markup for it to toggle.
   """
 
   use DoctransWeb.ConnCase, async: true
@@ -337,8 +338,9 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
       end
 
       # This one is a selector rather than an id, since it is matched against a
-      # submit event's target.
-      assert attribute(view, "#chat-scroll", "data-follow-on-submit") == "#chat-form"
+      # submit event's target; it has to resolve all the same, or a renamed form
+      # would quietly stop re-pinning the transcript on every question.
+      assert has_element?(view, attribute(view, "#chat-scroll", "data-follow-on-submit"))
     end
 
     test "the transcript is announced and reachable without a mouse", %{

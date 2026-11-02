@@ -51,9 +51,6 @@ defmodule DoctransWeb.DocumentLive.Index do
   end
 
   @impl true
-  def handle_params(_params, _uri, socket), do: {:noreply, socket}
-
-  @impl true
   def terminate(_reason, _socket) do
     DocumentStream.unsubscribe()
     :ok
@@ -326,7 +323,18 @@ defmodule DoctransWeb.DocumentLive.Index do
         {socket, [outcome | acc]}
       end)
 
-    {:noreply, UploadOutcomes.report(socket, Enum.reverse(outcomes))}
+    outcomes = Enum.reverse(outcomes)
+
+    {:noreply, socket |> UploadOutcomes.report(outcomes) |> refresh_started(outcomes)}
+  end
+
+  # The cards for what this submission started, in the same render: the
+  # `{:document_created, _}` broadcast refreshes them again, unchanged, but only
+  # once it arrives.
+  defp refresh_started(socket, outcomes) do
+    if Enum.any?(outcomes, &match?({:ok, _document_id}, &1)),
+      do: DocumentStream.refresh(socket),
+      else: socket
   end
 
   # One entry's whole journey, so that its place in the report is its place in the

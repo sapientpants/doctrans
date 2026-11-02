@@ -1,17 +1,42 @@
 defmodule DoctransWeb.DocumentLive.PageViewer do
-  @moduledoc "Page selection, zoom state, and controls for the document viewer."
-  use DoctransWeb, :html
+  @moduledoc """
+  Page selection, zoom and panel state for the document viewer.
+
+  Socket state and the events that change it only; the controls that render
+  that state are in `DoctransWeb.DocumentLive.ViewerComponents`, the way
+  `ChatSession` and `ChatComponents` divide the chat panel.
+  """
+
+  import Phoenix.Component, only: [assign: 3]
 
   require Logger
 
   alias Doctrans.Documents
+
+  # The discrete zoom scale, from the smallest level to the largest in steps of
+  # one increment. Every level needs a matching `.zoom-<level>` rule in
+  # `assets/css/app.css`: `ViewerComponents.page_image/1` interpolates the class
+  # name, so a level with no rule renders the page unscaled and nothing reports
+  # it. The bounds are read by `zoom_controls/1` for its disabled buttons, so
+  # the controls stop exactly where the clamp does.
+  @zoom_min 50
+  @zoom_max 200
+  @zoom_step 25
+
+  @doc "The zoom level the viewer opens at."
+  @spec default_zoom() :: pos_integer()
+  def default_zoom, do: 100
+
+  @doc "The smallest and largest zoom level."
+  @spec zoom_bounds() :: {pos_integer(), pos_integer()}
+  def zoom_bounds, do: {@zoom_min, @zoom_max}
 
   @doc "Initializes the first page and display settings."
   def init(socket) do
     socket
     |> goto_page(1)
     |> assign(:show_original, false)
-    |> assign(:zoom_level, 100)
+    |> assign(:zoom_level, default_zoom())
     |> assign(:view_tab, :translated)
   end
 
@@ -63,12 +88,12 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
   end
 
   def handle_event("zoom_in", _params, socket) do
-    new_zoom = min(200, socket.assigns.zoom_level + 25)
+    new_zoom = min(@zoom_max, socket.assigns.zoom_level + @zoom_step)
     {:noreply, assign(socket, :zoom_level, new_zoom)}
   end
 
   def handle_event("zoom_out", _params, socket) do
-    new_zoom = max(50, socket.assigns.zoom_level - 25)
+    new_zoom = max(@zoom_min, socket.assigns.zoom_level - @zoom_step)
     {:noreply, assign(socket, :zoom_level, new_zoom)}
   end
 
@@ -91,154 +116,5 @@ defmodule DoctransWeb.DocumentLive.PageViewer do
     socket
     |> assign(:current_page_number, page_number)
     |> assign(:current_page, page)
-  end
-
-  @doc """
-  Panel switcher for viewports too narrow for the side-by-side split.
-
-  Hidden from `lg:` up, where both panels are visible at once and the tabs
-  would describe a choice that no longer exists.
-
-  A pair of toggle buttons in a named group, not `role="tablist"`: the ARIA
-  tabs pattern moves between tabs with the arrow keys and takes the unselected
-  ones out of the Tab order, which needs a roving `tabindex` this component
-  does not maintain. Declaring the role without the behavior tells a screen
-  reader user to press keys that do nothing, so the buttons report their
-  state with `aria-pressed` and stay ordinary Tab stops instead.
-
-  The two panels are named rather than assumed: each tab points `aria-controls`
-  at an element this component does not render, and taking the ids as attrs
-  keeps that contract visible at the call site instead of buried in the markup.
-  """
-  attr :view_tab, :atom, required: true
-  attr :show_original, :boolean, required: true
-  attr :original_panel_id, :string, default: "original-panel"
-  attr :translated_panel_id, :string, default: "translated-panel"
-
-  def view_tabs(assigns) do
-    ~H"""
-    <div
-      id="viewer-tabs"
-      role="group"
-      aria-label={gettext("Document panels")}
-      class="flex items-stretch gap-1 border-b border-base-300 bg-base-200 px-2 lg:hidden"
-    >
-      <button
-        id="view-tab-original"
-        type="button"
-        phx-click="select_view_tab"
-        phx-value-tab="original"
-        aria-pressed={to_string(@view_tab == :original)}
-        aria-controls={@original_panel_id}
-        class={[
-          "-mb-px flex-1 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
-          if(@view_tab == :original,
-            do: "border-primary text-primary",
-            else: "border-transparent text-base-content/70 hover:text-base-content"
-          )
-        ]}
-      >
-        {gettext("Original Page")}
-      </button>
-      <button
-        id="view-tab-translated"
-        type="button"
-        phx-click="select_view_tab"
-        phx-value-tab="translated"
-        aria-pressed={to_string(@view_tab == :translated)}
-        aria-controls={@translated_panel_id}
-        class={[
-          "-mb-px flex-1 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
-          if(@view_tab == :translated,
-            do: "border-primary text-primary",
-            else: "border-transparent text-base-content/70 hover:text-base-content"
-          )
-        ]}
-      >
-        {content_panel_label(@show_original)}
-      </button>
-    </div>
-    """
-  end
-
-  @doc """
-  Name of the content panel, which tracks the "Show Original" toggle.
-
-  Shared with the panel's own header in `show.html.heex`: the tab names the
-  panel it opens, so a reworded label that only lands in one of the two makes
-  the tab point at something that no longer exists under that name.
-  """
-  def content_panel_label(true), do: gettext("Original Content")
-  def content_panel_label(false), do: gettext("Translated Content")
-
-  attr :zoom_level, :integer, required: true
-
-  def zoom_controls(assigns) do
-    ~H"""
-    <div class="flex items-center gap-1">
-      <button
-        type="button"
-        id="zoom-out"
-        phx-click="zoom_out"
-        aria-label={gettext("Zoom out")}
-        class="btn btn-ghost btn-xs"
-        disabled={@zoom_level <= 50}
-      >
-        <.icon name="hero-minus" class="w-4 h-4" />
-      </button>
-      <span class="text-xs w-12 text-center" aria-live="polite">{@zoom_level}%</span>
-      <button
-        type="button"
-        id="zoom-in"
-        phx-click="zoom_in"
-        aria-label={gettext("Zoom in")}
-        class="btn btn-ghost btn-xs"
-        disabled={@zoom_level >= 200}
-      >
-        <.icon name="hero-plus" class="w-4 h-4" />
-      </button>
-    </div>
-    """
-  end
-
-  attr :current_page_number, :integer, required: true
-  attr :total_pages, :integer, default: nil
-
-  def navigation(assigns) do
-    ~H"""
-    <footer
-      id="page-navigation"
-      class="sticky bottom-0 z-10 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 px-4 py-3 border-t border-base-300 bg-base-200 lg:static"
-    >
-      <button
-        type="button"
-        id="previous-page"
-        phx-click="prev_page"
-        class="btn btn-ghost"
-        disabled={@current_page_number <= 1}
-      >
-        <.icon name="hero-chevron-left" class="w-5 h-5" /> {gettext("Previous")}
-      </button>
-
-      <span class="text-sm text-base-content/70">
-        {gettext("Page %{current} of %{total}",
-          current: @current_page_number,
-          total: @total_pages || "?"
-        )}
-      </span>
-
-      <button
-        type="button"
-        id="next-page"
-        phx-click="next_page"
-        class="btn btn-ghost"
-        disabled={@current_page_number >= (@total_pages || 0)}
-      >
-        {gettext("Next")} <.icon name="hero-chevron-right" class="w-5 h-5" />
-      </button>
-    </footer>
-    """
   end
 end

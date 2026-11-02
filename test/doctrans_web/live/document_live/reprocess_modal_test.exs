@@ -457,9 +457,11 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
           models_loading: true,
           model_fetch_error: nil,
           available_models: [],
-          extraction_model: "vision",
-          translation_model: "translation",
-          reprocess_form: nil
+          reprocess_form:
+            Phoenix.Component.to_form(%{
+              "extraction_model" => "vision",
+              "translation_model" => "translation"
+            })
         },
         Map.new(overrides)
       )

@@ -6,14 +6,15 @@
 //
 // Shared by both bundles because both need it at different moments and neither
 // can wait for the other: `theme.js` calls it before the first paint and on
-// every change, while the `ThemeToggle` hook in `app.js` calls it again after a
-// LiveView patch restores the server's placeholder attributes. esbuild copies
+// every change, while the `ThemeToggle` hook in `hooks/theme_toggle.js` calls
+// it again after a LiveView patch restores the server's placeholder attributes. esbuild copies
 // these few lines into each output, which is cheaper than either bundle
 // importing the other.
 
 // "System" is the absence of `data-theme`, so it is what an unset attribute
-// means. Kept in step with `SYSTEM` in `theme.js`.
-const SYSTEM = "system"
+// means. Exported so `theme.js`, which stores and applies the choice, names the
+// same absence.
+export const SYSTEM = "system"
 
 // Document-wide rather than scoped to one toggle: the hook passes no root, and
 // a page rendering two toggles should not leave the second one stale.

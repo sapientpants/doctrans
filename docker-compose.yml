@@ -43,8 +43,6 @@ services:
       # Prevent overwriting dependencies
       - /app/deps
       - /app/_build
-      # Persist node modules
-      - /app/assets/node_modules
     depends_on:
       db:
         condition: service_healthy

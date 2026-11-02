@@ -13,10 +13,6 @@ defmodule DoctransWeb.Router do
     plug DoctransWeb.Plugs.SetLocale
   end
 
-  pipeline :api do
-    plug :accepts, ["json"]
-  end
-
   scope "/", DoctransWeb do
     pipe_through :browser
 
@@ -31,11 +27,6 @@ defmodule DoctransWeb.Router do
     # `Doctrans.Documents.Export`), so it needs none of the LiveView hooks.
     get "/documents/:id/export.md", DocumentExportController, :show
   end
-
-  # Other scopes may use custom stacks.
-  # scope "/api", DoctransWeb do
-  #   pipe_through :api
-  # end
 
   # Enable LiveDashboard in development
   if Application.compile_env(:doctrans, :dev_routes) do

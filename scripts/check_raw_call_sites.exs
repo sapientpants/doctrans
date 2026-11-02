@@ -21,11 +21,10 @@
 # Exit code: 1 if the call sites diverge from the register, 0 otherwise
 
 defmodule RawCallSiteChecker do
-  # file => number of `raw(` call sites expected in it. Both sites below render the
+  # file => number of `raw(` call sites expected in it. The one site renders the
   # output of MarkdownHelpers.render_markdown/2, which sanitizes before returning.
   @register %{
-    "lib/doctrans_web/live/document_live/viewer_components.ex" => 1,
-    "lib/doctrans_web/live/document_live/chat_components.ex" => 1
+    "lib/doctrans_web/live/document_live/markdown_helpers.ex" => 1
   }
 
   # Matches `raw(` as a call, not identifiers that merely end in "raw" (`to_raw(`).

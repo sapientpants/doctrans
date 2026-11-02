@@ -18,10 +18,8 @@ RUN apt-get update && apt-get install -y \
     libreoffice-writer-nogui \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js (required for esbuild and tailwind)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+# No Node.js, as in the release Dockerfile: `:esbuild` and `:tailwind` fetch
+# standalone binaries and the project has no `assets/package.json`.
 
 # Set up working directory
 WORKDIR /app

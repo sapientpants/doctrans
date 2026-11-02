@@ -164,21 +164,4 @@ defmodule DoctransWeb.CoreComponentsTest do
       assert %JS{ops: [["push", %{event: "event"}], ["hide", %{to: "#modal"}]]} = result
     end
   end
-
-  describe "translate_error/1" do
-    test "translates error message" do
-      Gettext.with_locale(DoctransWeb.Gettext, "de", fn ->
-        assert CoreComponents.translate_error({"can't be blank", []}) == "darf nicht leer sein"
-      end)
-    end
-
-    test "translates error with count" do
-      Gettext.with_locale(DoctransWeb.Gettext, "de", fn ->
-        assert CoreComponents.translate_error(
-                 {"should be at least %{count} character(s)", [count: 5]}
-               ) ==
-                 "sollte mindestens 5 Zeichen sein"
-      end)
-    end
-  end
 end

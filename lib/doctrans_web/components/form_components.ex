@@ -1,16 +1,16 @@
 defmodule DoctransWeb.FormComponents do
   @moduledoc """
-  Form-related UI components extracted from CoreComponents.
-
-  Provides input, checkbox, select, and textarea components with
-  error handling and label support.
+  The form controls: `input/1` in its text, select, checkbox and textarea
+  shapes, each with its label and its errors, plus `translate_error/1`, which
+  renders a changeset error in the request locale. Imported everywhere through
+  `DoctransWeb.html_helpers/0`, alongside `DoctransWeb.CoreComponents`.
   """
   use Phoenix.Component
   use Gettext, backend: DoctransWeb.Gettext
 
   alias Phoenix.HTML.Form
 
-  import DoctransWeb.CoreComponents, only: [icon: 1, translate_error: 1]
+  import DoctransWeb.CoreComponents, only: [icon: 1]
 
   @doc """
   Renders an input with label and error messages.
@@ -120,7 +120,7 @@ defmodule DoctransWeb.FormComponents do
           {@rest}
         >
           <option :if={@prompt} value="">{@prompt}</option>
-          {Phoenix.HTML.Form.options_for_select(@options, @value)}
+          {Form.options_for_select(@options, @value)}
         </select>
       </label>
       <.input_errors id={@id} errors={@errors} />
@@ -142,7 +142,7 @@ defmodule DoctransWeb.FormComponents do
           ]}
           {error_attrs(@id, @errors)}
           {@rest}
-        >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
+        >{Form.normalize_value("textarea", @value)}</textarea>
       </label>
       <.input_errors id={@id} errors={@errors} />
     </div>
@@ -159,7 +159,7 @@ defmodule DoctransWeb.FormComponents do
           type={@type}
           name={@name}
           id={@id}
-          value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+          value={Form.normalize_value(@type, @value)}
           class={[
             @class || "w-full input",
             @errors != [] && (@error_class || "input-error")
@@ -208,5 +208,26 @@ defmodule DoctransWeb.FormComponents do
       {render_slot(@inner_block)}
     </p>
     """
+  end
+
+  @doc """
+  Translates an error message using gettext.
+  """
+  def translate_error({msg, opts}) do
+    # When using gettext, we typically pass the strings we want
+    # to translate as a static argument:
+    #
+    #     # Translate the number of files with plural rules
+    #     dngettext("errors", "1 file", "%{count} files", count)
+    #
+    # However the error messages in our forms and APIs are generated
+    # dynamically, so we need to translate them by calling Gettext
+    # with our gettext backend as first argument. Translations are
+    # available in the errors.po file (as we use the "errors" domain).
+    if count = opts[:count] do
+      Gettext.dngettext(DoctransWeb.Gettext, "errors", msg, msg, count, opts)
+    else
+      Gettext.dgettext(DoctransWeb.Gettext, "errors", msg, opts)
+    end
   end
 end

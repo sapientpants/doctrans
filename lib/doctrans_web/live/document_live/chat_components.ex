@@ -2,7 +2,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
   @moduledoc "Components for the document chat panel."
   use DoctransWeb, :html
 
-  import DoctransWeb.DocumentLive.MarkdownHelpers, only: [render_markdown: 2]
+  import DoctransWeb.DocumentLive.MarkdownHelpers, only: [markdown_content: 1]
 
   attr :chat_messages, :any, required: true
   attr :chat_interrupted, :boolean, default: false
@@ -84,9 +84,9 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
         <%!-- `tabindex="0"` because a scroll container that only a mouse can
              reach strands a keyboard user: Chrome and Firefox now focus
              scrollers themselves, Safari does not, and holding a reading
-             position is the whole point of this panel. The ids the hook needs
-             are passed as data attributes so renaming one stays a change to
-             this file. --%>
+             position is the whole point of this panel. The ids the hook needs,
+             and the selector of the form whose submit re-pins it, are passed as
+             data attributes so renaming one stays a change to this file. --%>
         <div
           id="chat-scroll"
           class="flex-1 min-h-0 overflow-y-auto p-3 space-y-3"
@@ -126,9 +126,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
             id="chat-streaming"
             class="max-w-[95%] rounded-lg p-2.5 text-sm bg-base-200"
           >
-            <div class="markdown markdown-sm">
-              <.markdown_content content={@chat_streaming_content} />
-            </div>
+            <.markdown_content content={@chat_streaming_content} hardbreaks />
           </div>
         </div>
 
@@ -239,9 +237,9 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
       <div :if={@message.role == "user"} class="text-right">
         {@message.content}
       </div>
-      <div :if={@message.role == "assistant"} class="markdown markdown-sm">
-        <.markdown_content content={@message.content} />
-      </div>
+      <%!-- Hard breaks: answers separate lines with single newlines and expect
+           them kept, where a page's Markdown means a soft break by one. --%>
+      <.markdown_content :if={@message.role == "assistant"} content={@message.content} hardbreaks />
       <div :if={@message.role == "error"} class="flex items-center gap-2">
         <.icon name="hero-exclamation-triangle" class="w-4 h-4 flex-shrink-0" />
         <span>{@message.content}</span>
@@ -256,19 +254,4 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
   defp stage_label(:assessing), do: gettext("Checking the sources...")
   defp stage_label(:generating), do: gettext("Writing the answer...")
   defp stage_label(_), do: gettext("Thinking...")
-
-  attr :content, :string, default: nil
-
-  # The HTML comes from MarkdownHelpers.render_markdown/2, which sanitizes before
-  # returning; scripts/check_raw_call_sites.exs pins this as a registered raw/1 site.
-  # sobelow_skip ["XSS.Raw"]
-  defp markdown_content(assigns) do
-    # Chat answers separate lines with single newlines; render them as hard breaks
-    # so the layout is preserved instead of collapsing into run-on text.
-    html = render_markdown(assigns.content || "", hardbreaks: true)
-    assigns = assign(assigns, :html, html)
-    # No wrapper element: the rendered blocks must be direct children of the
-    # `.markdown` container so its edge-margin rules (`.markdown > :first-child`) match.
-    ~H"{raw(@html)}"
-  end
 end
