@@ -208,13 +208,21 @@ defmodule Doctrans.Search do
 
   ## Returns
 
-  A list of maps containing:
-  - `:page_id` - The page's UUID
-  - `:page_number` - Page number in the document
-  - `:original_markdown` - Original extracted text
-  - `:translated_markdown` - Translated text (if available)
-  - `:content_revision` - Source page revision the text came from
-  - `:similarity` - Cosine similarity score (0-1, higher is better)
+  `{:ok, results}`, a list of `t:document_result/0` in descending similarity.
+  Results are chunk-first: when the document has embedded chunks, each result
+  is one chunk, its `:original_markdown` is the chunk's text, `:chunk_id` and
+  `:chunk_index` are set, and `:translated_markdown` is always `nil` -- chunks
+  carry no translation. Only when no chunk clears the floor does the search
+  fall back to whole pages, whose results carry the page's text in both fields
+  (`:translated_markdown` `nil` until the page is translated) and no chunk
+  keys. `Doctrans.Chat` reads the fields on that contract: the chunk keys say
+  which text to quote and whether a translated copy may outrank it.
+
+  `{:error, :embedding_unavailable}` when the embedder succeeds without a
+  vector: nothing can be ranked against it, and `{:ok, []}` would report a
+  search that never ran as "nothing matched" -- the same reading
+  `Doctrans.Chat.MultiSearch` and library search give that result. Any other
+  embedder or database error is passed through.
   """
   @spec search_in_document(Ecto.UUID.t(), String.t() | nil, keyword()) ::
           {:ok, [document_result()]} | {:error, Doctrans.Errors.reason()}
@@ -226,11 +234,18 @@ defmodule Doctrans.Search do
     limit = Keyword.get(opts, :limit, 3)
     min_similarity = Keyword.get(opts, :min_similarity, @chat_similarity_threshold)
 
-    with {:ok, query_embedding} <- Deps.embedding().generate(query, []) do
-      search_by_embedding(document_id, query_embedding,
-        limit: limit,
-        min_similarity: min_similarity
-      )
+    case Deps.embedding().generate(query, []) do
+      {:ok, nil} ->
+        {:error, :embedding_unavailable}
+
+      {:ok, query_embedding} ->
+        search_by_embedding(document_id, query_embedding,
+          limit: limit,
+          min_similarity: min_similarity
+        )
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -278,8 +293,7 @@ defmodule Doctrans.Search do
   # belongs, and still uses it.
   #
   # Static heredoc; every value reaches Postgres as a bound parameter ($1..$4) via
-  # Repo.query/2. Flagged only because the query is bound to a variable named `sql`.
-  # sobelow_skip ["SQL.Query"]
+  # `run_document_search/6`, which owns the `Repo.query/2` call and its skip.
   defp execute_chunk_search(document_id, query_embedding, limit, min_similarity) do
     sql = """
     WITH candidates AS MATERIALIZED (
@@ -312,23 +326,12 @@ defmodule Doctrans.Search do
     LIMIT $3
     """
 
-    case Repo.query(sql, [query_embedding, Ecto.UUID.dump!(document_id), limit, min_similarity]) do
-      {:ok, %{rows: rows, columns: columns}} ->
-        {:ok, Enum.map(rows, &format_chunk_search_row(&1, columns))}
-
-      {:error, error} ->
-        Logger.error(
-          "Chunk search query failed: #{inspect(error, limit: 5, printable_limit: 256)}"
-        )
-
-        {:error, {:database_error, [reason: error]}}
-    end
+    run_document_search("Chunk", sql, document_id, query_embedding, limit, min_similarity)
   end
 
   # Exact for the same reason as `execute_chunk_search/4`; see the note there.
   #
   # Static heredoc; $1..$4 are bound parameters, nothing is interpolated into the SQL.
-  # sobelow_skip ["SQL.Query"]
   defp execute_page_search(document_id, query_embedding, limit, min_similarity) do
     sql = """
     WITH candidates AS MATERIALIZED (
@@ -357,38 +360,37 @@ defmodule Doctrans.Search do
     LIMIT $3
     """
 
-    case Repo.query(sql, [query_embedding, Ecto.UUID.dump!(document_id), limit, min_similarity]) do
+    run_document_search("Page", sql, document_id, query_embedding, limit, min_similarity)
+  end
+
+  # Both in-document statements bind the same four parameters in the same
+  # order and fail the same way; what differs is the SQL and the row shape,
+  # and the row's own columns say which shape it is.
+  #
+  # `sql` is one of the two static heredocs above, never built from input, and
+  # every value reaches Postgres as a bound parameter. Flagged only because the
+  # statement arrives in a variable.
+  # sobelow_skip ["SQL.Query"]
+  defp run_document_search(label, sql, document_id, query_embedding, limit, min_similarity) do
+    params = [query_embedding, Ecto.UUID.dump!(document_id), limit, min_similarity]
+
+    case Repo.query(sql, params) do
       {:ok, %{rows: rows, columns: columns}} ->
-        {:ok, Enum.map(rows, &format_page_search_row(&1, columns))}
+        {:ok, Enum.map(rows, &format_document_row(row_to_map(&1, columns)))}
 
       {:error, error} ->
         Logger.error(
-          "Page search query failed: #{inspect(error, limit: 5, printable_limit: 256)}"
+          "#{label} search query failed: #{inspect(error, limit: 5, printable_limit: 256)}"
         )
 
         {:error, {:database_error, [reason: error]}}
     end
   end
 
-  defp format_chunk_search_row(row, columns) do
-    result = Enum.zip(columns, row) |> Map.new()
-
-    %{
-      chunk_id: uuid_to_string(result["chunk_id"]),
-      page_id: uuid_to_string(result["page_id"]),
-      page_number: result["page_number"],
-      original_markdown: result["original_markdown"],
-      translated_markdown: result["translated_markdown"],
-      chunk_index: result["chunk_index"],
-      content_revision: result["content_revision"],
-      similarity: to_float(result["similarity"])
-    }
-  end
-
-  defp format_page_search_row(row, columns) do
-    result = Enum.zip(columns, row) |> Map.new()
-
-    %{
+  # Only the chunk statement selects `chunk_id` and `chunk_index`; a page row
+  # carries neither key, which is what `t:document_result/0` promises.
+  defp format_document_row(result) do
+    base = %{
       page_id: uuid_to_string(result["page_id"]),
       page_number: result["page_number"],
       original_markdown: result["original_markdown"],
@@ -396,15 +398,25 @@ defmodule Doctrans.Search do
       content_revision: result["content_revision"],
       similarity: to_float(result["similarity"])
     }
+
+    case result do
+      %{"chunk_id" => chunk_id, "chunk_index" => chunk_index} ->
+        Map.merge(base, %{chunk_id: uuid_to_string(chunk_id), chunk_index: chunk_index})
+
+      _page_row ->
+        base
+    end
   end
 
   defp execute_hybrid_search(query, query_embedding, retrieval, query_opts) do
     with {:ok, %{rows: rows, columns: columns}} <-
            HybridQuery.run(query, query_embedding, query_opts) do
+      rows = Enum.map(rows, &row_to_map(&1, columns))
+
       {:ok,
        %{
-         results: Enum.map(rows, &format_row(&1, columns)),
-         total_count: total_count(rows, columns),
+         results: Enum.map(rows, &format_row/1),
+         total_count: total_count(rows),
          retrieval: retrieval
        }}
     end
@@ -413,18 +425,13 @@ defmodule Doctrans.Search do
   # Every row carries the same window total, so the first one answers for all of
   # them. No rows means this page of the match set is empty and the window has
   # nothing to report -- see `search_with_count/2` on paginating past the end.
-  defp total_count([], _columns), do: 0
+  defp total_count([]), do: 0
+  defp total_count([row | _rest]), do: Map.fetch!(row, "total_count")
 
-  defp total_count([row | _rest], columns) do
-    columns
-    |> Enum.zip(row)
-    |> Map.new()
-    |> Map.fetch!("total_count")
-  end
+  # A Postgrex row keyed by its column names.
+  defp row_to_map(row, columns), do: columns |> Enum.zip(row) |> Map.new()
 
-  defp format_row(row, columns) do
-    result = Enum.zip(columns, row) |> Map.new()
-
+  defp format_row(result) do
     %{
       page_id: uuid_to_string(result["page_id"]),
       document_id: uuid_to_string(result["document_id"]),

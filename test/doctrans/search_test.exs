@@ -5,6 +5,7 @@ defmodule Doctrans.SearchTest do
   alias Doctrans.Documents.Page
   alias Doctrans.Repo
   alias Doctrans.Search
+  alias Doctrans.Search.EmbeddingMocks
 
   import Doctrans.Fixtures
 
@@ -280,6 +281,18 @@ defmodule Doctrans.SearchTest do
     test "returns empty list for nil query" do
       document = document_fixture(%{status: "completed"})
       assert {:ok, []} = Search.search_in_document(document.id, nil)
+    end
+
+    test "reports an embedder that returns no vector as unavailable, not as no matches" do
+      # `{:ok, nil}` is a legal embedding result, and a NULL vector ranks
+      # nothing: searching on it would report "nothing matched" for a page
+      # that is a perfect match of any query that actually ran.
+      document = document_fixture(%{status: "completed"})
+      insert_indexed_page(document, 1, query_aligned_embedding())
+
+      EmbeddingMocks.nil_vector()
+
+      assert {:error, :embedding_unavailable} = Search.search_in_document(document.id, "test")
     end
 
     test "limit caps the pages returned" do

@@ -8,8 +8,6 @@ defmodule Doctrans.Search.ReindexTest do
   alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, LlmProcessingJob}
   alias Doctrans.Search.Reindex
 
-  @moduletag :postgres
-
   describe "retry_document/1" do
     test "recovers an indexing failure without rerunning a successful translation" do
       Oban.Testing.with_testing_mode(:manual, fn ->

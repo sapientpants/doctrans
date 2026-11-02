@@ -13,8 +13,6 @@ defmodule Doctrans.Processing.WorkerTest do
 
   import Doctrans.Fixtures
 
-  @moduletag :postgres
-
   setup do
     # `config/test.exs` leaves the boot-time pass off, so this instance only
     # runs what the test sends it.

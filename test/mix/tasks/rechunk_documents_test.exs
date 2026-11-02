@@ -10,8 +10,6 @@ defmodule Mix.Tasks.RechunkDocumentsTest do
   alias Doctrans.Search.Indexer
   alias Mix.Tasks.RechunkDocuments
 
-  @moduletag :postgres
-
   test "queues every extracted page for a rebuild and calls no model itself" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_fixture()
