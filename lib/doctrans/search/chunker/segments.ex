@@ -221,43 +221,54 @@ defmodule Doctrans.Search.Chunker.Segments do
     open_measure
     |> add(gap_measure(text, gap))
     |> add(measure)
-    |> subtract_joined_word(text, open, start)
+    |> subtract_joined_words(text, open, start)
   end
 
   defp union({open_start, _open_len}, {start, len}), do: {open_start, start + len - open_start}
 
   # The bytes between two segments -- the separator the split dropped -- which
-  # the combined span covers and so has to be counted. Words are reported as
-  # zero, which holds only as far as `word_count/1`'s non-Unicode `\s` reaches.
-  # `@sentence_boundary` and `@word_boundary` match Unicode whitespace, so a
-  # dropped separator can hold a non-breaking or ideographic space that
-  # `word_count/1` counts as a word in the content while this counts none, and
-  # `subtract_joined_word/4` corrects only the zero-width case. A gap mixing the
-  # two -- `" " <> nbsp <> " "` -- therefore undercounts by one per separator:
-  # 400 sentences so separated pack into chunks of up to 1,033 words against a
-  # ceiling of 400, measured. This predates the span rewrite -- `Chunker` hit
-  # the same mismatch on its paragraph gaps and now measures them exactly --
-  # and is handed to the Unicode-aware `word_count/1` item.
+  # the combined span covers and so has to be counted. It is measured the same
+  # way a segment is, which keeps the running total an upper bound on the span's
+  # own measure: `@sentence_boundary` and `@word_boundary` match Unicode
+  # whitespace, so a dropped separator can hold a non-breaking or ideographic
+  # space that `word_count/1`'s non-Unicode `\s` does not split on and so
+  # counts as a word once it sits inside the content. Reporting the gap as zero
+  # words, as this once did, undercounted by one per such separator: 400
+  # sentences joined on `" " <> nbsp <> " "` packed into a 599-word chunk
+  # against a ceiling of 400. `Chunker.extend/5` measures its paragraph gaps
+  # the same way, for the same reason.
   defp gap_measure(_text, {_start, 0}), do: zero()
-  defp gap_measure(text, {_start, len} = gap), do: {0, grapheme_count(slice(text, gap)), len}
+  defp gap_measure(text, gap), do: measure(slice(text, gap))
 
-  # Graphemes and bytes are additive across a join; words are not. Where no
-  # whitespace separates two segments -- which is what a zero-width sentence
-  # boundary leaves behind, and what every grapheme-level cut leaves behind --
-  # the word they meet in is one word, and summing counts it twice. Left
-  # uncorrected this closes a CJK chunk after 300 sentences rather than at the
-  # grapheme budget, cutting it to an eighth of its intended size.
-  defp subtract_joined_word({words, graphemes, bytes}, text, {open_start, open_len}, start) do
+  # Graphemes and bytes are additive across a join; words are not. Where the
+  # bytes on both sides of a seam are not whitespace to `word_count/1`, the word
+  # they meet in is one word, and summing counts it twice. A zero-width sentence
+  # boundary and every grapheme-level cut leave one such seam; a dropped
+  # separator made only of whitespace `word_count/1` does not split on -- an
+  # ideographic space after a full stop, a lone non-breaking space -- leaves
+  # two, one on each side of it, and `measure/1` has counted the separator
+  # itself as the word that bridges them. Each seam is corrected on its own, so
+  # the total is the span's exact word count rather than a bound: correcting a
+  # single seam across the whole gap, as this once did, left one word per such
+  # separator over, and that closed a CJK chunk after 300 sentences rather than
+  # at the grapheme budget, cutting it to three-eighths of its intended size.
+  defp subtract_joined_words(measure, text, {open_start, open_len}, start) do
     open_end = open_start + open_len
-    junction = binary_part(text, open_end - 1, start - open_end + 2)
+    seams = if start == open_end, do: [open_end], else: [open_end, start]
 
-    # `:binary.match/2` rather than a regex because this runs once per segment,
-    # and the whitespace it looks for is exactly what `word_count/1`'s non-
-    # Unicode `\s` splits on.
-    if :binary.match(junction, @ascii_whitespace) == :nomatch do
+    Enum.reduce(seams, measure, &subtract_joined_word(&2, text, &1))
+  end
+
+  # `:binary.match/2` rather than a regex because this runs once or twice per
+  # segment, and the whitespace it looks for is exactly what `word_count/1`'s
+  # non-Unicode `\s` splits on. Those are single bytes, so the byte on either
+  # side of the seam is enough: a byte inside a multi-byte character is never
+  # one of them.
+  defp subtract_joined_word({words, graphemes, bytes} = measure, text, seam) do
+    if :binary.match(binary_part(text, seam - 1, 2), @ascii_whitespace) == :nomatch do
       {words - 1, graphemes, bytes}
     else
-      {words, graphemes, bytes}
+      measure
     end
   end
 
