@@ -19,8 +19,8 @@ defmodule Doctrans.Documents.Export do
   ## What the file carries out of the app
 
   Page content is model-extracted text, copied verbatim. In the viewer that same
-  text is rendered through `DoctransWeb.DocumentLive.MarkdownScrubber`, which is
-  the app's only layer in front of it; an export has no such layer and is not
+  text is rendered through `DoctransWeb.DocumentLive.MarkdownScrubber`, backed by
+  the app's Content-Security-Policy; an export has neither layer and is not
   meant to grow one, because stripping HTML out of a Markdown artifact would
   corrupt legitimate content to defend a renderer this app does not own. The
   export is a data file: whatever opens it afterwards is responsible for how it

@@ -3,15 +3,18 @@
 #
 # `Phoenix.HTML.raw/1` renders a string without escaping it. This app renders
 # LLM-extracted content from arbitrary uploads, so every `raw/1` site is a potential
-# XSS sink, and there is no Content-Security-Policy behind it: `.sobelow-conf` ignores
-# `Config.CSP` because the app is loopback-bound and single-user. The sanitizer is
-# therefore the only layer, which is safe exactly as long as every `raw/1` site routes
-# through `MarkdownHelpers.sanitize_html/1`.
+# XSS sink. Two layers stand in front of it: `MarkdownHelpers.sanitize_html/1`, which
+# every `raw/1` site must route through, and the `'self'`-only Content-Security-Policy
+# that `DoctransWeb.ContentSecurityPolicy.headers/0` serves on every route. The CSP is
+# the defence-in-depth for a sanitizer bug, not a substitute for the sanitizer: it
+# blocks inline script, not a markup injection that merely misrenders the page.
+# (`.sobelow-conf` still ignores `Config.CSP`, but only because Sobelow cannot see the
+# policy through a function-call argument; the header is served.)
 #
-# That invariant is cheap to state and expensive to notice breaking, so it is pinned
-# here: the set of `raw/1` call sites must match the register below. A new site fails
-# this check, which forces the choice — route it through the sanitizer, or adopt CSP —
-# to be made rather than defaulted into.
+# The sanitizer invariant is cheap to state and expensive to notice breaking, so it is
+# pinned here: the set of `raw/1` call sites must match the register below. A new site
+# fails this check, which forces the choice — route it through the sanitizer, or render
+# it another way — to be made rather than defaulted into.
 #
 # Usage: elixir scripts/check_raw_call_sites.exs
 #
@@ -49,7 +52,7 @@ defmodule RawCallSiteChecker do
           IO.ANSI.yellow() <>
             "Every raw/1 site must render sanitized HTML (MarkdownHelpers.sanitize_html/1).\n" <>
             "Confirm that, then update @register in scripts/check_raw_call_sites.exs.\n" <>
-            "If raw/1 is spreading, adopt a CSP instead and drop Config.CSP from .sobelow-conf." <>
+            "The CSP (DoctransWeb.ContentSecurityPolicy) is a second layer, not a substitute." <>
             IO.ANSI.reset()
         )
 

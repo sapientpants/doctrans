@@ -79,10 +79,17 @@ defmodule DialyzerFilterChecker do
           []
 
         {line, column} when is_integer(line) and is_integer(column) ->
-          []
+          [
+            problem(
+              entry,
+              "location must be a bare `line`, got {#{line}, #{column}}: dialyxir 1.4.8 " <>
+                "normalises a warning's position to its line before matching, so a " <>
+                "`{line, column}` filter never matches (jeremyjh/dialyxir#584)"
+            )
+          ]
 
         other ->
-          [problem(entry, "location must be `line` or `{line, column}`, got #{inspect(other)}")]
+          [problem(entry, "location must be a bare `line`, got #{inspect(other)}")]
       end
 
     file_problem =

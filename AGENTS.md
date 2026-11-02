@@ -82,8 +82,13 @@ This is a web application written using the Phoenix web framework.
 - **Always use and maintain this import syntax** in the app.css file for projects generated
   with `phx.new`
 - **Never** use `@apply` when writing raw css
-- **Always** manually write your own tailwind-based components instead of using daisyUI for a
-  unique, world-class design
+- **daisyUI v5 is the house style.** `assets/css/app.css` loads the vendored plugin
+  (`assets/vendor/daisyui`) with `themes: false` and defines the app's two themes through two
+  `daisyui-theme` blocks (a light one and a dark one), and `core_components.ex` is built on it.
+  Reach for daisyUI classes first (`btn-*`, `badge-*`, `alert-*`, `modal-box`, `loading-*`,
+  `menu`, `toggle`, `toast`) and the `base-*`/`primary`/... theme tokens for colour, then extend
+  with Tailwind utilities; do not hand-roll a component daisyUI already provides, and do not add
+  a third theme or an unvendored plugin
 - Out of the box **only the app.js and app.css bundles are supported**
   - You cannot reference an external vendor'd script `src` or link `href` in the layouts
   - You must import the vendor deps into app.js and app.css to use them

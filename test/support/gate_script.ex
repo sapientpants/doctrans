@@ -7,6 +7,10 @@ defmodule Doctrans.GateScript do
   `.pre-commit-config.yaml`. Loading them into the test VM would need every one
   to grow a guard and an injectable root; running the real command against a
   fixture tree tests what the hook actually runs, exit status included.
+
+  `scripts/check_translations.exs` is the one gate this does not cover: it needs
+  Expo, so the hook runs it under `mix run --no-start` and its test loads it
+  in-process instead.
   """
 
   @scripts_dir Path.expand("../../scripts", __DIR__)

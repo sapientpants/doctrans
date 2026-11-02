@@ -255,9 +255,9 @@ repos:
         pass_filenames: false
         files: ^(lib/|config/)
 
-      # 5.2. raw/1 call-site register. .sobelow-conf ignores Config.CSP because the app
-      # is loopback-bound, which leaves the HTML sanitizer as the only layer in front of
-      # LLM-extracted upload content. This pins the two sites that depend on it.
+      # 5.2. raw/1 call-site register. The HTML sanitizer is the first layer in front of
+      # LLM-extracted upload content and the CSP the second; this pins the two sites
+      # that depend on the sanitizer.
       - id: check-raw-call-sites
         name: Check raw/1 call sites
         entry: elixir scripts/check_raw_call_sites.exs
