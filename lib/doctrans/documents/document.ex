@@ -1,12 +1,14 @@
 defmodule Doctrans.Documents.Document do
   @moduledoc """
-  Schema for a document (uploaded PDF) being translated.
+  Schema for an uploaded document being translated. The upload is a PDF or one of
+  the office formats `Doctrans.Documents.Formats` converts to PDF first
+  (`.doc`, `.docx`, `.odt`, `.rtf`).
 
   ## Statuses
 
-  - `uploading` - PDF is being uploaded
+  - `uploading` - the file is being uploaded
   - `queued` - Waiting for another document to finish processing
-  - `extracting` - Extracting page images from PDF
+  - `extracting` - Converting to PDF where needed and extracting page images
   - `processing` - Extracting markdown and translating pages
   - `completed` - All pages have been translated
   - `error` - An error occurred during processing

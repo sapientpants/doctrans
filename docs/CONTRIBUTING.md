@@ -52,7 +52,10 @@ its tests, or the pi and Codex adapters change.
 The `scripts/check_*.exs` gates each have a smoke test under `test/scripts/`.
 They run the real script as a subprocess against a fixture tree through
 `Doctrans.GateScript`, so the exit status the hook relies on is what is tested;
-add a case there whenever a gate grows a rule.
+add a case there whenever a gate grows a rule. `check_translations.exs` is the
+deliberate exception: it depends on Expo, so the hook runs it through
+`mix run --no-start` rather than plain `elixir`, and its test loads it in-process
+with `Code.require_file/2` instead of going through `GateScript`.
 
 Test one observable contract per scenario. Establish fixture preconditions,
 assert identities and persisted outcomes, and use barriers for concurrency.
@@ -135,10 +138,10 @@ Add specs to public APIs and use concrete result types. Fix new warnings at thei
 source before considering a suppression.
 
 Suppressions live in `.dialyzer_ignore.exs`, which is a register rather than a
-dumping ground. Every entry is a narrow `{file, warning_class, line}` key — note
-that a warning carrying a column reports its location as `{line, column}`, and an
-integer-line filter silently matches nothing in that case — preceded by four
-comment annotations: `owner`, `expires` (an ISO date), `upstream` (an issue URL,
+dumping ground. Every entry is a narrow `{file, warning_class, line}` key with a
+bare integer line: dialyxir 1.4.8 normalises a warning's `{line, column}` position
+to its line before matching filters, so a `{line, column}` filter can never match
+and the gate refuses it — preceded by four comment annotations: `owner`, `expires` (an ISO date), `upstream` (an issue URL,
 or `none` for a first-party cause), and `rationale`. The register is capped at
 eight entries.
 

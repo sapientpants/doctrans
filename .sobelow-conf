@@ -16,18 +16,21 @@
   exit: "low",
   format: "txt",
   ignore: [
-    # Config.CSP and Config.HTTPS are correct to ignore for a loopback-bound,
-    # single-user app: there is no TLS terminator to redirect to, and the threat model
-    # has no remote origin to constrain. See AGENTS.md on deployment-level exposure.
+    # Config.CSP is a false positive, not a waiver. The `:browser` pipeline in
+    # `lib/doctrans_web/router.ex` serves a strict `'self'`-only policy from
+    # `DoctransWeb.ContentSecurityPolicy.headers/0`, but Sobelow 0.18.1 only recognises a
+    # CSP written as a literal map in the `put_secure_browser_headers` call; it cannot
+    # see through a function-call argument and reports "Config.CSP: Missing
+    # Content-Security-Policy - Low Confidence" at router.ex:11, which `exit: "low"`
+    # turns into a build failure. The policy itself is pinned by
+    # `test/doctrans_web/content_security_policy_test.exs`, which is the gate that
+    # would catch the header disappearing.
     #
-    # What would invalidate this: the app becoming reachable from anything but
-    # loopback, or gaining a third `raw/1` call site. Today exactly two sites render
-    # LLM-extracted content from arbitrary uploads through `raw/1`
-    # (viewer_components.ex, chat_components.ex) and both route through the single
-    # `MarkdownHelpers.sanitize_html/1` helper. CSP would be the defence-in-depth for a
-    # sanitizer bug and there is no second layer, so that invariant is guarded directly
-    # by `scripts/check_raw_call_sites.exs` instead.
+    # What would invalidate this: Sobelow learning to evaluate the argument, at which
+    # point the ignore should be dropped so the check runs for real.
     "Config.CSP",
+    # Config.HTTPS is correct to ignore for a loopback-bound, single-user app: there is
+    # no TLS terminator to redirect to. See AGENTS.md on deployment-level exposure.
     "Config.HTTPS"
   ],
   ignore_files: []

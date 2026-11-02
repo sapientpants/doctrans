@@ -28,7 +28,7 @@ defmodule Doctrans.Application do
       {Oban, Application.get_env(:doctrans, Oban)},
       # Task supervisor for background processing
       {Task.Supervisor, name: Doctrans.TaskSupervisor},
-      # Background worker for processing books
+      # Schedules the startup recovery pass that re-queues interrupted documents
       Doctrans.Processing.Worker,
       # Scheduled worker for cleaning up orphaned files
       Doctrans.Documents.SweeperWorker,

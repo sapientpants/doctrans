@@ -94,11 +94,19 @@ defmodule Scripts.CheckDialyzerFiltersTest do
     assert output =~ "suppresses lib/moved.ex, which does not exist"
   end
 
-  test "a location that is neither a line nor {line, column} fails", %{tmp_dir: dir} do
+  test "a location that is not a line fails", %{tmp_dir: dir} do
     register(dir, String.replace(@entry, ", 12}", ", :any}"))
 
     assert {output, 1} = run(@script, @today, dir)
-    assert output =~ "location must be `line` or `{line, column}`, got :any"
+    assert output =~ "location must be a bare `line`, got :any"
+  end
+
+  test "a {line, column} location fails because dialyxir never matches it", %{tmp_dir: dir} do
+    register(dir, String.replace(@entry, ", 12}", ", {12, 5}}"))
+
+    assert {output, 1} = run(@script, @today, dir)
+    assert output =~ "location must be a bare `line`, got {12, 5}"
+    assert output =~ "jeremyjh/dialyxir#584"
   end
 
   test "a filter spread over several lines is refused", %{tmp_dir: dir} do

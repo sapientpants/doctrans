@@ -34,6 +34,9 @@ to your device or a trusted network.
 - **LibreOffice** (optional) - for DOCX, DOC, ODT, and RTF conversion
 - **OpenAI-compatible inference server** - vision, translation/chat, and embedding models
   (the defaults target oMLX on Apple Silicon)
+- **Node.js** (development only) - `mix test` runs the browser theme tests in
+  `assets/js/theme_test.mjs` under Node's built-in test runner, and the command-policy
+  tests need its TypeScript support (Node 22.6 or newer)
 
 ### Installing poppler-utils
 
@@ -294,6 +297,49 @@ If every retrieval query fails -- an unreachable embedding server, say -- chat r
 document search is unavailable instead of answering as though the document held nothing relevant.
 
 Conversations are saved per document and can be resumed after reopening it.
+
+### Reprocessing a document
+
+Open a document and choose **Reprocess document**. Select the extraction and
+translation models, then confirm to rerun conversion (for office documents), page
+rendering, extraction, translation, and search indexing from the original upload.
+The dashboard and viewer show live progress, and pages become readable as they
+finish. Existing generated pages and search results are replaced; the document
+URL and chat history remain. Previous chat answers are historical.
+
+Original uploads are retained until you delete the document. Generated files live
+in separate processing-run directories; starting a run also enqueues a cleanup job
+that deletes the superseded run's directory once the new run owns the document, so
+no restart is needed. This uses more disk space than the previous source-deletion
+policy.
+Only generated page images are served over HTTP; retained originals and converted
+PDFs are excluded from static serving.
+Documents imported before source retention was added may need to be uploaded
+again before whole-document reprocessing is available. Single-page reprocessing
+remains available when page images exist.
+
+A document cannot restart while extraction or page-processing jobs are active,
+including scheduled retries and suspended jobs. Let those jobs finish first.
+Model choices are saved for the run and preserved during recovery. The models a
+run used are recorded on each page but are not displayed: the identifiers are
+request aliases that name an endpoint, not an immutable set of model weights.
+
+#### Incomplete model output
+
+OCR, translation, and non-streaming chat require a non-empty final answer and
+`finish_reason: "stop"` from the OpenAI-compatible provider. Responses marked
+`length`, filtered/tool-call responses, missing completion markers, and
+reasoning-only output are rejected. Only leading, unfenced `<think>` blocks are
+treated as model reasoning and removed before validating the final text. Tags
+inside final text or code examples are preserved. A literal tag block at the very
+start of a response must be fenced to distinguish it from reasoning.
+Rejected OCR or translation output is not saved as completed text.
+
+If processing reports incomplete output, use a model with a larger output budget
+or split the page into smaller sections, then reprocess. Ensure the provider
+returns the completion marker. The client does not automatically increase token
+limits or segment pages; existing background job retries may still run.
+Streaming chat uses a separate completion path and is not covered by this validation.
 
 ## Configuration
 
@@ -701,44 +747,3 @@ or install the extension manually: `CREATE EXTENSION vector;`
 ## License
 
 MIT
-
-## Reprocessing a document
-
-Open a document and choose **Reprocess document**. Select the extraction and
-translation models, then confirm to rerun conversion (for office documents), page
-rendering, extraction, translation, and search indexing from the original upload.
-The dashboard and viewer show live progress, and pages become readable as they
-finish. Existing generated pages and search results are replaced; the document
-URL and chat history remain. Previous chat answers are historical.
-
-Original uploads are retained until you delete the document. Generated files live
-in separate processing-run directories; superseded output is cleaned up after a
-restart. This uses more disk space than the previous source-deletion policy.
-Only generated page images are served over HTTP; retained originals and converted
-PDFs are excluded from static serving.
-Documents imported before source retention was added may need to be uploaded
-again before whole-document reprocessing is available. Single-page reprocessing
-remains available when page images exist.
-
-A document cannot restart while extraction or page-processing jobs are active,
-including scheduled retries and suspended jobs. Let those jobs finish first.
-Model choices are saved for the run and preserved during recovery. The models a
-run used are recorded on each page but are not displayed: the identifiers are
-request aliases that name an endpoint, not an immutable set of model weights.
-
-### Incomplete model output
-
-OCR, translation, and non-streaming chat require a non-empty final answer and
-`finish_reason: "stop"` from the OpenAI-compatible provider. Responses marked
-`length`, filtered/tool-call responses, missing completion markers, and
-reasoning-only output are rejected. Only leading, unfenced `<think>` blocks are
-treated as model reasoning and removed before validating the final text. Tags
-inside final text or code examples are preserved. A literal tag block at the very
-start of a response must be fenced to distinguish it from reasoning.
-Rejected OCR or translation output is not saved as completed text.
-
-If processing reports incomplete output, use a model with a larger output budget
-or split the page into smaller sections, then reprocess. Ensure the provider
-returns the completion marker. The client does not automatically increase token
-limits or segment pages; existing background job retries may still run.
-Streaming chat uses a separate completion path and is not covered by this validation.
