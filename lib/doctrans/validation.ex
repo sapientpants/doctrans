@@ -14,7 +14,9 @@ defmodule Doctrans.Validation do
   - `attrs` - Map of document attributes
 
   ## Returns
-  - `{:ok, sanitized_attrs}` if valid
+  - `{:ok, sanitized_attrs}` if valid: the title trimmed, the language codes
+    normalised to the lower-case form `Doctrans.Languages` lists, and the
+    filename stripped of path characters
   - `{:error, reason}` if invalid
   """
   @spec validate_document_attrs(map()) :: {:ok, map()} | {:error, Doctrans.Errors.reason()}
@@ -25,7 +27,6 @@ defmodule Doctrans.Validation do
          {:ok, attrs} <- validate_title(attrs),
          {:ok, attrs} <- validate_target_language(attrs),
          {:ok, attrs} <- validate_source_language(attrs),
-         {:ok, attrs} <- sanitize_title(attrs),
          {:ok, attrs} <- sanitize_filename(attrs) do
       {:ok, attrs}
     else
@@ -202,9 +203,8 @@ defmodule Doctrans.Validation do
     do: {:error, :invalid_title}
 
   defp validate_target_language(%{target_language: language} = attrs) when is_binary(language) do
-    case validate_language(language) do
-      {:ok, _} -> {:ok, attrs}
-      {:error, reason} -> {:error, reason}
+    with {:ok, normalized} <- validate_language(language) do
+      {:ok, %{attrs | target_language: normalized}}
     end
   end
 
@@ -212,9 +212,8 @@ defmodule Doctrans.Validation do
     do: {:error, :invalid_target_language}
 
   defp validate_source_language(%{source_language: language} = attrs) when is_binary(language) do
-    case validate_language(language) do
-      {:ok, _} -> {:ok, attrs}
-      {:error, reason} -> {:error, reason}
+    with {:ok, normalized} <- validate_language(language) do
+      {:ok, %{attrs | source_language: normalized}}
     end
   end
 
@@ -234,11 +233,4 @@ defmodule Doctrans.Validation do
   end
 
   defp sanitize_filename(attrs), do: {:ok, attrs}
-
-  defp sanitize_title(%{title: title} = attrs) when is_binary(title) do
-    sanitized = String.trim(title)
-    {:ok, Map.put(attrs, :title, sanitized)}
-  end
-
-  defp sanitize_title(%{} = attrs), do: {:ok, attrs}
 end

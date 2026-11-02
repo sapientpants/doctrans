@@ -4,7 +4,8 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Documents.{Chunk, Page, Pages}
+  alias Doctrans.Documents
+  alias Doctrans.Documents.{Chunk, Page}
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Search.EmbeddingMocks
 
@@ -34,7 +35,7 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
         assert Repo.aggregate(Oban.Job, :count) == 1
 
         {:ok, rewritten} =
-          Pages.update_page_extraction(page, %{
+          Documents.update_page_extraction(page, %{
             original_markdown: "Rewritten text",
             extraction_status: "completed"
           })
@@ -104,7 +105,7 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
       args = EmbeddingJob.page_args(page)
 
       {:ok, _rewritten} =
-        Pages.update_page_extraction(page, %{
+        Documents.update_page_extraction(page, %{
           original_markdown: "Current text",
           extraction_status: "completed"
         })

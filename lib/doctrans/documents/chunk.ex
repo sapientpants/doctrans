@@ -13,6 +13,11 @@ defmodule Doctrans.Documents.Chunk do
   schema "chunks" do
     field :chunk_index, :integer
     field :content, :string
+    # Legacy: nothing writes or reads this column any more. Chunks are built
+    # from the page's source markdown alone (`Doctrans.Search.Indexer`), and
+    # retrieval returns the page's translation instead, so the column stays
+    # NULL for every chunk indexed since. Mapped so old rows still load; not
+    # cast, so nothing can start filling it again by accident.
     field :translated_content, :string
     field :start_offset, :integer
     field :end_offset, :integer
@@ -34,7 +39,6 @@ defmodule Doctrans.Documents.Chunk do
     |> cast(attrs, [
       :chunk_index,
       :content,
-      :translated_content,
       :start_offset,
       :end_offset,
       :word_count

@@ -17,6 +17,8 @@ defmodule Doctrans.Documents.Document do
   use Doctrans.Schema
   import Ecto.Changeset
 
+  alias Doctrans.Languages
+
   @statuses ~w(uploading queued extracting processing completed error cancelled)
 
   schema "documents" do
@@ -58,6 +60,11 @@ defmodule Doctrans.Documents.Document do
     ])
     |> validate_required([:title, :original_filename, :target_language])
     |> validate_inclusion(:status, @statuses)
+    # Both languages are checked here, on the update path as well as on create,
+    # so a document can never hold a language the translation list does not
+    # offer. A nil source language is "detect it" and passes untouched.
+    |> validate_inclusion(:target_language, Languages.supported())
+    |> validate_inclusion(:source_language, Languages.supported())
   end
 
   @doc """

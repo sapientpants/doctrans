@@ -19,7 +19,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
   import Doctrans.Fixtures
   import ExUnit.CaptureLog
 
-  alias Doctrans.Documents.Pages
+  alias Doctrans.Documents
   alias Doctrans.Repo
   alias Doctrans.Search.EmbeddingMocks
   alias DoctransWeb.SearchLive
@@ -419,7 +419,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
     page = page_fixture(document, %{page_number: 1})
 
     {:ok, page} =
-      Pages.update_page_extraction(page, %{
+      Documents.update_page_extraction(page, %{
         extraction_status: "completed",
         original_markdown: text
       })

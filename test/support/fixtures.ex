@@ -7,7 +7,6 @@ defmodule Doctrans.Fixtures do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.{Layout, Page}
-  alias Doctrans.Documents.Pages
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
@@ -37,7 +36,7 @@ defmodule Doctrans.Fixtures do
 
     for page_num <- 1..page_count do
       {:ok, _page} =
-        Pages.create_page(document, %{
+        Documents.create_page(document, %{
           page_number: page_num,
           image_path: "documents/#{document.id}/pages/page_#{page_num}.png"
         })
@@ -51,7 +50,7 @@ defmodule Doctrans.Fixtures do
   """
   def page_fixture(document, attrs \\ %{}) do
     {:ok, page} =
-      Pages.create_page(
+      Documents.create_page(
         document,
         Enum.into(attrs, %{
           page_number: 1,
@@ -66,7 +65,7 @@ defmodule Doctrans.Fixtures do
   Creates a completed, single-page document whose page carries an embedding, so
   the chat opens with a usable context.
 
-  The embedding is inserted through `Repo` rather than the `Pages` API to pin a
+  The embedding is inserted through `Repo` rather than the `Documents` API to pin a
   deterministic vector of the configured dimension.
   """
   def completed_document_with_embedding_fixture(attrs \\ %{}) do
@@ -118,13 +117,13 @@ defmodule Doctrans.Fixtures do
     page = page_fixture(document, attrs)
 
     {:ok, page} =
-      Pages.update_page_extraction(page, %{
+      Documents.update_page_extraction(page, %{
         extraction_status: "completed",
         original_markdown: "# Original Content\n\nSome text here."
       })
 
     {:ok, page} =
-      Pages.update_page_translation(page, %{
+      Documents.update_page_translation(page, %{
         translation_status: "completed",
         translated_markdown: "# Translated Content\n\nSome translated text."
       })

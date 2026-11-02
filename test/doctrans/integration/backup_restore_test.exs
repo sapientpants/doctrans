@@ -121,7 +121,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
 
       assert saved.context == context
       refute saved.interrupted?
-      assert Documents.embeddings_ready?(document)
+      assert Chat.embeddings_ready?(document)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
       view |> element("header button[phx-click='toggle_chat']") |> render_click()

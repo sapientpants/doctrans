@@ -12,6 +12,9 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
         interval_ms: 60_000,
         auto_reset_circuits: true
 
+  The same three keys are accepted as start options, which take precedence, so
+  a test can start an instance of its own without a global override.
+
   ## Telemetry Events
 
   - `[:doctrans, :health_check, :completed]` - Emitted for each check
@@ -57,8 +60,8 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   end
 
   @impl true
-  def init(_opts) do
-    config = get_config()
+  def init(opts) do
+    config = config(opts)
 
     state = %{
       enabled: config[:enabled],
@@ -190,13 +193,17 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
 
   defp maybe_reset_circuits(_current, _previous), do: :ok
 
-  defp get_config do
-    config = Application.get_env(:doctrans, __MODULE__, [])
+  # Start options win over the application environment, so a test can start an
+  # instance of its own without a global override.
+  defp config(opts) do
+    app_config = Application.get_env(:doctrans, __MODULE__, [])
 
-    [
-      enabled: Keyword.get(config, :enabled, true),
-      interval_ms: Keyword.get(config, :interval_ms, @default_interval_ms),
-      auto_reset_circuits: Keyword.get(config, :auto_reset_circuits, @default_auto_reset)
-    ]
+    for {key, default} <- [
+          enabled: true,
+          interval_ms: @default_interval_ms,
+          auto_reset_circuits: @default_auto_reset
+        ] do
+      {key, Keyword.get(opts, key, Keyword.get(app_config, key, default))}
+    end
   end
 end

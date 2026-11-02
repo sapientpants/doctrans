@@ -9,6 +9,7 @@ defmodule Doctrans.Chat do
 
   alias Doctrans.Chat.MultiSearch
   alias Doctrans.Documents
+  alias Doctrans.Documents.Pages
   alias Doctrans.Errors
   alias Doctrans.Search
 
@@ -255,10 +256,11 @@ defmodule Doctrans.Chat do
   Checks if a document has any chunks or pages with embeddings ready for chat.
 
   Prefers chunks (fine-grained), falls back to page-level embeddings. Accepts a
-  `Document` struct or a bare document id.
+  `Document` struct or a bare document id. Chat is the only consumer of this
+  predicate, so it is reached here rather than through `Doctrans.Documents`.
   """
   @spec embeddings_ready?(Documents.Document.t() | Ecto.UUID.t()) :: boolean()
-  defdelegate embeddings_ready?(document), to: Documents
+  defdelegate embeddings_ready?(document), to: Pages
 
   @doc """
   The search options for `retrieve/4`, from a caller's chat options.

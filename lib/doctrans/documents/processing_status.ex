@@ -18,7 +18,8 @@ defmodule Doctrans.Documents.ProcessingStatus do
   import Ecto.Query
   import Doctrans.Documents.Page, only: [failed?: 1, settled?: 1]
 
-  alias Doctrans.Documents.{Document, Page, Pages}
+  alias Doctrans.Documents
+  alias Doctrans.Documents.{Document, Page}
   alias Doctrans.Processing.JobStates
   alias Doctrans.Repo
 
@@ -93,7 +94,7 @@ defmodule Doctrans.Documents.ProcessingStatus do
       document_id: document.id,
       content: content,
       index: index,
-      failed_pages: Pages.failed_page_numbers(document.id),
+      failed_pages: Documents.failed_page_numbers(document.id),
       # Derived, never recounted: a second definition of failure is a second
       # answer, and the badge and the list would eventually disagree.
       failed_page_count: pages.failed,

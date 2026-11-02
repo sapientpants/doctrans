@@ -1,7 +1,6 @@
 defmodule Doctrans.Processing.DocumentReprocessing do
   @moduledoc "Atomically replaces generated document content and starts a fresh run."
   import Ecto.Query
-  import Doctrans.Documents.Page, only: [failed?: 1]
   alias Doctrans.Chat.Session
   alias Doctrans.Documents
   alias Doctrans.Documents.{Page, Topics}
@@ -145,16 +144,10 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     {document, retried}
   end
 
-  # `Doctrans.Documents.Pages.failed_pages_query/1` assembles the same three
-  # clauses, but naming that module here would put this one over the dependency
-  # ceiling. The rule itself is not restated: `failed?/1` is the single
-  # definition both queries are built from.
   defp failed_pages(document_id) do
-    from(p in Page,
-      where: p.document_id == ^document_id,
-      where: failed?(p),
-      order_by: p.page_number
-    )
+    document_id
+    |> Documents.failed_pages_query()
+    |> order_by([p], p.page_number)
     |> Repo.all()
   end
 

@@ -4,7 +4,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Pages}
+  alias Doctrans.Documents.Layout
   alias Doctrans.Processing.{LlmProcessor, OpenAIMock}
 
   import Doctrans.Fixtures
@@ -52,7 +52,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
 
       # Mark extraction as completed
       {:ok, page} =
-        Pages.update_page_extraction(page, %{
+        Documents.update_page_extraction(page, %{
           extraction_status: "completed",
           original_markdown: "# Test Content"
         })

@@ -1,8 +1,8 @@
 defmodule Doctrans.SearchTest do
   use Doctrans.DataCase, async: true
 
+  alias Doctrans.Documents
   alias Doctrans.Documents.Page
-  alias Doctrans.Documents.Pages
   alias Doctrans.Repo
   alias Doctrans.Search
 
@@ -38,7 +38,7 @@ defmodule Doctrans.SearchTest do
       page = page_fixture(document, %{page_number: 3})
 
       {:ok, page} =
-        Pages.update_page_extraction(page, %{
+        Documents.update_page_extraction(page, %{
           extraction_status: "completed",
           original_markdown: "This is searchable content about cats and dogs"
         })
@@ -56,13 +56,13 @@ defmodule Doctrans.SearchTest do
       page = page_fixture(document, %{page_number: 2})
 
       {:ok, page} =
-        Pages.update_page_extraction(page, %{
+        Documents.update_page_extraction(page, %{
           extraction_status: "completed",
           original_markdown: "Original content"
         })
 
       {:ok, page} =
-        Pages.update_page_translation(page, %{
+        Documents.update_page_translation(page, %{
           translation_status: "completed",
           translated_markdown: "Translated content about elephants"
         })
@@ -78,13 +78,13 @@ defmodule Doctrans.SearchTest do
       page = page_fixture(document, %{page_number: 1})
 
       {:ok, page} =
-        Pages.update_page_extraction(page, %{
+        Documents.update_page_extraction(page, %{
           extraction_status: "completed",
           original_markdown: "placeholder"
         })
 
       {:ok, page} =
-        Pages.update_page_translation(page, %{
+        Documents.update_page_translation(page, %{
           translation_status: "completed",
           translated_markdown: "The runner was running fast through the field"
         })
@@ -99,7 +99,7 @@ defmodule Doctrans.SearchTest do
       page = page_fixture(document, %{page_number: 5})
 
       {:ok, page} =
-        Pages.update_page_extraction(page, %{
+        Documents.update_page_extraction(page, %{
           extraction_status: "completed",
           original_markdown: "Unique searchterm findme content"
         })
@@ -206,7 +206,7 @@ defmodule Doctrans.SearchTest do
       page = page_fixture(document, %{page_number: 1})
 
       {:ok, _page} =
-        Pages.update_page_extraction(page, %{
+        Documents.update_page_extraction(page, %{
           extraction_status: "completed",
           original_markdown: "Content with uniqueword99"
         })
@@ -239,7 +239,9 @@ defmodule Doctrans.SearchTest do
         assert result.page_id == completed.id
 
         # The same text/vector becomes eligible when only its stage changes.
-        assert {:ok, _} = Pages.update_page_extraction(pending, %{extraction_status: "completed"})
+        assert {:ok, _} =
+                 Documents.update_page_extraction(pending, %{extraction_status: "completed"})
+
         assert {:ok, %{results: results}} = Search.search_with_count(query)
         assert Enum.sort(Enum.map(results, & &1.page_id)) == Enum.sort([completed.id, pending.id])
       end
@@ -401,7 +403,7 @@ defmodule Doctrans.SearchTest do
     {:ok, page} =
       document
       |> page_fixture(%{page_number: page_number})
-      |> Pages.update_page_extraction(%{
+      |> Documents.update_page_extraction(%{
         extraction_status: "completed",
         original_markdown: markdown
       })
@@ -419,7 +421,7 @@ defmodule Doctrans.SearchTest do
     |> Repo.update!()
   end
 
-  # Inserted through `Repo` rather than the `Pages` API to pin the embedding
+  # Inserted through `Repo` rather than the `Documents` API to pin the embedding
   # alongside the text in one write.
   defp insert_indexed_page(document, page_number, embedding) do
     Repo.insert!(%Page{

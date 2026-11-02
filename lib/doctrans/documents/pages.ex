@@ -1,8 +1,11 @@
 defmodule Doctrans.Documents.Pages do
   @moduledoc """
-  Context for managing document pages.
+  CRUD operations and queries for the pages of a document.
 
-  Provides CRUD operations and queries for pages within documents.
+  Production code reaches these through the delegates on `Doctrans.Documents`,
+  so the page API has a single path; only this module's own tests name it
+  directly. The one exception is `embeddings_ready?/1`, which `Doctrans.Chat`
+  reaches here because chat is its only consumer.
   """
 
   import Ecto.Query

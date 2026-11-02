@@ -45,9 +45,22 @@ defmodule Doctrans.Documents.SweeperWorkerTest do
     end
 
     test "falls back to the documented defaults when nothing is configured" do
+      # `config/test.exs` disables the application's worker; clear that so the
+      # module defaults are what is left.
+      TestEnv.put_env(SweeperWorker, [])
       worker = start_worker([])
 
       assert %{enabled: true, interval_hours: 6, grace_period_hours: 24} =
+               GenServer.call(worker, :status)
+    end
+
+    test "start options win over the application environment" do
+      TestEnv.put_env(SweeperWorker, enabled: true, interval_hours: 12, grace_period_hours: 48)
+
+      worker = start_worker(enabled: false, grace_period_hours: 7)
+
+      # The interval is the one key the start options leave to the environment.
+      assert %{enabled: false, interval_hours: 12, grace_period_hours: 7} =
                GenServer.call(worker, :status)
     end
 
@@ -125,18 +138,45 @@ defmodule Doctrans.Documents.SweeperWorkerTest do
           with_unavailable_documents_table(fn ->
             :ok = GenServer.cast(worker, :sweep_now)
 
+            # The same shape every other database failure in the application
+            # takes, not a message string of the sweeper's own.
             assert %{sweep_count: 1, last_result: {:error, reason}} =
                      GenServer.call(worker, :status)
 
-            assert reason =~ "documents"
+            assert {:database_error, [reason: %Postgrex.Error{} = error]} = reason
+            assert Exception.message(error) =~ "documents"
           end)
         end)
 
       assert log =~ "Sweep failed"
-      assert_received {^failed, %{count: 1}, %{error: _reason}}
+      assert_received {^failed, %{count: 1}, %{error: {:database_error, _}}}
 
       # A sweep that could not tell orphans from live documents deleted neither.
       assert File.exists?(orphan)
+    end
+
+    test "an orphan that cannot be removed stays visible in the status", %{
+      documents_dir: documents_dir
+    } do
+      worker = start_worker(enabled: false, interval_hours: 6, grace_period_hours: 24)
+      failed = observe_telemetry([:doctrans, :sweeper, :failed])
+      removable = expired_orphan(documents_dir)
+      stuck = read_only_orphan(documents_dir)
+
+      log =
+        capture_log(fn ->
+          :ok = GenServer.cast(worker, :sweep_now)
+
+          assert %{sweep_count: 1, last_result: {:error, reason}} =
+                   GenServer.call(worker, :status)
+
+          assert reason == {:sweep_incomplete, [deleted: 1, failed: [stuck]]}
+        end)
+
+      assert log =~ "Failed to delete orphaned directory #{stuck}"
+      assert_received {^failed, %{count: 1}, %{error: {:sweep_incomplete, _}}}
+      refute File.exists?(removable)
+      assert File.exists?(stuck)
     end
   end
 
@@ -159,14 +199,14 @@ defmodule Doctrans.Documents.SweeperWorkerTest do
 
   # The application owns the registered name, so the instance under test runs
   # unnamed and is stopped with the case — nothing it schedules outlives it.
+  # Its settings travel as start options, which the worker prefers to the
+  # application environment, so nothing global is touched.
   defp start_worker(config) do
-    TestEnv.put_env(SweeperWorker, config)
-
     worker =
       start_supervised!(
         %{
           id: :sweeper_worker_under_test,
-          start: {GenServer, :start_link, [SweeperWorker, []]}
+          start: {GenServer, :start_link, [SweeperWorker, config]}
         },
         restart: :temporary
       )
@@ -185,6 +225,20 @@ defmodule Doctrans.Documents.SweeperWorkerTest do
   defp expire!(path) do
     File.touch!(path, System.os_time(:second) - @expired_seconds)
     path
+  end
+
+  # An expired orphan whose contents cannot be unlinked: removing a file needs
+  # write permission on its directory (as the unprivileged user the suite and CI
+  # run as; root is kept out of nothing). Writable again before the root is
+  # torn down, so the setup's cleanup can still remove it.
+  defp read_only_orphan(documents_dir) do
+    path = Path.join(documents_dir, Ecto.UUID.generate())
+    File.mkdir_p!(path)
+    File.write!(Path.join(path, "page.png"), "rendered page")
+    File.chmod!(path, 0o555)
+    on_exit(fn -> File.chmod!(path, 0o755) end)
+    # Last: writing into the directory touched it, and so does chmod on macOS.
+    expire!(path)
   end
 
   # The suite runs Logger at :warning, where an :info message is never built,

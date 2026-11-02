@@ -15,6 +15,9 @@ defmodule Doctrans.Documents.SweeperWorker do
         grace_period_hours: 24
 
   Set `enabled: false` to disable the sweeper entirely.
+
+  The same three keys are accepted as start options, which take precedence, so
+  a test can start an instance of its own without a global override.
   """
 
   use GenServer
@@ -22,6 +25,7 @@ defmodule Doctrans.Documents.SweeperWorker do
   require Logger
 
   alias Doctrans.Documents.Sweeper
+  alias Doctrans.Errors
 
   @default_interval_hours 6
   @default_grace_period_hours 24
@@ -47,6 +51,12 @@ defmodule Doctrans.Documents.SweeperWorker do
 
   @doc """
   Returns the current configuration and status.
+
+  `last_result` is the last sweep's `Doctrans.Documents.Sweeper.sweep/1`
+  result, so an orphan the sweeper could not remove is reported here as
+  `{:error, {:sweep_incomplete, deleted: count, failed: paths}}`. A sweep that
+  raised is reported as `{:error, reason}` too, with the database failure in the
+  `{:database_error, reason: error}` shape the rest of the application uses.
   """
   @spec status() :: %{
           enabled: boolean(),
@@ -54,7 +64,7 @@ defmodule Doctrans.Documents.SweeperWorker do
           grace_period_hours: pos_integer(),
           last_sweep: DateTime.t() | nil,
           sweep_count: non_neg_integer(),
-          last_result: {:ok, non_neg_integer()} | {:error, String.t()} | nil
+          last_result: {:ok, non_neg_integer()} | {:error, Errors.reason()} | nil
         }
   def status do
     GenServer.call(__MODULE__, :status)
@@ -63,8 +73,8 @@ defmodule Doctrans.Documents.SweeperWorker do
   # Server Callbacks
 
   @impl true
-  def init(_opts) do
-    config = get_config()
+  def init(opts) do
+    config = config(opts)
 
     state = %{
       enabled: config[:enabled],
@@ -132,30 +142,9 @@ defmodule Doctrans.Documents.SweeperWorker do
     Logger.info("Starting scheduled document sweep...")
 
     result =
-      try do
-        {:ok, count} = Sweeper.sweep(grace_period_hours: state.grace_period_hours)
-        Logger.info("Sweep complete: #{count} orphaned directories removed")
-
-        :telemetry.execute(
-          [:doctrans, :sweeper, :completed],
-          %{count: count},
-          %{}
-        )
-
-        {:ok, count}
-      rescue
-        e ->
-          reason = Exception.message(e)
-          Logger.error("Sweep failed: #{reason}")
-
-          :telemetry.execute(
-            [:doctrans, :sweeper, :failed],
-            %{count: 1},
-            %{error: reason}
-          )
-
-          {:error, reason}
-      end
+      state.grace_period_hours
+      |> run_sweep()
+      |> report_sweep()
 
     %{
       state
@@ -165,13 +154,39 @@ defmodule Doctrans.Documents.SweeperWorker do
     }
   end
 
-  defp get_config do
-    config = Application.get_env(:doctrans, __MODULE__, [])
+  defp run_sweep(grace_period_hours) do
+    Sweeper.sweep(grace_period_hours: grace_period_hours)
+  rescue
+    error in [Postgrex.Error, DBConnection.ConnectionError] ->
+      {:error, {:database_error, [reason: error]}}
 
-    [
-      enabled: Keyword.get(config, :enabled, true),
-      interval_hours: Keyword.get(config, :interval_hours, @default_interval_hours),
-      grace_period_hours: Keyword.get(config, :grace_period_hours, @default_grace_period_hours)
-    ]
+    error ->
+      {:error, Errors.normalize(error)}
+  end
+
+  defp report_sweep({:ok, count} = result) do
+    Logger.info("Sweep complete: #{count} orphaned directories removed")
+    :telemetry.execute([:doctrans, :sweeper, :completed], %{count: count}, %{})
+    result
+  end
+
+  defp report_sweep({:error, reason} = result) do
+    Logger.error("Sweep failed: #{inspect(reason)}")
+    :telemetry.execute([:doctrans, :sweeper, :failed], %{count: 1}, %{error: reason})
+    result
+  end
+
+  # Start options win over the application environment, so a test can start an
+  # instance of its own without a global override.
+  defp config(opts) do
+    app_config = Application.get_env(:doctrans, __MODULE__, [])
+
+    for {key, default} <- [
+          enabled: true,
+          interval_hours: @default_interval_hours,
+          grace_period_hours: @default_grace_period_hours
+        ] do
+      {key, Keyword.get(opts, key, Keyword.get(app_config, key, default))}
+    end
   end
 end
