@@ -8,7 +8,9 @@ defmodule Mix.Tasks.RechunkDocuments do
   lock and queues `Doctrans.Jobs.EmbeddingJob`, which rebuilds the page in the
   running application with the same revision fencing and retry schedule as every
   other indexing run. The queued work is done by the application, so the server
-  must be running (or started afterwards) for the pages to be re-indexed.
+  must be running (or started afterwards) for the pages to be re-indexed: the
+  task boots the application with its queues closed and its startup recovery
+  off, so that this short-lived VM only enqueues and never executes.
 
   A page an active indexing job already owns is left to that job and reported as
   skipped; rerun the task once that job has finished.
@@ -26,7 +28,7 @@ defmodule Mix.Tasks.RechunkDocuments do
 
   @impl true
   def run(_args) do
-    Mix.Task.run("app.start")
+    start_app_enqueue_only()
 
     page_ids = Reindex.extracted_page_ids()
     total = length(page_ids)
@@ -43,6 +45,41 @@ defmodule Mix.Tasks.RechunkDocuments do
     Mix.shell().info(
       "Done. #{counts.queued} queued, #{counts.skipped} skipped, #{counts.failed} failed."
     )
+  end
+
+  # Booted as configured, this VM would open the embedding queue and start
+  # executing the very jobs the loop below queues, then halt without grace the
+  # moment `run/1` returns: a job caught mid-run is left `executing` — its page
+  # stuck at "processing", its revision blocked from re-enqueue — until
+  # `Oban.Lifeline` rescues it a quarter of an hour later. Startup recovery is
+  # also a boot-time enqueue, and a job it queues for a not-yet-indexed page would
+  # make the rebuild of that page skip as owned. Both are the running server's to
+  # do; this process only enqueues.
+  #
+  # The override is applied only when this task is the one booting the
+  # application. Under `mix test` the app is already running, and a global
+  # environment the suite did not set must not be changed from here.
+  defp start_app_enqueue_only do
+    Mix.Task.run("app.config")
+
+    unless app_started?() do
+      oban = Application.get_env(:doctrans, Oban, [])
+      Application.put_env(:doctrans, Oban, Keyword.merge(oban, queues: false, plugins: false))
+
+      worker = Application.get_env(:doctrans, Doctrans.Processing.Worker, [])
+
+      Application.put_env(
+        :doctrans,
+        Doctrans.Processing.Worker,
+        Keyword.put(worker, :startup_recovery, false)
+      )
+    end
+
+    Mix.Task.run("app.start")
+  end
+
+  defp app_started? do
+    Enum.any?(Application.started_applications(), &match?({:doctrans, _, _}, &1))
   end
 
   # Prints one page's outcome and names the counter it goes to.
