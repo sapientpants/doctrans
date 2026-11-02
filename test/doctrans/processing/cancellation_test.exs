@@ -129,7 +129,7 @@ defmodule Doctrans.Processing.CancellationTest do
 
         # The job that was executing when the user cancelled finishes and asks
         # for the document to be settled; every page reads as a success.
-        assert :cancelled = Completion.check_document_completion(document.id)
+        assert :cancelled = Completion.check_document_completion_unguarded(document.id)
         assert Repo.get!(Document, document.id).status == "cancelled"
       end)
     end

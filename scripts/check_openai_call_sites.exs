@@ -22,17 +22,14 @@ defmodule OpenAICallSiteChecker do
     # The client itself.
     "lib/doctrans/processing/openai.ex" => "is the client",
     # The seam: the default the `:openai_module` env key falls back to.
-    "lib/doctrans/deps.ex" => "is the seam",
-    # The embedding client is a seam of its own (`Deps.embedding/0`) and delegates
-    # to `OpenAI.embed/2`, which is not part of `OpenAIBehaviour`.
-    "lib/doctrans/search/embedding.ex" => "implements the embedding seam"
+    "lib/doctrans/deps.ex" => "is the seam"
   }
 
   # An `alias Doctrans.Processing.OpenAI`, bare or inside a multi-alias (which the
   # formatter may spread over several lines), a call through the full module name
   # or through a bare `alias Doctrans.Processing`, or a function capture of either.
   # `\b` keeps `OpenAIBehaviour`, `OpenAIMock` and `Doctrans.Config.OpenAI` out of
-  # it; requiring `(` or a leading `&` keeps `Doctrans.Processing.OpenAI.embed/2`
+  # it; requiring `(` or a leading `&` keeps a `Doctrans.Processing.OpenAI.chat/2`
   # in a `@moduledoc` out of it.
   @patterns [
     ~r/\balias\s+Doctrans\.Processing\.OpenAI\b(?!\.)/,

@@ -39,9 +39,11 @@ defmodule Doctrans.ConfigTest do
     TestEnv.put_env(:openai, base_url: "http://llm:8000", chat_model: "chat")
     TestEnv.put_env(:embedding, base_url: nil)
     assert Embedding.base_url() == "http://llm:8000"
-    assert Embedding.model() == "chat"
     assert Embedding.api_key() == nil
     assert Embedding.timeout() == 60_000
+
+    # The chat model cannot serve embeddings, so there is nothing to fall back to.
+    assert_raise KeyError, fn -> Embedding.model() end
 
     TestEnv.put_env(:embedding,
       base_url: "http://embeddings:9000",

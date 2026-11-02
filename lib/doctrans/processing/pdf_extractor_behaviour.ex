@@ -2,7 +2,9 @@ defmodule Doctrans.Processing.PdfExtractorBehaviour do
   @moduledoc """
   Behaviour for PDF extraction.
 
-  This allows mocking the PDF extraction in tests.
+  This allows mocking the PDF extraction in tests. The pipeline dispatches
+  `get_page_count/1` once per document and `extract_page/4` once per page;
+  `available?/0` is for readiness reporting.
   """
 
   @callback extract_page(
@@ -15,11 +17,6 @@ defmodule Doctrans.Processing.PdfExtractorBehaviour do
 
   @callback get_page_count(pdf_path :: String.t()) ::
               {:ok, integer()} | {:error, Doctrans.Errors.reason()}
-
-  @callback page_image_path(output_dir :: String.t(), page_number :: integer()) ::
-              String.t() | nil
-
-  @callback list_page_images(output_dir :: String.t()) :: [String.t()]
 
   @callback available?() :: boolean()
 end

@@ -92,34 +92,38 @@ config :doctrans, :pdf_extraction, []
 # - macOS: brew install --cask libreoffice
 # - Ubuntu: apt-get install libreoffice-writer-nogui
 #
-# Optional keys:
-# - timeout (default 120_000): milliseconds a conversion may take before
-#   the soffice process is killed
+# Every key is optional and has its default in `Doctrans.Config.DocumentConversion`,
+# stated there and nowhere else; set a key here only to override it:
+# - timeout: milliseconds a conversion may take before the soffice process is
+#   killed
 # - soffice_path: explicit path to the soffice executable, e.g. an
 #   installation under a Nix store that is not on $PATH
-# - search_paths: extra absolute paths checked when soffice is not on
-#   $PATH (defaults cover Homebrew, macOS, and Debian/Ubuntu layouts)
-config :doctrans, :document_conversion, timeout: 120_000
+# - search_paths: absolute paths checked when soffice is not on $PATH (the
+#   default covers Homebrew, macOS, and Debian/Ubuntu layouts)
+config :doctrans, :document_conversion, []
 
 # Document sweeper configuration (cleans up orphaned directories)
-config :doctrans, Doctrans.Documents.SweeperWorker,
-  enabled: true,
-  interval_hours: 6,
-  grace_period_hours: 24
-
-# Default language settings.
 #
-# :target_language preselects the upload dialog's target picker.
+# Every key is optional and has its default in `Doctrans.Documents.SweeperWorker`;
+# set one here only to override it:
+# - enabled: false skips the scheduled sweeps (`sweep_now/0` still works)
+# - interval_hours: how often a sweep runs
+# - grace_period_hours: how old an orphaned directory must be before it is removed
+config :doctrans, Doctrans.Documents.SweeperWorker, []
+
+# Default language settings. Both keys are optional, with their defaults in the
+# module that reads them; set one here only to override it.
+#
+# :target_language preselects the upload dialog's target picker
+# (`DoctransWeb.DocumentLive.Index`).
 #
 # :source_language is NOT a default choice -- the source picker starts on
 # "Detect automatically", and the language is read from the document's own text
 # during processing. This is only the fallback recorded when detection cannot
 # identify the language (unreadable text, or a reply naming nothing supported),
 # so that a document always ends up with one stated source language rather than
-# a silent gap.
-config :doctrans, :defaults,
-  source_language: "de",
-  target_language: "en"
+# a silent gap (`Doctrans.Processing.SourceLanguage`).
+config :doctrans, :defaults, []
 
 # Gettext configuration for i18n
 config :doctrans, DoctransWeb.Gettext,

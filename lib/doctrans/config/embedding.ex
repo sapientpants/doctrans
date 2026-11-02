@@ -10,8 +10,15 @@ defmodule Doctrans.Config.Embedding do
   @spec api_key() :: String.t() | nil
   def api_key, do: Config.get(:embedding, :api_key)
 
+  @doc """
+  The embedding model; required.
+
+  There is no fallback to the chat model on purpose: a completion model cannot
+  serve `/v1/embeddings`, so a missing name is a configuration error to report,
+  not a gap to paper over.
+  """
   @spec model() :: String.t()
-  def model, do: Config.get(:embedding, :model) || OpenAI.chat_model()
+  def model, do: Config.fetch!(:embedding, :model)
 
   @doc "Per-receive timeout in milliseconds; defaults to one minute."
   @spec timeout() :: pos_integer()

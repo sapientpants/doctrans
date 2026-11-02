@@ -11,8 +11,8 @@ defmodule Doctrans.Processing.Prompts do
   alias Doctrans.Languages
 
   @doc "Asks the model to transcribe a page image as Markdown."
-  @spec extract(keyword()) :: String.t()
-  def extract(_opts) do
+  @spec extract() :: String.t()
+  def extract do
     "Extract all text and formatting from this image as clean Markdown. Include all headings, paragraphs, lists, tables, and other formatting elements exactly as they appear. Do not omit or summarize any content."
   end
 

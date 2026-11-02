@@ -99,7 +99,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   # source format, which is reported like a source that is not there.
   defp extract_from(document, path) do
     if path && File.regular?(path) do
-      case DocumentProcessor.extract_document(document.id, path, MapSet.new(), document) do
+      case DocumentProcessor.extract_document(document.id, path, document) do
         {:error, :obsolete_run} -> :ok
         result -> result
       end

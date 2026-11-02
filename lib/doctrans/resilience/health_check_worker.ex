@@ -3,16 +3,20 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   Periodic health check worker.
 
   Runs health checks at configurable intervals and emits telemetry events.
-  Can automatically reset circuit breakers when services recover.
+
+  It never resets a circuit breaker. The OpenAI verdict comes from
+  `list_models/0`, which asks the `:openai_api` fuse itself, so a recovery is
+  only ever visible once `:fuse` has already reopened that fuse on its own
+  schedule; and the `:embedding_api` fuse guards a different endpoint, about
+  which the verdict says nothing.
 
   ## Configuration
 
       config :doctrans, Doctrans.Resilience.HealthCheckWorker,
         enabled: true,
-        interval_ms: 60_000,
-        auto_reset_circuits: true
+        interval_ms: 60_000
 
-  The same three keys are accepted as start options, which take precedence, so
+  The same two keys are accepted as start options, which take precedence, so
   a test can start an instance of its own without a global override.
 
   ## Telemetry Events
@@ -28,7 +32,6 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   alias Doctrans.Resilience.{CircuitBreaker, HealthCheck}
 
   @default_interval_ms 60_000
-  @default_auto_reset true
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -41,7 +44,6 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
   @spec status() :: %{
           enabled: boolean(),
           interval_ms: pos_integer(),
-          auto_reset_circuits: boolean(),
           last_check: DateTime.t() | nil,
           last_results: HealthCheck.results() | nil,
           check_count: non_neg_integer(),
@@ -66,7 +68,6 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
     state = %{
       enabled: config[:enabled],
       interval_ms: config[:interval_ms],
-      auto_reset_circuits: config[:auto_reset_circuits],
       last_check: nil,
       last_results: nil,
       check_count: 0
@@ -88,7 +89,6 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
     status = %{
       enabled: state.enabled,
       interval_ms: state.interval_ms,
-      auto_reset_circuits: state.auto_reset_circuits,
       last_check: state.last_check,
       last_results: state.last_results,
       check_count: state.check_count,
@@ -144,11 +144,6 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
         Logger.debug("Health check passed: #{name}")
     end)
 
-    # Auto-reset circuit breakers if services recovered
-    if state.auto_reset_circuits do
-      maybe_reset_circuits(results, state.last_results)
-    end
-
     # Emit summary telemetry
     healthy_count = Enum.count(results, fn {_, r} -> r == :ok or match?({:ok, _}, r) end)
 
@@ -170,39 +165,12 @@ defmodule Doctrans.Resilience.HealthCheckWorker do
     }
   end
 
-  defp maybe_reset_circuits(current_results, previous_results) when is_map(previous_results) do
-    # Check if OpenAI recovered (was failing, now healthy)
-    openai_was_failing =
-      case previous_results[:openai] do
-        {:error, _} -> true
-        _ -> false
-      end
-
-    openai_now_healthy =
-      case current_results[:openai] do
-        {:ok, _} -> true
-        _ -> false
-      end
-
-    if openai_was_failing and openai_now_healthy do
-      Logger.info("OpenAI recovered, resetting circuit breakers")
-      CircuitBreaker.reset(:openai_api)
-      CircuitBreaker.reset(:embedding_api)
-    end
-  end
-
-  defp maybe_reset_circuits(_current, _previous), do: :ok
-
   # Start options win over the application environment, so a test can start an
   # instance of its own without a global override.
   defp config(opts) do
     app_config = Application.get_env(:doctrans, __MODULE__, [])
 
-    for {key, default} <- [
-          enabled: true,
-          interval_ms: @default_interval_ms,
-          auto_reset_circuits: @default_auto_reset
-        ] do
+    for {key, default} <- [enabled: true, interval_ms: @default_interval_ms] do
       {key, Keyword.get(opts, key, Keyword.get(app_config, key, default))}
     end
   end

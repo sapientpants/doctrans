@@ -1,17 +1,17 @@
-defmodule Doctrans.Processing.Worker do
+defmodule Doctrans.Processing.StartupRecoveryWorker do
   @moduledoc """
-  Runs the startup recovery pass.
+  Schedules the startup recovery pass.
 
   The GenServer owns one piece of work: shortly after boot it walks
   `StartupRecovery` one batch at a time, so a large backlog of interrupted
   documents is re-queued in the background rather than as a single burst.
-  Enqueueing lives on the job modules (`DocumentExtractionJob.enqueue_document/2`,
-  `LlmProcessingJob.enqueue_page/2`, `EmbeddingJob.enqueue_page/1`) and job
-  cancellation on `Cancellation`.
 
   ## Configuration
 
-      config :doctrans, Doctrans.Processing.Worker,
+  Every key has its default here; `config/config.exs` sets one only to
+  override it:
+
+      config :doctrans, Doctrans.Processing.StartupRecoveryWorker,
         startup_recovery: true,
         startup_delay_ms: 5_000,
         batch_interval_ms: 1_000
@@ -67,11 +67,11 @@ defmodule Doctrans.Processing.Worker do
       Process.send_after(self(), :recover_incomplete_documents, config[:startup_delay_ms])
 
       Logger.info(
-        "Processing.Worker started, recovering incomplete work in " <>
+        "StartupRecoveryWorker started, recovering incomplete work in " <>
           "#{config[:startup_delay_ms]}ms"
       )
     else
-      Logger.info("Processing.Worker startup recovery is disabled")
+      Logger.info("StartupRecoveryWorker boot-time recovery is disabled")
     end
 
     {:ok, %{batch_interval_ms: config[:batch_interval_ms]}}

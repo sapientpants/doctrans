@@ -21,11 +21,9 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
       states: [:available, :scheduled, :executing, :retryable, :suspended]
     ]
 
-  require Logger
-
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
-  alias Doctrans.Jobs.Keys
+  alias Doctrans.Jobs.{Keys, RetryTelemetry}
   alias Doctrans.Processing.{LlmProcessor, Run}
 
   @page_id_key Keys.page_id()
@@ -78,7 +76,7 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
     generation = Map.get(args, "generation")
 
     try do
-      LlmProcessor.process_page(page_id, MapSet.new(), processor_opts(args, generation))
+      LlmProcessor.process_page(page_id, processor_opts(args, generation))
     catch
       # A crash returns no result, so settle here: Oban discards the job after
       # the last attempt and nothing else would move the document off
@@ -105,29 +103,13 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
     Keyword.put(models, :generation, generation)
   end
 
-  # The processor owns no retry loop, so the retry series the dashboard charts
-  # (`type: :extraction` and `:translation`, alongside `:embedding`) is emitted
-  # from the layer that does own it — here. A `{:cancel, _}` is not a retry and
-  # reports nothing, just as a permanent error never did.
-  defp report_retry({:error, {code, _bindings}}, %Oban.Job{} = job, page_id)
+  # The processor owns no retry loop, so its retry series is reported from the
+  # layer that does own it -- here, through the one emission site every job
+  # shares. A `{:cancel, _}` is not a retry and reports nothing, just as a
+  # permanent error never did.
+  defp report_retry({:error, {code, _bindings} = reason}, %Oban.Job{} = job, page_id)
        when code in [:page_extraction_failed, :page_translation_failed] do
-    type = stage(code)
-
-    if job.attempt >= job.max_attempts do
-      Logger.error("#{type} exhausted #{job.max_attempts} attempts for page #{page_id}")
-
-      :telemetry.execute(
-        [:doctrans, :retry, :exhausted],
-        %{count: 1},
-        %{type: type, page_id: page_id}
-      )
-    else
-      :telemetry.execute(
-        [:doctrans, :retry, :attempt],
-        %{count: 1},
-        %{type: type, page_id: page_id, attempt: job.attempt}
-      )
-    end
+    RetryTelemetry.report(job, stage(code), page_id, reason)
   end
 
   defp report_retry(_outcome, _job, _page_id), do: :ok
@@ -142,8 +124,10 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
       {:cancel, reason} ->
         publish_final_error(page_id, generation, reason)
 
-      {:error, reason} when job.attempt >= job.max_attempts ->
-        publish_final_error(page_id, generation, reason)
+      {:error, reason} ->
+        if RetryTelemetry.final_attempt?(job),
+          do: publish_final_error(page_id, generation, reason),
+          else: :ok
 
       _ ->
         :ok

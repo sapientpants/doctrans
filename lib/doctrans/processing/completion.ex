@@ -7,17 +7,23 @@ defmodule Doctrans.Processing.Completion do
   have all settled. `update_document_status_to_processing/1` moves a document
   out of its pre-processing states when the first page job begins.
 
-  Both are guarded by `Run`, so a job left over from an earlier run cannot
-  settle the document the current run owns, and both broadcast only after the
-  transaction that holds the document lock has committed. Cancellation and
-  reprocessing own their own transitions in `Cancellation` and
-  `DocumentReprocessing`; the recovery pass that re-queues interrupted work is
-  `StartupRecovery`.
+  Both are guarded by `Run`: the page or document a caller hands over names
+  the run it acts for, so a job left over from an earlier run cannot settle the
+  document the current run owns. `check_document_completion_unguarded/1` is the
+  one exception, for the recovery pass, which holds no page or document of a run
+  and settles whichever run the document currently holds. Every transition
+  broadcasts only after the transaction that holds the document lock has
+  committed. Cancellation and reprocessing own their own transitions in
+  `Cancellation` and `DocumentReprocessing`; the recovery pass that re-queues
+  interrupted work is `StartupRecovery`.
   """
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
   alias Doctrans.Processing.{JobStates, Run}
+
+  @typedoc "How the document settled, or why it did not."
+  @type verdict :: :completed | :failed | :retrying | :incomplete | :cancelled
 
   @doc """
   Resolves the document state from its pages and applies terminal transitions.
@@ -25,16 +31,13 @@ defmodule Doctrans.Processing.Completion do
   Only fully successful pages complete a document. A document whose pages have
   all settled with at least one failure becomes an error, unless a failed page
   still has a pending retry that may yet succeed (`:retrying`).
-  """
-  @spec check_document_completion(
-          Ecto.UUID.t()
-          | Documents.Page.t()
-          | Documents.Document.t()
-          | nil
-        ) ::
-          :completed | :failed | :retrying | :incomplete | :cancelled | {:error, :obsolete_run}
-  def check_document_completion(nil), do: :incomplete
 
+  The page or document names the run this check acts for: one that has been
+  reset, replaced or deleted since answers `{:error, :obsolete_run}` and
+  changes nothing.
+  """
+  @spec check_document_completion(Documents.Page.t() | Documents.Document.t()) ::
+          verdict() | {:error, :obsolete_run}
   def check_document_completion(%Documents.Page{} = page) do
     Run.with_page(page, fn _ -> complete_locked_document(Run.lock(page.document_id)) end)
     |> publish_completion()
@@ -45,7 +48,15 @@ defmodule Doctrans.Processing.Completion do
     |> publish_completion()
   end
 
-  def check_document_completion(document_id) do
+  @doc """
+  Resolves the document state with no run guard.
+
+  For a caller that holds no page or document of a run -- the startup recovery
+  pass selects documents by status alone -- and so settles whichever run the
+  document currently holds. A document that is gone is `:incomplete`.
+  """
+  @spec check_document_completion_unguarded(Ecto.UUID.t()) :: verdict()
+  def check_document_completion_unguarded(document_id) do
     {:ok, result} =
       Doctrans.Repo.transaction(fn -> complete_locked_document(Run.lock(document_id)) end)
 
@@ -112,20 +123,17 @@ defmodule Doctrans.Processing.Completion do
   defp publish_completion(result), do: result
 
   @doc """
-  Updates document status to processing.
+  Updates the page's document to processing.
 
-  Only updates if document is currently in uploading, extracting, or queued state.
-  This is safe to call multiple times - it will only update if needed.
+  Only updates if the document is currently in uploading, extracting, or queued
+  state. This is safe to call multiple times - it will only update if needed.
+  The page names the run; one that has moved on answers `{:error, :obsolete_run}`.
   """
-  @spec update_document_status_to_processing(Ecto.UUID.t() | Documents.Page.t()) ::
+  @spec update_document_status_to_processing(Documents.Page.t()) ::
           :ok | {:error, :obsolete_run}
   def update_document_status_to_processing(%Documents.Page{} = page) do
     Run.with_page(page, fn _ -> start_processing(page.document_id) end)
     |> publish_status()
-  end
-
-  def update_document_status_to_processing(document_id) do
-    start_processing(document_id) |> publish_status()
   end
 
   defp start_processing(document_id) do

@@ -17,17 +17,26 @@ defmodule Doctrans.Resilience.CircuitBreaker do
        config :doctrans, :circuit_breakers,
         openai_api: [
           strategy: {:standard, 5, 60_000},  # 5 failures in 60s = blown
-          refresh: 30_000                     # Check recovery every 30s
+          refresh: 30_000                     # reopens 30s after blowing
         ],
         embedding_api: [
           strategy: {:standard, 3, 30_000},
           refresh: 15_000
         ]
 
+  `refresh` is `:fuse`'s `{:reset, ms}`: a blown fuse reopens unconditionally
+  that many milliseconds later. Nothing checks whether the service recovered in
+  the meantime; the next call finds out, and melts again if it did not.
+
   ## States
 
   - `:ok` - Circuit is closed, requests flow through
   - `:blown` - Circuit is open, requests are rejected immediately
+
+  Asking and melting are separate: `call/2` only asks, and the one place that
+  melts is `Doctrans.Processing.ApiFailure.handle/3`, which classifies a failure
+  first so that a permanent error -- a bad key, a malformed body -- never pushes
+  a fuse toward blown.
   """
 
   require Logger
@@ -74,14 +83,12 @@ defmodule Doctrans.Resilience.CircuitBreaker do
   end
 
   @doc """
-  Executes a function with circuit breaker protection.
+  Runs `fun` unless the circuit is open.
 
   If the circuit is open (blown), returns `{:error, :circuit_open}` immediately
-  without executing the function.
-
-  On success, returns the function result.
-  On failure, melts the fuse and returns the error. Pass `melt: false` when
-  the caller classifies and records failures itself.
+  without executing the function. Otherwise returns whatever `fun` returns,
+  errors included: this asks the fuse and never melts it, because failure
+  accounting belongs to the caller, which can classify what it sees.
 
   ## Examples
 
@@ -95,11 +102,11 @@ defmodule Doctrans.Resilience.CircuitBreaker do
       iex> CircuitBreaker.call(:openai_api, fn -> :never_called end)
       {:error, :circuit_open}
   """
-  @spec call(atom(), (-> any()), keyword()) :: any()
-  def call(fuse_name, fun, opts \\ []) when is_atom(fuse_name) and is_function(fun, 0) do
+  @spec call(atom(), (-> result)) :: result | {:error, :circuit_open} when result: var
+  def call(fuse_name, fun) when is_atom(fuse_name) and is_function(fun, 0) do
     case :fuse.ask(fuse_name, :sync) do
       :ok ->
-        execute_with_fuse(fuse_name, fun, opts)
+        fun.()
 
       :blown ->
         Logger.warning("Circuit breaker #{fuse_name} is open, rejecting request")
@@ -115,25 +122,6 @@ defmodule Doctrans.Resilience.CircuitBreaker do
       {:error, :not_found} ->
         Logger.warning("Circuit breaker #{fuse_name} not installed, executing without protection")
         fun.()
-    end
-  end
-
-  defp execute_with_fuse(fuse_name, fun, opts) do
-    result = fun.()
-
-    case result do
-      {:ok, _} ->
-        result
-
-      :ok ->
-        result
-
-      {:error, reason} = error ->
-        if Keyword.get(opts, :melt, true), do: melt(fuse_name, reason)
-        error
-
-      other ->
-        other
     end
   end
 

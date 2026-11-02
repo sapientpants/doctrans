@@ -14,17 +14,11 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   require Logger
 
+  alias Doctrans.Config.DocumentConversion
   alias Doctrans.Processing.Executable
   alias Doctrans.Processing.Subprocess
 
-  @default_timeout 120_000
   @profile_timeout 10_000
-  @search_paths [
-    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-    "/usr/bin/soffice",
-    "/usr/local/bin/soffice",
-    "/opt/homebrew/bin/soffice"
-  ]
 
   @impl true
   def available? do
@@ -56,14 +50,13 @@ defmodule Doctrans.Processing.DocumentConverter do
   #   2. The first `soffice` found on `PATH`.
   #   3. Absolute executable entries in `:search_paths`.
   #
+  # The settings and their defaults are `Doctrans.Config.DocumentConversion`'s.
   # Returns `{:ok, path}` or `{:error, :soffice_not_found}`.
   @spec resolve_soffice_path() :: {:ok, String.t()} | {:error, :soffice_not_found}
   def resolve_soffice_path do
-    config = Application.get_env(:doctrans, :document_conversion, [])
-
     case Executable.resolve("soffice",
-           configured: Keyword.get(config, :soffice_path),
-           candidates: Keyword.get(config, :search_paths, @search_paths)
+           configured: DocumentConversion.soffice_path(),
+           candidates: DocumentConversion.search_paths()
          ) do
       {:ok, path} -> {:ok, path}
       :error -> {:error, :soffice_not_found}
@@ -71,7 +64,7 @@ defmodule Doctrans.Processing.DocumentConverter do
   end
 
   defp supervise_conversion(path, source_path, output_dir) do
-    timeout = get_timeout()
+    timeout = DocumentConversion.timeout()
 
     # The profile is created inside the supervised process so a caller killed
     # mid-conversion still has it removed.
@@ -175,11 +168,5 @@ defmodule Doctrans.Processing.DocumentConverter do
       |> Enum.map_join("/", &URI.encode(&1, fn char -> URI.char_unreserved?(char) end))
 
     "file://" <> encoded
-  end
-
-  # Returns the configured timeout in milliseconds.
-  defp get_timeout do
-    config = Application.get_env(:doctrans, :document_conversion, [])
-    Keyword.get(config, :timeout, @default_timeout)
   end
 end

@@ -66,11 +66,11 @@ defmodule Mix.Tasks.RechunkDocuments do
       oban = Application.get_env(:doctrans, Oban, [])
       Application.put_env(:doctrans, Oban, Keyword.merge(oban, queues: false, plugins: false))
 
-      worker = Application.get_env(:doctrans, Doctrans.Processing.Worker, [])
+      worker = Application.get_env(:doctrans, Doctrans.Processing.StartupRecoveryWorker, [])
 
       Application.put_env(
         :doctrans,
-        Doctrans.Processing.Worker,
+        Doctrans.Processing.StartupRecoveryWorker,
         Keyword.put(worker, :startup_recovery, false)
       )
     end

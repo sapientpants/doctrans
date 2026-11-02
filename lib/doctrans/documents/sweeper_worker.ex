@@ -7,14 +7,15 @@ defmodule Doctrans.Documents.SweeperWorker do
 
   ## Configuration
 
-  Configure in `config/config.exs`:
+  Every key has its default here; `config/config.exs` sets one only to
+  override it:
 
       config :doctrans, Doctrans.Documents.SweeperWorker,
         enabled: true,
         interval_hours: 6,
         grace_period_hours: 24
 
-  Set `enabled: false` to disable the sweeper entirely.
+  Set `enabled: false` to disable the scheduled sweeps.
 
   The same three keys are accepted as start options, which take precedence, so
   a test can start an instance of its own without a global override.

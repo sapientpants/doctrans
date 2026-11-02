@@ -1,4 +1,4 @@
-defmodule Doctrans.Processing.WorkerStartupTest do
+defmodule Doctrans.Processing.StartupRecoveryWorkerBootTest do
   # `async: false` on purpose: the sandbox is shared for a synchronous case, so a
   # worker started here can query before the test has a pid to hand the
   # connection to. That is the situation the boot-time pass is in, and the one
@@ -7,7 +7,7 @@ defmodule Doctrans.Processing.WorkerStartupTest do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.Worker
+  alias Doctrans.Processing.StartupRecoveryWorker
 
   import Doctrans.Fixtures
 
@@ -64,7 +64,7 @@ defmodule Doctrans.Processing.WorkerStartupTest do
 
   defp start_worker!(opts) do
     start_supervised!(
-      %{id: :worker_under_test, start: {GenServer, :start_link, [Worker, opts]}},
+      %{id: :worker_under_test, start: {GenServer, :start_link, [StartupRecoveryWorker, opts]}},
       restart: :temporary
     )
   end

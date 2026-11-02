@@ -1,7 +1,6 @@
 defmodule Doctrans.Processing.PdfExtractorTest do
   @moduledoc """
-  Covers the extractor's filesystem helpers and what each poppler-backed call
-  reports for a PDF that is not there.
+  Covers what each poppler-backed call reports for a PDF that is not there.
 
   The three error tests below used to wrap the call in `rescue ErlangError ->
   :ok`, which turned any crash — including one from a completely unrelated
@@ -27,46 +26,6 @@ defmodule Doctrans.Processing.PdfExtractorTest do
 
   @missing_pdf "/nonexistent.pdf"
 
-  describe "list_page_images/1" do
-    test "returns empty list for non-existent directory" do
-      result = PdfExtractor.list_page_images("/nonexistent/directory")
-      assert result == []
-    end
-
-    test "returns sorted list of page images" do
-      dir = tmp_dir("pdf_test")
-
-      # Create test files out of order
-      File.write!(Path.join(dir, "page-03.png"), "")
-      File.write!(Path.join(dir, "page-01.png"), "")
-      File.write!(Path.join(dir, "page-02.png"), "")
-
-      result = PdfExtractor.list_page_images(dir)
-
-      assert length(result) == 3
-      assert Enum.at(result, 0) =~ "page-01.png"
-      assert Enum.at(result, 1) =~ "page-02.png"
-      assert Enum.at(result, 2) =~ "page-03.png"
-    end
-  end
-
-  describe "page_image_path/2" do
-    test "returns nil for non-existent page" do
-      dir = tmp_dir("pdf_test")
-
-      result = PdfExtractor.page_image_path(dir, 1)
-      assert result == nil
-    end
-
-    test "returns path for existing page" do
-      dir = tmp_dir("pdf_test")
-      File.write!(Path.join(dir, "page-01.png"), "")
-
-      result = PdfExtractor.page_image_path(dir, 1)
-      assert result =~ "page-01.png"
-    end
-  end
-
   describe "extract_page/4" do
     test "reports a missing PDF as a renderer failure" do
       dir = tmp_dir("pdf_out")
@@ -76,7 +35,7 @@ defmodule Doctrans.Processing.PdfExtractorTest do
 
       # Nothing was rendered, so nothing is there for a retry to mistake for a
       # finished page.
-      assert PdfExtractor.list_page_images(dir) == []
+      assert Path.wildcard(Path.join(dir, "page-*.png")) == []
     end
   end
 

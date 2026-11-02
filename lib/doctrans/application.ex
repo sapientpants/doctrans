@@ -29,7 +29,7 @@ defmodule Doctrans.Application do
       # Task supervisor for background processing
       {Task.Supervisor, name: Doctrans.TaskSupervisor},
       # Schedules the startup recovery pass that re-queues interrupted documents
-      Doctrans.Processing.Worker,
+      Doctrans.Processing.StartupRecoveryWorker,
       # Scheduled worker for cleaning up orphaned files
       Doctrans.Documents.SweeperWorker,
       # Periodic health check worker

@@ -37,7 +37,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
     test "a replay whose stages are all saved completes the document" do
       {document, [_first, last]} = interrupted_document([{1, :completed}, {2, :completed}])
 
-      assert LlmProcessor.process_page(last.id, MapSet.new(),
+      assert LlmProcessor.process_page(last.id,
                generation: last.processing_generation
              ) == :ok
 
@@ -63,7 +63,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
       {document, [_failed, last]} =
         interrupted_document([{1, %{extraction_status: "error"}}, {2, :completed}])
 
-      assert LlmProcessor.process_page(last.id, MapSet.new(),
+      assert LlmProcessor.process_page(last.id,
                generation: last.processing_generation
              ) == :ok
 
@@ -75,7 +75,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
     test "a replay leaves a document with outstanding work processing" do
       {document, [saved, _pending]} = interrupted_document([{1, :completed}, {2, %{}}])
 
-      assert LlmProcessor.process_page(saved.id, MapSet.new(),
+      assert LlmProcessor.process_page(saved.id,
                generation: saved.processing_generation
              ) == :ok
 

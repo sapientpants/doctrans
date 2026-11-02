@@ -343,9 +343,10 @@ Streaming chat uses a separate completion path and is not covered by this valida
 
 ## Configuration
 
-Key settings in `config/config.exs`. Each request bound is optional: its default is stated once,
-in the `Doctrans.Config.OpenAI`, `Doctrans.Config.Embedding` or `Doctrans.Config.PdfExtraction`
-module that reads it, and a key is set in `config.exs` only to override that default.
+Key settings in `config/config.exs`. Each bound and default is optional: it is stated once, in
+the `Doctrans.Config.OpenAI`, `Doctrans.Config.Embedding`, `Doctrans.Config.PdfExtraction` or
+`Doctrans.Config.DocumentConversion` module that reads it, and a key is set in `config.exs` only to
+override that default.
 
 ```elixir
 # API server settings (runtime OPENAI_HOST / OPENAI_API_KEY override these)
@@ -382,15 +383,15 @@ config :doctrans, :uploads, max_file_size: 100_000_000  # 100MB
 # image size limits): optional overrides, defaults in Doctrans.Config.PdfExtraction
 config :doctrans, :pdf_extraction, []
 
-# Document conversion timeout (for DOCX, DOC, ODT, RTF via LibreOffice)
-config :doctrans, :document_conversion, timeout: 120_000
+# Document conversion (DOCX, DOC, ODT, RTF via LibreOffice): optional timeout
+# and executable overrides, defaults in Doctrans.Config.DocumentConversion
+config :doctrans, :document_conversion, []
 
-# Default language settings. :target_language preselects the target picker.
-# :source_language is only the fallback recorded when detection cannot identify
-# a document's language -- the source picker starts on "Detect automatically".
-config :doctrans, :defaults,
-  source_language: "de",
-  target_language: "en"
+# Default language settings: optional overrides of :target_language (preselects
+# the target picker, "en") and :source_language (only the fallback recorded when
+# detection cannot identify a document's language, "de" -- the source picker
+# starts on "Detect automatically")
+config :doctrans, :defaults, []
 ```
 
 `:timeout` bounds one receive, so on its own it bounds silence rather than the request: an

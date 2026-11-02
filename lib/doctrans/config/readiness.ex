@@ -44,7 +44,7 @@ defmodule Doctrans.Config.Readiness do
   for far longer than the window suggests. Nothing waits on it — the dialog
   stays usable and the upload is never gated — so what that costs is a
   "checking" line that lingers. Bounding the total would mean threading a
-  deadline through `Doctrans.Processing.OpenAI.embed/2` and `list_models/0`,
+  deadline through `Doctrans.Search.Embedding.generate/2` and `list_models/0`,
   which no other caller has asked for.
 
   `check/0` is total for the `{:error, _}` results its collaborators are
@@ -146,7 +146,7 @@ defmodule Doctrans.Config.Readiness do
   end
 
   # One embedding call establishes availability and dimensional compatibility at
-  # once: `Doctrans.Processing.OpenAI.embed/2` truncates a wider Matryoshka
+  # once: `Doctrans.Search.Embedding.generate/2` truncates a wider Matryoshka
   # vector down to the stored width and rejects a narrower one, so a server that
   # answers with a usable vector has proved both.
   defp embedding_problems(models, chat, embedding) do

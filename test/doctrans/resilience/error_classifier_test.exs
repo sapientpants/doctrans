@@ -8,30 +8,14 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
       assert ErrorClassifier.classify(:timeout) == :retryable
     end
 
-    test "classifies {:error, :timeout} as retryable" do
-      assert ErrorClassifier.classify({:error, :timeout}) == :retryable
-    end
+    test "classifies normalized transport errors as retryable, whatever the reason" do
+      for reason <- [:timeout, :econnrefused, :econnreset, :closed, :nxdomain, :ehostunreach] do
+        assert ErrorClassifier.classify({:transport_error, [reason: reason]}) == :retryable
+      end
 
-    test "classifies transport errors as retryable" do
-      assert ErrorClassifier.classify({:error, %Req.TransportError{reason: :timeout}}) ==
-               :retryable
-
-      assert ErrorClassifier.classify({:error, %Req.TransportError{reason: :econnrefused}}) ==
-               :retryable
-
-      assert ErrorClassifier.classify({:error, %Req.TransportError{reason: :econnreset}}) ==
-               :retryable
-
-      assert ErrorClassifier.classify({:error, %Req.TransportError{reason: :closed}}) ==
-               :retryable
-
-      assert ErrorClassifier.classify({:error, %Req.TransportError{reason: :nxdomain}}) ==
-               :retryable
-
-      assert ErrorClassifier.classify({:error, %Req.TransportError{reason: :ehostunreach}}) ==
-               :retryable
-
-      assert ErrorClassifier.classify(%Req.TransportError{reason: :other}) == :retryable
+      # The shape `Doctrans.Errors.normalize/1` gives a raised transport error.
+      normalized = Doctrans.Errors.normalize(%Req.TransportError{reason: :other})
+      assert ErrorClassifier.classify(normalized) == :retryable
     end
 
     test "classifies conversion timeout as retryable" do
@@ -102,41 +86,18 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
       assert ErrorClassifier.classify({:http_error, [status: 422]}) == :permanent
     end
 
-    test "classifies file errors as permanent" do
-      assert ErrorClassifier.classify({:error, :enoent}) == :permanent
-      assert ErrorClassifier.classify({:error, :eacces}) == :permanent
-      assert ErrorClassifier.classify({:error, :enotdir}) == :permanent
-    end
-
-    test "classifies string errors with timeout keywords as retryable" do
-      assert ErrorClassifier.classify("connection timeout") == :retryable
-      assert ErrorClassifier.classify("request timed out") == :retryable
-      assert ErrorClassifier.classify("connection refused") == :retryable
-      assert ErrorClassifier.classify("connection reset by peer") == :retryable
-      assert ErrorClassifier.classify("HTTP 500 error") == :retryable
-      assert ErrorClassifier.classify("rate limit exceeded") == :retryable
-    end
-
-    test "classifies string errors with permanent keywords" do
-      assert ErrorClassifier.classify("resource not found") == :permanent
-      assert ErrorClassifier.classify("HTTP 404") == :permanent
-      assert ErrorClassifier.classify("invalid request") == :permanent
-      assert ErrorClassifier.classify("model xyz not available") == :permanent
-    end
-
-    test "classifies generic atom errors" do
-      assert ErrorClassifier.classify({:error, :econnrefused}) == :retryable
-      assert ErrorClassifier.classify({:error, :unknown_error}) == :unknown
-    end
-
-    test "classifies binary error reasons" do
-      assert ErrorClassifier.classify({:error, "timeout occurred"}) == :retryable
-      assert ErrorClassifier.classify({:error, "not found"}) == :permanent
+    test "classifies an unreadable page image as permanent, whatever the file error" do
+      for reason <- [:enoent, :eacces, :enotdir] do
+        assert ErrorClassifier.classify({:image_unreadable, [reason: reason]}) == :permanent
+      end
     end
 
     test "returns unknown for unrecognized errors" do
       assert ErrorClassifier.classify(:some_random_error) == :unknown
-      assert ErrorClassifier.classify({:error, {:complex, :error}}) == :unknown
+
+      assert ErrorClassifier.classify({:operation_failed, [reason: {:complex, :error}]}) ==
+               :unknown
+
       assert ErrorClassifier.classify("some random message") == :unknown
     end
   end
@@ -153,7 +114,7 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
 
     test "returns false for permanent errors" do
       assert ErrorClassifier.retryable?({:http_error, [status: 404]}) == false
-      assert ErrorClassifier.retryable?({:error, :enoent}) == false
+      assert ErrorClassifier.retryable?({:image_unreadable, [reason: :enoent]}) == false
     end
   end
 end

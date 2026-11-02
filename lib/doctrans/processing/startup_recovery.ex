@@ -149,18 +149,20 @@ defmodule Doctrans.Processing.StartupRecovery do
   # they all settled with a failure, and leaves a document alone while a retry
   # of a failed page is still pending.
   #
-  # One document per row, contained like the phases above: this phase commits
-  # per document rather than per batch, so an escaping error would abandon the
-  # cursor mid-batch and take the worker down with it. The worker restarts the
-  # whole pass from the first phase, and the inconsistency this phase exists to
-  # heal is durable, so an uncontained row would be replayed on every restart.
+  # One document per row, contained like `recover_embedding/1` above -- and
+  # unlike the two queueing phases before it, which commit a batch at a time:
+  # this phase commits per document rather than per batch, so an escaping error
+  # would abandon the cursor mid-batch and take the worker down with it. The
+  # worker restarts the whole pass from the first phase, and the inconsistency
+  # this phase exists to heal is durable, so an uncontained row would be
+  # replayed on every restart.
   #
   # Only the database errors are caught, matching `Cancellation.cancel_jobs/1`.
   # `Completion`'s `{:ok, _} =` matches are self-consistent under the document
   # lock it holds, so a MatchError from there would be a logic bug worth
   # surfacing rather than a row worth skipping.
   defp reconcile_completion(row) do
-    _ = Completion.check_document_completion(row.id)
+    _ = Completion.check_document_completion_unguarded(row.id)
     :ok
   rescue
     error in [Ecto.NoResultsError, Postgrex.Error, DBConnection.ConnectionError] ->

@@ -16,6 +16,39 @@ defmodule Doctrans.Processing.ApiFailure do
   @type reason :: term()
 
   @doc """
+  Turns a `Req` result into the caller's `{:ok, value}` or a reported failure.
+
+  Every way a call can fail -- a non-2xx, a transport error, or a 200 whose body
+  `parser` rejects -- goes through `handle/3`, so each failure is logged once at
+  the source, classified once, and leaves in the normalized shape. A malformed
+  body never melts the fuse: the classifier calls it permanent or unknown, not
+  transient. `opts` are `handle/3`'s.
+  """
+  @spec resolve(
+          {:ok, Req.Response.t()} | {:error, reason()},
+          atom(),
+          (term() -> {:ok, value} | {:error, reason()}),
+          keyword()
+        ) :: {:ok, value} | {:error, Doctrans.Errors.reason()}
+        when value: var
+  def resolve(result, fuse, parser, opts \\ [])
+
+  def resolve({:ok, %Req.Response{status: 200, body: body}}, fuse, parser, opts) do
+    case parser.(body) do
+      {:ok, _value} = ok -> ok
+      {:error, _reason} = error -> handle(fuse, error, opts)
+    end
+  end
+
+  def resolve({:ok, %Req.Response{status: status} = resp}, fuse, _parser, opts) do
+    handle(fuse, {:http_status, status, resp}, opts)
+  end
+
+  def resolve({:error, reason}, fuse, _parser, opts) do
+    handle(fuse, reason, opts)
+  end
+
+  @doc """
   Reports `reason` against `fuse` and returns the normalized `{:error, _}`.
 
   `melt: false` reports the failure without counting it against the fuse. It is

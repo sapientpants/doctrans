@@ -207,7 +207,16 @@ defmodule Doctrans.Processing.Subprocess do
     do: {:error, {Keyword.fetch!(opts, :start_tag), [error: inspect(reason)]}}
 
   def classify({:subprocess_owner_down, reason}, opts),
-    do: {:error, {Keyword.fetch!(opts, :start_tag), [error: inspect(reason)]}}
+    do: {:error, {Keyword.fetch!(opts, :start_tag), [error: owner_down_diagnostic(reason)]}}
+
+  # `supervised/1` reports a process that raised as `{exception, stacktrace}`.
+  # The message is the diagnostic, as `open_port/3` reports a start failure;
+  # the stacktrace stays out of a binding the error messages show verbatim.
+  defp owner_down_diagnostic({exception, stacktrace})
+       when is_exception(exception) and is_list(stacktrace),
+       do: Exception.message(exception)
+
+  defp owner_down_diagnostic(reason), do: inspect(reason)
 
   @doc """
   Turns retained command output into text safe to show and to encode.

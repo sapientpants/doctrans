@@ -41,12 +41,11 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
 
   describe "init/1" do
     test "reports its configuration before the first check has run" do
-      pid = start_worker!(enabled: true, interval_ms: 30_000, auto_reset_circuits: false)
+      pid = start_worker!(enabled: true, interval_ms: 30_000)
 
       assert GenServer.call(pid, :status) == %{
                enabled: true,
                interval_ms: 30_000,
-               auto_reset_circuits: false,
                last_check: nil,
                last_results: nil,
                check_count: 0,
@@ -64,21 +63,15 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
 
       assert status.enabled
       assert status.interval_ms == 60_000
-      assert status.auto_reset_circuits
     end
 
     test "start options win over the application environment" do
-      TestEnv.put_env(HealthCheckWorker,
-        enabled: true,
-        interval_ms: 5_000,
-        auto_reset_circuits: true
-      )
+      TestEnv.put_env(HealthCheckWorker, enabled: true, interval_ms: 5_000)
 
-      pid = start_worker!(enabled: false, auto_reset_circuits: false)
+      pid = start_worker!(enabled: false)
 
       # The interval is the one key the start options leave to the environment.
-      assert %{enabled: false, interval_ms: 5_000, auto_reset_circuits: false} =
-               GenServer.call(pid, :status)
+      assert %{enabled: false, interval_ms: 5_000} = GenServer.call(pid, :status)
     end
 
     test "a disabled worker ignores a check request", %{bypass: bypass} do
@@ -190,75 +183,6 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
     end
   end
 
-  describe "circuit breaker auto-reset" do
-    test "resets the API circuits once OpenAI answers again", %{bypass: bypass} do
-      pid = start_worker!(enabled: true, interval_ms: 60_000, auto_reset_circuits: true)
-
-      Bypass.expect(bypass, "GET", "/v1/models", &Plug.Conn.resp(&1, 401, "unauthorized"))
-      GenServer.cast(pid, :check_now)
-      assert {:error, _} = GenServer.call(pid, :status).last_results.openai
-
-      # The embedding fuse is the observable one: a blown `:openai_api` fuse
-      # would short-circuit the probe, so the check could never see a recovery.
-      blow(:embedding_api)
-
-      test_pid = self()
-      Bypass.expect(bypass, "GET", "/v1/models", &models(&1, test_pid, ["gpt-4o-mini"]))
-      GenServer.cast(pid, :check_now)
-
-      assert GenServer.call(pid, :status).circuit_breakers == %{
-               openai_api: :ok,
-               embedding_api: :ok
-             }
-    end
-
-    test "leaves the circuits alone while OpenAI is still failing", %{bypass: bypass} do
-      pid = start_worker!(enabled: true, interval_ms: 60_000, auto_reset_circuits: true)
-
-      Bypass.expect(bypass, "GET", "/v1/models", &Plug.Conn.resp(&1, 401, "unauthorized"))
-      GenServer.cast(pid, :check_now)
-
-      blow(:embedding_api)
-
-      # A second failing check: the previous verdict was a failure too, so
-      # there is no recovery to act on.
-      GenServer.cast(pid, :check_now)
-      status = GenServer.call(pid, :status)
-
-      assert status.last_results.openai == {:error, {:http_error, [status: 401]}}
-      assert status.circuit_breakers.embedding_api == :blown
-    end
-
-    test "leaves the circuits alone when the reset is switched off", %{bypass: bypass} do
-      pid = start_worker!(enabled: true, interval_ms: 60_000, auto_reset_circuits: false)
-
-      Bypass.expect(bypass, "GET", "/v1/models", &Plug.Conn.resp(&1, 401, "unauthorized"))
-      GenServer.cast(pid, :check_now)
-
-      blow(:embedding_api)
-
-      test_pid = self()
-      Bypass.expect(bypass, "GET", "/v1/models", &models(&1, test_pid, ["gpt-4o-mini"]))
-      GenServer.cast(pid, :check_now)
-
-      assert GenServer.call(pid, :status).circuit_breakers.embedding_api == :blown
-    end
-
-    test "leaves the circuits alone when OpenAI was healthy all along", %{bypass: bypass} do
-      test_pid = self()
-      Bypass.expect(bypass, "GET", "/v1/models", &models(&1, test_pid, ["gpt-4o-mini"]))
-
-      pid = start_worker!(enabled: true, interval_ms: 60_000, auto_reset_circuits: true)
-      GenServer.cast(pid, :check_now)
-      assert {:ok, _} = GenServer.call(pid, :status).last_results.openai
-
-      blow(:embedding_api)
-      GenServer.cast(pid, :check_now)
-
-      assert GenServer.call(pid, :status).circuit_breakers.embedding_api == :blown
-    end
-  end
-
   describe "the worker the application starts" do
     test "status/0 reports it disabled by the test configuration" do
       status = HealthCheckWorker.status()
@@ -308,12 +232,6 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
     conn
     |> Plug.Conn.put_resp_content_type("application/json")
     |> Plug.Conn.resp(200, Jason.encode!(body))
-  end
-
-  defp blow(fuse_name) do
-    for _ <- 1..6, do: CircuitBreaker.melt(fuse_name)
-    :blown = CircuitBreaker.status(fuse_name)
-    :ok
   end
 
   # The summary is emitted from the worker process, so the handler forwards it
