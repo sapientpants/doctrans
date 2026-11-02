@@ -1,5 +1,6 @@
 defmodule Doctrans.Chat.ConversationsTest do
   use Doctrans.DataCase, async: true
+  alias Doctrans.Chat
   alias Doctrans.Chat.{Conversations, Message, Session}
   alias Doctrans.Documents
 
@@ -109,7 +110,7 @@ defmodule Doctrans.Chat.ConversationsTest do
     saved = Conversations.load(document.id)
     assert length(saved.messages) == 100
     assert hd(saved.messages).content == "Question 3"
-    assert length(saved.history) == 16
+    assert length(saved.history) == Chat.history_limit()
     assert Repo.aggregate(Session, :count) == 1
     Repo.delete!(document)
     assert Repo.aggregate(Session, :count) == 0

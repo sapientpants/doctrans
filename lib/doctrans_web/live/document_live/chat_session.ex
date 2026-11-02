@@ -33,9 +33,6 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
 
   require Logger
 
-  # Keep the last 8 exchanges (user + assistant) as history for future turns.
-  @history_limit 16
-
   # The `start_async/3` name of the turn task.
   @turn :chat_turn
 
@@ -306,7 +303,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
            %{role: "user", content: socket.assigns.chat_last_question},
            %{role: "assistant", content: response}
          ])
-      |> Enum.take(-@history_limit)
+      |> Enum.take(-Chat.history_limit())
 
     socket
     |> stream_insert(:chat_messages, assistant_msg)

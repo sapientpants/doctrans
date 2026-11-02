@@ -41,6 +41,10 @@ defmodule Doctrans.Chat.Agent do
   # (on top of the initial planned multi-query search).
   @max_refine_rounds 2
 
+  # Chunks each retrieval round asks the search for. `Chat.merge_context/3`
+  # then bounds what accumulates across rounds and turns.
+  @context_limit 8
+
   @doc """
   Runs the agentic chat pipeline for `question` against `document`.
 
@@ -71,7 +75,7 @@ defmodule Doctrans.Chat.Agent do
   end
 
   defp do_run(document, question, chat_history, opts, on_event) do
-    search_opts = Chat.retrieval_opts(opts, 8)
+    search_opts = [limit: @context_limit]
 
     Logger.info(
       "Agent processing question for document #{document.id}: #{String.slice(question, 0, 100)}"
@@ -127,7 +131,7 @@ defmodule Doctrans.Chat.Agent do
 
   defp refine(document, merged, standalone_question, search_opts, opts, rounds_left) do
     context_text = Chat.build_context(merged)
-    {:ok, grade} = Grader.grade(standalone_question, context_text, opts)
+    grade = Grader.grade(standalone_question, context_text, opts)
 
     if grade.sufficient or grade.refined_queries == [] do
       merged

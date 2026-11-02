@@ -23,6 +23,11 @@ defmodule Doctrans.Chat.QueryExpander do
   @max_predict 512
   @max_queries 6
 
+  # Reformulation only needs the turns a follow-up can refer back to, so the
+  # planner sees a deliberately narrower window than the answer prompt
+  # (`Doctrans.Chat.history_exchanges/0`), which keeps the whole history.
+  @reformulation_exchanges 2
+
   @doc """
   Plans the retrieval queries for `question`.
 
@@ -133,7 +138,7 @@ defmodule Doctrans.Chat.QueryExpander do
 
   defp format_history(chat_history) do
     chat_history
-    |> Enum.take(-4)
+    |> Enum.take(-2 * @reformulation_exchanges)
     |> Enum.map_join("\n", fn msg ->
       role = if msg.role == "user", do: "User", else: "Assistant"
       "#{role}: #{msg.content}"

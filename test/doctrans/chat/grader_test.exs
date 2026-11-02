@@ -15,7 +15,7 @@ defmodule Doctrans.Chat.GraderTest do
         {:ok, ""}
       end)
 
-      assert {:ok, %{sufficient: false, refined_queries: []}} =
+      assert %{sufficient: false, refined_queries: []} =
                Grader.grade("What is the capital?", "")
 
       refute_received :model_queried
@@ -24,7 +24,7 @@ defmodule Doctrans.Chat.GraderTest do
     test "parses a sufficient verdict" do
       respond_with("Sufficient: yes")
 
-      assert {:ok, %{sufficient: true, refined_queries: []}} =
+      assert %{sufficient: true, refined_queries: []} =
                Grader.grade("What is the capital?", "[Page 1] Paris is the capital.")
     end
 
@@ -37,7 +37,7 @@ defmodule Doctrans.Chat.GraderTest do
 
       respond_with(response)
 
-      assert {:ok, grade} = Grader.grade("How many people live there?", "[Page 1] Some text.")
+      grade = Grader.grade("How many people live there?", "[Page 1] Some text.")
       refute grade.sufficient
 
       assert grade.refined_queries == [
@@ -49,14 +49,14 @@ defmodule Doctrans.Chat.GraderTest do
     test "defaults to sufficient when the response has no recognizable verdict" do
       respond_with("some unrelated text")
 
-      assert {:ok, %{sufficient: true}} =
+      assert %{sufficient: true} =
                Grader.grade("Question?", "[Page 1] Context.")
     end
 
     test "falls back to sufficient on model error" do
       respond_with({:error, :timeout})
 
-      assert {:ok, %{sufficient: true, refined_queries: []}} =
+      assert %{sufficient: true, refined_queries: []} =
                Grader.grade("Question?", "[Page 1] Context.")
     end
   end
