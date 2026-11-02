@@ -218,6 +218,34 @@ defmodule DoctransWeb.ErrorMessagesTest do
       end)
     end
 
+    test "a database outage has a specific message that names no operation" do
+      # Reached from cancellation, reprocessing and `Repo.safe_transaction/1`;
+      # the search paths remap to `:search_failed` / `:retrieval_unavailable`
+      # before they get here, so "failed to search" would be the wrong story.
+      assert_specific_messages_everywhere([
+        :database_error,
+        {:database_error, [reason: %DBConnection.ConnectionError{message: "closed"}]}
+      ])
+
+      Gettext.with_locale(DoctransWeb.Gettext, "en", fn ->
+        refute ErrorMessages.message(:database_error) =~ ~r/search/i
+      end)
+    end
+
+    test "a pdftoppm failure nested in an extraction failure does not repeat the prefix" do
+      Gettext.with_locale(DoctransWeb.Gettext, "en", fn ->
+        assert ErrorMessages.message(
+                 {:pdf_extraction_failed, [reason: {:pdf_command_failed, [error: "boom"]}]}
+               ) == "PDF extraction failed: pdftoppm failed: boom"
+      end)
+    end
+
+    test "a reason no producer emits has no entry of its own" do
+      # `:reprocess_failed` left with the page-reset flow; keeping its clause
+      # would keep a msgid live in every catalog for text nobody can see.
+      assert ErrorMessages.message(:reprocess_failed) == ErrorMessages.message(:unknown)
+    end
+
     test "a renderer timeout and a reader timeout do not give the same advice" do
       Gettext.with_locale(DoctransWeb.Gettext, "en", fn ->
         # Nothing was rendered when pdfinfo hangs, so "lower the resolution"
