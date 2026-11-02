@@ -389,6 +389,26 @@ defmodule Doctrans.ChatTest do
     end
   end
 
+  describe "build_messages/3" do
+    test "sends the model the shared history window, newest last" do
+      history =
+        for n <- 1..(Chat.history_limit() + 2),
+            role = if(rem(n, 2) == 1, do: "user", else: "assistant") do
+          %{role: role, content: "message #{n}"}
+        end
+
+      [system | rest] = Chat.build_messages("system", history, "question")
+
+      assert system == %{role: "system", content: "system"}
+      assert List.last(rest) == %{role: "user", content: "question"}
+
+      sent = Enum.drop(rest, -1)
+      assert length(sent) == Chat.history_limit()
+      assert hd(sent).content == "message 3"
+      assert List.last(sent).content == "message #{Chat.history_limit() + 2}"
+    end
+  end
+
   describe "embeddings_ready?/1" do
     test "returns false when no pages have embeddings" do
       document = create_document(status: "processing")

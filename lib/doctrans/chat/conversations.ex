@@ -163,22 +163,26 @@ defmodule Doctrans.Chat.Conversations do
     }
   end
 
-  # Keep the last eight complete exchanges in answer-completion order. Message
-  # insertion order alone cannot pair turns generated concurrently in two tabs.
+  # Keep the last `Chat.history_exchanges/0` complete exchanges in
+  # answer-completion order. Message insertion order alone cannot pair turns
+  # generated concurrently in two tabs.
   # Rotation and pre-linkage messages may leave answers without a known question;
   # keep those visible, but never guess their pairing in model history.
   defp completed_history(messages) do
-    questions =
-      messages
-      |> Enum.filter(&(&1.role == "user" and &1.completed))
-      |> Map.new(&{&1.id, &1})
+    questions = completed_questions(messages)
 
     messages
     |> Enum.filter(&(&1.role == "assistant" and &1.completed))
     |> Enum.flat_map(&paired_exchange(&1, questions))
-    |> Enum.take(-8)
+    |> Enum.take(-Chat.history_exchanges())
     |> List.flatten()
     |> Enum.map(&Map.take(&1, [:role, :content]))
+  end
+
+  defp completed_questions(messages) do
+    messages
+    |> Enum.filter(&(&1.role == "user" and &1.completed))
+    |> Map.new(&{&1.id, &1})
   end
 
   defp paired_exchange(answer, questions) do

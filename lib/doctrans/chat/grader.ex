@@ -24,15 +24,16 @@ defmodule Doctrans.Chat.Grader do
   @doc """
   Grades whether `context` is sufficient to answer `question`.
 
-  Returns `{:ok, %{sufficient: boolean(), refined_queries: [String.t()]}}`.
-  Always returns `{:ok, _}` — failures fall back to a "sufficient" verdict.
+  Returns a `grade/0` map. There is no error path: a failed or unparseable
+  model call falls back to a "sufficient" verdict, as `QueryExpander.expand/3`
+  falls back to the question it was given.
   """
-  @spec grade(String.t(), String.t(), keyword()) :: {:ok, grade()}
+  @spec grade(String.t(), String.t(), keyword()) :: grade()
   def grade(question, context, opts \\ [])
 
   def grade(_question, "", _opts) do
     # No context at all — nothing to grade against and nothing to refine toward.
-    {:ok, %{sufficient: false, refined_queries: []}}
+    %{sufficient: false, refined_queries: []}
   end
 
   def grade(question, context, opts) do
@@ -54,11 +55,11 @@ defmodule Doctrans.Chat.Grader do
     case StructuredCall.ask(prompt, opts, @max_predict) do
       {:ok, response} ->
         Logger.debug("Grader raw response:\n#{String.slice(response, 0, 300)}")
-        {:ok, parse_grade(response)}
+        parse_grade(response)
 
       {:error, reason} ->
         Logger.warning("Grading failed, assuming context is sufficient: #{inspect(reason)}")
-        {:ok, %{sufficient: true, refined_queries: []}}
+        %{sufficient: true, refined_queries: []}
     end
   end
 

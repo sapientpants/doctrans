@@ -22,6 +22,25 @@ defmodule Doctrans.Chat do
           optional(atom()) => term()
         }
 
+  @history_exchanges 8
+
+  @doc """
+  The number of completed exchanges (a question and its answer) kept as chat
+  history.
+
+  This is the one window every holder of history applies: the saved history
+  `Doctrans.Chat.Conversations` restores, the running history a chat session
+  keeps between turns, and the history `build_messages/3` sends to the model.
+  """
+  @spec history_exchanges() :: pos_integer()
+  def history_exchanges, do: @history_exchanges
+
+  @doc """
+  `history_exchanges/0` counted in messages: two per exchange.
+  """
+  @spec history_limit() :: pos_integer()
+  def history_limit, do: 2 * @history_exchanges
+
   @doc """
   Builds a context string from a list of search results (chunks or pages).
 
@@ -263,22 +282,6 @@ defmodule Doctrans.Chat do
   defdelegate embeddings_ready?(document), to: Pages
 
   @doc """
-  The search options for `retrieve/4`, from a caller's chat options.
-
-  `:context_limit` becomes the search `:limit`, falling back to `default_limit`
-  when absent. `:min_similarity` is passed through when given.
-  """
-  @spec retrieval_opts(keyword(), pos_integer()) :: keyword()
-  def retrieval_opts(opts, default_limit) do
-    base = [limit: Keyword.get(opts, :context_limit, default_limit)]
-
-    case Keyword.get(opts, :min_similarity) do
-      nil -> base
-      min_similarity -> Keyword.put(base, :min_similarity, min_similarity)
-    end
-  end
-
-  @doc """
   Retrieves relevant document context for a set of search queries.
 
   Runs multi-query search with RRF when there are multiple query variants,
@@ -352,18 +355,15 @@ defmodule Doctrans.Chat do
   @doc false
   @spec build_messages(String.t(), [message()], String.t()) :: [message()]
   def build_messages(system_prompt, chat_history, question) do
-    # Start with system prompt
     system_message = %{role: "system", content: system_prompt}
 
-    # Add chat history (limit to last 8 messages to avoid context overflow)
+    # Callers already hold a bounded history; the window is applied again here
+    # so the prompt never exceeds it whatever the caller passes.
     history_messages =
       chat_history
-      |> Enum.take(-8)
-      |> Enum.map(fn msg ->
-        %{role: msg.role, content: msg.content}
-      end)
+      |> Enum.take(-history_limit())
+      |> Enum.map(fn msg -> %{role: msg.role, content: msg.content} end)
 
-    # Add the current question
     user_message = %{role: "user", content: question}
 
     [system_message | history_messages] ++ [user_message]

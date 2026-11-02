@@ -82,7 +82,6 @@ defmodule Doctrans.Chat.MultiSearch do
     opts
     # Fetch more per-query so RRF has enough candidates to rank
     |> Keyword.put(:limit, limit + 2)
-    |> Keyword.delete(:context_limit)
   end
 
   # Supervised and *nolink*: `Task.async_stream/3` links each task to this
