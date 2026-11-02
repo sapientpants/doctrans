@@ -162,16 +162,20 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   # Runs one poppler command under a deadline. `:failure_tag` names a non-zero
   # exit and `:timeout_tag` a deadline for the caller, so a hung `pdfinfo` is not
-  # reported as a rendering problem; a command that never ran to an exit is a
-  # failure of the command itself, whichever one it was.
+  # reported as a rendering problem. A command that never ran to an exit is a
+  # failure of that same command, so it shares the `:failure_tag`: the user-facing
+  # copy names the tool, and a `pdfinfo` that failed to start must not be
+  # reported as `pdftoppm`.
   defp run(executable, args, timeout, tags) do
+    failure_tag = Keyword.fetch!(tags, :failure_tag)
+
     fn -> Subprocess.run(executable, args, timeout: timeout) end
     |> Subprocess.supervised()
     |> Subprocess.classify(
       name: executable,
       timeout: timeout,
-      failure_tag: Keyword.fetch!(tags, :failure_tag),
-      start_tag: :pdf_command_failed,
+      failure_tag: failure_tag,
+      start_tag: failure_tag,
       timeout_tag: Keyword.fetch!(tags, :timeout_tag)
     )
   end
