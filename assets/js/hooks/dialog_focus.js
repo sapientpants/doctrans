@@ -16,7 +16,7 @@ import {hasFocus} from "./focus"
 // there would never reach the dialog element.
 export const DialogFocus = {
   mounted() {
-    this.returnTo = this.returnTarget()
+    this.openedFrom = this.activeElementOutside()
     this.onKeyDown = event => this.trapTab(event)
     document.addEventListener("keydown", this.onKeyDown, true)
     this.focusFirst()
@@ -25,22 +25,21 @@ export const DialogFocus = {
     document.removeEventListener("keydown", this.onKeyDown, true)
     this.restoreFocus(3)
   },
-  returnTarget() {
-    const selector = this.el.getAttribute("data-return-focus")
-    const named = selector && document.querySelector(selector)
-    if (named) {
-      return named
-    }
+  // What had focus as the dialog opened, if that was somewhere on the page
+  // outside it. Only this is recorded at mount: the trigger named by
+  // `data-return-focus` is resolved when the dialog closes, since the patch
+  // that closes it is often the same one that rewrites the trigger, and a node
+  // resolved now may be gone by then.
+  activeElementOutside() {
     const active = document.activeElement
     return hasFocus() && !this.el.contains(active) ? active : null
   },
-  // The trigger, re-resolved rather than reused from mount, and only if it can
-  // actually take focus. The patch that closes a dialog is often the same one
-  // that rewrites its trigger: confirming a page reprocess resets the page to
-  // `pending`, which drops `#show-reprocess` from the DOM entirely, and
-  // confirming a document reprocess sets the status to `queued`, which
-  // disables `#show-document-reprocess` a patch later. `focus()` on a removed
-  // or disabled element silently does nothing.
+  // The named trigger first, then whatever was focused before the dialog
+  // opened, and only one that can actually take focus. Confirming a page
+  // reprocess resets the page to `pending`, which drops `#show-reprocess` from
+  // the DOM entirely, and confirming a document reprocess sets the status to
+  // `queued`, which disables `#show-document-reprocess` a patch later.
+  // `focus()` on a removed or disabled element silently does nothing.
   returnElement() {
     const usable = el =>
       el && el.isConnected && !el.disabled && el.getClientRects().length > 0
@@ -49,7 +48,7 @@ export const DialogFocus = {
     if (usable(named)) {
       return named
     }
-    return usable(this.returnTo) ? this.returnTo : null
+    return usable(this.openedFrom) ? this.openedFrom : null
   },
   // A dialog that cannot hand focus back to its trigger must still hand it
   // somewhere. Leaving it on `<body>` restarts a keyboard user at the top of

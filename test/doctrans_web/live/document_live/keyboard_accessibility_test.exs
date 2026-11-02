@@ -19,9 +19,11 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
   # global `:uploads` application env.
   use DoctransWeb.ConnCase, async: false
 
-  alias Doctrans.Processing.{OpenAIMock, PdfExtractorMock}
+  alias Doctrans.Documents.Layout
+  alias Doctrans.Processing.{OpenAIMock, PdfExtractorMock, Run}
   alias Doctrans.TestEnv
   alias DoctransWeb.DocumentLive.Components
+  alias DoctransWeb.ErrorMessages
 
   import Doctrans.Fixtures
 
@@ -344,6 +346,25 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
 
       # And it is the explanation, not the generic label.
       assert attribute(view, "#show-document-reprocess", "aria-label") =~ "unavailable"
+    end
+
+    test "a reprocess button disabled by a run in progress says so as well", %{conn: conn} do
+      # The original is on disk, so the run is the only thing disabling the
+      # button: a document still processing cannot be replaced by a fresh run.
+      document = document_fixture(%{total_pages: 1, status: "processing"})
+      completed_page_fixture(document)
+      File.mkdir_p!(Layout.document_dir(document.id))
+      File.write!(Run.source_path(document), "original pdf")
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      assert has_element?(view, "#show-document-reprocess[disabled]")
+
+      assert attribute(view, "#show-document-reprocess", "aria-label") ==
+               attribute(view, "#show-document-reprocess", "title")
+
+      assert attribute(view, "#show-document-reprocess", "aria-label") ==
+               ErrorMessages.message(:already_processing)
     end
   end
 

@@ -57,6 +57,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       assert status.content == :completed
       assert status.failed_page_count == 0
       assert status.failed_pages == []
+      assert status.progress == 100.0
       refute status.cancellable?
       refute status.retry_pages?
     end
@@ -80,6 +81,8 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       assert status.content == :failed
       assert status.failed_pages == [2]
       assert status.failed_page_count == 1
+      # One page through both steps, one through neither: two of four steps.
+      assert status.progress == 50.0
       assert status.pages == %{expected: 2, translated: 1, failed: 1, outstanding: 0}
       assert status.retry_pages?
     end
@@ -117,6 +120,13 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       _page = page_fixture(document)
 
       assert ProcessingStatus.for_document(document).content == :idle
+    end
+
+    test "progress reads as zero until the page count is known" do
+      document = document_fixture(%{status: "extracting"})
+      _page = indexed_page(document, 1, "completed")
+
+      assert ProcessingStatus.for_document(document).progress == 0.0
     end
 
     test "a pre-extraction document with no job is queued" do

@@ -12,22 +12,9 @@ defmodule DoctransWeb.Endpoint do
     # Not `Secure`: the app is served over plain HTTP on loopback or a LAN
     # address, and a `Secure` cookie would simply not be stored, breaking the
     # session. Confidentiality comes from the deployment binding, not the flag.
-    # (This previously read `compile_env(:doctrans, :env) == :prod`, but `:env`
-    # is configured nowhere, so it always evaluated to `false` regardless.)
     secure: false,
     http_only: true
   ]
-
-  # Hard server-side limit for multipart bodies: the upload UI allows up to
-  # 10 files of `:max_file_size` each, so allow headroom above that.
-  # Keep this compile-time read so Mix tracks changes to the parser limit.
-  # It uses the same required setting as Config.Uploads.max_file_size/0.
-  @multipart_length fn ->
-    max_file_size =
-      Application.compile_env!(:doctrans, [:uploads, :max_file_size])
-
-    10 * max_file_size + 1_000_000
-  end
 
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]],
@@ -73,9 +60,11 @@ defmodule DoctransWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # The default body limit is enough: document uploads travel over the LiveView
+  # socket, which bypasses this plug, and the router has no POST route, so no
+  # multipart body sized to `:max_file_size` ever reaches it.
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
-    length: @multipart_length.(),
     pass: ["*/*"],
     json_decoder: Phoenix.json_library()
 

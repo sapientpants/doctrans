@@ -181,11 +181,13 @@ defmodule DoctransWeb.Telemetry do
         unit: :millisecond,
         description: "Health check duration"
       ),
-      counter("doctrans.health_check.all_completed.healthy",
-        description: "Count of healthy services"
+      # One event per round carrying `%{total, healthy, unhealthy}`, so these are
+      # the size of each set as of the last round, not a tally of rounds.
+      last_value("doctrans.health_check.all_completed.healthy",
+        description: "Services the last health-check round found healthy"
       ),
-      counter("doctrans.health_check.all_completed.unhealthy",
-        description: "Count of unhealthy services"
+      last_value("doctrans.health_check.all_completed.unhealthy",
+        description: "Services the last health-check round found unhealthy"
       )
     ]
   end
@@ -193,9 +195,6 @@ defmodule DoctransWeb.Telemetry do
   # Processing Metrics
   defp processing_metrics do
     [
-      counter("doctrans.processing.timeout.count",
-        description: "Page processing timeouts"
-      ),
       counter("doctrans.sweeper.completed.count",
         description: "Successful sweeper runs"
       ),

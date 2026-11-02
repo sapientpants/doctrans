@@ -10,7 +10,7 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
   """
   use DoctransWeb, :html
 
-  alias DoctransWeb.DocumentLive.UploadIntake
+  alias DoctransWeb.DocumentLive.{UploadIntake, UploadOutcomes}
   alias DoctransWeb.ErrorMessages
   alias DoctransWeb.PrivacyCopy
 
@@ -294,7 +294,7 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
     <div id="upload-outcomes" aria-live="polite" class="mt-3 space-y-2 text-left">
       <div :if={@started > 0} id="upload-started" class="alert alert-success items-start">
         <.icon name="hero-check-circle" class="size-5 shrink-0" />
-        <p class="text-sm flex-1">{upload_started_message(@started)}</p>
+        <p class="text-sm flex-1">{UploadOutcomes.upload_started_message(@started)}</p>
       </div>
 
       <div :if={@failures != []} id="upload-failures" class="alert alert-error items-start">
@@ -337,20 +337,6 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
       </div>
     </div>
     """
-  end
-
-  @doc """
-  The message for documents a submission queued for processing.
-
-  Shared so the dashboard flash and the modal's own outcome list cannot drift apart.
-  """
-  @spec upload_started_message(non_neg_integer()) :: String.t()
-  def upload_started_message(count) do
-    ngettext(
-      "Document uploaded! Processing will begin shortly.",
-      "%{count} documents uploaded! Processing will begin shortly.",
-      count
-    )
   end
 
   defp upload_error(assigns) do

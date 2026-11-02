@@ -104,14 +104,6 @@
   --noise: 0;
 }
 
-/* Add variants based on LiveView classes */
-@custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
-@custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
-@custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
-
-/* Use the data attribute for dark mode  */
-@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
-
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
@@ -137,17 +129,20 @@
      light and dark daisyUI themes AND on top of any `base-100`/`base-200`
      surface (chat bubbles are `bg-base-200`). Every mix is a `--md-*` token
      below; do not hand-roll percentages in the rules.
-   - `.markdown-sm` (used by all three call sites) tightens the block scale;
-     see the variable overrides below.
+   - One scale, tuned for the narrow columns every call site is: the viewer
+     pane and the chat bubbles. The body font size is inherited, so neither
+     changes size here; only the heading scale and the vertical rhythm are
+     set, and every margin below derives from one of the two gap tokens, so
+     paragraphs and list items tighten along with the block-level spacing.
 --------------------------------------------------------------------------- */
 
 .markdown {
-  --md-h1: 1.75em;
-  --md-h2: 1.4em;
-  --md-h3: 1.2em;
-  --md-h4: 1.05em;
-  --md-block-gap: 1em;
-  --md-tight-gap: 0.25em;
+  --md-h1: 1.5em;
+  --md-h2: 1.25em;
+  --md-h3: 1.1em;
+  --md-h4: 1em;
+  --md-block-gap: 0.8em;
+  --md-tight-gap: 0.2em;
   --md-rule: color-mix(in oklab, var(--color-base-content) 15%, transparent);
   --md-rule-strong: color-mix(in oklab, var(--color-base-content) 35%, transparent);
   --md-cell-rule: color-mix(in oklab, var(--color-base-content) 20%, transparent);
@@ -162,26 +157,10 @@
   --md-link: color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));
   --md-mono: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 
-  line-height: 1.65;
+  line-height: 1.6;
   /* OCR output regularly contains long unbroken tokens (URLs, reference
      numbers); they must wrap instead of widening the pane. */
   overflow-wrap: break-word;
-}
-
-/* Compact scale for narrow columns. Deliberately leaves the body font size
-   inherited so neither the viewer nor the chat bubble changes size; only the
-   heading scale and the vertical rhythm tighten. Both gap tokens are scaled,
-   so paragraphs and list items tighten along with the block-level spacing —
-   every margin below derives from one of them. */
-.markdown.markdown-sm {
-  --md-h1: 1.5em;
-  --md-h2: 1.25em;
-  --md-h3: 1.1em;
-  --md-h4: 1em;
-  --md-block-gap: 0.8em;
-  --md-tight-gap: 0.2em;
-
-  line-height: 1.6;
 }
 
 /* No extra space at the edges of the container, or of a list item or quote.
@@ -446,9 +425,17 @@
 }
 
 
-/* Discrete zoom levels for the document page viewer.
-   Rendered as classes (not inline styles) so the CSP can keep
-   style-src 'self' without 'unsafe-inline'. */
+/* Discrete zoom levels for the document page viewer, one per level of the
+   scale `DoctransWeb.DocumentLive.PageViewer` steps through: `page_image/1`
+   interpolates the class name, so a level without a rule here renders
+   unscaled and nothing reports it. Rendered as classes (not inline styles)
+   so the CSP can keep style-src 'self' without 'unsafe-inline'.
+
+   The origin flips at 125%. Below full size the page is narrower than its
+   pane, so it shrinks toward the centre line and stays centred. Above it, a
+   transform scales the box without widening it: scaled from the centre the
+   left half overflows into space the pane cannot scroll to, while from the
+   left edge the overflow is all on the right, where `overflow-auto` reaches. */
 .zoom-50 { transform: scale(0.5); transform-origin: top center; }
 .zoom-75 { transform: scale(0.75); transform-origin: top center; }
 .zoom-100 { transform: scale(1); transform-origin: top center; }

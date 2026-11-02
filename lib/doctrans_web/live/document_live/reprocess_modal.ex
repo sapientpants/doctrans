@@ -19,9 +19,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     |> assign(:available_models, [])
     |> assign(:models_loading, false)
     |> assign(:model_fetch_error, nil)
-    |> assign(:extraction_model, Config.OpenAI.vision_model())
-    |> assign(:translation_model, Config.OpenAI.translation_model())
-    |> assign_form()
+    |> put_models(Config.OpenAI.vision_model(), Config.OpenAI.translation_model())
   end
 
   # Show reprocess button when page has completed processing or has an error
@@ -42,6 +40,25 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   """
   def can_reprocess_document?(%Doctrans.Documents.Document{} = document),
     do: DocumentReprocessing.reprocessable?(document)
+
+  @doc """
+  Names the reprocess-document button and fills its tooltip.
+
+  The two must say the same thing: `aria-label` overrides `title` for the
+  accessible name, so a tooltip-only explanation of why the button is disabled
+  never reaches a screen reader. One clause per reason the viewer disables it
+  for, so a disabled control always says why.
+  """
+  @spec reprocess_document_hint(boolean(), Doctrans.Documents.Document.t()) :: String.t()
+  def reprocess_document_hint(false, _document) do
+    gettext("Original upload unavailable. Re-upload this document to process it again.")
+  end
+
+  def reprocess_document_hint(true, document) do
+    if can_reprocess_document?(document),
+      do: gettext("Reprocess document"),
+      else: ErrorMessages.message(:already_processing)
+  end
 
   def handle_event("show_document_reprocess_modal", params, socket) do
     handle_event("show_reprocess_modal", params, assign(socket, :reprocess_scope, :document))
@@ -79,13 +96,11 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
 
   def handle_event("update_reprocess_models", params, socket) do
     socket =
-      socket
-      |> assign(:extraction_model, params["extraction_model"] || socket.assigns.extraction_model)
-      |> assign(
-        :translation_model,
-        params["translation_model"] || socket.assigns.translation_model
+      put_models(
+        socket,
+        params["extraction_model"] || selected_model(socket, :extraction_model),
+        params["translation_model"] || selected_model(socket, :translation_model)
       )
-      |> assign_form()
 
     {:noreply, socket}
   end
@@ -225,18 +240,20 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     |> assign(:available_models, models)
     |> assign(:models_loading, false)
     |> assign(:model_fetch_error, error)
-    |> assign(:extraction_model, available_selection(socket.assigns.extraction_model, models))
-    |> assign(:translation_model, available_selection(socket.assigns.translation_model, models))
-    |> assign_form()
+    |> put_models(
+      available_selection(selected_model(socket, :extraction_model), models),
+      available_selection(selected_model(socket, :translation_model), models)
+    )
   end
 
   defp select_page_models(
          %{assigns: %{reprocess_scope: :page, current_page: %{} = page}} = socket
        ) do
-    socket
-    |> assign(:extraction_model, page.extraction_model || Config.OpenAI.vision_model())
-    |> assign(:translation_model, page.translation_model || Config.OpenAI.translation_model())
-    |> assign_form()
+    put_models(
+      socket,
+      page.extraction_model || Config.OpenAI.vision_model(),
+      page.translation_model || Config.OpenAI.translation_model()
+    )
   end
 
   defp select_page_models(socket), do: socket
@@ -248,16 +265,21 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
       String.contains?(String.downcase(model), "embed")
   end
 
-  defp assign_form(socket) do
+  # The form is the one record of the selection. A selection kept beside it as
+  # scalar assigns had to be re-synced by every writer, and the one that forgot
+  # rendered a form a step behind the choice it was submitting.
+  defp put_models(socket, extraction_model, translation_model) do
     assign(
       socket,
       :reprocess_form,
       to_form(%{
-        "extraction_model" => socket.assigns.extraction_model,
-        "translation_model" => socket.assigns.translation_model
+        "extraction_model" => extraction_model,
+        "translation_model" => translation_model
       })
     )
   end
+
+  defp selected_model(socket, field), do: socket.assigns.reprocess_form[field].value
 
   attr :page, :map, required: true
   attr :document, :map, default: nil

@@ -21,19 +21,17 @@
 // rather than a shared chunk, which is what keeps a second `--bundle` entry
 // point cheap.
 
-import {syncThemeToggles} from "./theme_sync"
+import {SYSTEM, syncThemeToggles} from "./theme_sync"
 
 // The key `phx:theme` and the `phx:set-theme` event name are Phoenix
 // conventions, shared with `Layouts.theme_toggle/1`, which dispatches the
 // event from `phx-click`.
 const STORAGE_KEY = "phx:theme"
 
-// "System" is the absence of a choice, not a third stored value: the attribute
+// `SYSTEM` is the absence of a choice, not a third stored value: the attribute
 // comes off `<html>` and the daisyUI themes resolve through
 // `prefers-color-scheme` on their own. Storing the string instead would freeze
 // the page at whatever the system preference was on the day it was chosen.
-const SYSTEM = "system"
-
 // The only values `data-theme` may take. `light` and `dark` are the two daisyUI
 // themes declared in `app.css`.
 const THEMES = [SYSTEM, "light", "dark"]

@@ -22,15 +22,15 @@ const CHAT_FOLLOW_THRESHOLD_PX = 64
 // land there, so a ResizeObserver re-pins as well.
 //
 // Every element this reaches for is named by a `data-` attribute rather than a
-// hardcoded id, and a miss is reported: each of these failures is otherwise
-// silent, leaving an affordance that never appears or a button that never
-// binds.
+// hardcoded id or selector, and a miss is reported: each of these failures is
+// otherwise silent, leaving an affordance that never appears, a button that
+// never binds, or a submit that never re-pins.
 export const ChatScroll = {
   mounted() {
     this.newMessages = this.resolve("data-new-messages")
     this.jumpButton = this.resolve("data-jump-to-latest")
     this.liveRegion = this.resolve("data-live-region")
-    this.submitSelector = this.el.getAttribute("data-follow-on-submit")
+    this.submitSelector = this.resolveSelector("data-follow-on-submit")
 
     this.pinned = true
     this.scrollToBottom()
@@ -151,5 +151,26 @@ export const ChatScroll = {
       console.error(`ChatScroll: ${attribute}="${id}" matched no element`)
     }
     return el
+  },
+  // A selector rather than an id, because it is matched against a submit
+  // event's target, which LiveView swaps out as the form disables and
+  // re-enables. It is not resolved here: the form renders only once the
+  // document can be asked about, so an absent form at mount is a state, not a
+  // miss. What is checked is that the attribute names something at all, and
+  // that it parses as a selector, since `matches()` would otherwise throw on
+  // the first submit rather than at the point the markup went wrong.
+  resolveSelector(attribute) {
+    const selector = this.el.getAttribute(attribute)
+    if (!selector) {
+      console.error(`ChatScroll: ${attribute} is missing`)
+      return null
+    }
+    try {
+      document.querySelector(selector)
+    } catch {
+      console.error(`ChatScroll: ${attribute}="${selector}" is not a selector`)
+      return null
+    }
+    return selector
   }
 }

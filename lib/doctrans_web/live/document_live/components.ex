@@ -78,7 +78,13 @@ defmodule DoctransWeb.DocumentLive.Components do
   attr :id, :string, required: true
   attr :document, :map, required: true
   attr :progress, :float, required: true
-  attr :failed_pages, :list, default: []
+
+  attr :failed_pages, :list,
+    default: nil,
+    doc: """
+    the pages an errored document failed on, named under the bar; left out, the
+    bar reports no failure at all, for a caller that reports it elsewhere
+    """
 
   def processing_progress(assigns) do
     ~H"""
@@ -101,7 +107,7 @@ defmodule DoctransWeb.DocumentLive.Components do
       <%!-- `data-failed-pages` is read by the tests alone: it carries the page
             numbers so an assertion is on them, not on the translated prose. --%>
       <p
-        :if={@document.status == "error"}
+        :if={@failed_pages && @document.status == "error"}
         id={"#{@id}-failure"}
         data-failed-pages={Enum.join(@failed_pages, ",")}
         class="text-xs text-error"

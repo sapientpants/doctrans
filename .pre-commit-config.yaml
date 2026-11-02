@@ -100,7 +100,7 @@ repos:
   # Elixir hooks
   - repo: local
     hooks:
-      # 1. Security audit (fast - runs first for quick feedback on vulnerabilities)
+      # Security audit (fast - runs first for quick feedback on vulnerabilities)
       # Hex 2.5.1+ reports retired packages AND security advisories, exiting
       # non-zero for either. Acknowledged advisories live in the :hex section of
       # mix.exs; Hex warns when an entry stops matching the lockfile.
@@ -111,7 +111,7 @@ repos:
         pass_filenames: false
         files: ^(mix\.exs|mix\.lock)$
 
-      # 2. Code formatting check (fast - easy to fix)
+      # Code formatting check (fast - easy to fix)
       - id: mix-format
         name: Mix format check
         entry: mix format --check-formatted
@@ -119,7 +119,7 @@ repos:
         types: [elixir]
         pass_filenames: false
 
-      # 3. Translation completeness, and no fuzzy entries (fast). Gettext renders
+      # Translation completeness, and no fuzzy entries (fast). Gettext renders
       # fuzzy translations, so one is not a placeholder -- it is wrong text already
       # shipping, auto-filled from a different msgid the merge found similar.
       - id: check-translations
@@ -129,7 +129,7 @@ repos:
         pass_filenames: false
         files: ^(priv/gettext/.*\.pot?|scripts/check_translations\.exs)$
 
-      # 4. Compilation with warnings as errors (medium speed)
+      # Compilation with warnings as errors (medium speed)
       - id: mix-compile
         name: Mix compile with warnings as errors
         entry: mix compile --warnings-as-errors --all-warnings
@@ -137,7 +137,7 @@ repos:
         pass_filenames: false
         files: ^(lib/|test/|config/|mix\.exs)
 
-      # 3.5. Dependency vulnerability audit
+      # Dependency vulnerability audit
       - id: deps-audit
         name: Dependency vulnerability audit
         entry: mix deps.audit
@@ -145,7 +145,7 @@ repos:
         pass_filenames: false
         files: ^(mix\.exs|mix\.lock)$
 
-      # 3.55. Toolchain pin agreement. mise.toml is authoritative; CI reads it
+      # Toolchain pin agreement. mise.toml is authoritative; CI reads it
       # directly via erlef/setup-beam's `version-file`, but a Docker `FROM` line
       # cannot, so this keeps the restated version in Dockerfile.dev and Dockerfile
       # honest — and keeps every base image in both, the production runtime base
@@ -157,7 +157,7 @@ repos:
         pass_filenames: false
         files: ^(mise\.toml|Dockerfile(\.dev)?|scripts/check_toolchain_pins\.exs)$
 
-      # 3.57. Command-policy regression suite. scripts/command-policy.sh is the one
+      # Command-policy regression suite. scripts/command-policy.sh is the one
       # copy of the rule table every agent runs, and this is the only thing that
       # proves a rule change still blocks what it should and nothing else: it drives
       # the matcher, the pi adapter, and -- where the CLI is installed -- the codex
@@ -169,7 +169,7 @@ repos:
         pass_filenames: false
         files: ^(scripts/((test-)?command-policy\.sh|pi-adapter\.test\.mjs|fixtures/)|\.(pi/extensions|codex)/)
 
-      # 3.6. Module size limit. This line is the only place the number is stated:
+      # Module size limit. This line is the only place the number is stated:
       # the script requires --max-lines and has no default, so a caller cannot
       # disagree with a default it cannot see. 500 is the value the script documented
       # from the start; the 600 override was added inside a feature PR to let that
@@ -184,7 +184,7 @@ repos:
         pass_filenames: false
         files: ^(lib/.*\.ex|scripts/check_module_size\.exs)$
 
-      # 3.7. Compile-time dependency cycles. Architectural enforcement was assessed
+      # Compile-time dependency cycles. Architectural enforcement was assessed
       # and Boundary rejected: the violations it would catch do not
       # exist here, and it is an unmaintained compiler-tracer dependency with no
       # upper version bound. `mix xref` ships with Elixir, so it adds no
@@ -214,7 +214,7 @@ repos:
         pass_filenames: false
         files: ^(lib/|test/support/|mix\.exs$)
 
-      # 3.8. Asset bundle build. Nothing else in the gate compiles `assets/`: a syntax
+      # Asset bundle build. Nothing else in the gate compiles `assets/`: a syntax
       # error in app.js or theme.js, an import that resolves to nothing, or a stylesheet
       # `@import` naming a file that is not there all survive every check above and first
       # surface at `mix phx.server`, which is to say in a browser rather than in the gate.
@@ -227,7 +227,7 @@ repos:
       # including a cache hit, because `mix esbuild` only checks that the binary file
       # exists; a stale binary from an earlier pin is used with nothing but a warning, and
       # only `esbuild.install --if-missing` compares the installed `--version` against the
-      # configured one. It must also stay ahead of `6. mix-test-coverage`, which asserts the
+      # configured one. It must also stay ahead of `mix-test-coverage`, which asserts the
       # emitted bundles are served.
       - id: assets-build
         name: Build asset bundles (esbuild, Tailwind)
@@ -236,7 +236,7 @@ repos:
         pass_filenames: false
         files: ^(assets/|config/config\.exs|mix\.exs$)
 
-      # 4. Static code analysis with Credo (medium speed)
+      # Static code analysis with Credo (medium speed)
       - id: credo
         name: Credo strict mode
         entry: mix credo --strict
@@ -244,7 +244,7 @@ repos:
         pass_filenames: false
         files: ^(lib/|test/).*\.ex$
 
-      # 5. Security-focused static analysis (medium speed).
+      # Security-focused static analysis (medium speed).
       # .sobelow-conf sets exit: "low", so every confidence level blocks. Known-good
       # sites carry a `# sobelow_skip` annotation and a justification on the function
       # that owns the call; a new finding fails here instead of printing as noise.
@@ -255,9 +255,9 @@ repos:
         pass_filenames: false
         files: ^(lib/|config/)
 
-      # 5.2. raw/1 call-site register. The HTML sanitizer is the first layer in front of
-      # LLM-extracted upload content and the CSP the second; this pins the two sites
-      # that depend on the sanitizer.
+      # raw/1 call-site register. The HTML sanitizer is the first layer in front of
+      # LLM-extracted upload content and the CSP the second; this pins the one site
+      # that depends on the sanitizer.
       - id: check-raw-call-sites
         name: Check raw/1 call sites
         entry: elixir scripts/check_raw_call_sites.exs
@@ -265,7 +265,7 @@ repos:
         pass_filenames: false
         files: ^(lib/.*\.(ex|exs|heex)|scripts/check_raw_call_sites\.exs)$
 
-      # 5.3. OpenAI client call-site register. Every call into the model API goes
+      # OpenAI client call-site register. Every call into the model API goes
       # through `Deps.openai/0`, the seam tests replace with `OpenAIMock`; a module
       # that names `Doctrans.Processing.OpenAI` directly drags its tests back onto a
       # real HTTP server, a global env override and a fuse reset (#193, #207).
@@ -276,7 +276,7 @@ repos:
         pass_filenames: false
         files: ^(lib/.*\.(ex|exs|heex)|scripts/check_openai_call_sites\.exs)$
 
-      # 5.45. Dialyzer suppression register. Narrow `{file, class, line}` keys, an
+      # Dialyzer suppression register. Narrow `{file, class, line}` keys, an
       # owner, an expiry, an upstream link, and a rationale per entry, capped at 8.
       # `always_run` because the expiry is a date, not a file change: a register nobody
       # touches is exactly the one that goes stale.
@@ -287,7 +287,7 @@ repos:
         pass_filenames: false
         always_run: true
 
-      # 5.5. Static type analysis. --list-unused-filters makes a stale entry in
+      # Static type analysis. --list-unused-filters makes a stale entry in
       # .dialyzer_ignore.exs fail the gate instead of lingering unnoticed.
       - id: dialyzer
         name: Dialyzer type analysis
@@ -296,7 +296,7 @@ repos:
         pass_filenames: false
         files: ^(lib/|test/support/|mix\.exs|mix\.lock|\.dialyzer_ignore\.exs)$
 
-      # 6. Test suite with coverage (slow - runs last)
+      # Test suite with coverage (slow - runs last)
       - id: mix-test-coverage
         name: Mix test with 80% coverage
         entry: mix test --cover
@@ -304,7 +304,7 @@ repos:
         pass_filenames: false
         files: ^(lib/|test/|config/|mix\.exs$|mix\.lock$|coveralls\.json$)
 
-      # 7. Clean up unused dependencies (fast cleanup task)
+      # Clean up unused dependencies (fast cleanup task)
       - id: mix-deps-unlock
         name: Unlock unused dependencies
         entry: mix deps.unlock --unused

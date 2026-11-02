@@ -3,8 +3,13 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpers do
   Shared helpers for rendering and sanitizing Markdown content.
 
   Used by both ViewerComponents and ChatComponents to ensure consistent
-  rendering and security sanitization across the document viewer.
+  rendering and security sanitization across the document viewer. The
+  `markdown_content/1` component is the one place the rendered HTML reaches
+  the page, so the viewer and the chat cannot sanitize differently.
   """
+  use Phoenix.Component
+
+  import Phoenix.HTML, only: [raw: 1]
 
   require Logger
 
@@ -66,4 +71,28 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpers do
   attribute set, and why it is what it is.
   """
   defdelegate sanitize_html(html), to: MarkdownScrubber, as: :sanitize
+
+  @doc """
+  Renders Markdown as a `.markdown` block, styled by `assets/css/app.css`.
+
+  The rendered elements are direct children of that block, which its
+  edge-margin rules (`.markdown > :first-child`) rely on.
+  """
+  attr :content, :string, default: nil
+
+  attr :hardbreaks, :boolean,
+    default: false,
+    doc: "render single newlines as line breaks; see `render_markdown/2`"
+
+  # The HTML comes from render_markdown/2, which sanitizes before returning;
+  # scripts/check_raw_call_sites.exs pins this as the registered raw/1 site.
+  # sobelow_skip ["XSS.Raw"]
+  def markdown_content(assigns) do
+    html = render_markdown(assigns.content || "", hardbreaks: assigns.hardbreaks)
+    assigns = assign(assigns, :html, html)
+
+    ~H"""
+    <div class="markdown">{raw(@html)}</div>
+    """
+  end
 end

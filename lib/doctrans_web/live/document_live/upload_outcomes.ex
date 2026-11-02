@@ -13,8 +13,6 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomes do
   import Phoenix.LiveView, only: [put_flash: 3]
 
   alias Doctrans.Validation
-  alias DoctransWeb.DocumentLive.DocumentStream
-  alias DoctransWeb.DocumentLive.UploadComponents
   alias DoctransWeb.ErrorMessages
 
   @typedoc "What became of one file in a submission."
@@ -52,16 +50,28 @@ defmodule DoctransWeb.DocumentLive.UploadOutcomes do
     |> assign(:upload_started, 0)
   end
 
+  @doc """
+  The message for documents a submission queued for processing.
+
+  Shared with the modal's own outcome list, so the dashboard flash and the list
+  cannot drift apart.
+  """
+  @spec upload_started_message(non_neg_integer()) :: String.t()
+  def upload_started_message(count) do
+    ngettext(
+      "Document uploaded! Processing will begin shortly.",
+      "%{count} documents uploaded! Processing will begin shortly.",
+      count
+    )
+  end
+
   # No flash for the nothing-started case: it only happens alongside failures, which
   # keep the modal open, and the modal's backdrop covers the toast (z-999 against
   # z-50) until it dismisses itself unseen. The failure list says it instead.
   defp report_started(socket, 0), do: socket
 
-  defp report_started(socket, count) do
-    socket
-    |> put_flash(:info, UploadComponents.upload_started_message(count))
-    |> DocumentStream.refresh()
-  end
+  defp report_started(socket, count),
+    do: put_flash(socket, :info, upload_started_message(count))
 
   # The modal closes only when there is nothing left to say. Anything else keeps it
   # open to carry the list: a rejected file needs its reason next to the drop zone

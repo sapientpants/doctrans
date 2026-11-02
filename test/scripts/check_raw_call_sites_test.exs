@@ -2,10 +2,10 @@ defmodule Scripts.CheckRawCallSitesTest do
   @moduledoc """
   Smoke-tests the pre-commit gate in `scripts/check_raw_call_sites.exs`.
 
-  The register inside the script names the two files allowed one `raw/1` site
-  each, so every fixture tree starts from those two files and then drifts in
-  one direction: a site appears somewhere new, a registered file grows a
-  second one, or a registered site disappears.
+  The register inside the script names the one file allowed a `raw/1` site, so
+  every fixture tree starts from that file and then drifts in one direction: a
+  site appears somewhere new, the registered file grows a second one, or the
+  registered site disappears.
   """
   use ExUnit.Case, async: true
 
@@ -14,10 +14,7 @@ defmodule Scripts.CheckRawCallSitesTest do
   @moduletag :tmp_dir
   @script "check_raw_call_sites.exs"
 
-  @registered [
-    "lib/doctrans_web/live/document_live/viewer_components.ex",
-    "lib/doctrans_web/live/document_live/chat_components.ex"
-  ]
+  @registered ["lib/doctrans_web/live/document_live/markdown_helpers.ex"]
 
   @one_site "defmodule Example do\n  def body(html), do: raw(html)\nend\n"
 
@@ -28,7 +25,7 @@ defmodule Scripts.CheckRawCallSitesTest do
 
   test "a tree matching the register passes", %{tmp_dir: dir} do
     assert {output, 0} = run(@script, [], dir)
-    assert output =~ "raw/1 call sites match the register (2 files, 2 sites)"
+    assert output =~ "raw/1 call sites match the register (1 files, 1 sites)"
   end
 
   test "a raw/1 site in an unregistered file fails", %{tmp_dir: dir} do
@@ -39,19 +36,21 @@ defmodule Scripts.CheckRawCallSitesTest do
   end
 
   test "a second site in a registered file fails with both counts", %{tmp_dir: dir} do
-    [viewer | _] = @registered
-    write(dir, viewer, @one_site <> "raw(more)\n")
+    [registered] = @registered
+    write(dir, registered, @one_site <> "raw(more)\n")
 
     assert {output, 1} = run(@script, [], dir)
-    assert output =~ "#{viewer}: 2 raw/1 site(s), register says 1"
+    assert output =~ "#{registered}: 2 raw/1 site(s), register says 1"
   end
 
   test "a registered file that lost its site is reported as a stale entry", %{tmp_dir: dir} do
-    [_, chat] = @registered
-    write(dir, chat, "defmodule Example do\nend\n")
+    [registered] = @registered
+    write(dir, registered, "defmodule Example do\nend\n")
 
     assert {output, 1} = run(@script, [], dir)
-    assert output =~ "#{chat}: registered 1 raw/1 site(s), found none — stale register entry"
+
+    assert output =~
+             "#{registered}: registered 1 raw/1 site(s), found none — stale register entry"
   end
 
   test "the fully qualified Phoenix.HTML.raw/1 counts as a site", %{tmp_dir: dir} do

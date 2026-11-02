@@ -29,6 +29,15 @@ defmodule Doctrans.Documents.ProgressTest do
     assert Progress.calculate([page("completed", "completed")], 4) == 25.0
   end
 
+  test "from_counts/3 is the definition calculate/2 delegates to" do
+    pages = [page("completed", "completed"), page("completed", "processing")]
+
+    assert Progress.from_counts(2, 1, 3) == Progress.calculate(pages, 3)
+    assert Progress.from_counts(2, 1, nil) == 0.0
+    assert Progress.from_counts(2, 1, 0) == 0.0
+    assert Progress.from_counts(0, 0, 4) == 0.0
+  end
+
   test "unloaded associations are rejected instead of triggering database queries", %{
     unloaded_pages: pages
   } do
