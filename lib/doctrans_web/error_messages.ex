@@ -119,8 +119,10 @@ defmodule DoctransWeb.ErrorMessages do
   defp lookup({:pdf_extraction_failed, bindings}),
     do: dgettext("errors", "PDF extraction failed: %{reason}", reason: binding(bindings, :reason))
 
+  # Nested inside `:pdf_extraction_failed` by the processor, so it must not
+  # repeat that clause's prefix; name the tool, as the pdfinfo clause does.
   defp lookup({:pdf_command_failed, bindings}),
-    do: dgettext("errors", "PDF extraction failed: %{error}", error: binding(bindings, :error))
+    do: dgettext("errors", "pdftoppm failed: %{error}", error: binding(bindings, :error))
 
   defp lookup(:page_image_not_found),
     do: dgettext("errors", "Page image not found after extraction")
@@ -330,8 +332,11 @@ defmodule DoctransWeb.ErrorMessages do
   defp lookup(:empty_question), do: dgettext("errors", "Please enter a question.")
   defp lookup({:database_error, _}), do: lookup(:database_error)
 
+  # Reached from cancellation, reprocessing and `Repo.safe_transaction/1`, never
+  # from search (those paths remap to `:search_failed` / `:retrieval_unavailable`),
+  # so the copy names no operation.
   defp lookup(:database_error),
-    do: dgettext("errors", "Failed to search the document. Please try again.")
+    do: dgettext("errors", "The database did not respond. Please try again.")
 
   defp lookup(:search_failed),
     do: dgettext("errors", "Search is temporarily unavailable. Please try again.")
@@ -342,7 +347,6 @@ defmodule DoctransWeb.ErrorMessages do
     do: dgettext("errors", "Document search is temporarily unavailable. Please try again.")
 
   defp lookup(:delete_failed), do: dgettext("errors", "Failed to delete document")
-  defp lookup(:reprocess_failed), do: dgettext("errors", "Failed to reset page for reprocessing")
 
   defp lookup(:models_unavailable),
     do: dgettext("errors", "Could not fetch the list of models from the model server")
