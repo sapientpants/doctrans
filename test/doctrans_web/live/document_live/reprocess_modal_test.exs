@@ -9,7 +9,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   import Doctrans.Fixtures
   import ExUnit.CaptureLog
 
-  alias Doctrans.{Config, Documents}
+  alias Doctrans.{Config, Documents, ProcessProbe}
   alias Doctrans.Documents.{Layout, Topics}
   alias Doctrans.Processing.{OpenAIMock, Run}
   alias DoctransWeb.DocumentLive.ReprocessModal
@@ -215,19 +215,11 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
 
   # A cancelled task leaves the tracking map only once the LiveView has handled
   # its exit, so an empty list also means `handle_async/3` has already run.
-  defp await_no_async(view, attempts \\ 100) do
-    case Channel.async_pids(view.pid) do
-      {:ok, []} ->
-        :ok
-
-      {:ok, pids} ->
-        if attempts > 0 do
-          Process.sleep(10)
-          await_no_async(view, attempts - 1)
-        else
-          flunk("LiveView still tracks async tasks #{inspect(pids)}")
-        end
-    end
+  defp await_no_async(view) do
+    ProcessProbe.eventually(
+      fn -> Channel.async_pids(view.pid) == {:ok, []} end,
+      "the LiveView to drop its cancelled task"
+    )
   end
 
   @tag timeout: 10_000
@@ -263,7 +255,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     render_click(view, "toggle_original")
     assert has_element?(view, ".markdown h1", "Progress arrived")
 
-    view |> element("header button[phx-click='toggle_chat']") |> render_click()
+    view |> element("#toggle-chat") |> render_click()
     assert has_element?(view, "#chat-messages")
 
     assert has_element?(view, "#reprocess-modal")

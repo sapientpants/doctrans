@@ -11,9 +11,10 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
   What these cannot cover: where the focus ring actually goes. The `DialogFocus`
   hook runs in the browser, and `Phoenix.LiveViewTest` has no DOM to move focus
   in. These tests therefore assert only that the page *declares* the focus
-  management; that it works is a browser-level concern. The same goes for what a
-  screen reader announces: we assert the names exist and resolve, not how they
-  are read out.
+  management; what the hook does with it -- the tab ring, the return of focus
+  on close -- is executed by `test/js/dialog_focus_test.mjs`. The same goes for
+  what a screen reader announces: we assert the names exist and resolve, not
+  how they are read out.
   """
   # Sync: the tests mount the dashboard, whose PubSub is global, and override the
   # global `:uploads` application env.

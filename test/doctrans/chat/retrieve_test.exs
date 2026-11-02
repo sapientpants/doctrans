@@ -12,25 +12,13 @@ defmodule Doctrans.Chat.RetrieveTest do
   alias Doctrans.Documents
   alias Doctrans.Search.EmbeddingMocks
 
+  import Doctrans.Fixtures, only: [document_fixture: 1, indexed_page_fixture: 2]
+
   setup do
     RetrievalProbe.install()
 
-    {:ok, document} =
-      Documents.create_document(%{
-        title: "Annual Report",
-        original_filename: "report.pdf",
-        source_language: "en",
-        target_language: "de"
-      })
-
-    Repo.insert!(%Documents.Page{
-      document_id: document.id,
-      page_number: 1,
-      original_markdown: "Total assets EUR 120m.",
-      extraction_status: "completed",
-      embedding_status: "completed",
-      embedding: Pgvector.new(List.duplicate(0.1, 1024))
-    })
+    document = document_fixture(%{title: "Annual Report", original_filename: "report.pdf"})
+    indexed_page_fixture(document, %{original_markdown: "Total assets EUR 120m."})
 
     %{document: document}
   end

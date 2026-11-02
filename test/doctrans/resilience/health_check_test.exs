@@ -15,10 +15,11 @@ defmodule Doctrans.Resilience.HealthCheckTest do
   use Doctrans.DataCase, async: false
 
   alias Doctrans.Config.Uploads
-  alias Doctrans.Processing.{OpenAI, OpenAIMock}
-  alias Doctrans.Resilience.CircuitBreaker
-  alias Doctrans.Resilience.HealthCheck
+  alias Doctrans.Processing.{OpenAI, OpenAIBypass, OpenAIMock}
+  alias Doctrans.Resilience.{FuseProbe, HealthCheck}
   alias Doctrans.TestEnv
+
+  import OpenAIBypass, only: [models: 2]
 
   # The OpenAI probe is `OpenAI.list_models/0`, whose failures are logged at
   # :error by `Doctrans.Processing.ApiFailure`.
@@ -28,24 +29,18 @@ defmodule Doctrans.Resilience.HealthCheckTest do
 
   setup do
     Mox.stub_with(OpenAIMock, OpenAI)
-    CircuitBreaker.reset(:openai_api)
+    TestEnv.reset_fuses()
     bypass = Bypass.open()
-    put_openai_env(base_url: "http://localhost:#{bypass.port}", api_key: "sk-test-123")
+
+    TestEnv.merge_env(:openai,
+      base_url: "http://localhost:#{bypass.port}",
+      api_key: "sk-test-123"
+    )
 
     # The probe retries a safe GET on transport errors; keep the real retry
     # path but not its seconds of backoff, which the unreachable case would
     # otherwise spend.
-    prev_req = Application.fetch_env(:req, :default_options)
-    Req.default_options(Keyword.put(Req.default_options(), :retry_delay, 0))
-
-    on_exit(fn ->
-      CircuitBreaker.reset(:openai_api)
-
-      case prev_req do
-        {:ok, value} -> Application.put_env(:req, :default_options, value)
-        :error -> Application.delete_env(:req, :default_options)
-      end
-    end)
+    TestEnv.put_env(:req, :default_options, Keyword.put(Req.default_options(), :retry_delay, 0))
 
     %{bypass: bypass}
   end
@@ -88,7 +83,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
       # The probe used to build its own request and send `Bearer ` for a nil
       # key; going through the client, an absent key means an absent header.
       test_pid = self()
-      put_openai_env(api_key: nil)
+      TestEnv.merge_env(:openai, api_key: nil)
 
       Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
         send(test_pid, {:authorization, Plug.Conn.get_req_header(conn, "authorization")})
@@ -109,14 +104,14 @@ defmodule Doctrans.Resilience.HealthCheckTest do
     end
 
     test "reports a transport error when the API is unreachable" do
-      put_openai_env(base_url: "http://127.0.0.1:1", api_key: nil)
+      TestEnv.merge_env(:openai, base_url: "http://127.0.0.1:1", api_key: nil)
 
       assert HealthCheck.check_openai() == {:error, {:transport_error, [reason: :econnrefused]}}
     end
 
     test "normalizes a raised failure instead of crashing the caller" do
       # A base URL without a scheme makes Req raise while building the request.
-      put_openai_env(base_url: "localhost:9999", api_key: nil)
+      TestEnv.merge_env(:openai, base_url: "localhost:9999", api_key: nil)
 
       assert {:error, {:operation_failed, [reason: %ArgumentError{}]}} =
                HealthCheck.check_openai()
@@ -130,7 +125,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
         models(conn, [])
       end)
 
-      blow(:openai_api)
+      FuseProbe.blow(:openai_api)
 
       assert HealthCheck.check_openai() == {:error, :circuit_open}
       refute_received :http_request
@@ -144,7 +139,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
       assert_received {:completed, %{duration_ms: duration}, %{check: :openai, result: :ok}}
       assert duration >= 0
 
-      blow(:openai_api)
+      FuseProbe.blow(:openai_api)
 
       assert HealthCheck.check_openai() == {:error, :circuit_open}
       assert_received {:completed, _measurements, %{check: :openai, result: :error}}
@@ -226,7 +221,7 @@ defmodule Doctrans.Resilience.HealthCheckTest do
 
     test "keeps checking the other dependencies after one fails", %{bypass: bypass} do
       Bypass.stub(bypass, "GET", "/v1/models", &models(&1, []))
-      blow(:openai_api)
+      FuseProbe.blow(:openai_api)
 
       results = HealthCheck.check_all()
 
@@ -245,32 +240,10 @@ defmodule Doctrans.Resilience.HealthCheckTest do
 
     test "returns false when a check fails", %{bypass: bypass} do
       Bypass.stub(bypass, "GET", "/v1/models", &models(&1, []))
-      blow(:openai_api)
+      FuseProbe.blow(:openai_api)
 
       refute HealthCheck.healthy?()
     end
-  end
-
-  # `:openai` also carries the model names the processing pipeline reads, and
-  # `Application.put_env/3` is VM-global: replacing the keyword list outright
-  # would unset them for every process for as long as the test runs.
-  defp put_openai_env(overrides) do
-    merged = Keyword.merge(Application.fetch_env!(:doctrans, :openai), overrides)
-    TestEnv.put_env(:openai, merged)
-  end
-
-  defp models(conn, ids) do
-    body = %{"object" => "list", "data" => Enum.map(ids, &%{"id" => &1})}
-
-    conn
-    |> Plug.Conn.put_resp_content_type("application/json")
-    |> Plug.Conn.resp(200, Jason.encode!(body))
-  end
-
-  defp blow(fuse_name) do
-    for _ <- 1..6, do: CircuitBreaker.melt(fuse_name)
-    :blown = CircuitBreaker.status(fuse_name)
-    :ok
   end
 
   # The checks run in the test process, so a handler that forwards to `self()`

@@ -14,13 +14,9 @@ defmodule Doctrans.SearchTest do
   # 1/(k + rank) is the whole of what a fused score means.
   @default_rrf_k 60
 
-  # The stub every test in this module embeds with returns this vector for any
-  # text, so a page carrying it is a perfect semantic match for any query.
-  defp query_aligned_embedding, do: Pgvector.new(List.duplicate(0.1, 1024))
-
-  # Half the dimensions zeroed: cosine similarity 0.707 against the vector
-  # above -- clear of the 0.55 floor the semantic half applies, and strictly
-  # below a page that carries the query's own vector.
+  # Half the dimensions zeroed: cosine similarity 0.707 against the query's
+  # own vector, `fake_embedding/0` -- clear of the 0.55 floor the semantic half
+  # applies, and strictly below a page that carries that vector itself.
   defp half_aligned_embedding do
     Pgvector.new(List.duplicate(0.1, 512) ++ List.duplicate(0.0, 512))
   end
@@ -29,7 +25,7 @@ defmodule Doctrans.SearchTest do
     test "returns no matches when nothing in the library answers the query" do
       # A completed, indexed page that simply says something else: the empty
       # answer has to come from the ranking, not from an empty library.
-      searchable_page("A page about gardening tools", "Unrelated Doc")
+      searchable_page_fixture("A page about gardening tools", %{title: "Unrelated Doc"})
 
       assert {:ok, %{results: []}} = Search.search_with_count("nothinginthelibrarysaysthis")
     end
@@ -138,8 +134,10 @@ defmodule Doctrans.SearchTest do
     test "breaks a fused-score tie by page id" do
       # One match from each half, both at rank 1, so both score 1/(k + 1) and
       # only the tie-break can order them.
-      semantic_only = embedded_page("nothing lexical in common here", query_aligned_embedding())
-      keyword_only = searchable_page("a page about tiebreakterm only", "Tie Keyword Doc")
+      semantic_only = embedded_page("nothing lexical in common here", fake_embedding())
+
+      keyword_only =
+        searchable_page_fixture("a page about tiebreakterm only", %{title: "Tie Keyword Doc"})
 
       # Ascending page id is the rule under test, so the expectation is derived
       # from the ids rather than from the order the two were created in: UUIDv7
@@ -223,7 +221,7 @@ defmodule Doctrans.SearchTest do
         document = document_fixture(%{status: "completed"})
         query = "extractionfilterterm"
         text = if @mode == :keyword, do: query, else: "A semantically indexed passage"
-        embedding = if @mode == :semantic, do: query_aligned_embedding(), else: nil
+        embedding = if @mode == :semantic, do: fake_embedding(), else: nil
 
         [completed, pending] =
           for {number, status} <- [{1, "completed"}, {2, "pending"}] do
@@ -253,9 +251,11 @@ defmodule Doctrans.SearchTest do
       # one match from each half alone. Two reciprocal ranks beat one, which is
       # the whole point of fusing them.
       both =
-        embedded_page("a page about fusedterm and more fusedterm", query_aligned_embedding())
+        embedded_page("a page about fusedterm and more fusedterm", fake_embedding())
 
-      keyword_only = searchable_page("another page about fusedterm", "Fused Keyword Doc")
+      keyword_only =
+        searchable_page_fixture("another page about fusedterm", %{title: "Fused Keyword Doc"})
+
       semantic_only = embedded_page("nothing lexical in common", half_aligned_embedding())
 
       assert {:ok, %{results: [top | rest]}} = Search.search_with_count("fusedterm")
@@ -288,7 +288,7 @@ defmodule Doctrans.SearchTest do
       # nothing: searching on it would report "nothing matched" for a page
       # that is a perfect match of any query that actually ran.
       document = document_fixture(%{status: "completed"})
-      insert_indexed_page(document, 1, query_aligned_embedding())
+      indexed_page_fixture(document, %{page_number: 1, embedding: fake_embedding()})
 
       EmbeddingMocks.nil_vector()
 
@@ -299,7 +299,7 @@ defmodule Doctrans.SearchTest do
       document = document_fixture(%{status: "completed"})
 
       for page_number <- 1..3 do
-        insert_indexed_page(document, page_number, query_aligned_embedding())
+        indexed_page_fixture(document, %{page_number: page_number, embedding: fake_embedding()})
       end
 
       assert {:ok, results} = Search.search_in_document(document.id, "test", limit: 2)
@@ -308,8 +308,10 @@ defmodule Doctrans.SearchTest do
 
     test "min_similarity excludes pages the query is only loosely related to" do
       document = document_fixture(%{status: "completed"})
-      aligned = insert_indexed_page(document, 1, query_aligned_embedding())
-      loose = insert_indexed_page(document, 2, half_aligned_embedding())
+      aligned = indexed_page_fixture(document, %{page_number: 1, embedding: fake_embedding()})
+
+      loose =
+        indexed_page_fixture(document, %{page_number: 2, embedding: half_aligned_embedding()})
 
       # The default floor admits both, most similar first.
       assert {:ok, results} = Search.search_in_document(document.id, "test")
@@ -324,8 +326,8 @@ defmodule Doctrans.SearchTest do
       document = document_fixture(%{status: "completed", title: "Doc One"})
       other = document_fixture(%{status: "completed", title: "Doc Two"})
 
-      page = insert_indexed_page(document, 1, query_aligned_embedding())
-      _other_page = insert_indexed_page(other, 1, query_aligned_embedding())
+      page = indexed_page_fixture(document, %{page_number: 1, embedding: fake_embedding()})
+      _other_page = indexed_page_fixture(other, %{page_number: 1, embedding: fake_embedding()})
 
       assert {:ok, results} = Search.search_in_document(document.id, "content")
       assert Enum.map(results, & &1.page_id) == [page.id]
@@ -333,7 +335,7 @@ defmodule Doctrans.SearchTest do
 
     test "returns the page text and its similarity to the query" do
       document = document_fixture(%{status: "completed"})
-      page = insert_indexed_page(document, 4, query_aligned_embedding())
+      page = indexed_page_fixture(document, %{page_number: 4, embedding: fake_embedding()})
 
       assert {:ok, [result]} = Search.search_in_document(document.id, "test")
 
@@ -402,52 +404,14 @@ defmodule Doctrans.SearchTest do
   defp ranked_corpus(term, count) do
     for rank <- 1..count do
       text = String.duplicate("#{term} ", count + 1 - rank) <> "and some filler text"
-      indexed_page("Ranked Doc #{rank}", rank, text)
+      searchable_page_fixture(text, %{title: "Ranked Doc #{rank}", page_number: rank})
     end
-  end
-
-  defp searchable_page(text, title), do: indexed_page(title, 1, text)
-
-  # One completed, extracted page in a completed document of its own: the
-  # smallest thing global search is allowed to find.
-  defp indexed_page(title, page_number, markdown) do
-    document = document_fixture(%{status: "completed", title: title})
-
-    {:ok, page} =
-      document
-      |> page_fixture(%{page_number: page_number})
-      |> Documents.update_page_extraction(%{
-        extraction_status: "completed",
-        original_markdown: markdown
-      })
-
-    page
   end
 
   # A page the semantic half can rank: indexed with a vector of this module's
   # choosing, so its similarity to the stubbed query embedding is arithmetic
   # rather than a property of any model.
   defp embedded_page(text, embedding) do
-    text
-    |> searchable_page("Embedded Doc")
-    |> Ecto.Changeset.change(embedding: embedding)
-    |> Repo.update!()
-  end
-
-  # Inserted through `Repo` rather than the `Documents` API to pin the embedding
-  # alongside the text in one write.
-  defp insert_indexed_page(document, page_number, embedding) do
-    Repo.insert!(%Page{
-      id: Ecto.UUID.generate(),
-      document_id: document.id,
-      page_number: page_number,
-      image_path: "documents/#{document.id}/pages/page_#{page_number}.png",
-      original_markdown: "Content in document #{document.title} page #{page_number}",
-      translated_markdown: "Translated content page #{page_number}",
-      extraction_status: "completed",
-      translation_status: "completed",
-      embedding_status: "completed",
-      embedding: embedding
-    })
+    searchable_page_fixture(text, %{title: "Embedded Doc", embedding: embedding})
   end
 end

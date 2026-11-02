@@ -4,6 +4,8 @@ defmodule Doctrans.ChatTest do
   alias Doctrans.Chat
   alias Doctrans.Documents
 
+  import Doctrans.Fixtures, only: [indexed_page_fixture: 1]
+
   describe "build_context/1" do
     test "returns empty string for empty list" do
       assert Chat.build_context([]) == ""
@@ -424,20 +426,7 @@ defmodule Doctrans.ChatTest do
 
     test "returns true when at least one page has completed embeddings" do
       document = create_document(status: "completed")
-
-      # Create page with embedding using direct Repo insert to bypass changeset
-      embedding = create_test_embedding()
-
-      Doctrans.Repo.insert!(%Doctrans.Documents.Page{
-        id: Ecto.UUID.generate(),
-        document_id: document.id,
-        page_number: 1,
-        image_path: "documents/#{document.id}/pages/page_1.png",
-        extraction_status: "completed",
-        translation_status: "completed",
-        embedding_status: "completed",
-        embedding: embedding
-      })
+      indexed_page_fixture(document)
 
       assert Chat.embeddings_ready?(document)
     end
@@ -447,12 +436,6 @@ defmodule Doctrans.ChatTest do
 
       refute Chat.embeddings_ready?(document)
     end
-  end
-
-  # Helper to create a deterministic test embedding vector (1024 dimensions)
-  defp create_test_embedding do
-    List.duplicate(0.1, 1024)
-    |> Pgvector.new()
   end
 
   defp create_document(opts) do

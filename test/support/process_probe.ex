@@ -35,11 +35,9 @@ defmodule Doctrans.ProcessProbe do
     eventually_value(fn -> if check.(), do: :ok end, description)
   end
 
-  @doc """
-  Retries until `fetch` returns a non-`nil` value, and returns it.
-  """
-  def eventually_value(fetch, description, attempts \\ @poll_attempts) do
-    poll(fetch, description, attempts, System.monotonic_time(:millisecond))
+  # Retries until `fetch` returns a non-`nil` value, and returns it.
+  defp eventually_value(fetch, description) do
+    poll(fetch, description, @poll_attempts, System.monotonic_time(:millisecond))
   end
 
   # The elapsed time is measured rather than derived from the budget. Several of
@@ -119,14 +117,12 @@ defmodule Doctrans.ProcessProbe do
     status != 0
   end
 
-  @doc """
-  The children of `parent`, read from the process table.
-
-  `ps -e -o pid=,ppid=` is POSIX and prints the same two columns on macOS and on
-  the Linux CI image, so it needs no second binary beyond the `/bin/ps` already
-  used here (`pgrep` is installed on both too, but its `-P` output differs).
-  """
-  def child_pids(parent) do
+  # The children of `parent`, read from the process table.
+  #
+  # `ps -e -o pid=,ppid=` is POSIX and prints the same two columns on macOS and on
+  # the Linux CI image, so it needs no second binary beyond the `/bin/ps` already
+  # used here (`pgrep` is installed on both too, but its `-P` output differs).
+  defp child_pids(parent) do
     parent = to_string(parent)
     {output, 0} = System.cmd("/bin/ps", ["-e", "-o", "pid=,ppid="], env: [])
 

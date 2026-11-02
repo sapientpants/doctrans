@@ -3,9 +3,9 @@ defmodule DoctransWeb.ThemeScriptTest do
 
   import Doctrans.Fixtures
 
-  # Server tests cover CSP, asset serving and load order. The Node harness
-  # executes the real theme modules and the hook registered by app.js.
-  @theme_tests Path.expand("../js/theme_test.mjs", __DIR__)
+  # Server tests cover CSP, asset serving and load order. What the theme
+  # modules do when they execute is `test/js/theme_test.mjs`, run by
+  # `DoctransWeb.JavaScriptTest`.
 
   describe "the rendered page" do
     setup %{conn: conn} do
@@ -151,27 +151,6 @@ defmodule DoctransWeb.ThemeScriptTest do
       # configuration is still pinned here so that the entry point and the path
       # the layout asks for cannot drift apart without a named failure.
       assert "--outdir=../priv/static/assets/js" in args
-    end
-
-    test "theme selection and synchronization work when the JavaScript executes" do
-      node =
-        System.find_executable("node") || flunk("Node.js is required for the JavaScript tests")
-
-      # System.cmd inherits the VM's environment even with env: []. Keep only
-      # runtime basics; credentials and Node preload options must not reach it.
-      env =
-        System.get_env()
-        |> Map.keys()
-        |> Enum.reject(&(&1 in ~w(PATH TMPDIR TMP TEMP LANG LC_ALL TZ SystemRoot WINDIR)))
-        |> Enum.map(&{&1, nil})
-
-      {output, status} =
-        System.cmd(node, ["--experimental-vm-modules", "--test", @theme_tests],
-          stderr_to_stdout: true,
-          env: env
-        )
-
-      assert status == 0, output
     end
   end
 

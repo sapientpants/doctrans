@@ -26,16 +26,16 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
         Conversations.finish(question, "assistant", "Saved answer", [])
 
       {:ok, first, _} = live(conn, ~p"/documents/#{document.id}")
-      first |> element("header button[phx-click='toggle_chat']") |> render_click()
+      first |> element("#toggle-chat") |> render_click()
       assert has_element?(first, "#chat_messages-#{answer.id}")
-      first |> element("header button[phx-click='toggle_chat']") |> render_click()
-      first |> element("header button[phx-click='toggle_chat']") |> render_click()
+      first |> element("#toggle-chat") |> render_click()
+      first |> element("#toggle-chat") |> render_click()
       assert has_element?(first, "#chat_messages-#{answer.id}")
       GenServer.stop(first.pid)
 
       pending = Conversations.start_question(document.id, "Unfinished question")
       {:ok, restored, _} = live(conn, ~p"/documents/#{document.id}")
-      restored |> element("header button[phx-click='toggle_chat']") |> render_click()
+      restored |> element("#toggle-chat") |> render_click()
       assert has_element?(restored, "#chat_messages-#{answer.id}")
       assert has_element?(restored, "#chat_messages-#{pending.id}")
       assert has_element?(restored, "#chat-interrupted")
@@ -48,7 +48,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
     } do
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
       question = Conversations.start_question(document.id, "Another tab's question")
-      toggle = "header button[phx-click='toggle_chat']"
+      toggle = "#toggle-chat"
       view |> element(toggle) |> render_click()
       assert has_element?(view, "#chat-interrupted")
       view |> element(toggle) |> render_click()
@@ -72,9 +72,56 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       assert has_element?(view, "#chat_messages-#{answer.id}")
       refute has_element?(view, "#chat-interrupted")
 
+      # The refreshed context is what the next turn reads, and nothing renders it.
       assigns = :sys.get_state(view.pid).socket.assigns
       assert assigns.chat_history == Conversations.load(document.id).history
       assert assigns.chat_retrieved_context == context
+    end
+
+    test "chat button is visible in header", %{conn: conn, document: document} do
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      assert has_element?(view, "header #toggle-chat")
+    end
+
+    test "chat panel opens when toggle button is clicked", %{conn: conn, document: document} do
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      # Panel should not be visible initially
+      refute has_element?(view, "#chat-messages")
+
+      # Click toggle button in header
+      view |> element("#toggle-chat") |> render_click()
+
+      # Panel should now be visible
+      assert has_element?(view, "#chat-messages")
+      # Form should be visible because embeddings are ready
+      assert has_element?(view, "#chat-form")
+    end
+
+    test "chat panel closes when close button is clicked", %{conn: conn, document: document} do
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+      # Open panel
+      view |> element("#toggle-chat") |> render_click()
+      assert has_element?(view, "#chat-messages")
+
+      # Close panel using the chat toggle button in the header
+      view |> element("#toggle-chat") |> render_click()
+      refute has_element?(view, "#chat-messages")
+    end
+  end
+
+  # The events these react to -- a page broadcast from another tab, the result
+  # or exit of a turn that was superseded or interrupted -- arrive on the
+  # LiveView at a moment no rendered test can pin, and most of them leave nothing
+  # on screen: the accumulated context is state the next turn reads, not markup.
+  # So the callbacks are driven directly on the mounted socket, and the `chat_*`
+  # assigns are asserted by name. A rename in `ChatSession` is a rename here.
+  describe "the accumulated context, driven through the callbacks" do
+    setup do
+      document = completed_document_with_embedding_fixture()
+      %{document: document}
     end
 
     test "a page corrected elsewhere drops that page's accumulated context", %{
@@ -334,40 +381,6 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       assert Enum.map(Conversations.load(document.id).messages, & &1.role) == ["user"]
     end
-
-    test "chat button is visible in header", %{conn: conn, document: document} do
-      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-
-      # Use more specific selector - the header toggle button
-      assert has_element?(view, "header button[phx-click='toggle_chat']")
-    end
-
-    test "chat panel opens when toggle button is clicked", %{conn: conn, document: document} do
-      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-
-      # Panel should not be visible initially
-      refute has_element?(view, "#chat-messages")
-
-      # Click toggle button in header
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
-
-      # Panel should now be visible
-      assert has_element?(view, "#chat-messages")
-      # Form should be visible because embeddings are ready
-      assert has_element?(view, "#chat-form")
-    end
-
-    test "chat panel closes when close button is clicked", %{conn: conn, document: document} do
-      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-
-      # Open panel
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
-      assert has_element?(view, "#chat-messages")
-
-      # Close panel using the chat toggle button in the header
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
-      refute has_element?(view, "#chat-messages")
-    end
   end
 
   describe "chat with document without embeddings" do
@@ -378,7 +391,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
       # Open chat
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
 
       # Should show chat panel but no input form (not ready)
       assert has_element?(view, "#chat-messages")
@@ -401,7 +414,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
       # Open chat panel
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
 
       view |> form("#chat-form", %{message: question}) |> render_submit()
 
@@ -440,7 +453,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       end)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
       view |> form("#chat-form", %{message: "What is this document about?"}) |> render_submit()
       await_chat_turn(view)
 
@@ -460,7 +473,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       end)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
       view |> form("#chat-form", %{message: "What is this document about?"}) |> render_submit()
       await_chat_turn(view)
 
@@ -473,7 +486,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
       # Open chat panel
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
 
       # Submit empty message
       view
@@ -489,7 +502,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
       # Open chat panel
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
 
       # Submit whitespace-only message
       view
@@ -526,7 +539,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, answer} = Conversations.finish(question, "assistant", @answer_table, [])
 
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
 
       message = "#chat_messages-#{answer.id} .markdown"
       assert has_element?(view, "#{message} table thead th", "Account")
@@ -545,7 +558,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, answer} = Conversations.finish(question, "assistant", @answer_table, [])
 
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
 
       message = "#chat_messages-#{answer.id} .markdown"
       assert has_element?(view, "#{message} > p", "Here are the balances")
@@ -600,7 +613,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, answer} = Conversations.finish(question, "assistant", @answer_table, [])
 
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
 
       message = "#chat_messages-#{answer.id} .markdown"
       assert has_element?(view, "#{message} table thead th[align='right']", "Debit")
@@ -624,7 +637,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, answer} = Conversations.finish(question, "assistant", unsafe, [])
 
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
 
       message = "#chat_messages-#{answer.id} .markdown"
       assert has_element?(view, "#{message} table tbody td", "Widget")
@@ -639,6 +652,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   defp assert_no_chat_turn(view, document) do
     assert Conversations.load(document.id).messages == []
     refute has_element?(view, "#chat-streaming")
+    # An idle turn renders the same as a finished one; the token is the difference.
     assigns = :sys.get_state(view.pid).socket.assigns
     refute assigns.chat_loading
     assert assigns.chat_token == nil
@@ -647,11 +661,12 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   # A chat turn is a `start_async/3` task, so `render_async/2` waits on it: it
   # monitors the task and returns once it has exited, by which time its result
   # is already ahead of the next round trip to the LiveView. Nothing holds the
-  # turn open -- the stubs answer immediately, and this file is `async: true`, so
-  # it cannot install the global embedding barrier that would -- so the task may
-  # already have finished by the time this looks, which is covered the same way.
-  # Waiting at all is also what keeps the task from outliving the test and
-  # querying the database with no sandbox owner.
+  # turn open -- the stubs answer at once, and these tests are about the turn
+  # having landed, not about its in-flight state, which `CrossTabTest` observes
+  # through `EmbeddingMocks.hold/2` -- so the task may already have finished by
+  # the time this looks, which is covered the same way. Waiting at all is also
+  # what keeps the task from outliving the test and querying the database with
+  # no sandbox owner.
   defp await_chat_turn(view), do: render_async(view, 2_000)
 
   defp context_chunk(page, content) do

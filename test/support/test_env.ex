@@ -49,8 +49,29 @@ defmodule Doctrans.TestEnv do
   reverse registration order, so the restores unwind to the value that stood
   before the first override.
   """
-  def put_env(key, value) do
-    override(key, "put_env/2", fn -> Application.put_env(:doctrans, key, value) end)
+  def put_env(key, value), do: put_env(:doctrans, key, value)
+
+  @doc """
+  Sets `app`'s `key` for the running test and restores it afterwards.
+
+  For the settings that live outside `:doctrans`. Req's `:default_options` is
+  the one this suite overrides, to run the real retry path without spending
+  seconds on its backoff.
+  """
+  def put_env(app, key, value) do
+    override(app, key, "put_env/3", fn -> Application.put_env(app, key, value) end)
+  end
+
+  @doc """
+  Merges `overrides` into `:doctrans`'s keyword `key` for the running test.
+
+  For a keyword setting that carries more than the test is about. `:openai`
+  also names the vision, translation and chat models the pipeline reads, and
+  the env is VM-global, so replacing the whole list would unset them for every
+  process while the override stands.
+  """
+  def merge_env(key, overrides) do
+    put_env(key, Keyword.merge(Application.fetch_env!(:doctrans, key), overrides))
   end
 
   @doc """
@@ -61,7 +82,7 @@ defmodule Doctrans.TestEnv do
   finds rather than the default.
   """
   def delete_env(key) do
-    override(key, "delete_env/1", fn -> Application.delete_env(:doctrans, key) end)
+    override(:doctrans, key, "delete_env/1", fn -> Application.delete_env(:doctrans, key) end)
   end
 
   @doc """
@@ -90,16 +111,16 @@ defmodule Doctrans.TestEnv do
     :ok
   end
 
-  defp override(key, fun, change) do
+  defp override(app, key, fun, change) do
     refuse_async!(fun, "#{inspect(key)}")
 
-    previous = Application.fetch_env(:doctrans, key)
+    previous = Application.fetch_env(app, key)
     change.()
 
     on_exit(fn ->
       case previous do
-        {:ok, previous_value} -> Application.put_env(:doctrans, key, previous_value)
-        :error -> Application.delete_env(:doctrans, key)
+        {:ok, previous_value} -> Application.put_env(app, key, previous_value)
+        :error -> Application.delete_env(app, key)
       end
     end)
   end

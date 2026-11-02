@@ -19,7 +19,7 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
   @moduletag :capture_log
 
   alias Doctrans.Processing.OpenAI
-  alias Doctrans.Resilience.{CircuitBreaker, ErrorClassifier}
+  alias Doctrans.Resilience.ErrorClassifier
   alias Doctrans.TestEnv
   alias DoctransWeb.ErrorMessages
 
@@ -39,9 +39,7 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
   @buffered_chunks_allowed 64
 
   setup do
-    CircuitBreaker.reset(:openai_api)
-    on_exit(fn -> CircuitBreaker.reset(:openai_api) end)
-    :ok
+    TestEnv.reset_fuses()
   end
 
   describe "total deadline" do

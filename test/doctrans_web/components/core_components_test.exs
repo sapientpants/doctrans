@@ -142,26 +142,35 @@ defmodule DoctransWeb.CoreComponentsTest do
   end
 
   describe "JS commands" do
-    test "show targets the requested element" do
-      result = CoreComponents.show("#modal")
-      assert %JS{ops: [["show", %{to: "#modal"}]]} = result
-    end
+    # That the op names the element and chains onto an existing command is
+    # `Phoenix.LiveView.JS`'s behaviour. What this project authored is the
+    # transition each command runs, so that is what is pinned.
+    test "show and hide chain onto a command and carry the project's transitions" do
+      assert %JS{ops: [["push", %{event: "event"}], ["show", show]]} =
+               CoreComponents.show(JS.push("event"), "#modal")
 
-    test "hide targets the requested element" do
-      result = CoreComponents.hide("#modal")
-      assert %JS{ops: [["hide", %{to: "#modal"}]]} = result
-    end
+      assert show == %{
+               to: "#modal",
+               time: 300,
+               transition: [
+                 ["transition-all", "ease-out", "duration-300"],
+                 ["opacity-0", "translate-y-4", "sm:translate-y-0", "sm:scale-95"],
+                 ["opacity-100", "translate-y-0", "sm:scale-100"]
+               ]
+             }
 
-    test "show with existing JS struct" do
-      js = JS.push("event")
-      result = CoreComponents.show(js, "#modal")
-      assert %JS{ops: [["push", %{event: "event"}], ["show", %{to: "#modal"}]]} = result
-    end
+      assert %JS{ops: [["push", %{event: "event"}], ["hide", hide]]} =
+               CoreComponents.hide(JS.push("event"), "#modal")
 
-    test "hide with existing JS struct" do
-      js = JS.push("event")
-      result = CoreComponents.hide(js, "#modal")
-      assert %JS{ops: [["push", %{event: "event"}], ["hide", %{to: "#modal"}]]} = result
+      assert hide == %{
+               to: "#modal",
+               time: 200,
+               transition: [
+                 ["transition-all", "ease-in", "duration-200"],
+                 ["opacity-100", "translate-y-0", "sm:scale-100"],
+                 ["opacity-0", "translate-y-4", "sm:translate-y-0", "sm:scale-95"]
+               ]
+             }
     end
   end
 end

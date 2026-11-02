@@ -3,29 +3,15 @@ defmodule Doctrans.Resilience.CircuitBreakerTest do
   # them here would be seen by any test running at the same time.
   use Doctrans.EnvCase, async: false
 
-  alias Doctrans.Resilience.CircuitBreaker
+  alias Doctrans.Resilience.{CircuitBreaker, FuseProbe}
+  alias Doctrans.TestEnv
 
   setup do
-    # The fuses are VM-global and several cases below leave one blown. Reset
-    # on the way in so a case starts from a closed circuit, and on the way out
-    # so the last case here does not hand an open one to the next module: a
-    # blown fuse only refreshes after a minute, which is long enough for a
-    # test that calls the real `OpenAI` module against Bypass to see
-    # `:circuit_open` instead of the status it set up.
-    reset_fuses()
-    on_exit(&reset_fuses/0)
-    :ok
-  end
-
-  defp reset_fuses do
-    CircuitBreaker.reset(:openai_api)
-    CircuitBreaker.reset(:embedding_api)
-  end
-
-  describe "install_fuses/0" do
-    test "installs fuses without error" do
-      assert :ok = CircuitBreaker.install_fuses()
-    end
+    # Several cases below leave a fuse blown, and a blown fuse only refreshes
+    # after a minute: long enough for a test that calls the real `OpenAI`
+    # module against Bypass to see `:circuit_open` instead of the status it set
+    # up. The reset runs on the way in and, through `on_exit`, on the way out.
+    TestEnv.reset_fuses()
   end
 
   describe "status/1" do
@@ -34,10 +20,7 @@ defmodule Doctrans.Resilience.CircuitBreakerTest do
     end
 
     test "returns :blown for open circuit" do
-      # Trigger enough failures to blow the fuse
-      for _ <- 1..6 do
-        CircuitBreaker.melt(:openai_api)
-      end
+      FuseProbe.blow(:openai_api)
 
       assert CircuitBreaker.status(:openai_api) == :blown
     end
@@ -74,10 +57,7 @@ defmodule Doctrans.Resilience.CircuitBreakerTest do
     end
 
     test "returns circuit_open error when circuit is open" do
-      # Blow the fuse
-      for _ <- 1..6 do
-        CircuitBreaker.melt(:openai_api)
-      end
+      FuseProbe.blow(:openai_api)
 
       result = CircuitBreaker.call(:openai_api, fn -> {:ok, "should not run"} end)
       assert result == {:error, :circuit_open}
@@ -131,12 +111,7 @@ defmodule Doctrans.Resilience.CircuitBreakerTest do
 
   describe "reset/1" do
     test "resets a blown circuit" do
-      # Blow the fuse
-      for _ <- 1..6 do
-        CircuitBreaker.melt(:openai_api)
-      end
-
-      assert CircuitBreaker.status(:openai_api) == :blown
+      FuseProbe.blow(:openai_api)
 
       CircuitBreaker.reset(:openai_api)
       assert CircuitBreaker.status(:openai_api) == :ok

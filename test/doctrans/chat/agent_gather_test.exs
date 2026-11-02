@@ -5,11 +5,11 @@ defmodule Doctrans.Chat.AgentGatherTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Chat.{Agent, ContractProbe}
-  alias Doctrans.Documents
-  alias Doctrans.Repo
+
+  import Doctrans.Fixtures
 
   setup do
-    document = Doctrans.Fixtures.document_fixture(%{status: "completed", total_pages: 2})
+    document = document_fixture(%{status: "completed", total_pages: 2})
     assets = indexed_page(document, 1, "Assets are 120 million euros.", 0.1)
     liabilities = indexed_page(document, 2, "Liabilities are 75 million euros.", -0.1)
     %{document: document, assets: assets, liabilities: liabilities}
@@ -65,14 +65,13 @@ defmodule Doctrans.Chat.AgentGatherTest do
     end
   end
 
+  # Untranslated, so the context the grader is shown quotes `text` itself.
   defp indexed_page(document, number, text, component) do
-    Repo.insert!(%Documents.Page{
-      document_id: document.id,
+    indexed_page_fixture(document, %{
       page_number: number,
       original_markdown: text,
-      extraction_status: "completed",
-      embedding_status: "completed",
-      embedding: Pgvector.new(List.duplicate(component, 1024))
+      translated_markdown: nil,
+      embedding: fake_embedding(component)
     })
   end
 end

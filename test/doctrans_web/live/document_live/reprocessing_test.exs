@@ -23,39 +23,36 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
     conn: conn,
     document: document
   } do
-    Oban.Testing.with_testing_mode(:manual, fn ->
-      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
-      {:ok, other, _} = live(conn, ~p"/documents/#{document.id}")
+    {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+    {:ok, other, _} = live(conn, ~p"/documents/#{document.id}")
 
-      :sys.replace_state(view.pid, fn state ->
-        Process.put(:oban_testing, :manual)
-        state
-      end)
+    refute has_element?(view, "#document-processing-progress")
+    view |> element("#show-document-reprocess") |> render_click()
+    render_async(view)
+    assert has_element?(view, "#document-reprocess-form")
+    model = "vision"
 
-      refute has_element?(view, "#document-processing-progress")
-      view |> element("#show-document-reprocess") |> render_click()
-      render_async(view)
-      assert has_element?(view, "#document-reprocess-form")
-      model = "vision"
+    # Submitting a model the selects do not offer fails inside `form/3`, which
+    # would report the submit rather than the model list that never arrived.
+    refute has_element?(view, "#reprocess-model-error")
+    assert has_element?(view, "#extraction-model-select option[value='#{model}']")
+    assert has_element?(view, "#translation-model-select option[value='#{model}']")
 
-      # Submitting a model the selects do not offer fails inside `form/3`, which
-      # would report the submit rather than the model list that never arrived.
-      refute has_element?(view, "#reprocess-model-error")
-      assert has_element?(view, "#extraction-model-select option[value='#{model}']")
-      assert has_element?(view, "#translation-model-select option[value='#{model}']")
-
+    # Queued, not run: the confirmation's job would otherwise reprocess the
+    # document inline and the progress asserted below would already be 100.
+    queue_only(view, fn ->
       view
       |> form("#document-reprocess-form", %{extraction_model: model, translation_model: model})
       |> render_submit()
-
-      refute has_element?(view, "#reprocess-modal")
-      assert has_element?(view, "#document-processing-progress progress[value='0.0']")
-      assert has_element?(other, "#document-processing-progress progress[value='0.0']")
-      assert has_element?(view, "#show-document-reprocess[disabled]")
-      assert Documents.list_pages(document.id) == []
-      {:ok, reloaded, _} = live(conn, ~p"/documents/#{document.id}")
-      assert has_element?(reloaded, "#document-processing-progress progress[value='0.0']")
     end)
+
+    refute has_element?(view, "#reprocess-modal")
+    assert has_element?(view, "#document-processing-progress progress[value='0.0']")
+    assert has_element?(other, "#document-processing-progress progress[value='0.0']")
+    assert has_element?(view, "#show-document-reprocess[disabled]")
+    assert Documents.list_pages(document.id) == []
+    {:ok, reloaded, _} = live(conn, ~p"/documents/#{document.id}")
+    assert has_element?(reloaded, "#document-processing-progress progress[value='0.0']")
   end
 
   test "missing original disables reprocessing and cancel leaves generated pages intact", %{

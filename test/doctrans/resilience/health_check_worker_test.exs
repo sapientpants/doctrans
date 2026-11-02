@@ -15,8 +15,7 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
 
   use Doctrans.DataCase, async: false
 
-  alias Doctrans.Processing.{OpenAI, OpenAIMock}
-  alias Doctrans.Resilience.CircuitBreaker
+  alias Doctrans.Processing.{OpenAI, OpenAIBypass, OpenAIMock}
   alias Doctrans.Resilience.HealthCheckWorker
   alias Doctrans.TestEnv
   alias Ecto.Adapters.SQL.Sandbox
@@ -25,16 +24,14 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
 
   setup do
     Mox.stub_with(OpenAIMock, OpenAI)
-    CircuitBreaker.reset(:openai_api)
-    CircuitBreaker.reset(:embedding_api)
+    TestEnv.reset_fuses()
 
     bypass = Bypass.open()
-    put_openai_env(base_url: "http://localhost:#{bypass.port}", api_key: "sk-test-123")
 
-    on_exit(fn ->
-      CircuitBreaker.reset(:openai_api)
-      CircuitBreaker.reset(:embedding_api)
-    end)
+    TestEnv.merge_env(:openai,
+      base_url: "http://localhost:#{bypass.port}",
+      api_key: "sk-test-123"
+    )
 
     %{bypass: bypass}
   end
@@ -217,21 +214,11 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
     pid
   end
 
-  # `:openai` also carries the model names the processing pipeline reads, and
-  # `Application.put_env/3` is VM-global: replacing the keyword list outright
-  # would unset them for every process for as long as the test runs.
-  defp put_openai_env(overrides) do
-    merged = Keyword.merge(Application.fetch_env!(:doctrans, :openai), overrides)
-    TestEnv.put_env(:openai, merged)
-  end
-
+  # Every model-list answer also tells the test a request was made, so a test
+  # can assert that a disabled worker never asked.
   defp models(conn, test_pid, ids) do
     send(test_pid, :http_request)
-    body = %{"object" => "list", "data" => Enum.map(ids, &%{"id" => &1})}
-
-    conn
-    |> Plug.Conn.put_resp_content_type("application/json")
-    |> Plug.Conn.resp(200, Jason.encode!(body))
+    OpenAIBypass.models(conn, ids)
   end
 
   # The summary is emitted from the worker process, so the handler forwards it

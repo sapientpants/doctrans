@@ -1,17 +1,15 @@
 defmodule Doctrans.DataCase do
   @moduledoc """
-  This module defines the setup for tests requiring
-  access to the application's data layer.
+  The case template for tests of the data layer and everything above it that
+  needs no connection.
 
-  You may define functions here to be used as helpers in
-  your tests.
-
-  Finally, if the test case interacts with the database,
-  we enable the SQL sandbox, so changes done to the database
-  are reverted at the end of every test. If you are using
-  PostgreSQL, you can even run database tests asynchronously
-  by setting `use Doctrans.DataCase, async: true`, although
-  this option is not recommended for other databases.
+  `setup_sandbox/1` is the one setup every database-backed test runs, and
+  `DoctransWeb.ConnCase` delegates to it. It checks out a SQL sandbox
+  connection -- shared with every process when the test is `async: false`,
+  owned by the test alone when it is `async: true` -- registers the test with
+  `Doctrans.TestEnv`, so an application-env override is refused from an async
+  test and restored when the test exits, and installs the default Mox stubs
+  through `Doctrans.Mocks`, in the mode the `async` tag calls for.
   """
 
   use ExUnit.CaseTemplate

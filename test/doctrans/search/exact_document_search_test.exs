@@ -9,7 +9,7 @@ defmodule Doctrans.Search.ExactDocumentSearchTest do
   # sort-free plan, and it takes it whenever the query shape allows.
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.Documents.{Chunk, Page}
+  alias Doctrans.Documents.Chunk
   alias Doctrans.Repo
   alias Doctrans.Search
 
@@ -90,14 +90,12 @@ defmodule Doctrans.Search.ExactDocumentSearchTest do
     end
   end
 
+  # Which way the page's vector points decides whether the query finds it.
   defp indexed_page(document, number, component) do
-    Repo.insert!(%Page{
-      document_id: document.id,
+    indexed_page_fixture(document, %{
       page_number: number,
       original_markdown: "Page #{number}",
-      extraction_status: "completed",
-      embedding_status: "completed",
-      embedding: Pgvector.new(List.duplicate(component, 1024))
+      embedding: fake_embedding(component)
     })
   end
 end

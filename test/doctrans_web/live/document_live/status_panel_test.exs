@@ -9,20 +9,6 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
 
   @content "#processing-status-content"
 
-  # Oban runs `testing: :inline`, so an insert executes the job then and there
-  # and a retry would run a real model call. Both processes have to opt out:
-  # `Oban.Config.get_engine/1` reads `self()` *and* `$callers`, and the LiveView
-  # names this test among its callers, so setting the mode in only one of them
-  # leaves the other voting for inline.
-  defp queue_only(view, fun) do
-    :sys.replace_state(view.pid, fn state ->
-      Process.put(:oban_testing, :manual)
-      state
-    end)
-
-    Oban.Testing.with_testing_mode(:manual, fun)
-  end
-
   defp index_failure_fixture do
     document = document_fixture(%{status: "completed", total_pages: 1})
     page = completed_page_fixture(document)

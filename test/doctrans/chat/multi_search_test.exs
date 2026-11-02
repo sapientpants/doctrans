@@ -10,6 +10,8 @@ defmodule Doctrans.Chat.MultiSearchTest do
   alias Doctrans.Documents
   alias Doctrans.Search.EmbeddingMocks
 
+  import Doctrans.Fixtures, only: [fake_embedding: 1, indexed_page_fixture: 2]
+
   describe "search_with_queries/3" do
     test "returns empty results when no pages exist" do
       document = create_document(status: "completed")
@@ -19,8 +21,8 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
     test "returns pages matching a single query" do
       document = create_document(status: "completed")
-      first = insert_page_with_embedding(document, 1)
-      second = insert_page_with_embedding(document, 2)
+      first = indexed_page_fixture(document, %{page_number: 1})
+      second = indexed_page_fixture(document, %{page_number: 2})
 
       assert {:ok, pages} = MultiSearch.search_with_queries(document.id, ["test query"])
 
@@ -30,8 +32,8 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
     test "fuses different query rankings, retains distinct chunks and limits the best matches" do
       document = create_document(status: "completed")
-      first_page = insert_page_with_embedding(document, 1)
-      second_page = insert_page_with_embedding(document, 2)
+      first_page = indexed_page_fixture(document, %{page_number: 1})
+      second_page = indexed_page_fixture(document, %{page_number: 2})
 
       chunks =
         [
@@ -104,7 +106,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
     test "deduplicates pages across queries" do
       document = create_document(status: "completed")
-      page = insert_page_with_embedding(document, 1)
+      page = indexed_page_fixture(document, %{page_number: 1})
 
       # Same query twice should still return the page once
       assert {:ok, pages} =
@@ -117,7 +119,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
     test "reports an outage when every query fails" do
       document = create_document(status: "completed")
-      insert_page_with_embedding(document, 1)
+      indexed_page_fixture(document, %{page_number: 1})
 
       # Distinct reasons per query, so the assertion below pins *which* failure
       # is reported rather than passing for any of them.
@@ -137,7 +139,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
     test "reports a crashed query as an outage without carrying its payload out" do
       document = create_document(status: "completed")
-      insert_page_with_embedding(document, 1)
+      indexed_page_fixture(document, %{page_number: 1})
 
       EmbeddingMocks.exit_with_text()
 
@@ -157,7 +159,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
     test "treats an embedding that returns no vector as an outage, not as no matches" do
       document = create_document(status: "completed")
-      insert_page_with_embedding(document, 1)
+      indexed_page_fixture(document, %{page_number: 1})
 
       # `{:ok, nil}` is a legal success, but nothing can be ranked against a
       # NULL vector: searching on it would report "nothing matched" for a query
@@ -172,7 +174,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
     test "keeps the results of the queries that succeeded when only some fail" do
       document = create_document(status: "completed")
-      page = insert_page_with_embedding(document, 1)
+      page = indexed_page_fixture(document, %{page_number: 1})
 
       # Only the first query fails; the second embeds through the ordinary stub.
       EmbeddingMocks.fail_matching([{"failingquery", :circuit_open}])
@@ -194,7 +196,7 @@ defmodule Doctrans.Chat.MultiSearchTest do
       document = create_document(status: "completed")
       # Opposite direction to the stub's query vector, so the page is searched
       # but never clears the similarity threshold.
-      insert_page_with_embedding(document, 1, List.duplicate(-0.1, 1024))
+      indexed_page_fixture(document, %{page_number: 1, embedding: fake_embedding(-0.1)})
 
       assert {:ok, []} = MultiSearch.search_with_queries(document.id, ["q1", "q2"])
     end
@@ -226,21 +228,5 @@ defmodule Doctrans.Chat.MultiSearchTest do
 
     {:ok, document} = Documents.create_document(attrs)
     document
-  end
-
-  defp insert_page_with_embedding(document, page_number, values \\ List.duplicate(0.1, 1024)) do
-    embedding = Pgvector.new(values)
-
-    Doctrans.Repo.insert!(%Doctrans.Documents.Page{
-      id: Ecto.UUID.generate(),
-      document_id: document.id,
-      page_number: page_number,
-      image_path: "documents/#{document.id}/pages/page_#{page_number}.png",
-      original_markdown: "Content of page #{page_number}",
-      extraction_status: "completed",
-      translation_status: "completed",
-      embedding_status: "completed",
-      embedding: embedding
-    })
   end
 end

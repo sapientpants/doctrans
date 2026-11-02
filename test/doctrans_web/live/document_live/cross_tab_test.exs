@@ -370,7 +370,7 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
       barrier = install_barrier(question)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
       view |> form("#chat-form", %{"message" => question}) |> render_submit()
 
       # Parked inside the agent pipeline, which is where a real turn spends its
