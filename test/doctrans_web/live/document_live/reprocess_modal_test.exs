@@ -10,7 +10,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   import ExUnit.CaptureLog
 
   alias Doctrans.{Config, Documents}
-  alias Doctrans.Documents.{Layout, Pages, Topics}
+  alias Doctrans.Documents.{Layout, Topics}
   alias Doctrans.Processing.{OpenAIMock, Run}
   alias DoctransWeb.DocumentLive.ReprocessModal
   alias DoctransWeb.ErrorMessages
@@ -21,8 +21,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
 
     document = document_fixture(%{total_pages: 1, status: "completed"})
     page = completed_page_fixture(document)
-    {:ok, page} = Pages.update_page_extraction(page, %{extraction_model: "vision"})
-    {:ok, page} = Pages.update_page_translation(page, %{translation_model: "translation"})
+    {:ok, page} = Documents.update_page_extraction(page, %{extraction_model: "vision"})
+    {:ok, page} = Documents.update_page_translation(page, %{translation_model: "translation"})
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
     view |> element("#show-reprocess") |> render_click()
@@ -89,8 +89,11 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
           "removed"
         )
 
-      {:ok, page} = Pages.update_page_extraction(page, Map.take(models, [:extraction_model]))
-      {:ok, _page} = Pages.update_page_translation(page, Map.take(models, [:translation_model]))
+      {:ok, page} = Documents.update_page_extraction(page, Map.take(models, [:extraction_model]))
+
+      {:ok, _page} =
+        Documents.update_page_translation(page, Map.take(models, [:translation_model]))
+
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
       view |> element("#show-reprocess") |> render_click()
@@ -251,7 +254,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     {:ok, page_two} =
       document.id
       |> Documents.get_page_by_number(2)
-      |> Pages.update_page_extraction(%{
+      |> Documents.update_page_extraction(%{
         extraction_status: "completed",
         original_markdown: "# Progress arrived"
       })

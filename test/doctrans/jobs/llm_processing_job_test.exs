@@ -4,7 +4,6 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
 
   alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
-  alias Doctrans.Documents.Pages
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.{OpenAICrashStub, OpenAIMock, OpenAIProbe, StartupRecovery}
   alias Oban.Engines.Basic
@@ -79,7 +78,7 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
         Oban.Testing.with_testing_mode(:manual, fn ->
           document = document_fixture(%{total_pages: 1, status: "completed"})
           page = completed_page_fixture(document)
-          assert {:ok, page} = Pages.reset_page_for_reprocessing(page)
+          assert {:ok, page} = Documents.reset_page_for_reprocessing(page)
 
           # The shape `DocumentReprocessing` persists for a page-level retry.
           assert {:ok, job} =

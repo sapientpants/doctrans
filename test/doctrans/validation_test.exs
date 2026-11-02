@@ -88,6 +88,19 @@ defmodule Doctrans.ValidationTest do
       assert validated_attrs.title == "Test Document"
     end
 
+    test "returns the language codes in the normalised form it accepted them under" do
+      attrs = %{
+        title: "Test Document",
+        original_filename: "test.pdf",
+        target_language: " EN ",
+        source_language: "De"
+      }
+
+      assert {:ok, validated_attrs} = Validation.validate_document_attrs(attrs)
+      assert validated_attrs.target_language == "en"
+      assert validated_attrs.source_language == "de"
+    end
+
     test "returns error when title is empty" do
       attrs = %{
         title: "",

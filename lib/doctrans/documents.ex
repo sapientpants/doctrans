@@ -1,9 +1,18 @@
 defmodule Doctrans.Documents do
   @moduledoc """
-  Context for managing documents.
+  The documents context: the one entry point for document and page records.
 
-  Provides CRUD operations for documents, including file cleanup
-  when documents are deleted. For page operations, see `Doctrans.Documents.Pages`.
+  Hosts the document CRUD (with file cleanup on delete), the dashboard's
+  `Summary` listing and its ordering helper, and the page operations, which are
+  implemented in `Doctrans.Documents.Pages` and reached through the delegates
+  below. Callers name this module rather than `Pages` so the page API has a
+  single path; `Pages` is addressed directly only by its own tests.
+
+  Chat readiness (`embeddings_ready?/1`) is not part of this context: its only
+  consumer is `Doctrans.Chat`, which reaches `Pages` for it.
+
+  The module sits at Credo's first-party dependency ceiling, so a new
+  collaborator has to displace one.
   """
   require Logger
 
@@ -14,7 +23,7 @@ defmodule Doctrans.Documents do
   alias Doctrans.Validation
 
   # Page operations live in `Doctrans.Documents.Pages`; these delegates are the
-  # primary entry points callers reach them through.
+  # entry points callers reach them through.
   defdelegate get_page(id), to: Pages
   defdelegate get_page!(id), to: Pages
   defdelegate get_page_by_number(document_id, page_number), to: Pages
@@ -26,8 +35,8 @@ defmodule Doctrans.Documents do
   defdelegate update_page_extraction(page, attrs), to: Pages
   defdelegate update_page_translation(page, attrs), to: Pages
   defdelegate completion_state(document_id), to: Pages
-  defdelegate embeddings_ready?(document), to: Pages
   defdelegate failed_page_numbers(document_id), to: Pages
+  defdelegate failed_pages_query(document_id), to: Pages
   defdelegate reset_page_for_reprocessing(page), to: Pages
 
   # ============================================================================
@@ -37,6 +46,11 @@ defmodule Doctrans.Documents do
   @doc """
   Returns the list of all documents with optional sorting.
 
+  Pages are not loaded: a caller that needs them reaches for
+  `get_document_with_pages/1`, and the dashboard reads
+  `list_documents_with_progress/1`, which selects only the page fields progress
+  needs.
+
   ## Options
 
   - `:sort_by` - Field to sort by: `:inserted_at` (default) or `:title`
@@ -44,15 +58,9 @@ defmodule Doctrans.Documents do
   """
   @spec list_documents(keyword()) :: [Document.t()]
   def list_documents(opts \\ []) do
-    sort_by = Keyword.get(opts, :sort_by, :inserted_at)
-    sort_dir = Keyword.get(opts, :sort_dir, :desc)
-
-    order = [{sort_dir, sort_by}]
-
     Document
-    |> order_by(^order)
+    |> ordered_documents(opts)
     |> Repo.all()
-    |> Repo.preload(pages: from(p in Page, order_by: p.page_number))
   end
 
   @doc """

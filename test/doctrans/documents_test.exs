@@ -30,11 +30,13 @@ defmodule Doctrans.DocumentsTest do
       assert Documents.list_documents() == []
     end
 
-    test "returns all documents with pages preloaded" do
+    test "returns the documents without loading their pages" do
       doc = document_fixture()
       [result] = Documents.list_documents()
       assert result.id == doc.id
-      assert is_list(result.pages)
+      # Loading every page's markdown is the cost the dashboard listing exists to
+      # avoid; a caller that wants pages asks for one document with them.
+      assert %Ecto.Association.NotLoaded{} = result.pages
     end
 
     test "returns multiple documents" do
@@ -251,6 +253,20 @@ defmodule Doctrans.DocumentsTest do
                Documents.update_document(doc, %{status: "invalid"})
 
       assert %{status: ["is invalid"]} = errors_on(changeset)
+    end
+
+    test "rejects a language the translation list does not offer" do
+      doc = document_fixture()
+
+      assert {:error, {:validation_failed, [changeset: changeset]}} =
+               Documents.update_document(doc, %{target_language: "xx", source_language: "yy"})
+
+      assert %{target_language: ["is invalid"], source_language: ["is invalid"]} =
+               errors_on(changeset)
+
+      # Nil keeps its meaning of "detect the source language".
+      assert {:ok, updated} = Documents.update_document(doc, %{source_language: nil})
+      assert updated.source_language == nil
     end
   end
 

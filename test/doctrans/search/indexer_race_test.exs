@@ -4,7 +4,8 @@ defmodule Doctrans.Search.IndexerRaceTest do
   # embedding stub without a shared sandbox or a global stub.
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.Documents.{Chunk, Page, Pages}
+  alias Doctrans.Documents
+  alias Doctrans.Documents.{Chunk, Page}
   alias Doctrans.Search.{EmbeddingMocks, Indexer}
 
   import Doctrans.Fixtures
@@ -29,11 +30,11 @@ defmodule Doctrans.Search.IndexerRaceTest do
         assert_receive {:embedding_started, ^old_barrier, ^old_task}, 5_000
       end
 
-      {:ok, reset} = Pages.reset_page_for_reprocessing(page)
+      {:ok, reset} = Documents.reset_page_for_reprocessing(page)
       assert reset.content_revision > page.content_revision
 
       {:ok, corrected} =
-        Pages.update_page_extraction(reset, %{
+        Documents.update_page_extraction(reset, %{
           original_markdown: new_text,
           extraction_status: "completed"
         })
@@ -45,7 +46,7 @@ defmodule Doctrans.Search.IndexerRaceTest do
       # Translation can finish before the obsolete run releases. Regenerated
       # chunks must still use only source content.
       {:ok, _translated} =
-        Pages.update_page_translation(corrected, %{
+        Documents.update_page_translation(corrected, %{
           translated_markdown: translated_text,
           translation_status: "completed"
         })

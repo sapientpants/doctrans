@@ -3,7 +3,6 @@ defmodule Doctrans.ChatTest do
 
   alias Doctrans.Chat
   alias Doctrans.Documents
-  alias Doctrans.Documents.Pages
 
   describe "build_context/1" do
     test "returns empty string for empty list" do
@@ -458,7 +457,7 @@ defmodule Doctrans.ChatTest do
         embedding_status: "pending"
       })
 
-    {:ok, page} = Pages.create_page(document, attrs)
+    {:ok, page} = Documents.create_page(document, attrs)
     page
   end
 end

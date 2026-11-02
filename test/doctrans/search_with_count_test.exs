@@ -11,7 +11,7 @@ defmodule Doctrans.SearchWithCountTest do
   """
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.Documents.Pages
+  alias Doctrans.Documents
   alias Doctrans.Repo
   alias Doctrans.Search
   alias Doctrans.Search.EmbeddingMocks
@@ -217,7 +217,7 @@ defmodule Doctrans.SearchWithCountTest do
     page = page_fixture(document, %{page_number: 1})
 
     {:ok, page} =
-      Pages.update_page_extraction(page, %{
+      Documents.update_page_extraction(page, %{
         extraction_status: "completed",
         original_markdown: text
       })

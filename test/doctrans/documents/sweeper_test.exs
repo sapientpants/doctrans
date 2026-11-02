@@ -6,6 +6,7 @@ defmodule Doctrans.Documents.SweeperTest do
   alias Doctrans.TestEnv
 
   import Doctrans.Fixtures
+  import ExUnit.CaptureLog
 
   setup do
     # Sweep tests delete every directory the root contains, so give them a root
@@ -192,6 +193,32 @@ defmodule Doctrans.Documents.SweeperTest do
       # With default 24 hour threshold, recently created dir should not be removed
       assert {:ok, 0} = Sweeper.sweep(grace_period_hours: 24)
       assert File.exists?(orphan_dir)
+    end
+
+    test "reports the orphans it could not remove instead of only logging them", %{
+      documents_dir: documents_dir
+    } do
+      removable = Path.join(documents_dir, Ecto.UUID.generate())
+      File.mkdir_p!(removable)
+
+      # Removing a file needs write permission on its directory, so a read-only
+      # orphan with contents is one the sweeper can never delete -- as the
+      # unprivileged user the suite and CI run as; root is kept out of nothing.
+      stuck = Path.join(documents_dir, Ecto.UUID.generate())
+      File.mkdir_p!(stuck)
+      File.write!(Path.join(stuck, "page.png"), "rendered page")
+      File.chmod!(stuck, 0o555)
+      on_exit(fn -> File.chmod!(stuck, 0o755) end)
+
+      log =
+        capture_log(fn ->
+          assert {:error, {:sweep_incomplete, [deleted: 1, failed: [^stuck]]}} =
+                   Sweeper.sweep(grace_period_hours: 0)
+        end)
+
+      assert log =~ "Failed to delete orphaned directory #{stuck}"
+      refute File.exists?(removable)
+      assert File.exists?(stuck)
     end
   end
 end

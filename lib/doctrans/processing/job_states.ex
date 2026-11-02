@@ -20,7 +20,7 @@ defmodule Doctrans.Processing.JobStates do
 
   import Ecto.Query
 
-  alias Doctrans.Documents.Pages
+  alias Doctrans.Documents
   alias Doctrans.Jobs.{EmbeddingJob, LlmProcessingJob}
   alias Doctrans.Processing.JobQuery
   alias Doctrans.Repo
@@ -39,7 +39,7 @@ defmodule Doctrans.Processing.JobStates do
   def retry_pending?(document_id) do
     failed_page_ids =
       document_id
-      |> Pages.failed_pages_query()
+      |> Documents.failed_pages_query()
       |> select([p], type(p.id, :string))
 
     failed_page_ids

@@ -4,10 +4,10 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
 
   `config/test.exs` disables the worker the application starts, because a
   worker left enabled would run real checks on its interval for the whole
-  suite. These tests therefore start their own instance instead: the module
-  reads its settings from the application environment at `init/1`, so
-  `Doctrans.TestEnv` sets them for the test and the instance is started
-  unnamed, next to the disabled one. The OpenAI probe is forwarded from
+  suite. These tests therefore start their own instance instead: the worker
+  prefers its start options to the application environment, so each test hands
+  its settings to the instance it starts, unnamed, next to the disabled one,
+  and nothing global changes. The OpenAI probe is forwarded from
   `OpenAIMock` to the real client, which reaches a local Bypass server, and the
   database probe runs on the shared sandbox connection, so a cycle is driven
   end to end without touching the network.
@@ -55,6 +55,9 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
     end
 
     test "falls back to the module defaults when nothing is configured" do
+      # `config/test.exs` disables the application's worker; clear that so the
+      # module defaults are what is left.
+      TestEnv.put_env(HealthCheckWorker, [])
       pid = start_worker!([])
 
       status = GenServer.call(pid, :status)
@@ -62,6 +65,20 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
       assert status.enabled
       assert status.interval_ms == 60_000
       assert status.auto_reset_circuits
+    end
+
+    test "start options win over the application environment" do
+      TestEnv.put_env(HealthCheckWorker,
+        enabled: true,
+        interval_ms: 5_000,
+        auto_reset_circuits: true
+      )
+
+      pid = start_worker!(enabled: false, auto_reset_circuits: false)
+
+      # The interval is the one key the start options leave to the environment.
+      assert %{enabled: false, interval_ms: 5_000, auto_reset_circuits: false} =
+               GenServer.call(pid, :status)
     end
 
     test "a disabled worker ignores a check request", %{bypass: bypass} do
@@ -261,8 +278,6 @@ defmodule Doctrans.Resilience.HealthCheckWorkerTest do
   end
 
   defp start_worker!(opts) do
-    TestEnv.put_env(HealthCheckWorker, opts)
-
     pid =
       start_supervised!(
         %{

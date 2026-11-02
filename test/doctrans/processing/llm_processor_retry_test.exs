@@ -8,7 +8,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Pages, Topics}
+  alias Doctrans.Documents.{Layout, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.{LlmProcessor, OpenAIMock, OpenAIStub}
   alias Doctrans.Resilience.ErrorClassifier
@@ -273,7 +273,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
                  generation: stale_generation
                )
 
-      {:ok, reset} = Pages.reset_page_for_reprocessing(Documents.get_page!(context.page.id))
+      {:ok, reset} = Documents.reset_page_for_reprocessing(Documents.get_page!(context.page.id))
       recover(:extract_markdown)
 
       # The replayed attempt belongs to the generation the reset superseded, and
@@ -367,7 +367,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   # requested from another tab lands while the model is still working.
   defp reset_page_during_extraction(page) do
     stub_extraction(fn _image, _opts ->
-      {:ok, _reset} = Pages.reset_page_for_reprocessing(Documents.get_page!(page.id))
+      {:ok, _reset} = Documents.reset_page_for_reprocessing(Documents.get_page!(page.id))
       {:ok, "# Markdown from the superseded run"}
     end)
   end

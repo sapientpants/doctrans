@@ -64,9 +64,13 @@ defmodule Doctrans.Documents.Sweeper do
   - `:dry_run` - If true, only logs what would be deleted (default: false)
   - `:grace_period_hours` - Only delete directories older than this (default: 24)
 
-  Returns `{:ok, deleted_count}`.
+  Returns `{:ok, deleted_count}` when every orphan was removed (or, in a dry
+  run, counted). A directory that could not be removed is reported rather than
+  only logged: `{:error, {:sweep_incomplete, [deleted: count, failed: paths]}}`
+  names the orphans still on disk, so a directory that can never be deleted
+  stays visible to whoever reads the result, sweep after sweep.
   """
-  @spec sweep(keyword()) :: {:ok, non_neg_integer()}
+  @spec sweep(keyword()) :: {:ok, non_neg_integer()} | {:error, Doctrans.Errors.reason()}
   def sweep(opts \\ []) do
     dry_run = Keyword.get(opts, :dry_run, false)
     orphaned = find_orphaned_directories(opts)
@@ -77,27 +81,33 @@ defmodule Doctrans.Documents.Sweeper do
     else
       Logger.info("Found #{length(orphaned)} orphaned directories")
 
-      deleted_count = Enum.reduce(orphaned, 0, &delete_directory(&1, &2, dry_run))
+      {deleted, failed} = Enum.split_with(orphaned, &delete_directory(&1, dry_run))
 
-      {:ok, deleted_count}
+      case failed do
+        [] -> {:ok, length(deleted)}
+        failed -> {:error, {:sweep_incomplete, [deleted: length(deleted), failed: failed]}}
+      end
     end
   end
 
   # Paths are direct File.ls children of the configured documents directory; rm_rf does not follow symlinks.
   # sobelow_skip ["Traversal.FileModule"]
-  defp delete_directory(path, count, dry_run) do
+  defp delete_directory(path, dry_run) do
     if dry_run do
       Logger.info("[DRY RUN] Would delete: #{path}")
-      count + 1
+      true
     else
       case File.rm_rf(path) do
         {:ok, _} ->
           Logger.info("Deleted orphaned directory: #{path}")
-          count + 1
+          true
 
         {:error, reason, file} ->
-          Logger.error("Failed to delete #{file}: #{inspect(reason)}")
-          count
+          Logger.error(
+            "Failed to delete orphaned directory #{path} at #{file}: #{inspect(reason)}"
+          )
+
+          false
       end
     end
   end

@@ -11,7 +11,7 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
   """
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.Documents.Pages
+  alias Doctrans.Documents
   alias Doctrans.Repo
   alias Doctrans.Search
 
@@ -137,7 +137,7 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
     page = page_fixture(document, %{page_number: page_number})
 
     {:ok, page} =
-      Pages.update_page_extraction(page, %{
+      Documents.update_page_extraction(page, %{
         extraction_status: "completed",
         original_markdown: text
       })
