@@ -40,33 +40,48 @@ defmodule Doctrans.Search.HybridQuery do
   # sobelow_skip ["SQL.Query"]
   def run(query, query_embedding, opts) do
     # Use CTE-based query for efficient RRF calculation
-    # - semantic_ranked: pages ranked by embedding similarity (IDs and ranks only),
+    # - semantic_scored: every embedded page with its distance to the query,
     #   empty when $1 is NULL so an unembeddable query still gets the fts half
-    #   rather than an error -- one statement, both retrieval modes. $4 is the
+    #   rather than an error -- one statement, both retrieval modes.
+    # - semantic_ranked: those pages ranked (IDs and ranks only). $4 is the
     #   similarity floor: without it this CTE ranks every embedded page in the
     #   library, so the deepest ranks are whatever the corpus happens to hold
     #   rather than anything the query asked for.
-    # - fts_ranked: pages ranked by full-text search score (IDs and ranks only)
+    # - fts_scored / fts_ranked: the same two steps for full-text search
     # - combined: FULL OUTER JOIN with RRF score calculation
     # - Final SELECT joins back to pages for snippets using ts_headline(), and
     #   totals the filtered set with a window so the count cannot disagree with
     #   the page about what matched
+    #
+    # Each score is spelled once, in its `*_scored` CTE, and the ranking CTE
+    # orders over the alias: the distance operator and the two-term rank sum
+    # used to be repeated in the SELECT, the WHERE and the window, so a weight
+    # or a config had to be edited in lockstep. Postgres inlines a CTE that is
+    # referenced once, so the planner sees the same expressions it did before
+    # and the index paths open to it are unchanged.
     sql = """
-    WITH semantic_ranked AS (
+    WITH semantic_scored AS (
       SELECT
         p.id,
         p.document_id,
-        1 - (p.embedding <=> $1::vector) as semantic_score,
-        ROW_NUMBER() OVER (ORDER BY p.embedding <=> $1::vector ASC) as semantic_rank
+        p.embedding <=> $1::vector as distance
       FROM pages p
       JOIN documents d ON p.document_id = d.id
       WHERE $1::vector IS NOT NULL
         AND d.status = 'completed'
         AND p.extraction_status = 'completed'
         AND p.embedding IS NOT NULL
-        AND (1 - (p.embedding <=> $1::vector)) >= $4
     ),
-    fts_ranked AS (
+    semantic_ranked AS (
+      SELECT
+        id,
+        document_id,
+        1 - distance as semantic_score,
+        ROW_NUMBER() OVER (ORDER BY distance ASC) as semantic_rank
+      FROM semantic_scored
+      WHERE 1 - distance >= $4
+    ),
+    fts_scored AS (
       SELECT
         p.id,
         p.document_id,
@@ -74,13 +89,7 @@ defmodule Doctrans.Search.HybridQuery do
         (
           COALESCE(ts_rank_cd(p.original_searchable, plainto_tsquery('simple', $2)), 0) +
           COALESCE(ts_rank_cd(p.translated_searchable, plainto_tsquery(get_fts_config(d.target_language), $2)), 0)
-        ) as fts_score,
-        ROW_NUMBER() OVER (
-          ORDER BY (
-            COALESCE(ts_rank_cd(p.original_searchable, plainto_tsquery('simple', $2)), 0) +
-            COALESCE(ts_rank_cd(p.translated_searchable, plainto_tsquery(get_fts_config(d.target_language), $2)), 0)
-          ) DESC
-        ) as fts_rank
+        ) as fts_score
       FROM pages p
       JOIN documents d ON p.document_id = d.id
       WHERE d.status = 'completed'
@@ -89,6 +98,15 @@ defmodule Doctrans.Search.HybridQuery do
           p.original_searchable @@ plainto_tsquery('simple', $2)
           OR p.translated_searchable @@ plainto_tsquery(get_fts_config(d.target_language), $2)
         )
+    ),
+    fts_ranked AS (
+      SELECT
+        id,
+        document_id,
+        target_language,
+        fts_score,
+        ROW_NUMBER() OVER (ORDER BY fts_score DESC) as fts_rank
+      FROM fts_scored
     ),
     combined AS (
       SELECT

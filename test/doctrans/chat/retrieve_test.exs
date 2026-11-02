@@ -92,6 +92,18 @@ defmodule Doctrans.Chat.RetrieveTest do
     end)
   end
 
+  test "reports an embedder that returns no vector as an outage on the single-query branch",
+       %{document: document} do
+    # `{:ok, nil}` is a legal embedding result and the one success nothing can
+    # be ranked against. The multi-query branch already read it as an outage;
+    # the single-query branch searched on it and reported "nothing matched"
+    # for a search that never ran.
+    EmbeddingMocks.nil_vector()
+
+    assert {:error, {:retrieval_unavailable, [reason: :embedding_unavailable]}} =
+             Chat.retrieve(document.id, "original question", ["refined query"], limit: 1)
+  end
+
   test "leaves a searched-but-empty retrieval as no matches", %{document: document} do
     # Nothing failed, so nothing is an outage: an empty list keeps meaning that
     # the document was searched and held nothing relevant.

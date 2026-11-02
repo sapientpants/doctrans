@@ -33,7 +33,8 @@ defmodule Doctrans.Documents.Page do
     field :extraction_status, :string, default: "pending"
     field :translation_status, :string, default: "pending"
 
-    # Embedding field for semantic search (based on translated content)
+    # Page-level embedding for semantic search. `Doctrans.Search.Indexer` embeds
+    # `original_markdown` -- the source text, not the translation.
     field :embedding, Pgvector.Ecto.Vector, read_after_writes: true
     field :embedding_status, :string, default: "pending", read_after_writes: true
 

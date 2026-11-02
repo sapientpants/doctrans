@@ -17,8 +17,6 @@ defmodule Doctrans.Search.ReindexRebuildTest do
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Search.{Chunker, Indexer, Reindex}
 
-  @moduletag :postgres
-
   test "clears the page's index under the lock and queues its current revision" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       page = indexed_page()

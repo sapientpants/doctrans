@@ -9,8 +9,6 @@ defmodule Doctrans.Processing.CancellationTest do
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
   alias Doctrans.Processing.{Cancellation, Completion, DocumentReprocessing, Run}
 
-  @moduletag :postgres
-
   describe "cancel_document/1" do
     test "cancels the queued jobs, leaves an executing one, and settles the document" do
       Oban.Testing.with_testing_mode(:manual, fn ->

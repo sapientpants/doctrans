@@ -9,8 +9,6 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.DocumentReprocessing
 
-  @moduletag :postgres
-
   setup do
     document = document_fixture(%{status: "error", total_pages: 3})
     succeeded = completed_page_fixture(document, %{page_number: 1})

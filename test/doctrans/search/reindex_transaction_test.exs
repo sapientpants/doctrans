@@ -16,7 +16,6 @@ defmodule Doctrans.Search.ReindexTransactionTest do
   alias Doctrans.Search.Reindex
   alias Ecto.Adapters.SQL.Sandbox
 
-  @tag :postgres
   test "a rejected page preserves committed jobs and does not prevent later pages from queuing" do
     document =
       Sandbox.unboxed_run(Repo, fn -> document_fixture(%{status: "completed", total_pages: 3}) end)

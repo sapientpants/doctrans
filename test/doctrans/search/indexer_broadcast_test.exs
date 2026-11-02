@@ -15,8 +15,6 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
   alias Doctrans.Documents.{Page, Topics}
   alias Doctrans.Search.{EmbeddingMocks, Indexer}
 
-  @moduletag :postgres
-
   test "a completed run announces the page it indexed" do
     page = extracted_page("Indexed and announced")
     :ok = Topics.subscribe_document(page.document_id)

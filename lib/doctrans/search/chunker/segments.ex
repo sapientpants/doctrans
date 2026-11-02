@@ -103,23 +103,28 @@ defmodule Doctrans.Search.Chunker.Segments do
   defp segment_spans(text) do
     text
     |> split_spans({0, byte_size(text)}, @sentence_boundary)
-    |> Enum.flat_map(&bound(text, &1, [@word_boundary]))
+    |> Enum.flat_map(&bound(text, &1, :words))
   end
 
-  defp bound(text, span, rungs) do
+  # A span within the ceiling is one segment. Over it, it is cut at the rung
+  # below: a sentence into words, a word into runs of graphemes. The ladder is
+  # spelled out as two rungs rather than generalised over a list, because the
+  # list only ever held the word boundary.
+  @spec bound(String.t(), span(), :words | :graphemes) :: [{span(), measure()}]
+  defp bound(text, span, rung) do
     measure = measure(slice(text, span))
 
     cond do
       within?(measure, :max) ->
         [{span, measure}]
 
-      rungs == [] ->
-        Enum.map(grapheme_spans(text, span), &{&1, measure(slice(text, &1))})
+      rung == :words ->
+        text
+        |> split_spans(span, @word_boundary)
+        |> Enum.flat_map(&bound(text, &1, :graphemes))
 
       true ->
-        text
-        |> split_spans(span, hd(rungs))
-        |> Enum.flat_map(&bound(text, &1, tl(rungs)))
+        Enum.map(grapheme_spans(text, span), &{&1, measure(slice(text, &1))})
     end
   end
 

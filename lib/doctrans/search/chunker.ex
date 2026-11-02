@@ -34,9 +34,6 @@ defmodule Doctrans.Search.Chunker do
           word_count: non_neg_integer()
         }
 
-  # A chunk before it is indexed: {content, start_offset, end_offset}.
-  @typep raw_chunk :: {String.t(), non_neg_integer(), non_neg_integer()}
-
   @doc """
   Splits text into chunks without overlap.
 
@@ -57,11 +54,12 @@ defmodule Doctrans.Search.Chunker do
   def chunk(text) do
     # `Regex.scan/3` on a Unicode pattern raises `ArgumentError` on invalid
     # UTF-8, and `Segments` splits with one. An oversized paragraph holding a
-    # stray byte would otherwise take the raise
-    # through `Indexer`, whose Oban job retries it deterministically and leaves
-    # the page's `embedding_status` at "processing" for good. Postgres rejects
-    # these bytes in a text column, so this is a guard rather than a path with a
-    # known caller; offsets are into the sanitized text when it fires.
+    # stray byte would otherwise raise through `Indexer.embed_page_chunks/1`,
+    # which marks the page errored and re-raises for Oban to retry -- and a
+    # deterministic raise burns every attempt on a page that chunks fine once
+    # the byte is replaced. Postgres rejects these bytes in a text column, so
+    # this is a guard rather than a path with a known caller; offsets are into
+    # the sanitized text when it fires.
     text = if String.valid?(text), do: text, else: String.replace_invalid(text)
     trimmed = String.trim(text)
 
@@ -120,9 +118,10 @@ defmodule Doctrans.Search.Chunker do
   # than searched for. Searching the text for each paragraph needed a fallback
   # for a miss that could not happen, and an offset out of range is no longer a
   # pointer that merely reads back wrong: `finalize_paras/2` slices the text
-  # with it, and a length past the end raises `ArgumentError`, which `Indexer`'s
-  # Oban job retries deterministically -- leaving the page's `embedding_status`
-  # at "processing" for good. This way there is nothing to guard.
+  # with it, and a length past the end raises `ArgumentError`, which
+  # `Indexer.embed_page_chunks/1` records as a page error and re-raises for
+  # Oban to retry -- deterministically, so every attempt fails the same way.
+  # This way there is nothing to guard.
   defp split_paragraphs(text) do
     text
     |> String.split(~r/\n\n+/, include_captures: true)
@@ -237,7 +236,7 @@ defmodule Doctrans.Search.Chunker do
   end
 
   # Assign indexes to raw chunks, shifting offsets back onto the original text.
-  @spec index_chunks([raw_chunk()], non_neg_integer()) :: [chunk()]
+  @spec index_chunks([Segments.raw_chunk()], non_neg_integer()) :: [chunk()]
   defp index_chunks(raw_chunks, base) do
     raw_chunks
     |> Enum.with_index()
