@@ -23,20 +23,9 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   alias Doctrans.Processing.DocumentProcessor
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
+  alias Doctrans.Resilience.ErrorClassifier
 
   @document_id_key Keys.document_id()
-
-  # Failures that cannot come out differently on a retry. Retrying them burns the
-  # document's remaining attempts and occupies the single extraction slot to
-  # reach the same answer, so they are cancelled with the reason intact.
-  @deterministic_failures ~w(
-    pdf_too_many_pages
-    pdf_page_too_large
-    page_image_too_large
-    poppler_not_found
-    soffice_not_found
-    unsupported_format
-  )a
 
   # Oban waits forever by default. Extraction bounds each poppler run separately,
   # but a document is many runs, so the job carries its own ceiling — the same one
@@ -70,10 +59,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
           document |> Ecto.Changeset.change(Run.new_attrs()) |> Repo.update!()
         end
 
-      case Run.args(document)
-           |> Map.put("file_path", file_path)
-           |> new()
-           |> Oban.insert() do
+      case document |> Run.args() |> new() |> Oban.insert() do
         {:ok, job} -> job
         {:error, reason} -> Repo.rollback(reason)
       end
@@ -81,64 +67,36 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
     |> Doctrans.Errors.result()
   end
 
+  # A document row that is gone stays gone, so the job is cancelled rather than
+  # spent on retries that find the same absence.
   @impl true
   def perform(%Oban.Job{args: %{@document_id_key => document_id} = args}) do
     case Documents.get_document(document_id) do
-      nil -> {:error, :document_not_found}
-      document -> document |> perform_current(args) |> cancel_deterministic()
+      nil -> {:cancel, :document_not_found}
+      document -> document |> perform_current(args) |> cancel_permanent()
     end
   end
 
-  defp cancel_deterministic({:error, reason}) do
-    if deterministic?(reason), do: {:cancel, reason}, else: {:error, reason}
+  # A failure that cannot come out differently on a retry — the document is over
+  # a limit, a tool is not installed, the source file is gone — is cancelled with
+  # the reason intact. Retrying it would burn the document's remaining attempts
+  # and occupy the single extraction slot to reach the same answer.
+  defp cancel_permanent({:error, reason}) do
+    if ErrorClassifier.retryable?(reason), do: {:error, reason}, else: {:cancel, reason}
   end
 
-  defp cancel_deterministic(result), do: result
-
-  # A reason is either an atom or a `{atom, bindings}` pair. Extraction failures
-  # arrive wrapped — `{:pdf_extraction_failed, [reason: {:pdf_too_many_pages, _}]}` —
-  # so the nested reason is what has to be recognised, not the wrapper.
-  defp deterministic?(reason) when is_atom(reason), do: reason in @deterministic_failures
-
-  defp deterministic?({tag, bindings}) when is_atom(tag) and is_list(bindings) do
-    tag in @deterministic_failures or
-      case Keyword.fetch(bindings, :reason) do
-        {:ok, nested} -> deterministic?(nested)
-        :error -> false
-      end
-  end
-
-  defp deterministic?(_reason), do: false
+  defp cancel_permanent(result), do: result
 
   defp perform_current(document, args) do
     if Run.current?(document, Map.get(args, "run_id")) do
-      extract_from(document, source_path(document, args))
+      extract_from(document, Run.source_path(document))
     else
       :ok
     end
   end
 
-  defp source_path(document, args) do
-    if document.processing_run_id,
-      do: Run.source_path(document),
-      else: recorded_path(args) || Run.source_path(document)
-  end
-
-  # The recorded `file_path` is absolute, and it is the one path in the database
-  # that does not relocate: a job queued under one storage root and restored
-  # under another still names the old root, and the document would report its
-  # source missing while the file sits under the new one. So the arg is a hint,
-  # not a requirement — when it does not resolve, fall back to the path
-  # `Run.source_path/1` rebuilds from the root the application is running with.
-  defp recorded_path(args) do
-    with path when is_binary(path) <- Map.get(args, "file_path"),
-         true <- File.regular?(path) do
-      path
-    else
-      _ -> nil
-    end
-  end
-
+  # `Run.source_path/1` is nil for a document whose extension is not a supported
+  # source format, which is reported like a source that is not there.
   defp extract_from(document, path) do
     if path && File.regular?(path) do
       case DocumentProcessor.extract_document(document.id, path, MapSet.new(), document) do
