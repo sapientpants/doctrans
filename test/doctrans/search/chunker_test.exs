@@ -488,6 +488,22 @@ defmodule Doctrans.Search.ChunkerTest do
       assert_preserves(text, chunks)
     end
 
+    test "a separator the word count does not split on does not shrink the fill" do
+      # The same sentences with an ideographic space after each full stop. The
+      # sentence split drops the space, the gap is measured as the one word
+      # `word_count/1` sees in it, and the sentence on either side joins it
+      # with no ASCII whitespace between: two seams, two double-counted words.
+      # Correcting only one left a word per sentence over, and the word budget
+      # closed the chunk after 300 sentences instead of the grapheme budget.
+      text = Enum.map_join(1..2000, "\u3000", fn _ -> "あ。" end)
+
+      chunks = Chunker.chunk(text)
+
+      assert Enum.map(chunks, &String.length(&1.content)) == [2399, 2399, 1199]
+      assert_within_limits(chunks)
+      assert_preserves(text, chunks)
+    end
+
     test "offsets slice back out of the source across separators and scripts" do
       # The round-trip as a property over varied sources rather than one
       # fixture. Each is a single oversized paragraph, which is the region the
