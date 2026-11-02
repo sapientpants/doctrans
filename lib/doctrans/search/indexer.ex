@@ -145,9 +145,9 @@ defmodule Doctrans.Search.Indexer do
   # absent from search and would never be picked up again by startup recovery,
   # which keys on the status. Reporting the failure keeps the page recoverable.
   defp finish_page_level_embedding(page, attempted, total) do
-    case generate_page_embedding(page) do
-      :ok ->
-        mark_page_indexed(page, attempted, total)
+    case embed(page.original_markdown) do
+      {:ok, embedding} ->
+        mark_page_indexed(page, embedding, attempted, total)
 
       {:error, reason} ->
         Logger.error("Page-level embedding failed for page #{page.id}: #{inspect(reason)}")
@@ -156,11 +156,16 @@ defmodule Doctrans.Search.Indexer do
     end
   end
 
-  # The final write is fenced like every other one, so a page that changed or was
-  # deleted while its chunks were embedding reports the run as superseded rather
-  # than as a completed index it never wrote.
-  defp mark_page_indexed(page, attempted, total) do
-    case fenced_update(Page.embedding_changeset(page, %{embedding_status: "completed"}), page) do
+  # The vector and the status land in one fenced write, so "completed" implies a
+  # page vector by construction rather than by the two writes happening to both
+  # succeed. The write is fenced like every other one, so a page that changed or
+  # was deleted while its chunks were embedding reports the run as superseded
+  # rather than as a completed index it never wrote.
+  defp mark_page_indexed(page, embedding, attempted, total) do
+    changeset =
+      Page.embedding_changeset(page, %{embedding: embedding, embedding_status: "completed"})
+
+    case fenced_update(changeset, page) do
       {:error, :stale_entry} ->
         stale(page)
 
@@ -293,17 +298,6 @@ defmodule Doctrans.Search.Indexer do
       {:error, reason} ->
         Logger.warning("Embedding failed for chunk #{chunk.id}: #{inspect(reason)}")
         _ = fenced_update(Chunk.embedding_changeset(chunk, %{embedding_status: "error"}), page)
-        {:error, reason}
-    end
-  end
-
-  defp generate_page_embedding(page) do
-    case embed(page.original_markdown) do
-      {:ok, embedding} ->
-        _ = fenced_update(Page.embedding_changeset(page, %{embedding: embedding}), page)
-        :ok
-
-      {:error, reason} ->
         {:error, reason}
     end
   end

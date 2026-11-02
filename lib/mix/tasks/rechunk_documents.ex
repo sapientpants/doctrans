@@ -1,11 +1,17 @@
 defmodule Mix.Tasks.RechunkDocuments do
   @moduledoc """
-  Re-chunks and re-embeds all existing document pages.
+  Rebuilds the chunks and embeddings of every extracted page.
 
-  This task is used after adding sub-page chunking support to process
-  documents that were originally embedded at the page level.
+  Run it after a change to the chunker or to the embedding model, when the
+  stored chunks or vectors no longer match what a fresh index would produce. The
+  task itself calls no model: for each page it clears the index under the page
+  lock and queues `Doctrans.Jobs.EmbeddingJob`, which rebuilds the page in the
+  running application with the same revision fencing and retry schedule as every
+  other indexing run. The queued work is done by the application, so the server
+  must be running (or started afterwards) for the pages to be re-indexed.
 
-  Processes pages sequentially to avoid overwhelming the API.
+  A page an active indexing job already owns is left to that job and reported as
+  skipped; rerun the task once that job has finished.
 
   ## Usage
 
@@ -14,112 +20,41 @@ defmodule Mix.Tasks.RechunkDocuments do
 
   use Mix.Task
 
-  import Ecto.Query
+  alias Doctrans.Search.Reindex
 
-  alias Doctrans.Deps
-  alias Doctrans.Documents.{Chunk, Page}
-  alias Doctrans.Repo
-  alias Doctrans.Search.Chunker
-
-  @shortdoc "Re-chunk and re-embed all existing document pages"
+  @shortdoc "Rebuild the chunks and embeddings of every extracted page"
 
   @impl true
   def run(_args) do
     Mix.Task.run("app.start")
 
-    page_ids =
-      Page
-      |> where([p], p.extraction_status == "completed")
-      |> where([p], not is_nil(p.original_markdown))
-      |> select([p], p.id)
-      |> Repo.all()
-
+    page_ids = Reindex.extracted_page_ids()
     total = length(page_ids)
-    Mix.shell().info("Found #{total} pages to re-chunk and re-embed")
+    Mix.shell().info("Found #{total} pages to rebuild")
 
-    {success, errors} =
+    counts =
       page_ids
       |> Enum.with_index(1)
-      |> Enum.reduce({0, 0}, fn {page_id, index}, {ok, err} ->
-        Mix.shell().info("Processing page #{index}/#{total}: #{page_id}")
-
-        case process_page(page_id) do
-          :ok ->
-            {ok + 1, err}
-
-          {:error, reason} ->
-            Mix.shell().error("  Failed: #{inspect(reason)}")
-            {ok, err + 1}
-        end
+      |> Enum.reduce(%{queued: 0, skipped: 0, failed: 0}, fn {page_id, index}, counts ->
+        Mix.shell().info("Rebuilding page #{index}/#{total}: #{page_id}")
+        Map.update!(counts, report(Reindex.rebuild_page(page_id)), &(&1 + 1))
       end)
 
-    Mix.shell().info("Done. #{success} succeeded, #{errors} failed.")
+    Mix.shell().info(
+      "Done. #{counts.queued} queued, #{counts.skipped} skipped, #{counts.failed} failed."
+    )
   end
 
-  defp process_page(page_id) do
-    page = Repo.get!(Page, page_id)
+  # Prints one page's outcome and names the counter it goes to.
+  defp report({:ok, :queued}), do: :queued
 
-    # Delete existing chunks
-    Chunk |> where([c], c.page_id == ^page_id) |> Repo.delete_all()
-
-    # Create new chunks
-    chunk_data = Chunker.chunk(page.original_markdown)
-
-    if chunk_data == [] do
-      Mix.shell().info("  No chunks (empty content), skipping")
-      :ok
-    else
-      chunks = insert_chunks(page, chunk_data)
-      results = embed_chunks(chunks)
-      embed_page(page)
-
-      failed = Enum.count(results, &match?({:error, _}, &1))
-      Mix.shell().info("  #{length(chunks)} chunks, #{failed} failed")
-
-      if failed > 0, do: {:error, :some_chunks_failed}, else: :ok
-    end
+  defp report({:skipped, reason}) do
+    Mix.shell().info("  Skipped: #{inspect(reason)}")
+    :skipped
   end
 
-  defp insert_chunks(page, chunk_data) do
-    Enum.map(chunk_data, fn data ->
-      %Chunk{page_id: page.id}
-      |> Chunk.changeset(data)
-      |> Repo.insert!()
-    end)
-  end
-
-  defp embed_chunks(chunks) do
-    # Compute chunk data for overlap context, matching production embedding behavior
-    chunk_data =
-      Enum.map(chunks, fn c -> %{chunk_index: c.chunk_index, content: c.content} end)
-
-    Enum.map(chunks, fn chunk ->
-      embed_content = Chunker.content_for_embedding(chunk_data, chunk.chunk_index)
-
-      case Deps.embedding().generate(embed_content, []) do
-        {:ok, embedding} ->
-          chunk
-          |> Chunk.embedding_changeset(%{embedding: embedding, embedding_status: "completed"})
-          |> Repo.update!()
-
-          :ok
-
-        {:error, reason} ->
-          chunk |> Chunk.embedding_changeset(%{embedding_status: "error"}) |> Repo.update!()
-          {:error, reason}
-      end
-    end)
-  end
-
-  defp embed_page(page) do
-    case Deps.embedding().generate(page.original_markdown, []) do
-      {:ok, embedding} ->
-        page
-        |> Page.embedding_changeset(%{embedding: embedding, embedding_status: "completed"})
-        |> Repo.update!()
-
-      {:error, _} ->
-        :ok
-    end
+  defp report({:error, reason}) do
+    Mix.shell().error("  Failed: #{inspect(reason)}")
+    :failed
   end
 end
