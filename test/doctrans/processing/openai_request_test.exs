@@ -11,16 +11,17 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
 
   use Doctrans.EnvCase, async: false
 
-  alias Doctrans.Processing.OpenAI
+  alias Doctrans.Processing.{OpenAI, OpenAIBypass}
   alias Doctrans.Resilience.{CircuitBreaker, FuseProbe}
   alias Doctrans.TestEnv
 
+  import OpenAIBypass, only: [json: 3]
+
   setup do
-    CircuitBreaker.reset(:openai_api)
-    prev_req = Application.fetch_env(:req, :default_options)
+    TestEnv.reset_fuses()
     # Exercise the real retry path without spending seconds on backoff in tests
     # whose assertions concern the resulting HTTP contract.
-    Req.default_options(Keyword.put(Req.default_options(), :retry_delay, 0))
+    TestEnv.put_env(:req, :default_options, Keyword.put(Req.default_options(), :retry_delay, 0))
     test_pid = self()
 
     bypass = Bypass.open()
@@ -34,16 +35,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       translation_model: "test-translation-model"
     )
 
-    on_exit(fn ->
-      CircuitBreaker.reset(:openai_api)
-
-      case prev_req do
-        {:ok, value} -> Application.put_env(:req, :default_options, value)
-        :error -> Application.delete_env(:req, :default_options)
-      end
-
-      Bypass.down(bypass)
-    end)
+    on_exit(fn -> Bypass.down(bypass) end)
 
     %{bypass: bypass, url: url, test_pid: test_pid}
   end
@@ -69,8 +61,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
           completion_response(conn, @operation)
         end)
 
-        for _ <- 1..6, do: :fuse.melt(:openai_api)
-        assert CircuitBreaker.status(:openai_api) == :blown
+        FuseProbe.blow(:openai_api)
 
         assert {:error, :circuit_open} = call_llm(@operation, image_path)
         refute_received :http_request
@@ -152,12 +143,6 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
     json(conn, 200, %{
       "choices" => [%{"finish_reason" => "stop", "message" => %{"content" => "hello"}}]
     })
-  end
-
-  defp json(conn, status, payload) do
-    conn
-    |> Plug.Conn.put_resp_content_type("application/json")
-    |> Plug.Conn.resp(status, Jason.encode!(payload))
   end
 
   # Reads the request headers and body from a raw socket so the test server
@@ -840,20 +825,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
         json(conn, 500, %{"error" => "boom"})
       end)
 
-      handler_id = {__MODULE__, make_ref()}
-      test_pid = self()
-
-      :ok =
-        :telemetry.attach(
-          handler_id,
-          [:doctrans, :circuit_breaker, :failure],
-          fn _event, _measurements, metadata, pid ->
-            send(pid, {:circuit_failure, metadata.fuse_name})
-          end,
-          test_pid
-        )
-
-      on_exit(fn -> :telemetry.detach(handler_id) end)
+      FuseProbe.watch_failures()
 
       for _ <- 1..6, do: assert({:error, _} = OpenAI.list_models())
 

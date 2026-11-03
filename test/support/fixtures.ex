@@ -1,14 +1,22 @@
 defmodule Doctrans.Fixtures do
   @moduledoc """
   Test fixtures for creating documents and pages.
+
+  The page fixtures come in two kinds. `page_fixture/2`, `completed_page_fixture/2`
+  and `searchable_page_fixture/2` go through the `Documents` API, so they produce
+  what the pipeline would. `indexed_page_fixture/2` writes through `Repo`, because
+  that API takes no embedding and a page that search can rank needs one in the
+  same write as its text.
   """
 
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   alias Doctrans.Documents
   alias Doctrans.Documents.{Layout, Page}
-  alias Doctrans.Processing.Run
+  alias Doctrans.Jobs.DocumentExtractionJob
+  alias Doctrans.Processing.{OpenAIMock, PageContentStub, Run}
   alias Doctrans.Repo
+  alias Doctrans.Search.Embedding
 
   @doc """
   Creates a document with valid attributes.
@@ -62,33 +70,82 @@ defmodule Doctrans.Fixtures do
   end
 
   @doc """
-  Creates a completed, single-page document whose page carries an embedding, so
-  the chat opens with a usable context.
+  A deterministic embedding of the stored width, every component `value`.
 
-  The embedding is inserted through `Repo` rather than the `Documents` API to pin a
-  deterministic vector of the configured dimension.
+  `Doctrans.Search.EmbeddingStub` embeds every query as `dimensions` components
+  of `0.1`, so a page carrying `fake_embedding()` is a perfect semantic match for
+  any query, and one carrying `fake_embedding(-0.1)` points the opposite way and
+  never clears the similarity floor.
   """
-  def completed_document_with_embedding_fixture(attrs \\ %{}) do
-    document =
-      document_fixture(
-        Enum.into(attrs, %{
-          target_language: "de",
-          status: "completed",
-          total_pages: 1
-        })
-      )
+  def fake_embedding(value \\ 0.1) do
+    Pgvector.new(List.duplicate(value, Embedding.dimensions()))
+  end
 
-    Repo.insert!(%Page{
+  @doc """
+  Inserts a fully processed page -- extracted, translated and indexed -- into
+  `document`, and returns it.
+
+  `attrs` override any `Page` field. The embedding defaults to `fake_embedding/1`,
+  the page number to 1, and the text names the document and page so a result can
+  be told apart from its neighbours.
+  """
+  def indexed_page_fixture(document, attrs \\ %{}) do
+    page_number = Map.get(attrs, :page_number, 1)
+
+    page = %Page{
       id: Ecto.UUID.generate(),
       document_id: document.id,
-      page_number: 1,
-      image_path: "documents/#{document.id}/pages/page_1.png",
-      original_markdown: "Test content for chat",
-      translated_markdown: "Testinhalt für Chat",
+      page_number: page_number,
+      image_path: "documents/#{document.id}/pages/page_#{page_number}.png",
+      original_markdown: "Content in document #{document.title} page #{page_number}",
+      translated_markdown: "Translated content page #{page_number}",
       extraction_status: "completed",
       translation_status: "completed",
       embedding_status: "completed",
-      embedding: Pgvector.new(List.duplicate(0.1, 1024))
+      embedding: fake_embedding()
+    }
+
+    Repo.insert!(struct!(page, attrs))
+  end
+
+  @doc """
+  One extracted page in a completed document of its own: the smallest thing
+  global search is allowed to find. Returns the page.
+
+  The page carries no embedding unless `attrs` give one, so only the keyword
+  half of a search can find it. `attrs` may also carry `:title` for the document
+  and `:page_number` for the page.
+  """
+  def searchable_page_fixture(text, attrs \\ %{}) do
+    {title, attrs} = Map.pop(attrs, :title, "Searchable Doc")
+    {embedding, attrs} = Map.pop(attrs, :embedding)
+    document = document_fixture(%{status: "completed", title: title})
+
+    {:ok, page} =
+      document
+      |> page_fixture(attrs)
+      |> Documents.update_page_extraction(%{
+        extraction_status: "completed",
+        original_markdown: text
+      })
+
+    if embedding do
+      page |> Ecto.Changeset.change(embedding: embedding) |> Repo.update!()
+    else
+      page
+    end
+  end
+
+  @doc """
+  Creates a completed, single-page document whose page carries an embedding, so
+  the chat opens with a usable context.
+  """
+  def completed_document_with_embedding_fixture(attrs \\ %{}) do
+    document = document_fixture(Enum.into(attrs, %{status: "completed", total_pages: 1}))
+
+    indexed_page_fixture(document, %{
+      original_markdown: "Testinhalt für Chat",
+      translated_markdown: "Test content for chat"
     })
 
     document
@@ -108,6 +165,52 @@ defmodule Doctrans.Fixtures do
     File.write!(path, contents)
     on_exit(fn -> File.rm_rf(Layout.document_dir(document.id)) end)
     path
+  end
+
+  @doc """
+  Runs a three-page document through the whole pipeline -- page rendering, both
+  model stages for every page, indexing -- and returns it with its pages in
+  order and the path of its retained source.
+
+  The models are `Doctrans.Processing.PageContentStub`, installed here on
+  `OpenAIMock`, so each page ends up with a source term and a translated term
+  no other page carries. Oban runs inline in `:test`, so the one `enqueue` call
+  drives everything. A caller that wants to observe the run through the
+  embedding mock -- the inputs it was asked to embed, say -- installs that
+  probe before calling this; a stub on `OpenAIMock` installed beforehand is
+  replaced here, so it has to be installed afterwards.
+
+  Raises if the run did not leave the document `completed`, so a pipeline that
+  stops short is reported here rather than by whichever later assertion first
+  misses the pages it expected.
+  """
+  def processed_document_fixture(attrs \\ %{}) do
+    Mox.stub_with(OpenAIMock, PageContentStub)
+
+    document =
+      document_fixture(
+        Enum.into(attrs, %{
+          title: "Jahresabschluss 2025",
+          original_filename: "jahresabschluss.pdf",
+          target_language: "en"
+        })
+      )
+
+    source_path = document_source_fixture(document)
+    {:ok, _job} = DocumentExtractionJob.enqueue_document(document.id, source_path)
+
+    document = Documents.get_document_with_pages(document.id)
+
+    if document.status != "completed" do
+      raise "processed_document_fixture: the pipeline left document #{document.id} " <>
+              "in status #{inspect(document.status)} rather than \"completed\""
+    end
+
+    %{
+      document: document,
+      pages: Enum.sort_by(document.pages, & &1.page_number),
+      source_path: source_path
+    }
   end
 
   @doc """

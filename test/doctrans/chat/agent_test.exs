@@ -9,9 +9,11 @@ defmodule Doctrans.Chat.AgentTest do
   alias Doctrans.Processing.{OpenAIMock, OpenAIProbe}
   alias Doctrans.Repo
 
+  import Doctrans.Fixtures
+
   describe "run/5" do
     setup do
-      %{document: create_document_with_embeddings()}
+      %{document: completed_document_with_embedding_fixture()}
     end
 
     test "emits pipeline stages in order, streams deltas, and returns context", %{
@@ -39,18 +41,13 @@ defmodule Doctrans.Chat.AgentTest do
 
     test "accumulates and dedups the retrieved context across turns", %{document: document} do
       first_page = Documents.get_page_by_number(document.id, 1)
-      second_vector = Pgvector.new(List.duplicate(-0.1, 1024))
 
       second_page =
-        Repo.insert!(%Documents.Page{
-          document_id: document.id,
+        indexed_page_fixture(document, %{
           page_number: 2,
           original_markdown: "Liabilities are 75 million euros.",
           translated_markdown: "Verbindlichkeiten sind 75 Millionen Euro.",
-          extraction_status: "completed",
-          translation_status: "completed",
-          embedding_status: "completed",
-          embedding: second_vector
+          embedding: fake_embedding(-0.1)
         })
 
       probe =
@@ -63,7 +60,7 @@ defmodule Doctrans.Chat.AgentTest do
             {:ok, "Standalone: liabilities"},
             {:ok, "Sufficient: yes"}
           ],
-          %{"assets" => first_page.embedding, "liabilities" => second_vector}
+          %{"assets" => first_page.embedding, "liabilities" => second_page.embedding}
         )
 
       noop = fn _ -> :ok end
@@ -141,7 +138,7 @@ defmodule Doctrans.Chat.AgentTest do
       assert byte_size(Chat.build_context(context)) <= 32_000
       assert_received {:contract_generation, [%{role: "system", content: prompt} | _], _}
       refute prompt =~ "Oversized retained passage"
-      assert prompt =~ "Testinhalt für Chat"
+      assert prompt =~ "Test content for chat"
     end
 
     test "surfaces generation errors", %{document: document} do
@@ -202,33 +199,4 @@ defmodule Doctrans.Chat.AgentTest do
   end
 
   defp build_stub_document, do: %Documents.Document{id: Ecto.UUID.generate(), title: "Stub"}
-
-  defp create_document_with_embeddings do
-    {:ok, document} =
-      Documents.create_document(%{
-        title: "Test Document",
-        original_filename: "test.pdf",
-        source_language: "en",
-        target_language: "de",
-        status: "completed",
-        total_pages: 1
-      })
-
-    embedding = List.duplicate(0.1, 1024) |> Pgvector.new()
-
-    Repo.insert!(%Documents.Page{
-      id: Ecto.UUID.generate(),
-      document_id: document.id,
-      page_number: 1,
-      image_path: "documents/#{document.id}/pages/page_1.png",
-      original_markdown: "Test content for chat",
-      translated_markdown: "Testinhalt für Chat",
-      extraction_status: "completed",
-      translation_status: "completed",
-      embedding_status: "completed",
-      embedding: embedding
-    })
-
-    document
-  end
 end

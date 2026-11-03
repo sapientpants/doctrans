@@ -1,11 +1,11 @@
 defmodule Doctrans.Processing.LlmProcessorTest do
-  # `async: false`: the retry telemetry the error-handling cases refute is
-  # VM-global, so a concurrent test's retries would reach the observer here.
-  use Doctrans.DataCase, async: false
+  # The happy path of one page through both model stages. The failure paths,
+  # and what the job does with each, are `LlmProcessorRetryTest`'s.
+  use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Layout
-  alias Doctrans.Processing.{LlmProcessor, OpenAIMock}
+  alias Doctrans.Processing.LlmProcessor
 
   import Doctrans.Fixtures
 
@@ -13,12 +13,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
     test "processes page extraction and translation successfully" do
       document = document_fixture(%{status: "processing"})
       page = page_fixture(document, %{page_number: 1})
-
-      # Create the image file for the mock to find
-      upload_dir = Layout.root()
-      full_path = Path.join(upload_dir, page.image_path)
-      File.mkdir_p!(Path.dirname(full_path))
-      File.write!(full_path, "fake image")
+      setup_image_file(page)
 
       result = LlmProcessor.process_page(page.id)
 
@@ -63,127 +58,11 @@ defmodule Doctrans.Processing.LlmProcessorTest do
     end
   end
 
-  describe "extraction error handling" do
-    setup do
-      attach_retry_observer()
-      :ok
-    end
-
-    test "fails immediately on circuit breaker open" do
-      document = document_fixture(%{status: "processing"})
-      page = page_fixture(document, %{page_number: 1})
-
-      # Create the image file
-      setup_image_file(page)
-
-      # Configure stub to return circuit open error
-      fail_extraction(:circuit_open)
-
-      result = LlmProcessor.process_page(page.id)
-
-      assert {:error, _} = result
-
-      # Verify page is marked as error
-      updated_page = Documents.get_page!(page.id)
-      assert updated_page.extraction_status == "error"
-      refute_received {:retry_event, _}
-    end
-
-    test "fails immediately on permanent error" do
-      document = document_fixture(%{status: "processing"})
-      page = page_fixture(document, %{page_number: 1})
-
-      setup_image_file(page)
-
-      # A 404 arrives normalized, the way the client reports every failure.
-      fail_extraction({:http_error, [status: 404]})
-
-      result = LlmProcessor.process_page(page.id)
-
-      assert {:cancel, _} = result
-
-      updated_page = Documents.get_page!(page.id)
-      assert updated_page.extraction_status == "error"
-      refute_received {:retry_event, _}
-    end
-  end
-
-  describe "translation error handling" do
-    setup do
-      attach_retry_observer()
-      :ok
-    end
-
-    test "fails immediately on circuit breaker open during translation" do
-      document = document_fixture(%{status: "processing"})
-      page = page_fixture(document, %{page_number: 1})
-
-      setup_image_file(page)
-
-      # Configure stub: extraction succeeds, translation fails
-      fail_translation(:circuit_open)
-
-      result = LlmProcessor.process_page(page.id)
-
-      assert {:error, _} = result
-
-      updated_page = Documents.get_page!(page.id)
-      assert updated_page.extraction_status == "completed"
-      assert updated_page.translation_status == "error"
-      refute_received {:retry_event, _}
-    end
-
-    test "fails immediately on permanent error during translation" do
-      document = document_fixture(%{status: "processing"})
-      page = page_fixture(document, %{page_number: 1})
-
-      setup_image_file(page)
-
-      # Extraction succeeds; translation fails with a normalized 400.
-      fail_translation({:http_error, [status: 400]})
-
-      result = LlmProcessor.process_page(page.id)
-
-      assert {:cancel, _} = result
-
-      updated_page = Documents.get_page!(page.id)
-      assert updated_page.extraction_status == "completed"
-      assert updated_page.translation_status == "error"
-      refute_received {:retry_event, _}
-    end
-  end
-
-  defp fail_extraction(reason) do
-    Mox.stub(OpenAIMock, :extract_markdown, fn _image_path, _opts -> {:error, reason} end)
-  end
-
-  defp fail_translation(reason) do
-    Mox.stub(OpenAIMock, :translate, fn _markdown, _source, _target, _opts ->
-      {:error, reason}
-    end)
-  end
-
-  defp attach_retry_observer do
-    handler = {__MODULE__, make_ref()}
-    events = [[:doctrans, :retry, :attempt], [:doctrans, :retry, :exhausted]]
-
-    :telemetry.attach_many(
-      handler,
-      events,
-      fn event, _, _, owner ->
-        send(owner, {:retry_event, event})
-      end,
-      self()
-    )
-
-    on_exit(fn -> :telemetry.detach(handler) end)
-  end
-
-  # Helper to create a fake image file for tests
+  # The image file extraction hands to the model, where the page says it is.
   defp setup_image_file(page) do
-    upload_dir = Layout.root()
-    full_path = Path.join(upload_dir, page.image_path)
+    full_path = Path.join(Layout.root(), page.image_path)
     File.mkdir_p!(Path.dirname(full_path))
     File.write!(full_path, "fake image")
+    on_exit(fn -> File.rm(full_path) end)
   end
 end

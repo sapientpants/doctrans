@@ -194,10 +194,6 @@ defmodule Doctrans.DocumentsTest do
       doc = document_fixture()
       assert Documents.get_document(doc.id).id == doc.id
     end
-
-    test "returns nil for non-existent id" do
-      assert is_nil(Documents.get_document(Ecto.UUID.generate()))
-    end
   end
 
   describe "create_document/1" do

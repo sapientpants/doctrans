@@ -379,10 +379,10 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     end
 
     test "displays page count when available", %{conn: conn} do
-      _doc = document_fixture(%{total_pages: 10})
+      doc = document_fixture(%{total_pages: 10})
       {:ok, view, _html} = live(conn, ~p"/")
 
-      assert render(view) =~ "10 pages"
+      assert has_element?(view, "#documents-#{doc.id}", "10 pages")
     end
 
     test "upload modal contains target language select", %{conn: conn} do
@@ -390,11 +390,9 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
 
       view |> element("#upload-document-btn") |> render_click()
 
-      assert has_element?(view, "#target-lang-select")
-      html = render(view)
-      assert html =~ "German"
-      assert html =~ "English"
-      assert html =~ "French"
+      for language <- ~w(de en fr) do
+        assert has_element?(view, "#target-lang-select option[value='#{language}']")
+      end
     end
 
     test "document card links to document show page", %{conn: conn} do
@@ -407,10 +405,8 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     test "search form links to search page", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/")
 
-      # The search form is a regular HTML form that submits to /search
-      html = render(view)
-      assert html =~ ~s(action="/search")
-      assert html =~ ~s(method="get")
+      # A regular HTML form that submits to /search, not a LiveView event.
+      assert has_element?(view, "#dashboard-search-form[action='/search'][method='get']")
     end
 
     test "shows progress bar for extracting documents", %{conn: conn} do
@@ -420,37 +416,19 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       assert has_element?(view, "#documents progress")
     end
 
+    # Page progress reaching the dashboard is covered by `CrossTabTest`, which
+    # asserts it on a second tab.
     test "receives document updates via PubSub", %{conn: conn} do
       doc = document_fixture(%{title: "Initial"})
       {:ok, view, _html} = live(conn, ~p"/")
+      card = "#documents-#{doc.id}"
 
-      # Verify initial state
-      assert render(view) =~ "Initial"
+      assert has_element?(view, card, "Initial")
 
-      # Update and broadcast
       {:ok, updated} = Doctrans.Documents.update_document(doc, %{title: "Updated PubSub"})
       Topics.broadcast_document_updated(updated)
 
-      assert render(view) =~ "Updated PubSub"
-    end
-
-    # Page progress reaches the dashboard on the collection topic, which is the
-    # only subscription it holds since the per-document ones were dropped.
-    test "receives page updates via PubSub", %{conn: conn} do
-      doc = document_with_pages_fixture(%{title: "Page Update Test", status: "processing"}, 2)
-      other = document_with_pages_fixture(%{title: "Untouched", status: "processing"}, 2)
-      {:ok, view, _html} = live(conn, ~p"/")
-
-      [page | _] = doc.pages
-
-      # Update page and broadcast
-      {:ok, updated_page} =
-        Doctrans.Documents.update_page_extraction(page, %{extraction_status: "completed"})
-
-      Topics.broadcast_page_updated(updated_page)
-
-      assert has_element?(view, "#documents-#{doc.id} progress[value='25.0']")
-      assert has_element?(view, "#documents-#{other.id} progress[value='0.0']")
+      assert has_element?(view, card, "Updated PubSub")
     end
 
     test "validate_upload changes target language", %{conn: conn} do
@@ -470,11 +448,10 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     test "handles unknown PubSub messages gracefully", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/")
 
-      # Send unknown message directly to the process
       send(view.pid, {:unknown_message, "test"})
 
-      # Should not crash
-      assert render(view) =~ "Doctrans"
+      # Still rendering, so the message was ignored rather than crashing the view.
+      assert has_element?(view, "#dashboard-search-form")
     end
 
     test "cancel_upload removes pending upload", %{conn: conn} do
@@ -498,9 +475,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       assert has_element?(view, "button[phx-click=cancel_upload][aria-label*='retained.pdf']")
       assert has_element?(view, "#upload-modal")
 
-      put_oban_manual_mode(view)
-
-      Oban.Testing.with_testing_mode(:manual, fn ->
+      queue_only(view, fn ->
         view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
       end)
 
@@ -552,11 +527,10 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     end
 
     test "shows page count for document with zero pages", %{conn: conn} do
-      _doc = document_fixture(%{total_pages: 0})
-      {:ok, _view, html} = live(conn, ~p"/")
+      doc = document_fixture(%{total_pages: 0})
+      {:ok, view, _html} = live(conn, ~p"/")
 
-      # Should show 0 pages for document with no pages extracted yet
-      assert html =~ "0 pages"
+      assert has_element?(view, "#documents-#{doc.id}", "0 pages")
     end
   end
 end

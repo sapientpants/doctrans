@@ -21,9 +21,6 @@ defmodule Doctrans.Processing.OpenAIStub do
     "mlx-community/Qwen3-Embedding-8B-4bit-DWQ"
   ]
 
-  @doc "The model list `list_models/0` answers with."
-  def default_models, do: @default_models
-
   @impl true
   def extract_markdown(_image_path, _opts) do
     {:ok, "# Extracted Test Content\n\nThis is mock markdown content extracted from the image."}
@@ -42,10 +39,13 @@ defmodule Doctrans.Processing.OpenAIStub do
 
   @impl true
   def chat(messages, _opts) do
-    # Handle both atom keys (%{role: "user"}) and string keys (%{"role" => "user"})
+    # Messages arrive with atom keys (%{role: "user"}) or string keys
+    # (%{"role" => "user"}). The parentheses matter: without them `||` binds
+    # the role itself, every atom-keyed message passes, and the trailing
+    # message is returned whatever its role.
     user_msg =
       messages
-      |> Enum.filter(fn msg -> Map.get(msg, :role) || Map.get(msg, "role") == "user" end)
+      |> Enum.filter(fn msg -> (Map.get(msg, :role) || Map.get(msg, "role")) == "user" end)
       |> List.last()
 
     content =

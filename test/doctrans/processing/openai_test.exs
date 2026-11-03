@@ -1,29 +1,18 @@
 defmodule Doctrans.Processing.OpenAITest do
   @moduledoc """
-  Covers `Doctrans.Processing.OpenAI`'s local helpers and its model-list probe.
+  Covers `Doctrans.Processing.OpenAI`'s local helpers: the file check in front
+  of an extraction and the code-fence stripping every stage's output goes
+  through. Neither touches the network or any global setting, so the file runs
+  concurrently with the rest of the suite.
 
-  `list_models/0` is the call the reprocess modal makes before anything has
-  been processed, and it used to be asserted here with `is_list/1` against
-  whatever happened to be listening on the configured host — an assertion that
-  cannot fail, run against the network. It now talks to a local Bypass server
-  and is asserted exactly, reachable and not. Nothing in this file leaves the
-  machine.
-
-  The unreachable case is driven through a base URL Req cannot build a request
-  from rather than a closed port: Req retries a safe GET on `:econnrefused`, so
-  a refused connection costs about seven seconds of backoff per call, and the
-  probe takes no options this test could pass `retry: false` through, so it
-  reports a rejected request instead.
-
-  The full HTTP surface — chat, streaming, extraction, translation, embedding
-  and the circuit-breaker paths — is covered in
+  The HTTP surface -- chat, streaming, extraction, translation, the model list
+  and the circuit-breaker paths -- is covered against a local Bypass server in
   `Doctrans.Processing.OpenAIRequestTest`.
   """
 
-  use Doctrans.EnvCase, async: false
+  use Doctrans.EnvCase, async: true
 
   alias Doctrans.Processing.OpenAI
-  alias Doctrans.TestEnv
 
   # A rejected request is logged at :error by `ApiFailure`.
   @moduletag :capture_log
@@ -34,18 +23,6 @@ defmodule Doctrans.Processing.OpenAITest do
 
       assert {:error, reason} = result
       assert {:image_unreadable, [reason: :enoent]} = reason
-    end
-  end
-
-  describe "list_models/0" do
-    setup :bypass_api
-
-    test "reports the status when the API rejects the request", %{bypass: bypass} do
-      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
-        Plug.Conn.resp(conn, 401, "unauthorized")
-      end)
-
-      assert OpenAI.list_models() == {:error, {:http_error, [status: 401]}}
     end
   end
 
@@ -89,19 +66,5 @@ defmodule Doctrans.Processing.OpenAITest do
       input = "```\n  Hello  \n```"
       assert OpenAI.strip_code_fences(input) == "Hello"
     end
-  end
-
-  defp bypass_api(_context) do
-    bypass = Bypass.open()
-    put_openai_env(base_url: "http://localhost:#{bypass.port}", api_key: "sk-test-123")
-    %{bypass: bypass}
-  end
-
-  # Merged, not replaced: `:openai` also carries the vision, translation and chat
-  # model names, and application env is global, so replacing the list would unset
-  # them for every process for as long as this test runs.
-  defp put_openai_env(overrides) do
-    merged = Keyword.merge(Application.fetch_env!(:doctrans, :openai), overrides)
-    TestEnv.put_env(:openai, merged)
   end
 end

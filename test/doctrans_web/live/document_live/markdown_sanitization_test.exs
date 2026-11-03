@@ -101,7 +101,7 @@ defmodule DoctransWeb.DocumentLive.MarkdownSanitizationTest do
       {:ok, answer} = Conversations.finish(question, "assistant", @payload, [])
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
 
       assert has_element?(view, "#chat_messages-#{answer.id}")
 

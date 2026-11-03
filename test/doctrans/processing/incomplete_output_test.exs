@@ -8,7 +8,7 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Layout
   alias Doctrans.Processing.{LlmProcessor, OpenAI, OpenAIMock}
-  alias Doctrans.Resilience.{CircuitBreaker, ErrorClassifier}
+  alias Doctrans.Resilience.ErrorClassifier
   alias Doctrans.TestEnv
   alias DoctransWeb.ErrorMessages
 
@@ -22,7 +22,7 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
 
     # The processor's calls go through the real client, and from there to Bypass.
     Mox.stub_with(OpenAIMock, OpenAI)
-    CircuitBreaker.reset(:openai_api)
+    TestEnv.reset_fuses()
 
     document = document_fixture(%{status: "processing", total_pages: 1})
     page = page_fixture(document)
@@ -30,10 +30,7 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, "test image")
 
-    on_exit(fn ->
-      CircuitBreaker.reset(:openai_api)
-      File.rm(path)
-    end)
+    on_exit(fn -> File.rm(path) end)
 
     %{bypass: bypass, page: page, path: path}
   end

@@ -9,9 +9,9 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
   `lg:flex`, `lg:w-1/2`) rather than a computed layout. Likewise, the chat's
   "keep following the answer only while the reader is already near the bottom"
   behaviour lives entirely in the `ChatScroll` hook in
-  `assets/js/hooks/chat_scroll.js` and is **not** exercised by this suite -- the
-  tests below only pin that the hook is wired up and that its affordance exists
-  in the markup for it to toggle.
+  `assets/js/hooks/chat_scroll.js`; `test/js/chat_scroll_test.mjs` executes it,
+  and the tests below only pin that the hook is wired up and that its
+  affordance exists in the markup for it to toggle.
   """
 
   use DoctransWeb.ConnCase, async: true

@@ -1,18 +1,16 @@
 defmodule DoctransWeb.ConnCase do
   @moduledoc """
-  This module defines the test case to be used by
-  tests that require setting up a connection.
+  The case template for tests that drive the application through a connection
+  or a LiveView.
 
-  Such tests rely on `Phoenix.ConnTest` and also
-  import other functionality to make it easier
-  to build common data structures and query the data layer.
-
-  Finally, if the test case interacts with the database,
-  we enable the SQL sandbox, so changes done to the database
-  are reverted at the end of every test. If you are using
-  PostgreSQL, you can even run database tests asynchronously
-  by setting `use DoctransWeb.ConnCase, async: true`, although
-  this option is not recommended for other databases.
+  Beyond `Phoenix.ConnTest` and `Phoenix.LiveViewTest`, it does three things of
+  this project's own. It registers the test with `Doctrans.TestEnv` and installs
+  the default mock stubs through `Doctrans.DataCase.setup_sandbox/1`, so a
+  global override is refused from an `async: true` test and every collaborator
+  answers from the first call. It wraps `live/3` and the redirect helpers so a
+  mount of the dashboard from an async test fails at once: dashboard PubSub is
+  global even when SQL sandboxes are isolated. And `queue_only/2` is how a test
+  submits a form whose handler enqueues a job without running that job inline.
   """
 
   use ExUnit.CaseTemplate
@@ -83,22 +81,24 @@ defmodule DoctransWeb.ConnCase do
   def check_live_result!(result), do: result
 
   @doc """
-  Puts the LiveView process itself into Oban's `:manual` testing mode.
+  Runs `fun` with Oban in `:manual` mode for both the test and the LiveView.
 
-  `Oban.Testing.with_testing_mode/2` records the mode in the *calling* process's
-  dictionary, but a `render_submit/1` is handled in the LiveView process, and
-  that is the process which inserts the job -- so setting it in the test process
-  is what lets a submitted upload run its worker inline. `:sys.replace_state/2`
-  is only a way to run `Process.put/2` over there; the socket state is returned
-  unchanged, and the flag leaves with the view at the end of the test.
+  Oban runs `testing: :inline` in the suite, so an insert executes the job then
+  and there, and a job a LiveView event enqueues -- an upload's extraction, a
+  retry's model call -- would run for real. Both processes have to opt out:
+  `Oban.Config.get_engine/1` reads `self()` *and* `$callers`, and the LiveView
+  names the test among its callers, so setting the mode in only one of them
+  leaves the other voting for inline. `:sys.replace_state/2` is only a way to
+  run `Process.put/2` in the view; the socket state is returned unchanged, and
+  the flag leaves with the view at the end of the test.
   """
-  def put_oban_manual_mode(view) do
+  def queue_only(view, fun) do
     :sys.replace_state(view.pid, fn state ->
       Process.put(:oban_testing, :manual)
       state
     end)
 
-    view
+    Oban.Testing.with_testing_mode(:manual, fun)
   end
 
   @doc """

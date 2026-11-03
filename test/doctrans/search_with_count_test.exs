@@ -11,8 +11,6 @@ defmodule Doctrans.SearchWithCountTest do
   """
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.Documents
-  alias Doctrans.Repo
   alias Doctrans.Search
   alias Doctrans.Search.EmbeddingMocks
 
@@ -21,7 +19,7 @@ defmodule Doctrans.SearchWithCountTest do
 
   describe "search_with_count/2" do
     test "counts and lists matches from a single query embedding" do
-      page = searchable_page("A page about sharedembeddingterm and nothing else")
+      page = searchable_page_fixture("A page about sharedembeddingterm and nothing else")
 
       EmbeddingMocks.observe()
 
@@ -41,7 +39,9 @@ defmodule Doctrans.SearchWithCountTest do
       # Seven matches against a limit of five: a total that merely described the
       # returned page would read 5, and pagination would lose the last two.
       for index <- 1..7 do
-        searchable_page("Page #{index} about countbeyondlimitterm", "Counted Doc #{index}")
+        searchable_page_fixture("Page #{index} about countbeyondlimitterm", %{
+          title: "Counted Doc #{index}"
+        })
       end
 
       assert {:ok, %{results: results, total_count: total_count}} =
@@ -53,7 +53,9 @@ defmodule Doctrans.SearchWithCountTest do
 
     test "counts every match from the last page of results too" do
       for index <- 1..7 do
-        searchable_page("Page #{index} about offsetcountterm", "Offset Doc #{index}")
+        searchable_page_fixture("Page #{index} about offsetcountterm", %{
+          title: "Offset Doc #{index}"
+        })
       end
 
       assert {:ok, %{results: results, total_count: total_count}} =
@@ -65,9 +67,9 @@ defmodule Doctrans.SearchWithCountTest do
     end
 
     test "returns a tagged error when the search statement fails" do
-      "A page about dbfailureterm"
-      |> searchable_page()
-      |> embed()
+      # Indexed, because the statement only compares vectors for pages that have
+      # one: a width mismatch cannot reach Postgres otherwise.
+      searchable_page_fixture("A page about dbfailureterm", %{embedding: fake_embedding()})
 
       EmbeddingMocks.wrong_dimension()
 
@@ -82,14 +84,15 @@ defmodule Doctrans.SearchWithCountTest do
 
   describe "retrieval without an embedding server" do
     test "still returns the keyword matches, flagged as keyword-only" do
-      page = searchable_page("A page about failingembeddingterm and nothing else")
+      page = searchable_page_fixture("A page about failingembeddingterm and nothing else")
 
       # An indexed page the query does not mention. It is what proves the
       # semantic half really sat out: ranked against a NULL vector it would
       # otherwise place first and count as a match nobody searched for.
-      "An indexed page about something unrelated"
-      |> searchable_page("Indexed Doc")
-      |> embed()
+      searchable_page_fixture("An indexed page about something unrelated", %{
+        title: "Indexed Doc",
+        embedding: fake_embedding()
+      })
 
       fail_embeddings_for("failingembeddingterm")
 
@@ -112,7 +115,7 @@ defmodule Doctrans.SearchWithCountTest do
     end
 
     test "reports no matches as no matches, not as an outage" do
-      searchable_page("A page about somethingelseentirely")
+      searchable_page_fixture("A page about somethingelseentirely")
 
       fail_embeddings_for("unmatchedkeywordterm")
 
@@ -124,7 +127,9 @@ defmodule Doctrans.SearchWithCountTest do
 
     test "counts every degraded match, not just the page returned" do
       for index <- 1..7 do
-        searchable_page("Page #{index} about degradedcountterm", "Degraded Doc #{index}")
+        searchable_page_fixture("Page #{index} about degradedcountterm", %{
+          title: "Degraded Doc #{index}"
+        })
       end
 
       fail_embeddings_for("degradedcountterm")
@@ -143,7 +148,9 @@ defmodule Doctrans.SearchWithCountTest do
       # hybrid floor here would cap both the page and its total at 40 and call
       # that the whole match set.
       for index <- 1..45 do
-        searchable_page("Page #{index} about floorcapterm", "Floor Cap Doc #{index}")
+        searchable_page_fixture("Page #{index} about floorcapterm", %{
+          title: "Floor Cap Doc #{index}"
+        })
       end
 
       fail_embeddings_for("floorcapterm")
@@ -158,7 +165,9 @@ defmodule Doctrans.SearchWithCountTest do
 
     test "pages through degraded matches past the floor rather than ending at it" do
       for index <- 1..45 do
-        searchable_page("Page #{index} about floorpageterm", "Floor Page Doc #{index}")
+        searchable_page_fixture("Page #{index} about floorpageterm", %{
+          title: "Floor Page Doc #{index}"
+        })
       end
 
       fail_embeddings_for("floorpageterm")
@@ -173,7 +182,7 @@ defmodule Doctrans.SearchWithCountTest do
     end
 
     test "reports a vectorless embedding success as keyword-only, not as hybrid" do
-      page = searchable_page("A page about nilvectorterm and nothing else")
+      page = searchable_page_fixture("A page about nilvectorterm and nothing else")
 
       # `{:ok, nil}` is a legal embedding result; ranking never ran, so calling
       # it hybrid would claim a semantic half that sat out.
@@ -202,7 +211,9 @@ defmodule Doctrans.SearchWithCountTest do
   describe "pagination past the end" do
     test "reports no matches rather than a total it cannot see" do
       for index <- 1..3 do
-        searchable_page("Page #{index} about pastendterm", "Past End Doc #{index}")
+        searchable_page_fixture("Page #{index} about pastendterm", %{
+          title: "Past End Doc #{index}"
+        })
       end
 
       # Documented behaviour: the total is a window over the returned rows, so
@@ -210,27 +221,6 @@ defmodule Doctrans.SearchWithCountTest do
       assert {:ok, %{results: [], total_count: 0}} =
                Search.search_with_count("pastendterm", limit: 5, offset: 50)
     end
-  end
-
-  defp searchable_page(text, title \\ "Search With Count Doc") do
-    document = document_fixture(%{status: "completed", title: title})
-    page = page_fixture(document, %{page_number: 1})
-
-    {:ok, page} =
-      Documents.update_page_extraction(page, %{
-        extraction_status: "completed",
-        original_markdown: text
-      })
-
-    page
-  end
-
-  # The statement only compares vectors for pages that have one, so a page must
-  # be indexed before a width mismatch can reach Postgres at all.
-  defp embed(page) do
-    page
-    |> Ecto.Changeset.change(embedding: Pgvector.new(List.duplicate(0.1, 1024)))
-    |> Repo.update!()
   end
 
   # The plan fails this query alone, so the stub stays behaviourally identical

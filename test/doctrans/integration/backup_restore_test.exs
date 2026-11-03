@@ -34,8 +34,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   alias Doctrans.Chat
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
-  alias Doctrans.Jobs.DocumentExtractionJob
-  alias Doctrans.Processing.{DocumentReprocessing, OpenAIMock, OpenAIProbe, PageContentStub, Run}
+  alias Doctrans.Processing.{DocumentReprocessing, OpenAIProbe, PageContentStub, Run}
   alias Doctrans.Search
   alias Doctrans.TestEnv
 
@@ -44,7 +43,6 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   @answer "Seite 2 nennt den Bestand zum Stichtag."
   @follow_up "Und die Pensionsrueckstellungen?"
 
-  setup :stub_models
   setup :process_under_original_root
 
   describe "a restore that carries the whole storage tree" do
@@ -80,26 +78,18 @@ defmodule Doctrans.Integration.BackupRestoreTest do
       assert get(build_conn(), "/uploads/documents/#{document.id}/original.pdf").status == 404
     end
 
-    test "a search a single page can answer returns that page of the restored document", %{
-      document: document,
+    # What the ranking says about this document is `ProcessingToRetrievalTest`'s
+    # claim. This one is only that the result still leads to a file.
+    test "a search result's image path resolves under the restored root", %{
       pages: pages,
       restored_root: restored_root
     } do
       target = Enum.at(pages, 1)
 
-      assert {:ok, %{results: [top | rest], total_count: 3, retrieval: :hybrid}} =
+      assert {:ok, %{results: [top | _rest]}} =
                Search.search_with_count(PageContentStub.source_term(2))
 
       assert top.page_id == target.id
-      assert top.document_id == document.id
-      assert top.page_number == 2
-      assert top.document_title == @title
-      assert top.image_path == target.image_path
-      assert top.snippet =~ PageContentStub.translated_term(2)
-
-      # The rest of the document ranks behind it rather than being absent, so
-      # the index survived the move whole and not just for the matched page.
-      assert Enum.sort([top.page_number | Enum.map(rest, & &1.page_number)]) == [1, 2, 3]
 
       # The path a result hands the browser resolves under the root the restore
       # put the files in, not the one they were written under.
@@ -124,7 +114,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
       assert Chat.embeddings_ready?(document)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
-      view |> element("header button[phx-click='toggle_chat']") |> render_click()
+      view |> element("#toggle-chat") |> render_click()
       assert has_element?(view, "#chat_messages-#{answer.id}")
 
       # Record the actual answer request, so a canned reply without restored
@@ -233,11 +223,6 @@ defmodule Doctrans.Integration.BackupRestoreTest do
     end
   end
 
-  defp stub_models(_context) do
-    Mox.stub_with(OpenAIMock, PageContentStub)
-    :ok
-  end
-
   # Runs orchestration, persistence and indexing with stubbed rendering and
   # models under a storage root of its own.
   defp process_under_original_root(_context) do
@@ -266,26 +251,13 @@ defmodule Doctrans.Integration.BackupRestoreTest do
     %{previous_uploads: previous, original_root: original_root, restored_root: restored_root}
   end
 
+  # Everything the run wrote has to sit under the root it ran against, or the
+  # copy below would move nothing and the assertions after it prove nothing.
   defp process_document(original_root) do
-    document =
-      document_fixture(%{
-        title: @title,
-        original_filename: "jahresabschluss.pdf",
-        target_language: "en"
-      })
+    %{document: document, pages: pages, source_path: source} =
+      processed_document_fixture(%{title: @title})
 
-    source = document_source_fixture(document)
     assert String.starts_with?(source, original_root <> "/")
-
-    # Oban runs inline in :test, so this one call drives page rendering, both
-    # model stages for every page, and indexing.
-    assert {:ok, _job} = DocumentExtractionJob.enqueue_document(document.id, source)
-
-    document = Documents.get_document_with_pages(document.id)
-    pages = Enum.sort_by(document.pages, & &1.page_number)
-
-    assert document.status == "completed"
-    assert Enum.map(pages, & &1.page_number) == [1, 2, 3]
     assert Enum.all?(pages, &File.regular?(Path.join(original_root, &1.image_path)))
 
     %{

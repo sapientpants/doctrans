@@ -11,7 +11,6 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
   """
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.Documents
   alias Doctrans.Repo
   alias Doctrans.Search
 
@@ -26,8 +25,8 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
 
   describe "the semantic floor" do
     test "retains a match just above the calibrated 0.55 floor and excludes one just below" do
-      below = searchable_page("A passage below the calibrated floor", "Below")
-      above = searchable_page("A passage above the calibrated floor", "Above")
+      below = searchable_page_fixture("A passage below the calibrated floor", %{title: "Below"})
+      above = searchable_page_fixture("A passage above the calibrated floor", %{title: "Above"})
 
       # These map to exactly 0.548828125 and 0.55078125 with embedding_at/1,
       # safely distinct in float32 while bracketing the documented threshold.
@@ -41,7 +40,7 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
     end
 
     test "an unrelated query returns nothing rather than the corpus in rank order" do
-      page = searchable_page("Grundlagen der Bilanzanalyse und Kennzahlen")
+      page = searchable_page_fixture("Grundlagen der Bilanzanalyse und Kennzahlen")
       embed(page, @below)
 
       # Shares no lexeme with the page, so the full-text half cannot rescue it
@@ -54,7 +53,7 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
     end
 
     test "a semantic match above the floor is still found without any keyword match" do
-      page = searchable_page("Grundlagen der Bilanzanalyse und Kennzahlen")
+      page = searchable_page_fixture("Grundlagen der Bilanzanalyse und Kennzahlen")
       embed(page, @above)
 
       assert {:ok, result} = Search.search_with_count("Korallenriff")
@@ -65,7 +64,7 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
     end
 
     test "a keyword match below the floor is untouched by it" do
-      page = searchable_page("Liquiditaetssicherung im Familienunternehmen")
+      page = searchable_page_fixture("Liquiditaetssicherung im Familienunternehmen")
       embed(page, @below)
 
       # The floor gates which pages the semantic half may rank. A page that
@@ -81,8 +80,8 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
     test "the total counts the filtered set, not everything embedded" do
       document = completed_document("Mixed Library")
 
-      above = for n <- 1..3, do: embed(indexed_page(document, n, "Seite #{n}"), @above)
-      for n <- 4..8, do: embed(indexed_page(document, n, "Seite #{n}"), @below)
+      above = for n <- 1..3, do: indexed_page(document, n, @above)
+      for n <- 4..8, do: indexed_page(document, n, @below)
 
       assert {:ok, result} = Search.search_with_count("Korallenriff")
 
@@ -93,8 +92,8 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
     test "pagination draws from the same filtered set the total describes" do
       document = completed_document("Paged Library")
 
-      for n <- 1..3, do: embed(indexed_page(document, n, "Seite #{n}"), @above)
-      for n <- 4..8, do: embed(indexed_page(document, n, "Seite #{n}"), @below)
+      for n <- 1..3, do: indexed_page(document, n, @above)
+      for n <- 4..8, do: indexed_page(document, n, @below)
 
       assert {:ok, first} = Search.search_with_count("Korallenriff", limit: 2)
       assert {:ok, rest} = Search.search_with_count("Korallenriff", limit: 2, offset: 2)
@@ -115,7 +114,7 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
       # 45 > the 40 a fused-score floor of 0.01 admits at k=60: the 41st rank
       # scores 1/101, under the floor, so restoring it drops five matches here
       # *and* shrinks the total to agree with the truncation.
-      for n <- 1..45, do: embed(indexed_page(document, n, "Seite #{n}"), @above)
+      for n <- 1..45, do: indexed_page(document, n, @above)
 
       assert {:ok, full} = Search.search_with_count("Korallenriff", limit: 50)
       assert {:ok, tail} = Search.search_with_count("Korallenriff", limit: 20, offset: 40)
@@ -129,20 +128,13 @@ defmodule Doctrans.Search.SemanticRelevanceTest do
 
   defp completed_document(title), do: document_fixture(%{status: "completed", title: title})
 
-  defp searchable_page(text, title \\ "Semantic Relevance Doc") do
-    indexed_page(completed_document(title), 1, text)
-  end
-
-  defp indexed_page(document, page_number, text) do
-    page = page_fixture(document, %{page_number: page_number})
-
-    {:ok, page} =
-      Documents.update_page_extraction(page, %{
-        extraction_status: "completed",
-        original_markdown: text
-      })
-
-    page
+  # A page of a shared document, sitting at `similarity` to the query vector.
+  defp indexed_page(document, page_number, similarity) do
+    indexed_page_fixture(document, %{
+      page_number: page_number,
+      original_markdown: "Seite #{page_number}",
+      embedding: embedding_at(similarity)
+    })
   end
 
   defp embed(page, similarity) do

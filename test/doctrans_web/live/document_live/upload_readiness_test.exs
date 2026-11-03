@@ -275,9 +275,7 @@ defmodule DoctransWeb.DocumentLive.UploadReadinessTest do
       assert has_element?(view, @problems)
       refute has_element?(view, "#start-translation-btn[disabled]")
 
-      put_oban_manual_mode(view)
-
-      Oban.Testing.with_testing_mode(:manual, fn ->
+      queue_only(view, fn ->
         view |> form("#upload-form", %{target_language: "en"}) |> render_submit()
 
         assert [document] = Documents.list_documents()

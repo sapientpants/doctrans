@@ -51,10 +51,7 @@ defmodule Doctrans.Mocks do
     :ok
   end
 
-  @doc """
-  Installs the default stub on every mock, replacing any narrower stub.
-  """
-  def stub_defaults do
+  defp stub_defaults do
     for {mock, default} <- @defaults, do: stub_with(mock, default)
     :ok
   end

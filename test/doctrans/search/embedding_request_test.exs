@@ -10,16 +10,18 @@ defmodule Doctrans.Search.EmbeddingRequestTest do
 
   use Doctrans.EnvCase, async: false
 
+  alias Doctrans.Processing.OpenAIBypass
   alias Doctrans.Resilience.{CircuitBreaker, FuseProbe}
   alias Doctrans.Search.Embedding
   alias Doctrans.TestEnv
 
+  import OpenAIBypass, only: [json: 3]
+
   setup do
-    CircuitBreaker.reset(:embedding_api)
-    prev_req = Application.fetch_env(:req, :default_options)
+    TestEnv.reset_fuses()
     # Exercise the real retry path without spending seconds on backoff in tests
     # whose assertions concern the resulting HTTP contract.
-    Req.default_options(Keyword.put(Req.default_options(), :retry_delay, 0))
+    TestEnv.put_env(:req, :default_options, Keyword.put(Req.default_options(), :retry_delay, 0))
     test_pid = self()
 
     bypass = Bypass.open()
@@ -38,16 +40,7 @@ defmodule Doctrans.Search.EmbeddingRequestTest do
       model: "test-embed-model"
     )
 
-    on_exit(fn ->
-      CircuitBreaker.reset(:embedding_api)
-
-      case prev_req do
-        {:ok, value} -> Application.put_env(:req, :default_options, value)
-        :error -> Application.delete_env(:req, :default_options)
-      end
-
-      Bypass.down(bypass)
-    end)
+    on_exit(fn -> Bypass.down(bypass) end)
 
     %{bypass: bypass, url: url, test_pid: test_pid}
   end
@@ -252,11 +245,5 @@ defmodule Doctrans.Search.EmbeddingRequestTest do
     after
       0 -> :ok
     end
-  end
-
-  defp json(conn, status, payload) do
-    conn
-    |> Plug.Conn.put_resp_content_type("application/json")
-    |> Plug.Conn.resp(status, Jason.encode!(payload))
   end
 end

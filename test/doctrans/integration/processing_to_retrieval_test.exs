@@ -19,39 +19,21 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Documents
   alias Doctrans.Documents.Chunk
-  alias Doctrans.Jobs.DocumentExtractionJob
-  alias Doctrans.Processing.{OpenAIMock, PageContentStub}
+  alias Doctrans.Processing.PageContentStub
   alias Doctrans.Search
   alias Doctrans.Search.EmbeddingMocks
 
   @title "Jahresabschluss 2025"
 
   setup do
-    Mox.stub_with(OpenAIMock, PageContentStub)
+    # Installed before the run, so every embedding the pipeline asks for is on
+    # record by the time the fixture returns.
     EmbeddingMocks.observe()
 
-    document =
-      document_fixture(%{
-        title: @title,
-        original_filename: "jahresabschluss.pdf",
-        target_language: "en"
-      })
+    %{document: document, pages: pages} = processed_document_fixture(%{title: @title})
 
-    path = document_source_fixture(document)
-
-    # Oban runs inline in :test, so this one call drives page rendering, both
-    # model stages for every page, indexing, and the completion check.
-    assert {:ok, _job} = DocumentExtractionJob.enqueue_document(document.id, path)
-
-    document = Documents.get_document_with_pages(document.id)
-
-    %{
-      document: document,
-      pages: Enum.sort_by(document.pages, & &1.page_number),
-      embedding_inputs: embedding_inputs()
-    }
+    %{document: document, pages: pages, embedding_inputs: embedding_inputs()}
   end
 
   test "the pipeline carries each page's own text through every stage", %{

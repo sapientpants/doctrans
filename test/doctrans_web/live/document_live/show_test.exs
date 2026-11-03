@@ -293,7 +293,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       doc = document_with_pages_fixture(%{}, 1)
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
-      assert render(view) =~ "Waiting to process"
+      assert has_element?(view, "#page-content[data-page-state='pending']")
     end
 
     test "shows processing state for extracting page", %{conn: conn} do
@@ -303,7 +303,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
-      assert render(view) =~ "Extracting text from page"
+      assert has_element?(view, "#page-content[data-page-state='extracting']")
     end
 
     test "shows translation in progress state", %{conn: conn} do
@@ -320,7 +320,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
-      assert render(view) =~ "Translating content"
+      assert has_element?(view, "#page-content[data-page-state='translating']")
     end
 
     test "shows error state for failed page", %{conn: conn} do
@@ -330,7 +330,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
-      assert render(view) =~ "An error occurred processing this page"
+      assert has_element?(view, "#page-content[data-page-state='error']")
     end
 
     test "shows translated content when completed", %{conn: conn} do

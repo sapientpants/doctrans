@@ -19,8 +19,6 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
   import Doctrans.Fixtures
   import ExUnit.CaptureLog
 
-  alias Doctrans.Documents
-  alias Doctrans.Repo
   alias Doctrans.Search.EmbeddingMocks
   alias DoctransWeb.SearchLive
 
@@ -35,7 +33,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
 
   describe "query embeddings" do
     test "embeds a submitted query exactly once", %{conn: conn} do
-      searchable_page("Contains onceonlyterm in the text", "Once Only Doc")
+      searchable_page_fixture("Contains onceonlyterm in the text", %{title: "Once Only Doc"})
 
       EmbeddingMocks.observe()
 
@@ -51,7 +49,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
 
   describe "loading state" do
     test "renders while the query embedding is still in flight", %{conn: conn} do
-      searchable_page("Contains blockedterm in the text", "Blocked Doc")
+      searchable_page_fixture("Contains blockedterm in the text", %{title: "Blocked Doc"})
       barrier = install_barrier("blockedterm")
 
       {:ok, view, _html} = live(conn, ~p"/search?q=blockedterm")
@@ -71,8 +69,8 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
 
   describe "superseded queries" do
     test "a newer query cancels the search it replaced", %{conn: conn} do
-      searchable_page("Contains staleterm in the text", "Stale Doc")
-      searchable_page("Contains freshterm in the text", "Fresh Doc")
+      searchable_page_fixture("Contains staleterm in the text", %{title: "Stale Doc"})
+      searchable_page_fixture("Contains freshterm in the text", %{title: "Fresh Doc"})
 
       barrier = install_barrier("staleterm")
 
@@ -244,9 +242,12 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
 
   describe "search failures end to end" do
     test "renders the error panel when the search statement fails", %{conn: conn} do
-      "Contains failingstatementterm in the text"
-      |> searchable_page("Failing Statement Doc")
-      |> embed()
+      # Indexed, because the statement only compares vectors for pages that have
+      # one: a width mismatch cannot reach Postgres otherwise.
+      searchable_page_fixture("Contains failingstatementterm in the text", %{
+        title: "Failing Statement Doc",
+        embedding: fake_embedding()
+      })
 
       # The embedding succeeds and the query fails for a real reason, which is
       # what separates an outage from the degraded keyword-only mode: there are
@@ -267,7 +268,9 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
 
   describe "keyword-only retrieval" do
     test "tells the reader the results are keyword matches only", %{conn: conn} do
-      page = searchable_page("Contains degradedterm in the text", "Degraded Doc")
+      page =
+        searchable_page_fixture("Contains degradedterm in the text", %{title: "Degraded Doc"})
+
       inference_down_for("degradedterm")
 
       {:ok, view, _html} = live(conn, ~p"/search?q=degradedterm")
@@ -284,7 +287,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
     end
 
     test "tells the reader why a keyword-only search found nothing", %{conn: conn} do
-      searchable_page("Contains something else entirely", "Unrelated Doc")
+      searchable_page_fixture("Contains something else entirely", %{title: "Unrelated Doc"})
       inference_down_for("unmatchedterm")
 
       {:ok, view, _html} = live(conn, ~p"/search?q=unmatchedterm")
@@ -299,7 +302,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
     end
 
     test "says nothing about retrieval until the search reports", %{conn: conn} do
-      searchable_page("Contains degradedterm in the text", "Degraded Doc")
+      searchable_page_fixture("Contains degradedterm in the text", %{title: "Degraded Doc"})
       barrier = EmbeddingMocks.hold("degradedterm", result: {:error, :circuit_open})
 
       {:ok, view, _html} = live(conn, ~p"/search?q=degradedterm")
@@ -319,8 +322,10 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
     end
 
     test "the notice does not outlive the query that produced it", %{conn: conn} do
-      searchable_page("Contains degradedterm in the text", "Degraded Doc")
-      healthy = searchable_page("Contains healthyterm in the text", "Healthy Doc")
+      searchable_page_fixture("Contains degradedterm in the text", %{title: "Degraded Doc"})
+
+      healthy =
+        searchable_page_fixture("Contains healthyterm in the text", %{title: "Healthy Doc"})
 
       # Only the first query fails to embed, so the second one searches normally.
       inference_down_for("degradedterm")
@@ -339,7 +344,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
 
   describe "navigating away from a search" do
     test "patching to a query-less URL clears the results behind it", %{conn: conn} do
-      page = searchable_page("Contains clearedterm in the text", "Cleared Doc")
+      page = searchable_page_fixture("Contains clearedterm in the text", %{title: "Cleared Doc"})
 
       {:ok, view, _html} = live(conn, ~p"/search?q=clearedterm")
       render_async(view, @async_timeout)
@@ -356,7 +361,7 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
     end
 
     test "a query the view moved off cannot report under a query-less URL", %{conn: conn} do
-      searchable_page("Contains abandonedterm in the text", "Abandoned Doc")
+      searchable_page_fixture("Contains abandonedterm in the text", %{title: "Abandoned Doc"})
       barrier = install_barrier("abandonedterm")
 
       {:ok, view, _html} = live(conn, ~p"/search?q=abandonedterm")
@@ -412,27 +417,6 @@ defmodule DoctransWeb.SearchLiveAsyncTest do
       score: 0.5,
       snippet: nil
     }
-  end
-
-  defp searchable_page(text, title) do
-    document = document_fixture(%{status: "completed", title: title})
-    page = page_fixture(document, %{page_number: 1})
-
-    {:ok, page} =
-      Documents.update_page_extraction(page, %{
-        extraction_status: "completed",
-        original_markdown: text
-      })
-
-    page
-  end
-
-  # The statement only compares vectors for pages that have one, so a page must
-  # be indexed before a width mismatch can reach Postgres at all.
-  defp embed(page) do
-    page
-    |> Ecto.Changeset.change(embedding: Pgvector.new(List.duplicate(0.1, 1024)))
-    |> Repo.update!()
   end
 
   # Parks the embedding stub on `text` until this test releases it, so the
