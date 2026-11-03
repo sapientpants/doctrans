@@ -266,42 +266,6 @@ defmodule Doctrans.DocumentsTest do
     end
   end
 
-  describe "update_document_status/3" do
-    test "stores structured failure diagnostics and clears them on recovery" do
-      doc = document_fixture()
-      reason = {:pdf_extraction_failed, [reason: :invalid_page_count]}
-      assert {:ok, updated} = Documents.update_document_status(doc, "error", reason)
-      assert updated.error_message == inspect(reason)
-      assert {:ok, recovered} = Documents.update_document_status(updated, "processing")
-      assert recovered.error_message == nil
-    end
-
-    test "updates document status" do
-      doc = document_fixture()
-      assert {:ok, updated} = Documents.update_document_status(doc, "processing")
-      assert updated.status == "processing"
-    end
-
-    test "updates status with error message" do
-      doc = document_fixture()
-
-      assert {:ok, updated} =
-               Documents.update_document_status(doc, "error", "Something went wrong")
-
-      assert updated.status == "error"
-      assert updated.error_message == "Something went wrong"
-    end
-
-    test "rejects invalid status" do
-      doc = document_fixture()
-
-      assert {:error, {:validation_failed, [changeset: changeset]}} =
-               Documents.update_document_status(doc, "invalid_status")
-
-      assert %{status: ["is invalid"]} = errors_on(changeset)
-    end
-  end
-
   describe "delete_document/1" do
     test "succeeds when another caller deletes the document after lookup" do
       doc = document_with_pages_fixture(%{}, 2)

@@ -9,7 +9,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
+  alias Doctrans.Documents.{Lifecycle, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.{LlmProcessor, OpenAICrashStub, OpenAIMock, StartupRecovery}
 
@@ -165,7 +165,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
       Oban.Testing.with_testing_mode(:manual, fn ->
         {document, _pages} = interrupted_document([{1, :completed}])
 
-        {:ok, failed} = Documents.update_document_status(document, "error", "stopped")
+        {:ok, failed} = Lifecycle.fail(document, "stopped")
 
         assert :done = StartupRecovery.run_batch({:completion, nil})
 

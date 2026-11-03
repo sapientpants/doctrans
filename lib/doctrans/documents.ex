@@ -9,7 +9,9 @@ defmodule Doctrans.Documents do
   single path; `Pages` is addressed directly only by its own tests.
 
   Chat readiness (`embeddings_ready?/1`) is not part of this context: its only
-  consumer is `Doctrans.Chat`, which reaches `Pages` for it.
+  consumer is `Doctrans.Chat`, which reaches `Pages` for it. Nor is the
+  document's status: every status write is a named transition of
+  `Doctrans.Documents.Lifecycle`.
 
   The module sits at Credo's first-party dependency ceiling, so a new
   collaborator has to displace one.
@@ -38,6 +40,7 @@ defmodule Doctrans.Documents do
   defdelegate failed_page_numbers(document_id), to: Pages
   defdelegate failed_pages_query(document_id), to: Pages
   defdelegate reset_page_for_reprocessing(page), to: Pages
+  defdelegate delete_pages(document_id), to: Pages
 
   # ============================================================================
   # Documents
@@ -215,20 +218,6 @@ defmodule Doctrans.Documents do
     Revision.with_current(document, fn current ->
       current
       |> Document.changeset(attrs)
-      |> Repo.update()
-      |> Doctrans.Errors.result()
-    end)
-  end
-
-  @doc """
-  Updates a document's status.
-  """
-  @spec update_document_status(Document.t(), String.t(), term()) ::
-          {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
-  def update_document_status(%Document{} = document, status, error_message \\ nil) do
-    Revision.with_current(document, fn current ->
-      current
-      |> Document.status_changeset(status, Doctrans.Errors.diagnostic(error_message))
       |> Repo.update()
       |> Doctrans.Errors.result()
     end)

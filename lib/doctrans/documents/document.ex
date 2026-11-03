@@ -13,6 +13,9 @@ defmodule Doctrans.Documents.Document do
   - `completed` - All pages have been translated
   - `error` - An error occurred during processing
   - `cancelled` - processing was stopped by the user; the document can be reprocessed
+
+  The transitions between them, and which are legal from where, are
+  `Doctrans.Documents.Lifecycle`'s; this schema only validates the column.
   """
   use Doctrans.Schema
   import Ecto.Changeset
@@ -68,9 +71,12 @@ defmodule Doctrans.Documents.Document do
   end
 
   @doc """
-  Changeset for updating document status.
+  Changeset for a status transition, with the diagnostic that goes with it.
+
+  `Doctrans.Documents.Lifecycle` is its only caller.
   """
-  @spec status_changeset(t(), String.t(), String.t() | nil) :: Ecto.Changeset.t()
+  @spec status_changeset(t() | Ecto.Changeset.t(), String.t(), String.t() | nil) ::
+          Ecto.Changeset.t()
   def status_changeset(document, status, error_message \\ nil) do
     document
     |> cast(%{status: status, error_message: error_message}, [:status, :error_message])

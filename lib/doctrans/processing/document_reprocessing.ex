@@ -3,27 +3,16 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   import Ecto.Query
   alias Doctrans.Chat.Session
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Page, Topics}
+  alias Doctrans.Documents.{Lifecycle, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
-  # A run that has not produced its pages yet owns the whole document; there is
-  # no per-page work to replace until it has.
-  @queueing ~w(uploading queued extracting)
-  # `cancelled` belongs here for the same reason `error` does: recovering from a
-  # stop without deleting the document is the point of offering one.
-  @reprocessable ~w(completed error cancelled)
-
-  @doc """
-  Whether a document is in a state a fresh run may replace.
-
-  The status check alone: `reprocess_document/2` also requires that no run is
-  active and that the original upload is still on disk, which the caller cannot
-  know without the lock.
-  """
-  @spec reprocessable?(Documents.Document.t()) :: boolean()
-  def reprocessable?(%Documents.Document{status: status}), do: status in @reprocessable
+  # Every status rule here is `Lifecycle`'s: `reprocessable?/1` is the check a
+  # fresh run needs, and `pre_processing?/1` says a run has not produced its
+  # pages yet, so there is no per-page work to replace. `reprocess_document/2`
+  # also requires that no run is active and that the original upload is still
+  # on disk, which a caller cannot know without the lock.
 
   @spec reprocess_document(Ecto.UUID.t(), keyword()) ::
           {:ok, Documents.Document.t()} | {:error, Doctrans.Errors.reason()}
@@ -44,14 +33,14 @@ defmodule Doctrans.Processing.DocumentReprocessing do
 
     validate_models!(opts)
 
-    if document.status not in @reprocessable || Run.active?(document.id),
+    if not Lifecycle.reprocessable?(document) || Run.active?(document.id),
       do: Repo.rollback(:already_processing)
 
     unless Run.source_available?(document), do: Repo.rollback(:original_upload_missing)
   end
 
   defp purge_generated_content(document) do
-    _ = from(p in Page, where: p.document_id == ^document.id) |> Repo.delete_all()
+    _ = Documents.delete_pages(document.id)
 
     _ =
       from(s in Session, where: s.document_id == ^document.id)
@@ -61,17 +50,14 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   end
 
   defp start_run(document, opts) do
-    attrs =
-      Map.merge(Run.new_attrs(opts), %{status: "queued", total_pages: nil, error_message: nil})
-
-    document = document |> Ecto.Changeset.change(attrs) |> Repo.update!()
+    document = transition!(Lifecycle.requeue(document, Run.new_attrs(opts)))
     _ = insert!(DocumentExtractionJob.new(Run.args(document)))
     _ = insert!(RunCleanupJob.new(Run.args(document)))
     document
   end
 
   @spec reprocess_page(Ecto.UUID.t(), keyword()) ::
-          {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
+          {:ok, Documents.Page.t()} | {:error, Doctrans.Errors.reason()}
   def reprocess_page(page_id, opts \\ []) do
     case Documents.get_page(page_id) do
       nil -> {:error, :page_not_found}
@@ -98,10 +84,10 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   # The document lock held here also serializes this with in-flight answers.
   defp do_reset_page(page, opts) do
     document = Run.lock(page.document_id) || Repo.rollback(:document_not_found)
-    current = Repo.get(Page, page.id) || Repo.rollback(:page_not_found)
+    current = Documents.get_page(page.id) || Repo.rollback(:page_not_found)
     validate_models!(opts)
 
-    if document.status in @queueing || Run.active?(document.id),
+    if Lifecycle.pre_processing?(document) || Run.active?(document.id),
       do: Repo.rollback(:already_processing)
 
     {:ok, reset} = Documents.reset_page_for_reprocessing(current)
@@ -111,8 +97,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     updated = request_models(reset, choices)
 
     _ = insert!(LlmProcessingJob.new(page_job_args(page, updated, choices), priority: 1))
-    {:ok, document} = Documents.update_document_status(document, "processing")
-    {document, updated}
+    {transition!(Lifecycle.resume(document)), updated}
   end
 
   @doc """
@@ -132,7 +117,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     document = Run.lock(document_id) || Repo.rollback(:document_not_found)
     validate_models!(opts)
 
-    if document.status in @queueing || Run.active?(document.id),
+    if Lifecycle.pre_processing?(document) || Run.active?(document.id),
       do: Repo.rollback(:already_processing)
 
     pages = failed_pages(document_id)
@@ -140,8 +125,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
 
     choices = Run.choices(opts)
     retried = Enum.map(pages, &retry_page(&1, document, choices))
-    {:ok, document} = Documents.update_document_status(document, "processing")
-    {document, retried}
+    {transition!(Lifecycle.resume(document)), retried}
   end
 
   defp failed_pages(document_id) do
@@ -205,6 +189,11 @@ defmodule Doctrans.Processing.DocumentReprocessing do
            end),
            do: Repo.rollback(:invalid_model)
   end
+
+  # The eligibility check above ran under the same lock, so a refusal here is a
+  # rule the two disagree on; rolling it back reports it rather than hiding it.
+  defp transition!({:ok, document}), do: document
+  defp transition!({:error, reason}), do: Repo.rollback(reason)
 
   defp insert!(changeset) do
     case Oban.insert(changeset) do

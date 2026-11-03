@@ -312,7 +312,7 @@ defmodule DoctransWeb.ErrorMessages do
         reason: binding(bindings, :reason)
       )
 
-  # --- Document outcome (`Doctrans.Processing.Completion`, the viewer) --------
+  # --- Document outcome (`Doctrans.Documents.Lifecycle`, the viewer) ----------
 
   defp lookup({:pages_failed, bindings}),
     do:

@@ -4,7 +4,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Page
+  alias Doctrans.Documents.{Lifecycle, Page}
   alias Doctrans.Documents.Topics
   alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, LlmProcessingJob}
   alias Doctrans.Processing.StartupRecovery
@@ -75,7 +75,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_with_pages_fixture(%{status: "processing"}, 51)
       assert {:pages, cursor} = StartupRecovery.run_batch({:pages, nil})
-      {:ok, _} = Documents.update_document_status(document, "error")
+      {:ok, _} = Lifecycle.fail(document, :stopped)
       assert {:embeddings, nil} = StartupRecovery.run_batch({:pages, cursor})
       assert Repo.aggregate(Oban.Job, :count) == 50
     end)
@@ -124,7 +124,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
   test "does not recover a document stopped after candidate selection" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_with_pages_fixture(%{status: "processing"}, 1)
-      after_candidate_selection(fn -> Documents.update_document_status(document, "error") end)
+      after_candidate_selection(fn -> Lifecycle.fail(document, :stopped) end)
       assert {:embeddings, nil} = StartupRecovery.run_batch({:pages, nil})
       assert Repo.aggregate(Oban.Job, :count) == 0
     end)

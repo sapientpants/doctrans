@@ -7,7 +7,8 @@ defmodule Doctrans.Processing.Cancellation do
   and `suspended`, as `JobQuery.waiting_states/0` lists them; a job already
   `executing` is out of Oban's reach and runs to completion. That
   straggler is why the document's own status matters: `cancelled` is a terminal
-  state `Completion` refuses to overturn, so a job finishing after the fact
+  state `Doctrans.Documents.Lifecycle` refuses to leave on a job's account, so a
+  job finishing after the fact -- succeeding, or failing on its last attempt --
   cannot report the document completed or failed.
 
   Nothing generated is discarded by `cancel_document/1`. The pages keep the
@@ -23,14 +24,10 @@ defmodule Doctrans.Processing.Cancellation do
   require Logger
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Page, Topics}
+  alias Doctrans.Documents.{Document, Lifecycle, Page, Topics}
   alias Doctrans.Errors
   alias Doctrans.Processing.{JobQuery, Run}
   alias Doctrans.Repo
-
-  # Everything else has already settled: cancelling it would rewrite an outcome
-  # rather than stop work.
-  @in_flight ~w(uploading queued extracting processing)
 
   @clear_processing "CASE WHEN ? = 'processing' THEN 'pending' ELSE ? END"
 
@@ -48,9 +45,17 @@ defmodule Doctrans.Processing.Cancellation do
     |> Topics.publish_document_updated()
   end
 
+  # The status moves first: a document that has already settled is refused
+  # before any job is touched, and the broadcast waits for the commit, which is
+  # why the transition is not asked to publish.
   defp cancel_locked(document_id) do
     document = Run.lock(document_id) || Repo.rollback(:document_not_found)
-    unless document.status in @in_flight, do: Repo.rollback(:not_cancellable)
+
+    cancelled =
+      case Lifecycle.cancel(document) do
+        {:ok, cancelled} -> cancelled
+        {:error, reason} -> Repo.rollback(reason)
+      end
 
     case cancel_jobs(document.id) do
       :ok -> :ok
@@ -58,7 +63,6 @@ defmodule Doctrans.Processing.Cancellation do
     end
 
     reset_abandoned_stages(document.id)
-    {:ok, cancelled} = Documents.update_document_status(document, "cancelled")
     cancelled
   end
 

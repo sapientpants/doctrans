@@ -23,10 +23,9 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   alias Doctrans.Deps
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Topics}
+  alias Doctrans.Documents.{Layout, Lifecycle, Topics}
   alias Doctrans.Errors
   alias Doctrans.Jobs.EmbeddingJob
-  alias Doctrans.Processing.Completion
   alias Doctrans.Processing.Run
   alias Doctrans.Processing.SourceLanguage
   alias Doctrans.Resilience.ErrorClassifier
@@ -105,13 +104,13 @@ defmodule Doctrans.Processing.LlmProcessor do
   # save the last translation. Resolving it costs no model call.
   #
   # Hand over the page this run already read rather than a fresh copy. The
-  # orchestrator fences the check against that page's revision and generation,
+  # lifecycle fences the check against that page's revision and generation,
   # and a row re-read here would only ever be compared against itself. The
   # translation writes in between cannot invalidate it: `content_revision`
   # advances on an `original_markdown` change or an extraction leaving
   # "completed", and `processing_generation` only on a reprocess.
   defp reconcile_document(page) do
-    _ = Completion.check_document_completion(page)
+    _ = Lifecycle.settle(page)
     :ok
   end
 
@@ -161,7 +160,7 @@ defmodule Doctrans.Processing.LlmProcessor do
     # Moves the document out of its pre-processing states (uploading, extracting,
     # queued) when its first page starts; a document already processing is left
     # alone, so every page may call it.
-    with :ok <- Completion.update_document_status_to_processing(page),
+    with :ok <- Lifecycle.begin_processing(page),
          {:ok, page} <- mark_stage(page, :extraction, "processing") do
       image_path = Layout.absolute(page.image_path)
 

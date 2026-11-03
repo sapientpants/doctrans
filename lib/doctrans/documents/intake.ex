@@ -16,7 +16,7 @@ defmodule Doctrans.Documents.Intake do
 
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Layout}
+  alias Doctrans.Documents.{Document, Layout, Lifecycle}
   alias Doctrans.Errors
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Validation
@@ -167,8 +167,9 @@ defmodule Doctrans.Documents.Intake do
       # `nil` when the submission left the picker on "Detect automatically": the
       # column is nullable, and processing resolves the language before it runs.
       source_language: languages.source,
-      target_language: languages.target,
-      status: "uploading"
+      # The status is the schema's default, `uploading`: the first transition
+      # out of it is `Lifecycle`'s, once the extraction job is enqueued.
+      target_language: languages.target
     }
 
     case create_document(attrs, filename) do
@@ -254,10 +255,10 @@ defmodule Doctrans.Documents.Intake do
 
       {:error, reason} ->
         Logger.error("Could not delete document #{document.id}: #{inspect(reason)}")
-        # A stable atom, not `reason`: `update_document_status/3` inspects whatever
-        # it is given into a text column, and a changeset reason would persist the
+        # A stable atom, not `reason`: `Lifecycle.fail/2` inspects whatever it is
+        # given into a text column, and a changeset reason would persist the
         # whole document struct there.
-        _ = Documents.update_document_status(document, "error", :delete_failed)
+        _ = Lifecycle.fail(document, :delete_failed)
         :ok
     end
   end

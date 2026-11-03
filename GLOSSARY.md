@@ -33,7 +33,9 @@ A named move of a Document from one status to another, legal only from specific 
 illegal status is refused, not ignored.
 
 **Terminal status**:
-A status no transition leaves except starting a new Run. `cancelled` and `completed` are terminal.
+A status no job-side transition leaves: only the user's own request does, by starting a new Run or by
+queuing Page work under the current one (reprocessing a Page, retrying failed Pages). `cancelled` and
+`completed` are terminal.
 
 **Settle**:
 The transition that decides a Document's outcome once every Page has either succeeded or failed. A Document reaches

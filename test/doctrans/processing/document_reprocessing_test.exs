@@ -4,11 +4,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   import Doctrans.Fixtures
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Chunk, Layout, Page}
+  alias Doctrans.Documents.{Chunk, Layout, Lifecycle, Page}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
 
   alias Doctrans.Processing.{
-    Completion,
     DocumentConverterMocks,
     DocumentReprocessing,
     OpenAIMock,
@@ -46,16 +45,16 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     %{document: document, page: page, source: source, old_image: old_image}
   end
 
-  test "reprocessable?/1 admits exactly the settled statuses, as the UI control does" do
+  test "the UI control offers a reprocess exactly where the lifecycle admits one" do
     for status <- ~w(completed error cancelled) do
       document = %Documents.Document{status: status}
-      assert DocumentReprocessing.reprocessable?(document)
+      assert Lifecycle.reprocessable?(document)
       assert ReprocessModal.can_reprocess_document?(document)
     end
 
     for status <- ~w(uploading queued extracting processing) do
       document = %Documents.Document{status: status}
-      refute DocumentReprocessing.reprocessable?(document)
+      refute Lifecycle.reprocessable?(document)
       refute ReprocessModal.can_reprocess_document?(document)
     end
   end
@@ -143,8 +142,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
           })
       end
 
-      assert :completed =
-               Completion.check_document_completion_unguarded(run.id)
+      assert :completed = Lifecycle.settle_unguarded(run.id)
 
       # Simulate rescue after page jobs finished but extraction was not acknowledged.
       Repo.update_all(from(j in Oban.Job), set: [state: "completed"])
@@ -175,7 +173,8 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     end)
   end
 
-  test "extraction completion preserves an exhausted translation error", c do
+  test "a page exhausted while rendering continues fails the document only once every page settles",
+       c do
     Mox.stub(OpenAIMock, :translate, fn _markdown, _source, _target, _opts ->
       {:error, :circuit_open}
     end)
@@ -208,13 +207,18 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
 
       assert {:error, _} = LlmProcessingJob.perform(%{page_job | attempt: page_job.max_attempts})
       Repo.update!(Ecto.Changeset.change(page_job, state: "discarded"))
-      failed = Documents.get_document!(run.id)
-      assert failed.status == "error"
+
+      # The page is failed for good, but its siblings are still being rendered,
+      # so the document is not: it reaches `error` only by settling.
+      assert Documents.get_page!(page.id).translation_status == "error"
+      assert Documents.get_document!(run.id).status == "extracting"
 
       send(task.pid, :resume_pdf)
       assert :ok = Task.await(task)
-      assert Documents.get_document!(run.id).status == "error"
-      assert Documents.get_document!(run.id).error_message == failed.error_message
+      # Extraction finishing keeps the page's verdict and settles nothing while
+      # the other pages are still owed.
+      assert Documents.get_page!(page.id).translation_status == "error"
+      assert Documents.get_document!(run.id).status == "processing"
 
       # Once the remaining jobs finish, the failed document can be restarted.
       for remaining <- Documents.list_pages(run.id), remaining.id != page.id do
@@ -225,10 +229,12 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
           Documents.update_page_translation(remaining, %{translation_status: "completed"})
       end
 
-      # Settled pages with a discarded failure are a terminal partial failure.
-      assert :failed = Completion.check_document_completion_unguarded(run.id)
-      assert Documents.get_document!(run.id).status == "error"
-      assert Documents.get_document!(run.id).error_message == failed.error_message
+      # Settled pages with a discarded failure are a terminal partial failure,
+      # named by the page that failed.
+      assert :failed = Lifecycle.settle_unguarded(run.id)
+      failed = Documents.get_document!(run.id)
+      assert failed.status == "error"
+      assert failed.error_message == inspect({:pages_failed, [page_numbers: "1"]})
 
       Repo.update_all(from(j in Oban.Job, where: j.state == "available"),
         set: [state: "completed"]
@@ -390,7 +396,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   test "late writes and jobs from a replaced run cannot alter current content", c do
     Oban.Testing.with_testing_mode(:manual, fn ->
       assert {:ok, run} = DocumentReprocessing.reprocess_document(c.document.id)
-      assert {:error, :obsolete_run} = Documents.update_document_status(c.document, "completed")
+      assert {:error, :obsolete_run} = Lifecycle.begin_extraction(c.document)
 
       assert {:error, :obsolete_run} =
                Documents.update_page_extraction(c.page, %{original_markdown: "late"})

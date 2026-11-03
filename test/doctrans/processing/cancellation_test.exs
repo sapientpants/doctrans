@@ -5,9 +5,9 @@ defmodule Doctrans.Processing.CancellationTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Layout, Page, Topics}
+  alias Doctrans.Documents.{Document, Layout, Lifecycle, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
-  alias Doctrans.Processing.{Cancellation, Completion, DocumentReprocessing, Run}
+  alias Doctrans.Processing.{Cancellation, DocumentReprocessing, OpenAIMock, Run}
 
   describe "cancel_document/1" do
     test "cancels the queued jobs, leaves an executing one, and settles the document" do
@@ -64,10 +64,11 @@ defmodule Doctrans.Processing.CancellationTest do
       end)
     end
 
-    test "clears the diagnostic a failing page recorded" do
+    test "clears the diagnostic the document carried" do
       Oban.Testing.with_testing_mode(:manual, fn ->
-        document = document_fixture(%{status: "processing", total_pages: 1})
-        {:ok, _} = Documents.update_document_status(document, "processing", :page_failed)
+        document =
+          document_fixture(%{status: "processing", total_pages: 1, error_message: "page failed"})
+
         assert Repo.get!(Document, document.id).error_message
 
         assert {:ok, cancelled} = Cancellation.cancel_document(document)
@@ -129,8 +130,38 @@ defmodule Doctrans.Processing.CancellationTest do
 
         # The job that was executing when the user cancelled finishes and asks
         # for the document to be settled; every page reads as a success.
-        assert :cancelled = Completion.check_document_completion_unguarded(document.id)
+        assert :cancelled = Lifecycle.settle_unguarded(document.id)
         assert Repo.get!(Document, document.id).status == "cancelled"
+      end)
+    end
+
+    # Regression: a page job failing on its final attempt once wrote `error` to
+    # the document directly, with no from-state check, so a straggler that
+    # failed -- unlike one that succeeded -- overturned the cancellation and
+    # offered the user a retry of a run they had stopped.
+    test "a page job failing on its final attempt cannot overturn the user's decision" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "processing", total_pages: 1})
+        page = page_fixture(document, %{page_number: 1})
+
+        # Executing when the user cancels, so cancellation leaves it to finish.
+        executing =
+          insert_job(
+            LlmProcessingJob,
+            LlmProcessingJob.page_args(page, page.processing_generation, %{}),
+            "executing"
+          )
+
+        assert {:ok, _cancelled} = Cancellation.cancel_document(document.id)
+        :ok = Topics.subscribe_document(document.id)
+
+        Mox.stub(OpenAIMock, :extract_markdown, fn _image_path, _opts -> {:error, :timeout} end)
+
+        assert {:error, _} =
+                 LlmProcessingJob.perform(%{executing | attempt: executing.max_attempts})
+
+        assert Repo.get!(Document, document.id).status == "cancelled"
+        refute_received {:document_updated, %Document{status: "error"}}
       end)
     end
 

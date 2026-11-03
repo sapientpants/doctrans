@@ -10,11 +10,12 @@ defmodule Doctrans.Processing.StartupRecovery do
   require Logger
 
   import Ecto.Query
+  import Doctrans.Documents.Lifecycle, only: [awaiting_pages?: 1, processing?: 1]
   import Doctrans.Documents.Page, only: [settled?: 1]
 
-  alias Doctrans.Documents.{Document, Page, Topics}
+  alias Doctrans.Documents.{Document, Lifecycle, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, LlmProcessingJob}
-  alias Doctrans.Processing.{Completion, JobQuery, Run}
+  alias Doctrans.Processing.{JobQuery, Run}
   alias Doctrans.Repo
 
   @batch_size 50
@@ -47,7 +48,7 @@ defmodule Doctrans.Processing.StartupRecovery do
     rows =
       from(d in Document,
         as: :document,
-        where: d.status in ["queued", "extracting"],
+        where: awaiting_pages?(d),
         where: not exists(active_extraction),
         select: %{id: d.id}
       )
@@ -68,7 +69,7 @@ defmodule Doctrans.Processing.StartupRecovery do
         as: :page,
         join: d in Document,
         on: d.id == p.document_id,
-        where: d.status == "processing",
+        where: processing?(d),
         where: p.extraction_status != "completed" or p.translation_status != "completed",
         select: %{
           id: p.id,
@@ -123,7 +124,7 @@ defmodule Doctrans.Processing.StartupRecovery do
     rows =
       from(d in Document,
         as: :document,
-        where: d.status == "processing",
+        where: processing?(d),
         # A document that does not know how many pages to expect is never
         # terminal, so there is nothing for this phase to resolve.
         where: d.total_pages > 0,
@@ -144,7 +145,7 @@ defmodule Doctrans.Processing.StartupRecovery do
     next_cursor(rows, :completion, :done)
   end
 
-  # The orchestrator holds the rules: it locks the document, completes it only
+  # The lifecycle holds the rules: it locks the document, completes it only
   # when every expected page succeeded, records the failed page numbers when
   # they all settled with a failure, and leaves a document alone while a retry
   # of a failed page is still pending.
@@ -158,11 +159,11 @@ defmodule Doctrans.Processing.StartupRecovery do
   # replayed on every restart.
   #
   # Only the database errors are caught, matching `Cancellation.cancel_jobs/1`.
-  # `Completion`'s `{:ok, _} =` matches are self-consistent under the document
-  # lock it holds, so a MatchError from there would be a logic bug worth
-  # surfacing rather than a row worth skipping.
+  # `Lifecycle`'s writes are self-consistent under the document lock it holds,
+  # so a raise from there would be a logic bug worth surfacing rather than a
+  # row worth skipping.
   defp reconcile_completion(row) do
-    _ = Completion.check_document_completion_unguarded(row.id)
+    _ = Lifecycle.settle_unguarded(row.id)
     :ok
   rescue
     error in [Ecto.NoResultsError, Postgrex.Error, DBConnection.ConnectionError] ->
@@ -211,14 +212,14 @@ defmodule Doctrans.Processing.StartupRecovery do
   defp recover_document(row) do
     locked = from(d in Document, where: d.id == ^row.id, lock: "FOR UPDATE") |> Repo.one()
 
-    case locked do
-      %Document{status: status} = current when status in ["queued", "extracting"] ->
-        Run.args(current)
-        |> DocumentExtractionJob.new(meta: %{recovered: true})
-        |> Oban.insert!()
-
-      _ ->
-        :ok
+    # Re-read under the lock: a document that moved on since it was selected is
+    # not re-queued on the strength of a stale row.
+    if locked && awaiting_pages?(locked) do
+      Run.args(locked)
+      |> DocumentExtractionJob.new(meta: %{recovered: true})
+      |> Oban.insert!()
+    else
+      :ok
     end
   end
 
@@ -269,8 +270,8 @@ defmodule Doctrans.Processing.StartupRecovery do
     page = from(p in Page, where: p.id == ^row.id, lock: "FOR UPDATE") |> Repo.one()
 
     case {document, page} do
-      {%Document{status: "processing"} = document, %Page{} = page} ->
-        maybe_recover_page(page, document)
+      {%Document{} = document, %Page{} = page} ->
+        if processing?(document), do: maybe_recover_page(page, document), else: []
 
       _ ->
         []

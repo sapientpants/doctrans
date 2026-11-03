@@ -235,6 +235,16 @@ defmodule Doctrans.Documents.Pages do
   end
 
   @doc """
+  Deletes every page of the document, for a run that replaces its output
+  wholesale. Returns the number of pages removed.
+  """
+  @spec delete_pages(Ecto.UUID.t()) :: non_neg_integer()
+  def delete_pages(document_id) do
+    {count, _} = from(p in Page, where: p.document_id == ^document_id) |> Repo.delete_all()
+    count
+  end
+
+  @doc """
   Resets a page for reprocessing.
 
   Clears extracted and translated content and resets all statuses to pending.
