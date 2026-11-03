@@ -30,7 +30,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
             end)
           end)
 
-        assert_receive {:pdf_page_paused, 2}, 2_000
+        ResumablePdfExtractorStub.await_pause(task, 2)
         assert Documents.get_document!(document.id).total_pages == 3
         assert [first_page] = Documents.list_pages(document.id)
         complete_page(first_page)
