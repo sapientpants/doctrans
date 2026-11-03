@@ -4,6 +4,7 @@ defmodule DoctransWeb.DocumentLive.Components do
   """
   use DoctransWeb, :html
 
+  alias Doctrans.Documents.Lifecycle
   alias DoctransWeb.ErrorMessages
 
   @doc """
@@ -88,11 +89,7 @@ defmodule DoctransWeb.DocumentLive.Components do
 
   def processing_progress(assigns) do
     ~H"""
-    <div
-      :if={@document.status in ~w(queued extracting processing completed error)}
-      id={@id}
-      class="my-2 space-y-2"
-    >
+    <div :if={Lifecycle.progress_reportable?(@document)} id={@id} class="my-2 space-y-2">
       <div class="flex items-center justify-between gap-4 text-xs text-base-content/70">
         <span>{status_text(@document.status)}</span>
         <span :if={@document.total_pages}>{Float.round(@progress, 1)}%</span>

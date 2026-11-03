@@ -371,6 +371,17 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
       assert has_element?(view, ".badge", "Queued")
     end
 
+    test "draws a progress bar once a run has started, and not for a stop", %{conn: conn} do
+      uploading = document_fixture(%{status: "uploading"})
+      queued = document_fixture(%{status: "queued"})
+      stopped = document_fixture(%{status: "cancelled"})
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      assert has_element?(view, "#document-progress-#{queued.id}")
+      refute has_element?(view, "#document-progress-#{uploading.id}")
+      refute has_element?(view, "#document-progress-#{stopped.id}")
+    end
+
     test "shows error badge for failed documents", %{conn: conn} do
       _doc = document_fixture(%{status: "error"})
       {:ok, view, _html} = live(conn, ~p"/")

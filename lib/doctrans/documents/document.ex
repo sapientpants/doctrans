@@ -6,8 +6,9 @@ defmodule Doctrans.Documents.Document do
 
   ## Statuses
 
-  - `uploading` - the file is being uploaded
-  - `queued` - Waiting for another document to finish processing
+  - `uploading` - the file is being stored; no run has started
+  - `queued` - a run has started and its extraction job is waiting its turn
+
   - `extracting` - Converting to PDF where needed and extracting page images
   - `processing` - Extracting markdown and translating pages
   - `completed` - All pages have been translated

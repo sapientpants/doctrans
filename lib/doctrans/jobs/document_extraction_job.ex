@@ -17,8 +17,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
     ]
 
   alias Doctrans.Config.PdfExtraction
-  alias Doctrans.Documents
-  alias Doctrans.Documents.{Formats, Lifecycle}
+  alias Doctrans.Documents.{Formats, Lifecycle, Topics}
   alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.DocumentProcessor
   alias Doctrans.Processing.Run
@@ -35,83 +34,82 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   @impl true
   def timeout(_job), do: PdfExtraction.job_timeout()
 
+  @doc """
+  Starts the document's run: records the extension the stored upload was
+  validated under, moves the document to `queued` through
+  `Lifecycle.requeue/2`, and inserts the extraction job, in one transaction.
+  The queued document is announced once that transaction has committed.
+
+  Legal where `requeue/2` is -- a fresh upload, or a settled document -- and
+  answers `{:error, :already_processing}` for a document whose run is under
+  way.
+  """
   @spec enqueue_document(Ecto.UUID.t(), String.t()) ::
           {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
   def enqueue_document(document_id, file_path) do
     Repo.transaction(fn ->
       document = Run.lock(document_id) || Repo.rollback(:document_not_found)
-
-      # This is the stored upload path, whose extension passed magic-byte validation.
-      extension = Formats.extension(file_path)
-
-      unless Formats.supported?(extension),
-        do: Repo.rollback({:unsupported_format, [format: extension]})
-
-      document =
-        document
-        |> Ecto.Changeset.change(source_extension: document.source_extension || extension)
-        |> Repo.update!()
-
-      document =
-        if document.processing_run_id do
-          document
-        else
-          document |> Ecto.Changeset.change(Run.new_attrs()) |> Repo.update!()
-        end
-
-      case document |> Run.args() |> new() |> Oban.insert() do
-        {:ok, job} -> job
-        {:error, reason} -> Repo.rollback(reason)
-      end
+      queued = document |> record_extension(file_path) |> start_run()
+      {queued, insert_job(queued)}
     end)
+    |> publish_queued()
     |> Doctrans.Errors.result()
   end
 
-  # A document row that is gone stays gone, so the job is cancelled rather than
-  # spent on retries that find the same absence.
-  @impl true
-  def perform(%Oban.Job{args: %{@document_id_key => document_id} = args}) do
-    case Documents.get_document(document_id) do
-      nil -> {:cancel, :document_not_found}
-      document -> document |> perform_current(args) |> cancel_permanent()
+  # `file_path` is the stored upload path, whose extension passed magic-byte
+  # validation; a document that already records one keeps it.
+  defp record_extension(document, file_path) do
+    extension = Formats.extension(file_path)
+
+    unless Formats.supported?(extension),
+      do: Repo.rollback({:unsupported_format, [format: extension]})
+
+    document
+    |> Ecto.Changeset.change(source_extension: document.source_extension || extension)
+    |> Repo.update!()
+  end
+
+  defp start_run(document) do
+    case Lifecycle.requeue(document, Run.new_attrs()) do
+      {:ok, queued} -> queued
+      {:error, reason} -> Repo.rollback(reason)
     end
   end
 
-  # A failure that cannot come out differently on a retry — the document is over
-  # a limit, a tool is not installed, the source file is gone — is cancelled with
-  # the reason intact. Retrying it would burn the document's remaining attempts
-  # and occupy the single extraction slot to reach the same answer.
-  defp cancel_permanent({:error, reason}) do
+  # A job already waiting for the document belongs to the run just replaced and
+  # would drop the new one as obsolete, so the conflict is a refusal, not a job.
+  defp insert_job(document) do
+    case document |> Run.args() |> new() |> Oban.insert() do
+      {:ok, %{conflict?: false} = job} -> job
+      {:ok, _conflicting} -> Repo.rollback(:already_processing)
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  # `Lifecycle` does not announce a write made inside the caller's transaction,
+  # so the queued document is announced here, after the commit.
+  defp publish_queued({:ok, {document, job}}) do
+    _ = Topics.broadcast_document_updated(document)
+    {:ok, job}
+  end
+
+  defp publish_queued(error), do: error
+
+  @impl true
+  def perform(%Oban.Job{args: %{@document_id_key => document_id} = args}) do
+    document_id
+    |> DocumentProcessor.extract_current(Map.get(args, "run_id"))
+    |> outcome()
+  end
+
+  # A failure that cannot come out differently on a retry — the document row is
+  # gone, the document is over a limit, a tool is not installed, the source file
+  # is gone — is cancelled with the reason intact. Retrying it would burn the
+  # document's remaining attempts and occupy the single extraction slot to reach
+  # the same answer.
+  defp outcome({:error, reason}) do
     if ErrorClassifier.retryable?(reason), do: {:error, reason}, else: {:cancel, reason}
   end
 
-  defp cancel_permanent(result), do: result
-
-  defp perform_current(document, args) do
-    if Run.current?(document, Map.get(args, "run_id")) do
-      extract_from(document, Run.source_path(document))
-    else
-      :ok
-    end
-  end
-
-  # `Run.source_path/1` is nil for a document whose extension is not a supported
-  # source format, which is reported like a source that is not there. A run the
-  # document has moved on from, or a document that settled while this job was
-  # waiting, is not this job's to act on: both are dropped as a success.
-  defp extract_from(document, path) do
-    if path && File.regular?(path) do
-      case DocumentProcessor.extract_document(document.id, path, document) do
-        {:error, reason} when reason in [:obsolete_run, :already_settled] -> :ok
-        result -> result
-      end
-    else
-      report_missing_source(document)
-    end
-  end
-
-  defp report_missing_source(document) do
-    _ = Lifecycle.fail(document, :document_file_not_found)
-    {:error, :document_file_not_found}
-  end
+  defp outcome(result), do: result
 end

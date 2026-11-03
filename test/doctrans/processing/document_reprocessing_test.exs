@@ -163,9 +163,13 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
                Documents.update_document(document, %{original_filename: "renamed.pdf"})
 
       assert Run.source_path(document) == c.source
+
+      # Enqueueing started a run; a reprocess needs it settled, so stop it.
       Repo.delete!(job)
+      assert {:ok, document} = Lifecycle.cancel(document)
 
       assert {:ok, run} = DocumentReprocessing.reprocess_document(document.id)
+
       [job] = all_enqueued(worker: DocumentExtractionJob)
       assert :ok = DocumentExtractionJob.perform(job)
       assert File.read!(Path.join(Run.output_dir(run), "original.pdf")) == "original office bytes"

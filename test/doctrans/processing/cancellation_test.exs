@@ -246,7 +246,7 @@ defmodule Doctrans.Processing.CancellationTest do
 
     test "cancelling a document that does not exist leaves every other job alone" do
       Oban.Testing.with_testing_mode(:manual, fn ->
-        bystander = document_fixture(%{status: "extracting"})
+        bystander = document_fixture()
 
         {:ok, untouched} =
           DocumentExtractionJob.enqueue_document(bystander.id, "/uploads/original.pdf")
