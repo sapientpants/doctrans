@@ -19,4 +19,21 @@ defmodule Doctrans.Repo do
     error in [Postgrex.Error, DBConnection.ConnectionError, Ecto.ConstraintError] ->
       {:error, {:database_error, [reason: error]}}
   end
+
+  @doc """
+  Inserts an Oban job inside the caller's transaction, or rolls the transaction back.
+
+  A unique conflict rolls back with `:already_processing`: the job already
+  waiting belongs to the work this transaction is replacing, and would drop the
+  new work as obsolete when it ran. Any other insert failure rolls back with
+  its own reason.
+  """
+  @spec insert_job!(Ecto.Changeset.t()) :: Oban.Job.t()
+  def insert_job!(changeset) do
+    case Oban.insert(changeset) do
+      {:ok, %{conflict?: false} = job} -> job
+      {:ok, _conflicting} -> rollback(:already_processing)
+      {:error, reason} -> rollback(reason)
+    end
+  end
 end

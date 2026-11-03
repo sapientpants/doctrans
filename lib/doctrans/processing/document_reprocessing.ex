@@ -21,7 +21,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
       document = Run.lock(document_id) || Repo.rollback(:document_not_found)
       ensure_reprocessable!(document, opts)
       purge_generated_content(document)
-      start_run(document, opts)
+      requeue(document, opts)
     end)
     |> Topics.publish_document_updated()
   end
@@ -49,10 +49,10 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     :ok
   end
 
-  defp start_run(document, opts) do
+  defp requeue(document, opts) do
     document = or_rollback(Lifecycle.requeue(document, Run.new_attrs(opts)))
-    _ = insert!(DocumentExtractionJob.new(Run.args(document)))
-    _ = insert!(RunCleanupJob.new(Run.args(document)))
+    _ = document |> Run.args() |> DocumentExtractionJob.new() |> Repo.insert_job!()
+    _ = document |> Run.args() |> RunCleanupJob.new() |> Repo.insert_job!()
     document
   end
 
@@ -96,7 +96,12 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     choices = Run.choices(opts)
     updated = request_models(reset, choices)
 
-    _ = insert!(LlmProcessingJob.new(page_job_args(page, updated, choices), priority: 1))
+    _ =
+      page
+      |> page_job_args(updated, choices)
+      |> LlmProcessingJob.new(priority: 1)
+      |> Repo.insert_job!()
+
     {or_rollback(Lifecycle.resume(document)), updated}
   end
 
@@ -142,7 +147,13 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     {:ok, reset} = Documents.reset_page_for_reprocessing(page)
     _ = purge_page_context(document.id, page.id)
     updated = request_models(reset, choices)
-    _ = insert!(LlmProcessingJob.new(page_job_args(page, updated, choices), priority: 1))
+
+    _ =
+      page
+      |> page_job_args(updated, choices)
+      |> LlmProcessingJob.new(priority: 1)
+      |> Repo.insert_job!()
+
     updated
   end
 
@@ -194,12 +205,4 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   # rule the two disagree on; rolling it back reports it rather than hiding it.
   defp or_rollback({:ok, document}), do: document
   defp or_rollback({:error, reason}), do: Repo.rollback(reason)
-
-  defp insert!(changeset) do
-    case Oban.insert(changeset) do
-      {:ok, %{conflict?: false} = job} -> job
-      {:ok, _} -> Repo.rollback(:already_processing)
-      {:error, reason} -> Repo.rollback(reason)
-    end
-  end
 end

@@ -169,7 +169,6 @@ defmodule Doctrans.Documents.Intake do
       source_language: languages.source,
       # The status is the schema's default, `uploading`: `Lifecycle.requeue/2`
       # moves it to `queued` as the extraction job is enqueued.
-
       target_language: languages.target
     }
 

@@ -72,8 +72,9 @@ defmodule Doctrans.Documents.Lifecycle do
   @in_flight @pre_processing ++ ~w(processing)
   @settled ~w(completed error cancelled)
   @awaiting_pages ~w(queued extracting)
-  @run_startable ~w(uploading) ++ @settled
-  @progress_reportable ~w(queued extracting processing completed error)
+  @requeueable ~w(uploading) ++ @settled
+  # A run has started and the user has not stopped it.
+  @progress_reportable (@in_flight ++ @settled) -- ~w(uploading cancelled)
 
   # The from-list transitions, as the moduledoc tables them: the statuses each
   # is legal from, the status it lands on, and what it answers from anywhere
@@ -128,12 +129,23 @@ defmodule Doctrans.Documents.Lifecycle do
   @spec failed?(Document.t()) :: boolean()
   def failed?(%{status: status}), do: status == "error"
 
-  @doc """
-  True while a run's progress is worth reporting: one has started and the user
-  has not stopped it. The rule a UI draws its progress bar under.
+  @doc "True while the upload is being stored: no run has started."
+  @spec uploading?(Document.t()) :: boolean()
+  def uploading?(%{status: status}), do: status == "uploading"
 
-  `uploading` has no run to report on yet, and a `cancelled` document shows
-  the stop itself rather than how far the run it interrupted had got.
+  @doc """
+  The rule `requeue/2` applies: a fresh upload, or a settled run a new one may
+  replace.
+  """
+  @spec requeueable?(Document.t()) :: boolean()
+  def requeueable?(%{status: status}), do: status in @requeueable
+
+  @doc """
+  True while a run has progress to report: one has started and the user has
+  not stopped it.
+
+  `uploading` has no run yet, and a `cancelled` document reports the stop
+  itself rather than how far the run it interrupted had got.
   """
   @spec progress_reportable?(Document.t()) :: boolean()
   def progress_reportable?(%{status: status}), do: status in @progress_reportable
@@ -238,7 +250,7 @@ defmodule Doctrans.Documents.Lifecycle do
   @spec requeue(Document.t(), map()) :: {:ok, Document.t()} | {:error, refusal()}
   def requeue(%Document{} = document, run_attrs) do
     Revision.with_current(document, fn current ->
-      if current.status in @run_startable do
+      if requeueable?(current) do
         queued =
           current
           |> Ecto.Changeset.change(run_attrs)

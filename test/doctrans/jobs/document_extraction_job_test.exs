@@ -76,9 +76,9 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       end)
     end
 
-    test "refuses a document whose run is under way, queueing nothing" do
+    test "refuses a document whose run has started, under way or settled, queueing nothing" do
       Oban.Testing.with_testing_mode(:manual, fn ->
-        for status <- ~w(queued extracting processing) do
+        for status <- ~w(queued extracting processing completed error cancelled) do
           document = document_fixture(%{status: status})
 
           assert {:error, :already_processing} =

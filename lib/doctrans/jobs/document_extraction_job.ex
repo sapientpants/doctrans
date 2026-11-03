@@ -17,7 +17,8 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
     ]
 
   alias Doctrans.Config.PdfExtraction
-  alias Doctrans.Documents.{Formats, Lifecycle, Topics}
+  alias Doctrans.Documents
+  alias Doctrans.Documents.{Lifecycle, Topics}
   alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.DocumentProcessor
   alias Doctrans.Processing.Run
@@ -35,81 +36,87 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   def timeout(_job), do: PdfExtraction.job_timeout()
 
   @doc """
-  Starts the document's run: records the extension the stored upload was
-  validated under, moves the document to `queued` through
-  `Lifecycle.requeue/2`, and inserts the extraction job, in one transaction.
-  The queued document is announced once that transaction has committed.
+  Queues a fresh upload: records the extension its stored file was validated
+  under, requeues it through `Lifecycle.requeue/2`, and inserts the extraction
+  job, in one transaction. The queued document is announced once that
+  transaction has committed.
 
-  Legal where `requeue/2` is -- a fresh upload, or a settled document -- and
-  answers `{:error, :already_processing}` for a document whose run is under
-  way.
+  Only a document still `uploading` is taken. One whose run has started --
+  under way or settled -- is refused with `{:error, :already_processing}`:
+  replacing a settled run also discards its pages and chat context, which is
+  `Doctrans.Processing.DocumentReprocessing`'s to do.
   """
   @spec enqueue_document(Ecto.UUID.t(), String.t()) ::
           {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
   def enqueue_document(document_id, file_path) do
-    Repo.transaction(fn ->
-      document = Run.lock(document_id) || Repo.rollback(:document_not_found)
-      queued = document |> record_extension(file_path) |> start_run()
-      {queued, insert_job(queued)}
-    end)
-    |> publish_queued()
-    |> Doctrans.Errors.result()
-  end
-
-  # `file_path` is the stored upload path, whose extension passed magic-byte
-  # validation; a document that already records one keeps it.
-  defp record_extension(document, file_path) do
-    extension = Formats.extension(file_path)
-
-    unless Formats.supported?(extension),
-      do: Repo.rollback({:unsupported_format, [format: extension]})
-
-    document
-    |> Ecto.Changeset.change(source_extension: document.source_extension || extension)
-    |> Repo.update!()
-  end
-
-  defp start_run(document) do
-    case Lifecycle.requeue(document, Run.new_attrs()) do
-      {:ok, queued} -> queued
-      {:error, reason} -> Repo.rollback(reason)
-    end
-  end
-
-  # A job already waiting for the document belongs to the run just replaced and
-  # would drop the new one as obsolete, so the conflict is a refusal, not a job.
-  defp insert_job(document) do
-    case document |> Run.args() |> new() |> Oban.insert() do
-      {:ok, %{conflict?: false} = job} -> job
-      {:ok, _conflicting} -> Repo.rollback(:already_processing)
-      {:error, reason} -> Repo.rollback(reason)
+    with {:ok, {queued, job}} <- Repo.safe_transaction(fn -> requeue(document_id, file_path) end) do
+      _ = Topics.broadcast_document_updated(queued)
+      {:ok, job}
     end
   end
 
   # `Lifecycle` does not announce a write made inside the caller's transaction,
-  # so the queued document is announced here, after the commit.
-  defp publish_queued({:ok, {document, job}}) do
-    _ = Topics.broadcast_document_updated(document)
-    {:ok, job}
+  # which is why `enqueue_document/2` announces the queued document itself.
+  defp requeue(document_id, file_path) do
+    document = Run.lock(document_id) || Repo.rollback(:document_not_found)
+    unless Lifecycle.uploading?(document), do: Repo.rollback(:already_processing)
+
+    queued =
+      with {:ok, recorded} <- Run.record_source_extension(document, file_path),
+           {:ok, queued} <- Lifecycle.requeue(recorded, Run.new_attrs()) do
+        queued
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+
+    {queued, queued |> Run.args() |> new() |> Repo.insert_job!()}
   end
 
-  defp publish_queued(error), do: error
-
+  # A document row that is gone stays gone, so the job is cancelled rather than
+  # spent on retries that find the same absence.
   @impl true
   def perform(%Oban.Job{args: %{@document_id_key => document_id} = args}) do
-    document_id
-    |> DocumentProcessor.extract_current(Map.get(args, "run_id"))
-    |> outcome()
+    case Documents.get_document(document_id) do
+      nil -> {:cancel, :document_not_found}
+      document -> document |> perform_current(args) |> cancel_permanent()
+    end
   end
 
-  # A failure that cannot come out differently on a retry — the document row is
-  # gone, the document is over a limit, a tool is not installed, the source file
-  # is gone — is cancelled with the reason intact. Retrying it would burn the
-  # document's remaining attempts and occupy the single extraction slot to reach
-  # the same answer.
-  defp outcome({:error, reason}) do
+  # A failure that cannot come out differently on a retry — the document is over
+  # a limit, a tool is not installed, the source file is gone — is cancelled with
+  # the reason intact. Retrying it would burn the document's remaining attempts
+  # and occupy the single extraction slot to reach the same answer.
+  defp cancel_permanent({:error, reason}) do
     if ErrorClassifier.retryable?(reason), do: {:error, reason}, else: {:cancel, reason}
   end
 
-  defp outcome(result), do: result
+  defp cancel_permanent(result), do: result
+
+  defp perform_current(document, args) do
+    if Run.current?(document, Map.get(args, "run_id")) do
+      extract_from(document, Run.source_path(document))
+    else
+      :ok
+    end
+  end
+
+  # `Run.source_path/1` is nil for a document whose extension is not a supported
+  # source format, which is reported like a source that is not there. A run the
+  # document has moved on from, or a document that settled while this job was
+  # waiting, is not this job's to act on: both are dropped as a success.
+  defp extract_from(document, path) do
+    if path && File.regular?(path) do
+      case DocumentProcessor.extract_document(document.id, path, document) do
+        {:error, reason} when reason in [:obsolete_run, :already_settled] -> :ok
+        result -> result
+      end
+    else
+      report_missing_source(document)
+    end
+  end
+
+  defp report_missing_source(document) do
+    _ = Lifecycle.fail(document, :document_file_not_found)
+    {:error, :document_file_not_found}
+  end
 end

@@ -347,7 +347,8 @@ defmodule Doctrans.Documents.LifecycleTest do
         assert Lifecycle.cancellable?(document) == status in @in_flight
         assert Lifecycle.reprocessable?(document) == status in @settled
         assert Lifecycle.progress_reportable?(document) == status in @progress_reportable
-
+        assert Lifecycle.requeueable?(document) == status in ["uploading" | @settled]
+        assert Lifecycle.uploading?(document) == (status == "uploading")
         assert Lifecycle.completed?(document) == (status == "completed")
         assert Lifecycle.cancelled?(document) == (status == "cancelled")
         assert Lifecycle.failed?(document) == (status == "error")
