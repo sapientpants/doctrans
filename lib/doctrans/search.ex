@@ -289,8 +289,8 @@ defmodule Doctrans.Search do
   # A document's own rows are few and reachable through the `document_id` btree,
   # so these queries collect them, with their distances, in a MATERIALIZED CTE
   # that has no ORDER BY the approximate index could serve, and rank them
-  # afterwards. The library-wide search in `HybridQuery` is where the HNSW index
-  # belongs, and still uses it.
+  # afterwards. The library-wide search in `HybridQuery` ranks its semantic half
+  # the same way, and for the same reason (#218).
   #
   # Static heredoc; every value reaches Postgres as a bound parameter ($1..$4) via
   # `run_document_search/6`, which owns the `Repo.query/2` call and its skip.
