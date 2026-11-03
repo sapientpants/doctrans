@@ -42,7 +42,8 @@ defmodule Doctrans.Search.HybridQuery do
     # Use CTE-based query for efficient RRF calculation
     # - semantic_scored: every embedded page with its distance to the query,
     #   empty when $1 is NULL so an unembeddable query still gets the fts half
-    #   rather than an error -- one statement, both retrieval modes.
+    #   rather than an error -- one statement, both retrieval modes. It is
+    #   MATERIALIZED so the semantic half is exact; see below.
     # - semantic_ranked: those pages ranked (IDs and ranks only). $4 is the
     #   similarity floor: without it this CTE ranks every embedded page in the
     #   library, so the deepest ranks are whatever the corpus happens to hold
@@ -56,11 +57,25 @@ defmodule Doctrans.Search.HybridQuery do
     # Each score is spelled once, in its `*_scored` CTE, and the ranking CTE
     # orders over the alias: the distance operator and the two-term rank sum
     # used to be repeated in the SELECT, the WHERE and the window, so a weight
-    # or a config had to be edited in lockstep. Postgres inlines a CTE that is
-    # referenced once, so the planner sees the same expressions it did before
-    # and the index paths open to it are unchanged.
+    # or a config had to be edited in lockstep.
+    #
+    # The semantic half is exact, by construction of the SQL. Postgres inlines
+    # a CTE that is referenced once, and then the window's ORDER BY distance is
+    # one the HNSW index on `pages.embedding` can serve: that scan collects
+    # `hnsw.ef_search` candidates (40 by default) from the whole index -- every
+    # document's pages, plus the entries of deleted or rolled-back rows vacuum
+    # has not yet removed -- and applies the status and similarity filters to
+    # those afterwards (pgvector, "Filtering"). A page that clears the floor
+    # but is not among the index's nearest 40 is then silently absent from the
+    # ranking and from the total, and whether the planner took that path
+    # depended on its statistics at the time (#218; #184 for the in-document
+    # queries). MATERIALIZED keeps `semantic_scored` from being inlined, so the
+    # distances are computed for every eligible page and the ranking that
+    # follows has no ORDER BY the approximate index could serve. A single-user
+    # library is small enough that the exact scan is cheap, and the count and
+    # the page it ships with stay in agreement about what matched.
     sql = """
-    WITH semantic_scored AS (
+    WITH semantic_scored AS MATERIALIZED (
       SELECT
         p.id,
         p.document_id,
