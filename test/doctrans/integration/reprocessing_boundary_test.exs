@@ -5,10 +5,10 @@ defmodule Doctrans.Integration.ReprocessingBoundaryTest do
 
   Reprocessing stamps a page with a new generation; every job queued for the old
   one is then a job whose work has already been replaced. `LlmProcessor` refuses
-  to run such a job, and a run superseded mid-flight can neither write its stage
-  states onto the page that replaced it nor settle the document on its account.
-  The second half is the one with teeth: a stale run would otherwise leave its
-  half-written stages on a page the new generation owns.
+  to run such a job, and `LlmProcessingJob` refuses to report such a job's final
+  failure against the document. The second half is the one with teeth: a stale
+  run that exhausts its retries would otherwise flip a document to "error" while
+  the generation that replaced it is still processing happily.
 
   Both cases install a model stub that raises on any call, so a run that was
   *not* refused announces itself instead of quietly succeeding. The stub is per
@@ -63,13 +63,13 @@ defmodule Doctrans.Integration.ReprocessingBoundaryTest do
     assert Repo.get!(Document, document.id).status == "processing"
   end
 
-  test "a run superseded mid-flight writes nothing onto the page its replacement owns" do
+  test "a run superseded mid-flight does not fail the document its replacement owns" do
     document = document_fixture(%{status: "processing", total_pages: 1})
     page = document |> page_fixture() |> with_generation()
     SupersedingCrashStub.install(page)
 
-    # The last attempt is the one that settles the document on the page's
-    # account, so it is the attempt on which the guard has the most to refuse.
+    # The last attempt is the one that settles the document, so it is the only
+    # attempt on which the guard can be the difference.
     assert_raise RuntimeError, ~r/superseded/, fn ->
       perform_job(
         LlmProcessingJob,
@@ -89,11 +89,9 @@ defmodule Doctrans.Integration.ReprocessingBoundaryTest do
     assert current.translation_status == "pending"
   end
 
-  # The control for the test above: without it, the page assertions there would
-  # also hold if a run never wrote a stage at all. A crash is not a page failure
-  # -- the stage it interrupted stays `processing` -- so the document is not
-  # failed on its account either; that is left to the recovery pass.
-  test "the same crash on the current generation does reach the page" do
+  # The control for the test above: without it, that assertion would also hold
+  # if exhausted jobs stopped reporting failures altogether.
+  test "the same crash on the current generation does fail the document" do
     Mox.stub_with(OpenAIMock, OpenAICrashStub)
 
     document = document_fixture(%{status: "processing", total_pages: 1})
@@ -107,10 +105,7 @@ defmodule Doctrans.Integration.ReprocessingBoundaryTest do
       )
     end
 
-    current = Repo.get!(Page, page.id)
-    assert current.processing_generation == page.processing_generation
-    assert current.extraction_status == "processing"
-    assert Documents.get_document!(document.id).status == "processing"
+    assert Documents.get_document!(document.id).status == "error"
   end
 
   defp with_generation(page) do

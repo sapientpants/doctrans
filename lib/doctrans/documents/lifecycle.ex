@@ -49,9 +49,10 @@ defmodule Doctrans.Documents.Lifecycle do
 
   A page failing for good writes nothing here. The document reaches `error`
   from page failures in `settle/1` alone, once every expected page has settled;
-  `fail/2` is for the extraction side -- a missing source, a conversion or a
-  render failure. `error` therefore reads as "failed" only once nothing is
-  running for the document, which `ProcessingStatus` asks Oban about.
+  `fail/2` is for failures before any page exists -- a stored upload that could
+  not be cleaned up, a missing source, a conversion or a render failure.
+  `error` therefore reads as "failed" only once nothing is running for the
+  document, which `ProcessingStatus` asks Oban about.
   """
 
   require Logger
@@ -65,10 +66,17 @@ defmodule Doctrans.Documents.Lifecycle do
   @pre_processing ~w(uploading queued extracting)
   @in_flight @pre_processing ++ ~w(processing)
   @settled ~w(completed error cancelled)
-  @extractable @in_flight ++ ~w(error)
-  @failable @in_flight ++ ~w(error)
-  @resumable ~w(processing) ++ @settled
   @awaiting_pages ~w(queued extracting)
+
+  # The from-list transitions, as the moduledoc tables them: the statuses each
+  # is legal from, the status it lands on, and what it answers from anywhere
+  # else. `begin_processing/1`, `settle/1` and `requeue/2` have their own shape.
+  @transitions %{
+    begin_extraction: {@in_flight ++ ~w(error), "extracting", :already_settled},
+    fail: {@in_flight ++ ~w(error), "error", :already_settled},
+    cancel: {@in_flight, "cancelled", :not_cancellable},
+    resume: {~w(processing) ++ @settled, "processing", :already_processing}
+  }
 
   @typedoc "How the document settled, or why it did not."
   @type verdict :: :completed | :failed | :retrying | :incomplete | :cancelled
@@ -144,9 +152,7 @@ defmodule Doctrans.Documents.Lifecycle do
   its retry to find. Clears the diagnostic that attempt recorded.
   """
   @spec begin_extraction(Document.t()) :: {:ok, Document.t()} | {:error, refusal()}
-  def begin_extraction(%Document{} = document) do
-    transition(document, :begin_extraction, @extractable, "extracting", nil, :already_settled)
-  end
+  def begin_extraction(%Document{} = document), do: transition(document, :begin_extraction)
 
   @doc """
   The first page job has started: the document leaves its pre-processing states.
@@ -159,28 +165,22 @@ defmodule Doctrans.Documents.Lifecycle do
   @spec begin_processing(Page.t() | Document.t()) :: :ok | {:error, :obsolete_run}
   def begin_processing(%Page{} = page) do
     Revision.with_page(page, fn _ -> start_processing(Revision.lock(page.document_id)) end)
-    |> publish_started()
+    |> publish()
   end
 
   def begin_processing(%Document{} = document) do
     document
     |> Revision.with_current(&start_processing/1)
-    |> publish_started()
+    |> publish()
   end
 
   defp start_processing(%Document{} = document) do
-    if pre_processing?(document), do: {:ok, write(document, "processing")}, else: :ok
+    if pre_processing?(document), do: {:started, write(document, "processing")}, else: :ok
   end
-
-  defp publish_started({:ok, document}) do
-    broadcast(document)
-    :ok
-  end
-
-  defp publish_started(result), do: result
 
   @doc """
-  Extraction failed: a missing source, a conversion or a render failure.
+  The run failed before any page did: a stored upload that could not be
+  cleaned up, a missing source, a conversion or a render failure.
 
   Records the inspected `reason` in `error_message`. Legal from `error` as
   well, so a retry that fails again records its own diagnostic. Refused on a
@@ -188,17 +188,14 @@ defmodule Doctrans.Documents.Lifecycle do
   failures do not come through here; see `settle/1`.
   """
   @spec fail(Document.t(), term()) :: {:ok, Document.t()} | {:error, refusal()}
-  def fail(%Document{} = document, reason) do
-    transition(document, :fail, @failable, "error", Errors.diagnostic(reason), :already_settled)
-  end
+  def fail(%Document{} = document, reason),
+    do: transition(document, :fail, Errors.diagnostic(reason))
 
   @doc """
   The user stops the run. Refused with `:not_cancellable` once it has settled.
   """
   @spec cancel(Document.t()) :: {:ok, Document.t()} | {:error, refusal()}
-  def cancel(%Document{} = document) do
-    transition(document, :cancel, @in_flight, "cancelled", nil, :not_cancellable)
-  end
+  def cancel(%Document{} = document), do: transition(document, :cancel)
 
   @doc """
   Page work is queued again under the current run: a page reprocess, or a retry
@@ -209,9 +206,7 @@ defmodule Doctrans.Documents.Lifecycle do
   since there is no per-page work to replace until it has.
   """
   @spec resume(Document.t()) :: {:ok, Document.t()} | {:error, refusal()}
-  def resume(%Document{} = document) do
-    transition(document, :resume, @resumable, "processing", nil, :already_processing)
-  end
+  def resume(%Document{} = document), do: transition(document, :resume)
 
   @doc """
   A new run replaces the current one: the document is `queued` for extraction
@@ -241,8 +236,8 @@ defmodule Doctrans.Documents.Lifecycle do
   @doc """
   Decides the document's outcome from the state of its pages.
 
-  Only fully successful pages complete a document. One whose pages have all
-  settled with at least one failure becomes `error`, with the failed page
+  A document is `completed` only when every expected page succeeded. One whose
+  pages have all settled with at least one failure becomes `error`, with the failed page
   numbers as its diagnostic -- unless a failed page still has a job waiting to
   retry it (`:retrying`). Pages still outstanding leave it alone
   (`:incomplete`). A `completed` or `cancelled` document is not read again: it
@@ -259,13 +254,13 @@ defmodule Doctrans.Documents.Lifecycle do
     Revision.with_page(page, fn _ ->
       settle_locked(Revision.lock(page.document_id), page.id)
     end)
-    |> publish_settled()
+    |> publish()
   end
 
   def settle(%Document{} = document) do
     document
     |> Revision.with_current(&settle_locked(&1, nil))
-    |> publish_settled()
+    |> publish()
   end
 
   @doc """
@@ -280,7 +275,7 @@ defmodule Doctrans.Documents.Lifecycle do
     {:ok, result} =
       Repo.transaction(fn -> settle_locked(Revision.lock(document_id), nil) end)
 
-    publish_settled(result)
+    publish(result)
   end
 
   defp settle_locked(nil, _finished_page_id), do: :incomplete
@@ -290,10 +285,15 @@ defmodule Doctrans.Documents.Lifecycle do
   # would let that straggler report the document completed or failed,
   # overturning a stop the user asked for and already saw take effect. A
   # completed document is terminal for the same reason: its verdict stands.
-  defp settle_locked(%{status: "cancelled"}, _finished_page_id), do: :cancelled
-  defp settle_locked(%{status: "completed"}, _finished_page_id), do: :completed
-
   defp settle_locked(document, finished_page_id) do
+    cond do
+      cancelled?(document) -> :cancelled
+      completed?(document) -> :completed
+      true -> settle_pages(document, finished_page_id)
+    end
+  end
+
+  defp settle_pages(document, finished_page_id) do
     case Documents.completion_state(document.id) do
       :completed -> {:completed, write(document, "completed")}
       :failed -> settle_failed(document, finished_page_id)
@@ -322,25 +322,15 @@ defmodule Doctrans.Documents.Lifecycle do
     {:pages_failed, [page_numbers: page_numbers]}
   end
 
-  defp publish_settled({:completed, document}) do
-    broadcast(document)
-    :completed
-  end
-
-  defp publish_settled({:failed, document}) do
-    broadcast(document)
-    :failed
-  end
-
-  defp publish_settled(result), do: result
-
   # ---------------------------------------------------------------------------
   # Plumbing
   # ---------------------------------------------------------------------------
 
   # One shape for every from-list transition: lock the row, compare its status
-  # against the legal starting states, write or refuse.
-  defp transition(document, name, from, to, diagnostic, refusal) do
+  # against the legal starting states in `@transitions`, write or refuse.
+  defp transition(document, name, diagnostic \\ nil) do
+    {from, to, refusal} = Map.fetch!(@transitions, name)
+
     Revision.with_current(document, fn current ->
       if current.status in from,
         do: {:ok, write(current, to, diagnostic)},
@@ -366,12 +356,19 @@ defmodule Doctrans.Documents.Lifecycle do
     |> Repo.update!()
   end
 
-  defp publish({:ok, document} = result) do
-    broadcast(document)
-    result
-  end
-
+  # Every write a transition makes comes back here tagged with the document it
+  # produced; the tag says what the caller is told once the row is announced.
+  # Anything else -- a refusal, a verdict that wrote nothing -- passes through.
+  defp publish({:ok, document} = result), do: announce(document, result)
+  defp publish({:started, document}), do: announce(document, :ok)
+  defp publish({:completed, document}), do: announce(document, :completed)
+  defp publish({:failed, document}), do: announce(document, :failed)
   defp publish(result), do: result
+
+  defp announce(document, answer) do
+    broadcast(document)
+    answer
+  end
 
   # Call after the guard's transaction returns, so subscribers read committed
   # state. A caller mid-transaction publishes after its own commit instead.

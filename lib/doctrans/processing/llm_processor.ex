@@ -162,13 +162,38 @@ defmodule Doctrans.Processing.LlmProcessor do
     # alone, so every page may call it.
     with :ok <- Lifecycle.begin_processing(page),
          {:ok, page} <- mark_stage(page, :extraction, "processing") do
-      image_path = Layout.absolute(page.image_path)
-
-      case Deps.openai().extract_markdown(image_path, model_opts(opts, :extraction_model)) do
-        {:ok, markdown} -> save_extraction(page, markdown, opts)
-        {:error, reason} -> fail_stage(page, :extraction, reason)
-      end
+      run_stage(page, :extraction, fn -> extract_markdown(page, opts) end)
     end
+  end
+
+  defp extract_markdown(page, opts) do
+    image_path = Layout.absolute(page.image_path)
+
+    case Deps.openai().extract_markdown(image_path, model_opts(opts, :extraction_model)) do
+      {:ok, markdown} -> save_extraction(page, markdown, opts)
+      {:error, reason} -> fail_stage(page, :extraction, reason)
+    end
+  end
+
+  # A stage runs with the page already marked "processing". A crash -- a model
+  # client raising, a database blip mid-write -- would otherwise leave that mark
+  # behind for good: Oban retries, a deterministic failure raises again on every
+  # attempt, and the page is discarded still reading "processing", neither
+  # failed nor finished, for the recovery pass to re-queue on every boot.
+  # Recording the failure keeps the stage truthful and lets the document settle
+  # on it once Oban gives up; re-raising leaves Oban's schedule to decide whether
+  # the crash was transient. `Doctrans.Search.Indexer` does the same for indexing.
+  defp run_stage(page, stage, fun) do
+    fun.()
+  catch
+    kind, reason ->
+      Logger.error(
+        "#{stage_name(stage)} crashed for page #{page.page_number}: " <>
+          Exception.format(kind, reason, __STACKTRACE__)
+      )
+
+      _ = mark_stage(page, stage, "error")
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   defp save_extraction(page, markdown, opts) do
@@ -203,17 +228,21 @@ defmodule Doctrans.Processing.LlmProcessor do
 
     with {:ok, page} <- mark_stage(page, :translation, "processing"),
          {:ok, document} <- fetch_document(page) do
-      source_language = SourceLanguage.resolve(document, page.original_markdown)
+      run_stage(page, :translation, fn -> translate_markdown(page, document, opts) end)
+    end
+  end
 
-      case Deps.openai().translate(
-             page.original_markdown,
-             source_language,
-             document.target_language,
-             model_opts(opts, :translation_model)
-           ) do
-        {:ok, translated} -> save_translation(page, translated, opts)
-        {:error, reason} -> fail_stage(page, :translation, reason)
-      end
+  defp translate_markdown(page, document, opts) do
+    source_language = SourceLanguage.resolve(document, page.original_markdown)
+
+    case Deps.openai().translate(
+           page.original_markdown,
+           source_language,
+           document.target_language,
+           model_opts(opts, :translation_model)
+         ) do
+      {:ok, translated} -> save_translation(page, translated, opts)
+      {:error, reason} -> fail_stage(page, :translation, reason)
     end
   end
 

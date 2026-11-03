@@ -171,7 +171,7 @@ defmodule Doctrans.Documents.ProcessingStatus do
   end
 
   # The terminal verdicts are the row's alone. Below them, a live job outranks
-  # the row: a document recorded as errored has finished failing only once
+  # the row: a document recorded as failed has finished failing only once
   # nothing is left running for it, and while a job of its own is queued,
   # executing or waiting on a retry, that job is what the document is doing --
   # saying `failed` instead would offer a retry that `Run.active?/1` refuses

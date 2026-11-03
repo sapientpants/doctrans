@@ -129,7 +129,7 @@ defmodule Doctrans.Documents.LifecycleTest do
       assert {:error, :obsolete_run} = Lifecycle.settle(document)
     end
 
-    test "a page from an earlier generation can neither restart nor settle the document" do
+    test "a page reset since its job was queued can neither restart nor settle the document" do
       document = document_fixture(%{status: "queued", total_pages: 1})
       stale = page_fixture(document)
 

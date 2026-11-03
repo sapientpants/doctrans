@@ -50,7 +50,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   end
 
   defp start_run(document, opts) do
-    document = transition!(Lifecycle.requeue(document, Run.new_attrs(opts)))
+    document = or_rollback(Lifecycle.requeue(document, Run.new_attrs(opts)))
     _ = insert!(DocumentExtractionJob.new(Run.args(document)))
     _ = insert!(RunCleanupJob.new(Run.args(document)))
     document
@@ -97,7 +97,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     updated = request_models(reset, choices)
 
     _ = insert!(LlmProcessingJob.new(page_job_args(page, updated, choices), priority: 1))
-    {transition!(Lifecycle.resume(document)), updated}
+    {or_rollback(Lifecycle.resume(document)), updated}
   end
 
   @doc """
@@ -125,7 +125,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
 
     choices = Run.choices(opts)
     retried = Enum.map(pages, &retry_page(&1, document, choices))
-    {transition!(Lifecycle.resume(document)), retried}
+    {or_rollback(Lifecycle.resume(document)), retried}
   end
 
   defp failed_pages(document_id) do
@@ -192,8 +192,8 @@ defmodule Doctrans.Processing.DocumentReprocessing do
 
   # The eligibility check above ran under the same lock, so a refusal here is a
   # rule the two disagree on; rolling it back reports it rather than hiding it.
-  defp transition!({:ok, document}), do: document
-  defp transition!({:error, reason}), do: Repo.rollback(reason)
+  defp or_rollback({:ok, document}), do: document
+  defp or_rollback({:error, reason}), do: Repo.rollback(reason)
 
   defp insert!(changeset) do
     case Oban.insert(changeset) do

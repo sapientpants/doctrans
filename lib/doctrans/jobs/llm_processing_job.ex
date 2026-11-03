@@ -78,9 +78,9 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
     try do
       LlmProcessor.process_page(page_id, processor_opts(args, generation))
     catch
-      # A crash returns no result, so settle here: Oban discards the job after
-      # the last attempt, and a page whose stages were all saved before the
-      # crash would otherwise wait for the next startup recovery pass.
+      # A crash returns no result, so settle here: the processor has marked the
+      # stage it was in as failed, Oban discards the job after the last attempt,
+      # and nothing else would settle the document until the next recovery pass.
       kind, reason ->
         _ = settle(job, page_id, generation, {:error, :crashed})
         :erlang.raise(kind, reason, __STACKTRACE__)
