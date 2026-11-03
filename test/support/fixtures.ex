@@ -175,8 +175,14 @@ defmodule Doctrans.Fixtures do
   The models are `Doctrans.Processing.PageContentStub`, installed here on
   `OpenAIMock`, so each page ends up with a source term and a translated term
   no other page carries. Oban runs inline in `:test`, so the one `enqueue` call
-  drives everything; a caller that wants to observe the run -- the embedding
-  inputs, say -- installs its probe before calling this.
+  drives everything. A caller that wants to observe the run through the
+  embedding mock -- the inputs it was asked to embed, say -- installs that
+  probe before calling this; a stub on `OpenAIMock` installed beforehand is
+  replaced here, so it has to be installed afterwards.
+
+  Raises if the run did not leave the document `completed`, so a pipeline that
+  stops short is reported here rather than by whichever later assertion first
+  misses the pages it expected.
   """
   def processed_document_fixture(attrs \\ %{}) do
     Mox.stub_with(OpenAIMock, PageContentStub)
@@ -194,6 +200,11 @@ defmodule Doctrans.Fixtures do
     {:ok, _job} = DocumentExtractionJob.enqueue_document(document.id, source_path)
 
     document = Documents.get_document_with_pages(document.id)
+
+    if document.status != "completed" do
+      raise "processed_document_fixture: the pipeline left document #{document.id} " <>
+              "in status #{inspect(document.status)} rather than \"completed\""
+    end
 
     %{
       document: document,
