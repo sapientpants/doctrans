@@ -194,7 +194,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
           end)
         end)
 
-      assert_receive {:pdf_page_paused, 3}, 5_000
+      ResumablePdfExtractorStub.await_pause(task, 3)
       page = Documents.get_page_by_number(run.id, 1)
 
       {:ok, _} =
