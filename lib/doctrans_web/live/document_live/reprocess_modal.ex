@@ -6,6 +6,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
 
   alias Doctrans.Config
   alias Doctrans.Deps
+  alias Doctrans.Documents.Lifecycle
   alias Doctrans.Processing.DocumentReprocessing
   alias DoctransWeb.ErrorMessages
 
@@ -34,12 +35,13 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   @doc """
   Whether the whole-document reprocess control is offered.
 
-  The status rule is `DocumentReprocessing`'s own, so the button and the
-  transaction behind it cannot disagree; the original upload still has to be on
-  disk, which the caller knows and this does not.
+  The status rule is `Doctrans.Documents.Lifecycle`'s, the same one the
+  `DocumentReprocessing` transaction applies, so the button and the transaction
+  behind it cannot disagree; the original upload still has to be on disk, which
+  the caller knows and this does not.
   """
   def can_reprocess_document?(%Doctrans.Documents.Document{} = document),
-    do: DocumentReprocessing.reprocessable?(document)
+    do: Lifecycle.reprocessable?(document)
 
   @doc """
   Names the reprocess-document button and fills its tooltip.

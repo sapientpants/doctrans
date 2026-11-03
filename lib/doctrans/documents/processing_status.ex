@@ -19,12 +19,10 @@ defmodule Doctrans.Documents.ProcessingStatus do
   import Doctrans.Documents.Page, only: [failed?: 1, settled?: 1]
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Page, Progress}
+  alias Doctrans.Documents.{Document, Lifecycle, Page, Progress}
   alias Doctrans.Processing.JobStates
   alias Doctrans.Repo
 
-  @active_content ~w(uploading queued extracting)
-  @cancellable ~w(uploading queued extracting processing)
   @in_flight [:running, :queued, :retrying]
 
   @type content :: :idle | :queued | :running | :retrying | :failed | :completed | :cancelled
@@ -111,7 +109,7 @@ defmodule Doctrans.Documents.ProcessingStatus do
       # job is executing duplicates the model call and the write behind it.
       retry_pages?: pages.failed > 0 and content not in @in_flight,
       retry_index?: indexing.outstanding > 0 and index not in @in_flight,
-      cancellable?: document.status in @cancellable
+      cancellable?: Lifecycle.cancellable?(document)
     }
   end
 
@@ -172,22 +170,25 @@ defmodule Doctrans.Documents.ProcessingStatus do
     }
   end
 
-  defp content_state(%{status: "completed"}, _activity), do: :completed
-  defp content_state(%{status: "cancelled"}, _activity), do: :cancelled
-
-  # A document recorded as errored has finished failing only once nothing is
-  # left running for it. While a job of its own is queued, executing or waiting
-  # on a retry, that job is what the document is doing, and saying `failed`
-  # instead would offer a retry that `Run.active?/1` refuses anyway.
-  defp content_state(%{status: "error"}, :idle), do: :failed
-  defp content_state(%{status: "error"}, activity), do: activity
-
-  # An in-progress document with no Oban job is genuinely idle — that gap is
-  # what startup recovery exists to repair — so it must not be dressed up as
-  # running. Before any page job exists there is nothing to be idle about yet,
-  # so the pre-page statuses read as queued instead.
-  defp content_state(%{status: status}, :idle) when status in @active_content, do: :queued
-  defp content_state(_document, activity), do: activity
+  # The terminal verdicts are the row's alone. Below them, a live job outranks
+  # the row: a document recorded as failed has finished failing only once
+  # nothing is left running for it, and while a job of its own is queued,
+  # executing or waiting on a retry, that job is what the document is doing --
+  # saying `failed` instead would offer a retry that `Run.active?/1` refuses
+  # anyway. With nothing running, an in-progress document is genuinely idle:
+  # that gap is what startup recovery exists to repair, so it must not be
+  # dressed up as running. Before any page job exists there is nothing to be
+  # idle about yet, so the pre-page statuses read as queued instead.
+  defp content_state(document, activity) do
+    cond do
+      Lifecycle.completed?(document) -> :completed
+      Lifecycle.cancelled?(document) -> :cancelled
+      activity != :idle -> activity
+      Lifecycle.failed?(document) -> :failed
+      Lifecycle.pre_processing?(document) -> :queued
+      true -> :idle
+    end
+  end
 
   # Nothing extracted means nothing indexable, which is a different statement
   # from "indexed nothing" and must not read as a pending index.

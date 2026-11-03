@@ -1,16 +1,15 @@
-defmodule Doctrans.Processing.CompletionNotificationTest do
+defmodule Doctrans.Documents.LifecycleNotificationTest do
   # `async: false`: the rows are committed outside the sandbox so the broadcast
   # can be observed against a real commit, which a handler on the VM-global
   # repo query event holds open.
   use ExUnit.Case, async: false
 
   alias Doctrans.{Documents, Repo}
-  alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.Completion
+  alias Doctrans.Documents.{Lifecycle, Topics}
   alias DoctransWeb.DocumentLive.Show
   alias Ecto.Adapters.SQL.Sandbox
 
-  test "completion is published after the transaction returns and the viewer reads committed state" do
+  test "a settlement is published after the transaction returns and the viewer reads committed state" do
     {document, page} =
       Sandbox.unboxed_run(Repo, fn ->
         document = Doctrans.Fixtures.document_fixture(%{status: "processing", total_pages: 1})
@@ -38,7 +37,7 @@ defmodule Doctrans.Processing.CompletionNotificationTest do
       Task.async(fn ->
         Sandbox.unboxed_run(Repo, fn ->
           Process.put(:hold_review_commit, true)
-          Completion.check_document_completion(page)
+          Lifecycle.settle(page)
         end)
       end)
 

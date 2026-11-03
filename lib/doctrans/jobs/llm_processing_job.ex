@@ -22,9 +22,9 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
     ]
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
+  alias Doctrans.Documents.Lifecycle
   alias Doctrans.Jobs.{Keys, RetryTelemetry}
-  alias Doctrans.Processing.{LlmProcessor, Run}
+  alias Doctrans.Processing.LlmProcessor
 
   @page_id_key Keys.page_id()
 
@@ -78,11 +78,11 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
     try do
       LlmProcessor.process_page(page_id, processor_opts(args, generation))
     catch
-      # A crash returns no result, so settle here: Oban discards the job after
-      # the last attempt and nothing else would move the document off
-      # "processing" until the next startup recovery pass.
+      # A crash returns no result, so settle here: the processor has marked the
+      # stage it was in as failed, Oban discards the job after the last attempt,
+      # and nothing else would settle the document until the next recovery pass.
       kind, reason ->
-        _ = settle(job, page_id, generation, {:error, crash_reason(kind, reason)})
+        _ = settle(job, page_id, generation, {:error, :crashed})
         :erlang.raise(kind, reason, __STACKTRACE__)
     else
       result ->
@@ -118,37 +118,24 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
   defp stage(:page_translation_failed), do: :translation
 
   # A failure is final when Oban will not run the job again: a cancel, or an
-  # error on the last attempt. Only then does the document learn of it.
+  # error on the last attempt. Only then is the document settled on the page's
+  # account; a successful run settles it from the processor. The document
+  # reaches `error` there and nowhere else, once every page has settled, so a
+  # page exhausting its retries while its siblings still run changes nothing
+  # yet, and one failing after the user cancelled changes nothing at all.
   defp settle(job, page_id, generation, result) do
-    case result do
-      {:cancel, reason} ->
-        publish_final_error(page_id, generation, reason)
-
-      {:error, reason} ->
-        if RetryTelemetry.final_attempt?(job),
-          do: publish_final_error(page_id, generation, reason),
-          else: :ok
-
-      _ ->
-        :ok
-    end
+    if final?(job, result), do: settle_page(page_id, generation), else: :ok
   end
 
-  defp crash_reason(kind, reason),
-    do: {:operation_failed, [reason: Exception.format(kind, reason)]}
+  defp final?(_job, {:cancel, _reason}), do: true
+  defp final?(job, {:error, _reason}), do: RetryTelemetry.final_attempt?(job)
+  defp final?(_job, _result), do: false
 
-  defp publish_final_error(page_id, generation, reason) do
+  defp settle_page(page_id, generation) do
     case Documents.get_page(page_id) do
       %{processing_generation: ^generation} = page ->
-        Run.with_page(page, fn _ ->
-          document = Documents.get_document!(page.document_id)
-
-          Documents.update_document_status(document, "error", reason)
-        end)
-        |> case do
-          {:ok, document} -> Topics.broadcast_document_updated(document)
-          error -> error
-        end
+        _ = Lifecycle.settle(page)
+        :ok
 
       _ ->
         :ok

@@ -2,8 +2,7 @@ defmodule Doctrans.Processing.PdfProcessorTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Topics}
-  alias Doctrans.Processing.Completion
+  alias Doctrans.Documents.{Layout, Lifecycle, Topics}
   alias Doctrans.Processing.PdfProcessor
 
   import Doctrans.Fixtures
@@ -35,20 +34,20 @@ defmodule Doctrans.Processing.PdfProcessorTest do
         assert [first_page] = Documents.list_pages(document.id)
         complete_page(first_page)
 
-        assert Completion.check_document_completion_unguarded(document.id) == :incomplete
+        assert Lifecycle.settle_unguarded(document.id) == :incomplete
         assert Documents.get_document!(document.id).status == "processing"
         refute_received {:document_updated, %{status: "completed"}}
 
         send(task.pid, :resume_pdf)
         assert Task.await(task) == :ok
         assert length(Documents.list_pages(document.id)) == 3
-        assert Completion.check_document_completion_unguarded(document.id) == :incomplete
+        assert Lifecycle.settle_unguarded(document.id) == :incomplete
 
         for page <- Documents.list_pages(document.id), page.page_number > 1 do
           complete_page(page)
         end
 
-        assert Completion.check_document_completion_unguarded(document.id) == :completed
+        assert Lifecycle.settle_unguarded(document.id) == :completed
         assert Documents.get_document!(document.id).status == "completed"
         assert_received {:document_updated, %{status: "completed"}}
       end)

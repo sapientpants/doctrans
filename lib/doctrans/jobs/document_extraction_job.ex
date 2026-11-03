@@ -18,7 +18,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   alias Doctrans.Config.PdfExtraction
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Formats, Topics}
+  alias Doctrans.Documents.{Formats, Lifecycle}
   alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.DocumentProcessor
   alias Doctrans.Processing.Run
@@ -96,11 +96,13 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   end
 
   # `Run.source_path/1` is nil for a document whose extension is not a supported
-  # source format, which is reported like a source that is not there.
+  # source format, which is reported like a source that is not there. A run the
+  # document has moved on from, or a document that settled while this job was
+  # waiting, is not this job's to act on: both are dropped as a success.
   defp extract_from(document, path) do
     if path && File.regular?(path) do
       case DocumentProcessor.extract_document(document.id, path, document) do
-        {:error, :obsolete_run} -> :ok
+        {:error, reason} when reason in [:obsolete_run, :already_settled] -> :ok
         result -> result
       end
     else
@@ -109,12 +111,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   end
 
   defp report_missing_source(document) do
-    _ =
-      with {:ok, updated} <-
-             Documents.update_document_status(document, "error", :document_file_not_found) do
-        Topics.broadcast_document_updated(updated)
-      end
-
+    _ = Lifecycle.fail(document, :document_file_not_found)
     {:error, :document_file_not_found}
   end
 end

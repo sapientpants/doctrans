@@ -33,19 +33,25 @@ defmodule Doctrans.Processing.JobStates do
   True when a failed page of the document still has an active LLM job.
 
   A scheduled or retryable job may still turn the page into a success, so its
-  failure is not terminal for the document yet.
+  failure is not terminal for the document yet. `except: page_id` leaves one
+  page out of the question: the one whose job is asking, having just finished
+  with it, and which Oban still lists as executing.
   """
-  @spec retry_pending?(Ecto.UUID.t()) :: boolean()
-  def retry_pending?(document_id) do
+  @spec retry_pending?(Ecto.UUID.t(), except: Ecto.UUID.t() | nil) :: boolean()
+  def retry_pending?(document_id, opts \\ []) do
     failed_page_ids =
       document_id
       |> Documents.failed_pages_query()
+      |> except_page(Keyword.get(opts, :except))
       |> select([p], type(p.id, :string))
 
     failed_page_ids
     |> JobQuery.page_jobs_query(worker: LlmProcessingJob)
     |> Repo.exists?()
   end
+
+  defp except_page(query, nil), do: query
+  defp except_page(query, page_id), do: where(query, [p], p.id != ^page_id)
 
   @doc """
   Reports the live activity of the document's content and indexing pipelines.

@@ -15,7 +15,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
 
   alias Doctrans.Deps
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Formats, Topics}
+  alias Doctrans.Documents.{Formats, Lifecycle}
   alias Doctrans.Processing.{PdfProcessor, Run}
 
   @doc """
@@ -39,12 +39,7 @@ defmodule Doctrans.Processing.DocumentProcessor do
   defp prepare_document(nil), do: {:error, :document_not_found}
   defp prepare_document(%{processing_run_id: nil} = document), do: {:ok, document}
 
-  defp prepare_document(document) do
-    with {:ok, document} <- Documents.update_document_status(document, "extracting") do
-      _ = Topics.broadcast_document_updated(document)
-      {:ok, document}
-    end
-  end
+  defp prepare_document(document), do: Lifecycle.begin_extraction(document)
 
   defp process_source(document_id, file_path, document) do
     extension = Formats.extension(file_path)
@@ -78,15 +73,8 @@ defmodule Doctrans.Processing.DocumentProcessor do
       {:error, reason} ->
         Logger.error("Failed to convert document #{document_id}: #{inspect(reason)}")
         # Preserve the source for the persisted job's next attempt or manual recovery.
-        _ = publish_conversion_error(document, reason)
+        _ = Lifecycle.fail(document, reason)
         {:error, reason}
-    end
-  end
-
-  defp publish_conversion_error(document, reason) do
-    with %Documents.Document{} = document <- document,
-         {:ok, document} <- Documents.update_document_status(document, "error", reason) do
-      _ = Topics.broadcast_document_updated(document)
     end
   end
 end

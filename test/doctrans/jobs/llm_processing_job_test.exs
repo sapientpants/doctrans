@@ -141,6 +141,8 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
       assert {:cancel, :page_not_found} = result
     end
 
+    # The processor marks the stage a crash interrupted as failed, so the page
+    # has settled and the document can settle on it: `error`, named by page.
     test "a crash on the last attempt still settles the document" do
       Mox.stub_with(OpenAIMock, OpenAICrashStub)
 
@@ -152,6 +154,24 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
         perform_job(LlmProcessingJob, args, attempt: 3)
       end
 
+      assert Documents.get_page!(page.id).extraction_status == "error"
+
+      failed = Documents.get_document!(document.id)
+      assert failed.status == "error"
+      assert failed.error_message == inspect({:pages_failed, [page_numbers: "1"]})
+    end
+
+    test "a crash on the last attempt settles a document whose pages were all saved" do
+      Mox.stub_with(OpenAIMock, OpenAICrashStub)
+
+      document = document_fixture(%{status: "processing", total_pages: 2})
+      page_fixture(document, %{page_number: 1, extraction_status: "error"})
+      saved = completed_page_fixture(document, %{page_number: 2})
+      args = %{"page_id" => saved.id, "generation" => saved.processing_generation}
+
+      # Both stages are saved, so the processor skips them and settles the
+      # document itself; the crash stub is never reached.
+      assert :ok = perform_job(LlmProcessingJob, args, attempt: 3)
       assert Documents.get_document!(document.id).status == "error"
     end
 

@@ -16,9 +16,9 @@ defmodule Doctrans.Processing.PdfProcessor do
   alias Doctrans.Config.PdfExtraction
   alias Doctrans.Deps
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Topics}
+  alias Doctrans.Documents.{Layout, Lifecycle, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{Completion, Run}
+  alias Doctrans.Processing.Run
 
   @doc """
   Extracts pages from a PDF and creates page records progressively.
@@ -48,15 +48,14 @@ defmodule Doctrans.Processing.PdfProcessor do
     end
   end
 
-  defp resume_failed_document(%{status: "error"} = document) do
-    # Restore processing before queueing pages so retries can publish live progress.
-    with {:ok, document} <- Documents.update_document_status(document, "processing") do
-      _ = Topics.broadcast_document_updated(document)
-      {:ok, document}
-    end
+  # A document reaching here straight from a failed attempt -- one without a
+  # run, which `DocumentProcessor` does not prepare -- goes back on the
+  # extraction path first, so the retry publishes live progress.
+  defp resume_failed_document(document) do
+    if Lifecycle.failed?(document),
+      do: Lifecycle.begin_extraction(document),
+      else: {:ok, document}
   end
-
-  defp resume_failed_document(document), do: {:ok, document}
 
   defp fetch_document(_document_id, %Documents.Document{} = document), do: {:ok, document}
 
@@ -67,9 +66,8 @@ defmodule Doctrans.Processing.PdfProcessor do
     end
   end
 
-  defp maybe_update_error(document, reason) do
-    if document, do: Documents.update_document_status(document, "error", reason), else: :ok
-  end
+  defp maybe_update_error(nil, _reason), do: :ok
+  defp maybe_update_error(document, reason), do: Lifecycle.fail(document, reason)
 
   # The output path is built from persisted document/run UUIDs with a fixed pages suffix.
   # sobelow_skip ["Traversal.FileModule"]
@@ -131,23 +129,13 @@ defmodule Doctrans.Processing.PdfProcessor do
     end
   end
 
+  # Every page is rendered and queued, so the document is processing; pages
+  # that were already saved from an earlier attempt may even have settled it.
   defp finish_extraction(document) do
-    result =
-      Run.with_current(document, fn current ->
-        # Preserve errors from page jobs that exhausted retries during rendering.
-        if current.status in ~w(uploading queued extracting) do
-          Documents.update_document_status(current, "processing")
-        else
-          {:ok, current}
-        end
-      end)
-
-    with {:ok, current} <- result do
-      _ = Topics.broadcast_document_updated(current)
-      # Guard completion separately, without publishing inside the extraction transaction.
-      case Completion.check_document_completion(current) do
+    with :ok <- Lifecycle.begin_processing(document) do
+      case Lifecycle.settle(document) do
         {:error, _} = error -> error
-        _ -> :ok
+        _verdict -> :ok
       end
     end
   end

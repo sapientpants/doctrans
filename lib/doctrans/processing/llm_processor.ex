@@ -23,10 +23,9 @@ defmodule Doctrans.Processing.LlmProcessor do
 
   alias Doctrans.Deps
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Topics}
+  alias Doctrans.Documents.{Layout, Lifecycle, Topics}
   alias Doctrans.Errors
   alias Doctrans.Jobs.EmbeddingJob
-  alias Doctrans.Processing.Completion
   alias Doctrans.Processing.Run
   alias Doctrans.Processing.SourceLanguage
   alias Doctrans.Resilience.ErrorClassifier
@@ -105,13 +104,13 @@ defmodule Doctrans.Processing.LlmProcessor do
   # save the last translation. Resolving it costs no model call.
   #
   # Hand over the page this run already read rather than a fresh copy. The
-  # orchestrator fences the check against that page's revision and generation,
+  # lifecycle fences the check against that page's revision and generation,
   # and a row re-read here would only ever be compared against itself. The
   # translation writes in between cannot invalidate it: `content_revision`
   # advances on an `original_markdown` change or an extraction leaving
   # "completed", and `processing_generation` only on a reprocess.
   defp reconcile_document(page) do
-    _ = Completion.check_document_completion(page)
+    _ = Lifecycle.settle(page)
     :ok
   end
 
@@ -161,15 +160,40 @@ defmodule Doctrans.Processing.LlmProcessor do
     # Moves the document out of its pre-processing states (uploading, extracting,
     # queued) when its first page starts; a document already processing is left
     # alone, so every page may call it.
-    with :ok <- Completion.update_document_status_to_processing(page),
+    with :ok <- Lifecycle.begin_processing(page),
          {:ok, page} <- mark_stage(page, :extraction, "processing") do
-      image_path = Layout.absolute(page.image_path)
-
-      case Deps.openai().extract_markdown(image_path, model_opts(opts, :extraction_model)) do
-        {:ok, markdown} -> save_extraction(page, markdown, opts)
-        {:error, reason} -> fail_stage(page, :extraction, reason)
-      end
+      run_stage(page, :extraction, fn -> extract_markdown(page, opts) end)
     end
+  end
+
+  defp extract_markdown(page, opts) do
+    image_path = Layout.absolute(page.image_path)
+
+    case Deps.openai().extract_markdown(image_path, model_opts(opts, :extraction_model)) do
+      {:ok, markdown} -> save_extraction(page, markdown, opts)
+      {:error, reason} -> fail_stage(page, :extraction, reason)
+    end
+  end
+
+  # A stage runs with the page already marked "processing". A crash -- a model
+  # client raising, a database blip mid-write -- would otherwise leave that mark
+  # behind for good: Oban retries, a deterministic failure raises again on every
+  # attempt, and the page is discarded still reading "processing", neither
+  # failed nor finished, for the recovery pass to re-queue on every boot.
+  # Recording the failure keeps the stage truthful and lets the document settle
+  # on it once Oban gives up; re-raising leaves Oban's schedule to decide whether
+  # the crash was transient. `Doctrans.Search.Indexer` does the same for indexing.
+  defp run_stage(page, stage, fun) do
+    fun.()
+  catch
+    kind, reason ->
+      Logger.error(
+        "#{stage_name(stage)} crashed for page #{page.page_number}: " <>
+          Exception.format(kind, reason, __STACKTRACE__)
+      )
+
+      _ = mark_stage(page, stage, "error")
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   defp save_extraction(page, markdown, opts) do
@@ -204,17 +228,21 @@ defmodule Doctrans.Processing.LlmProcessor do
 
     with {:ok, page} <- mark_stage(page, :translation, "processing"),
          {:ok, document} <- fetch_document(page) do
-      source_language = SourceLanguage.resolve(document, page.original_markdown)
+      run_stage(page, :translation, fn -> translate_markdown(page, document, opts) end)
+    end
+  end
 
-      case Deps.openai().translate(
-             page.original_markdown,
-             source_language,
-             document.target_language,
-             model_opts(opts, :translation_model)
-           ) do
-        {:ok, translated} -> save_translation(page, translated, opts)
-        {:error, reason} -> fail_stage(page, :translation, reason)
-      end
+  defp translate_markdown(page, document, opts) do
+    source_language = SourceLanguage.resolve(document, page.original_markdown)
+
+    case Deps.openai().translate(
+           page.original_markdown,
+           source_language,
+           document.target_language,
+           model_opts(opts, :translation_model)
+         ) do
+      {:ok, translated} -> save_translation(page, translated, opts)
+      {:error, reason} -> fail_stage(page, :translation, reason)
     end
   end
 
