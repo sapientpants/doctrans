@@ -18,7 +18,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   alias Doctrans.Config.PdfExtraction
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Formats, Lifecycle}
+  alias Doctrans.Documents.{Lifecycle, Topics}
   alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.DocumentProcessor
   alias Doctrans.Processing.Run
@@ -35,36 +35,41 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   @impl true
   def timeout(_job), do: PdfExtraction.job_timeout()
 
+  @doc """
+  Queues a fresh upload: records the extension its stored file was validated
+  under, requeues it through `Lifecycle.requeue/2`, and inserts the extraction
+  job, in one transaction. The queued document is announced once that
+  transaction has committed.
+
+  Only a document still `uploading` is taken. One whose run has started --
+  under way or settled -- is refused with `{:error, :already_processing}`:
+  replacing a settled run also discards its pages and chat context, which is
+  `Doctrans.Processing.DocumentReprocessing`'s to do.
+  """
   @spec enqueue_document(Ecto.UUID.t(), String.t()) ::
           {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
   def enqueue_document(document_id, file_path) do
-    Repo.transaction(fn ->
-      document = Run.lock(document_id) || Repo.rollback(:document_not_found)
+    with {:ok, {queued, job}} <- Repo.safe_transaction(fn -> requeue(document_id, file_path) end) do
+      _ = Topics.broadcast_document_updated(queued)
+      {:ok, job}
+    end
+  end
 
-      # This is the stored upload path, whose extension passed magic-byte validation.
-      extension = Formats.extension(file_path)
+  # `Lifecycle` does not announce a write made inside the caller's transaction,
+  # which is why `enqueue_document/2` announces the queued document itself.
+  defp requeue(document_id, file_path) do
+    document = Run.lock(document_id) || Repo.rollback(:document_not_found)
+    unless Lifecycle.uploading?(document), do: Repo.rollback(:already_processing)
 
-      unless Formats.supported?(extension),
-        do: Repo.rollback({:unsupported_format, [format: extension]})
-
-      document =
-        document
-        |> Ecto.Changeset.change(source_extension: document.source_extension || extension)
-        |> Repo.update!()
-
-      document =
-        if document.processing_run_id do
-          document
-        else
-          document |> Ecto.Changeset.change(Run.new_attrs()) |> Repo.update!()
-        end
-
-      case document |> Run.args() |> new() |> Oban.insert() do
-        {:ok, job} -> job
+    queued =
+      with {:ok, recorded} <- Run.record_source_extension(document, file_path),
+           {:ok, queued} <- Lifecycle.requeue(recorded, Run.new_attrs()) do
+        queued
+      else
         {:error, reason} -> Repo.rollback(reason)
       end
-    end)
-    |> Doctrans.Errors.result()
+
+    {queued, queued |> Run.args() |> new() |> Repo.insert_job!()}
   end
 
   # A document row that is gone stays gone, so the job is cancelled rather than

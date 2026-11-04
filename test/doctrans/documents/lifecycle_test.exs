@@ -12,6 +12,7 @@ defmodule Doctrans.Documents.LifecycleTest do
   @pre_processing ~w(uploading queued extracting)
   @in_flight @pre_processing ++ ~w(processing)
   @settled ~w(completed error cancelled)
+  @progress_reportable ~w(queued extracting processing completed error)
 
   # Every from-list transition: its legal starting statuses, where it lands,
   # and what it answers from anywhere else. `begin_processing/1` and `settle/1`
@@ -21,7 +22,7 @@ defmodule Doctrans.Documents.LifecycleTest do
     {:fail, @in_flight ++ ~w(error), "error", :already_settled},
     {:cancel, @in_flight, "cancelled", :not_cancellable},
     {:resume, ~w(processing) ++ @settled, "processing", :already_processing},
-    {:requeue, @settled, "queued", :already_processing}
+    {:requeue, ~w(uploading) ++ @settled, "queued", :already_processing}
   ]
 
   defp run(:begin_extraction, document), do: Lifecycle.begin_extraction(document)
@@ -345,6 +346,9 @@ defmodule Doctrans.Documents.LifecycleTest do
         assert Lifecycle.in_flight?(document) == status in @in_flight
         assert Lifecycle.cancellable?(document) == status in @in_flight
         assert Lifecycle.reprocessable?(document) == status in @settled
+        assert Lifecycle.progress_reportable?(document) == status in @progress_reportable
+        assert Lifecycle.requeueable?(document) == status in ["uploading" | @settled]
+        assert Lifecycle.uploading?(document) == (status == "uploading")
         assert Lifecycle.completed?(document) == (status == "completed")
         assert Lifecycle.cancelled?(document) == (status == "cancelled")
         assert Lifecycle.failed?(document) == (status == "error")

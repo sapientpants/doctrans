@@ -167,8 +167,8 @@ defmodule Doctrans.Documents.Intake do
       # `nil` when the submission left the picker on "Detect automatically": the
       # column is nullable, and processing resolves the language before it runs.
       source_language: languages.source,
-      # The status is the schema's default, `uploading`: the first transition
-      # out of it is `Lifecycle`'s, once the extraction job is enqueued.
+      # The status is the schema's default, `uploading`: `Lifecycle.requeue/2`
+      # moves it to `queued` as the extraction job is enqueued.
       target_language: languages.target
     }
 

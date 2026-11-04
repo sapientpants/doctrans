@@ -16,16 +16,24 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
   # leaves a settled row behind. These cases assert on what was *queued*, so they
   # insert in manual mode instead.
   describe "enqueue_document/2" do
-    test "queues extraction and stamps the run the job belongs to" do
+    test "queues extraction, starts the run the job belongs to and announces it" do
       Oban.Testing.with_testing_mode(:manual, fn ->
-        document = document_fixture(%{status: "queued"})
+        document = document_fixture(%{total_pages: 2})
+        :ok = Topics.subscribe_document(document.id)
         path = "/uploads/#{document.id}/original.pdf"
 
         assert {:ok, job} = DocumentExtractionJob.enqueue_document(document.id, path)
 
+        # A fresh upload is `queued` from the moment its job exists: `uploading`
+        # means only that no run has started.
         stamped = Documents.get_document!(document.id)
+        assert stamped.status == "queued"
         assert stamped.source_extension == ".pdf"
         assert stamped.processing_run_id != nil
+        assert stamped.total_pages == nil
+
+        id = document.id
+        assert_received {:document_updated, %{id: ^id, status: "queued"}}
 
         assert job.queue == "pdf_extraction"
         assert job.state == "available"
@@ -61,8 +69,26 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
         # The whole enqueue is one transaction, so the refusal rolls back the
         # extension and run it had already written.
         untouched = Documents.get_document!(document.id)
+        assert untouched.status == "uploading"
         assert untouched.source_extension == nil
         assert untouched.processing_run_id == nil
+        assert all_enqueued(worker: DocumentExtractionJob) == []
+      end)
+    end
+
+    test "refuses a document whose run has started, under way or settled, queueing nothing" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        for status <- ~w(queued extracting processing completed error cancelled) do
+          document = document_fixture(%{status: status})
+
+          assert {:error, :already_processing} =
+                   DocumentExtractionJob.enqueue_document(document.id, "/uploads/original.pdf")
+
+          untouched = Documents.get_document!(document.id)
+          assert untouched.status == status
+          assert untouched.source_extension == nil
+        end
+
         assert all_enqueued(worker: DocumentExtractionJob) == []
       end)
     end

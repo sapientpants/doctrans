@@ -18,7 +18,7 @@ defmodule Doctrans.Documents.Lifecycle do
 
   | status       | meaning                                                            |
   |--------------|--------------------------------------------------------------------|
-  | `uploading`  | the row exists and no run has started                              |
+  | `uploading`  | the row exists, its file is being stored, and no run has started   |
   | `queued`     | a run has started and its extraction job is waiting                |
   | `extracting` | the source is being converted and rendered into page images        |
   | `processing` | page jobs are extracting and translating                           |
@@ -36,7 +36,12 @@ defmodule Doctrans.Documents.Lifecycle do
   | `settle/1`           | uploading, queued, extracting, processing, error    | completed or error   |
   | `cancel/1`           | uploading, queued, extracting, processing           | cancelled            |
   | `resume/1`           | processing, completed, error, cancelled             | processing           |
-  | `requeue/2`          | completed, error, cancelled                         | queued               |
+  | `requeue/2`          | uploading, completed, error, cancelled              | queued               |
+
+  `requeue/2` is the one transition that starts a run, for a fresh upload and
+  a reprocess alike: a document leaves `uploading` the moment its extraction
+  job is enqueued, so `uploading` never has a job of its own, and a document
+  with a run is `queued` or past it whichever path started the run.
 
   `completed` and `cancelled` are terminal for the pipeline: no job-side
   transition (`begin_*`, `fail/2`, `settle/1`) leaves them, so a job that was
@@ -67,6 +72,9 @@ defmodule Doctrans.Documents.Lifecycle do
   @in_flight @pre_processing ++ ~w(processing)
   @settled ~w(completed error cancelled)
   @awaiting_pages ~w(queued extracting)
+  @requeueable ~w(uploading) ++ @settled
+  # A run has started and the user has not stopped it.
+  @progress_reportable (@in_flight ++ @settled) -- ~w(uploading cancelled)
 
   # The from-list transitions, as the moduledoc tables them: the statuses each
   # is legal from, the status it lands on, and what it answers from anywhere
@@ -120,6 +128,27 @@ defmodule Doctrans.Documents.Lifecycle do
   @doc "True when the row records a failure; whether it is final is Oban's to say."
   @spec failed?(Document.t()) :: boolean()
   def failed?(%{status: status}), do: status == "error"
+
+  @doc "True while the upload is being stored: no run has started."
+  @spec uploading?(Document.t()) :: boolean()
+  def uploading?(%{status: status}), do: status == "uploading"
+
+  @doc """
+  The rule `requeue/2` applies: a fresh upload, or a settled run a new one may
+  replace.
+  """
+  @spec requeueable?(Document.t()) :: boolean()
+  def requeueable?(%{status: status}), do: status in @requeueable
+
+  @doc """
+  True while a run has progress to report: one has started and the user has
+  not stopped it.
+
+  `uploading` has no run yet, and a `cancelled` document reports the stop
+  itself rather than how far the run it interrupted had got.
+  """
+  @spec progress_reportable?(Document.t()) :: boolean()
+  def progress_reportable?(%{status: status}), do: status in @progress_reportable
 
   @doc """
   Query-land predicate for a document whose run owes it page images: the run
@@ -209,16 +238,19 @@ defmodule Doctrans.Documents.Lifecycle do
   def resume(%Document{} = document), do: transition(document, :resume)
 
   @doc """
-  A new run replaces the current one: the document is `queued` for extraction
-  with the given run attributes (`Doctrans.Processing.Run.new_attrs/1`), its
-  page count and diagnostic cleared.
+  A run starts: the document is `queued` for extraction with the given run
+  attributes (`Doctrans.Processing.Run.new_attrs/1`), its page count and
+  diagnostic cleared. The one transition that starts a run, whether the
+  extraction job of a fresh upload is being enqueued or a reprocess is
+  replacing the run a settled document holds.
 
-  Legal only from a settled status; refused with `:already_processing`.
+  Legal from `uploading` and from a settled status; refused with
+  `:already_processing` while a run is under way.
   """
   @spec requeue(Document.t(), map()) :: {:ok, Document.t()} | {:error, refusal()}
   def requeue(%Document{} = document, run_attrs) do
     Revision.with_current(document, fn current ->
-      if reprocessable?(current) do
+      if requeueable?(current) do
         queued =
           current
           |> Ecto.Changeset.change(run_attrs)

@@ -84,6 +84,28 @@ defmodule Doctrans.Processing.Run do
     end
   end
 
+  @doc """
+  Records the extension of the stored upload at `path` as the document's source
+  format, unless the document already records one.
+
+  `path` is the stored upload, whose extension passed magic-byte validation; one
+  that is not a supported source format is refused and nothing is written.
+  """
+  @spec record_source_extension(Document.t(), String.t()) ::
+          {:ok, Document.t()} | {:error, {:unsupported_format, [format: String.t()]}}
+  def record_source_extension(document, path) do
+    extension = Formats.extension(path)
+
+    if Formats.supported?(extension) do
+      {:ok,
+       document
+       |> Ecto.Changeset.change(source_extension: document.source_extension || extension)
+       |> Repo.update!()}
+    else
+      {:error, {:unsupported_format, [format: extension]}}
+    end
+  end
+
   @spec source_available?(Document.t()) :: boolean()
   def source_available?(document) do
     case source_path(document) do

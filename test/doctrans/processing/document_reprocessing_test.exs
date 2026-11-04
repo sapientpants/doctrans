@@ -155,7 +155,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
 
   test "reprocessing resolves the persisted source extension after a metadata rename", c do
     Oban.Testing.with_testing_mode(:manual, fn ->
-      assert {:ok, job} = DocumentExtractionJob.enqueue_document(c.document.id, c.source)
+      # Enqueueing takes a fresh upload only.
+      {:ok, upload} = Documents.update_document(c.document, %{status: "uploading"})
+      assert {:ok, job} = DocumentExtractionJob.enqueue_document(upload.id, c.source)
+
       document = Documents.get_document!(c.document.id)
       assert document.source_extension == ".docx"
 
@@ -163,9 +166,13 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
                Documents.update_document(document, %{original_filename: "renamed.pdf"})
 
       assert Run.source_path(document) == c.source
+
+      # Enqueueing started a run; a reprocess needs it settled, so stop it.
       Repo.delete!(job)
+      assert {:ok, document} = Lifecycle.cancel(document)
 
       assert {:ok, run} = DocumentReprocessing.reprocess_document(document.id)
+
       [job] = all_enqueued(worker: DocumentExtractionJob)
       assert :ok = DocumentExtractionJob.perform(job)
       assert File.read!(Path.join(Run.output_dir(run), "original.pdf")) == "original office bytes"
