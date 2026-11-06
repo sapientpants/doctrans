@@ -17,14 +17,19 @@ defmodule Doctrans.MixProject do
       listeners: [Phoenix.CodeReloader],
       test_coverage: [tool: ExCoveralls],
       hex: [
-        # cowlib reaches the project only through :bypass (test-only); production
-        # serves with Bandit, not Cowboy, so this is not reachable at runtime.
-        # cowlib 2.21.0 fixed CVE-2026-43971 and CVE-2026-43969; CVE-2026-43966
-        # (response splitting in cow_http_struct_hd) has no fixed release as of
-        # 2026-10-30.
-        # REVIEW BY 2026-12-30: drop this once a fixed cowlib ships.
+        # cowboy and cowlib reach the project only through :bypass (test-only);
+        # production serves with Bandit, not Cowboy, so none of these is
+        # reachable at runtime.
+        # cowlib 2.21.0 fixed CVE-2026-43971 and CVE-2026-43969. No fixed release
+        # exists as of 2026-11-06 for CVE-2026-43966 (response splitting in
+        # cow_http_struct_hd), CVE-2026-113431 (HPACK amplification in
+        # cow_http2_machine) or CVE-2026-115701 (cowboy HTTP/1.1 pipelined-data
+        # buffering).
+        # REVIEW BY 2026-12-30: drop each once a fixed cowlib or cowboy ships.
         ignore_advisories: [
-          "CVE-2026-43966"
+          "CVE-2026-43966",
+          "CVE-2026-113431",
+          "CVE-2026-115701"
         ]
       ],
       dialyzer: [
