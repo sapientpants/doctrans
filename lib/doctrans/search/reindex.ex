@@ -29,7 +29,7 @@ defmodule Doctrans.Search.Reindex do
 
   import Ecto.Query
 
-  alias Doctrans.Documents.{Document, Page, PageLifecycle}
+  alias Doctrans.Documents.{Document, Page, PageLifecycle, Revision}
   alias Doctrans.Errors
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Repo
@@ -94,8 +94,14 @@ defmodule Doctrans.Search.Reindex do
     end
   end
 
+  # The document first, then the page: the order every transition takes, so
+  # the lifecycle call made under this lock never waits for a document lock
+  # held by a transition that is itself waiting for this page.
   defp lock_page(page_id) do
-    from(p in Page, where: p.id == ^page_id, lock: "FOR UPDATE") |> Repo.one()
+    with %Page{document_id: document_id} <- Repo.get(Page, page_id),
+         %Document{} <- Revision.lock(document_id) do
+      from(p in Page, where: p.id == ^page_id, lock: "FOR UPDATE") |> Repo.one()
+    end
   end
 
   # Insert before resuming the stage: uniqueness also covers a job queued since
@@ -111,7 +117,7 @@ defmodule Doctrans.Search.Reindex do
         false
 
       {:ok, %Oban.Job{}} ->
-        {:ok, _resumed} = PageLifecycle.resume(page, :embedding)
+        _resumed = Repo.or_rollback(PageLifecycle.resume(page, [:embedding]))
         true
 
       {:error, reason} ->
@@ -184,7 +190,7 @@ defmodule Doctrans.Search.Reindex do
   # inline job (Oban's `:inline` testing mode runs it inside this insert) from
   # indexing the chunks the reset is about to delete.
   defp rebuild_locked_page(page) do
-    page = or_rollback(PageLifecycle.forget_index(page))
+    page = Repo.or_rollback(PageLifecycle.forget_index(page))
 
     case EmbeddingJob.enqueue_page(page) do
       {:ok, %Oban.Job{conflict?: true}} -> Repo.rollback(:indexing_in_progress)
@@ -192,7 +198,4 @@ defmodule Doctrans.Search.Reindex do
       {:error, reason} -> Repo.rollback(reason)
     end
   end
-
-  defp or_rollback({:ok, page}), do: page
-  defp or_rollback({:error, reason}), do: Repo.rollback(reason)
 end

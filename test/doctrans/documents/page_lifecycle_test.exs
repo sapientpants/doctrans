@@ -142,7 +142,7 @@ defmodule Doctrans.Documents.PageLifecycleTest do
       {:ok, page} = PageLifecycle.fail(page, :translation)
       {:ok, page} = PageLifecycle.fail(page, :embedding)
 
-      assert {:ok, resumed} = PageLifecycle.resume(page, :embedding)
+      assert {:ok, resumed} = PageLifecycle.resume(page, [:embedding])
       assert resumed.embedding_status == "pending"
       assert resumed.translation_status == "error"
       assert resumed.extraction_status == "completed"

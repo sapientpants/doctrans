@@ -159,9 +159,10 @@ defmodule Doctrans.Search.Indexer do
     end
   end
 
-  # The vector and the status land in one transition, so "completed" implies a
-  # page vector by construction rather than by two writes happening to both
-  # succeed. A page that changed or was deleted while its chunks were embedding
+  # The vector and the status land in one transition, so "completed" always
+  # comes with the vector the run stated -- `nil` for a page with nothing to
+  # embed -- rather than by two writes happening to both succeed. A page that
+  # changed or was deleted while its chunks were embedding
   # reports the run as superseded rather than as a completed index it never
   # wrote.
   defp mark_page_indexed(page, embedding, attempted, total) do
@@ -234,16 +235,13 @@ defmodule Doctrans.Search.Indexer do
     end)
 
     # Re-fetch to get actual records (on_conflict: :nothing may return empty struct)
-    Chunk
-    |> where([c], c.page_id == ^page_id)
-    |> order_by([c], c.chunk_index)
-    |> Repo.all()
+    Chunk.for_page(page_id) |> order_by([c], c.chunk_index) |> Repo.all()
   end
 
   # Only reached from `ensure_chunks/1`, which holds the page lock — the delete
   # and the re-insert must not be visible to another run as an empty page.
   defp recreate_chunks(page_id, chunk_data) do
-    Chunk |> where([c], c.page_id == ^page_id) |> Repo.delete_all()
+    _ = Repo.delete_all(Chunk.for_page(page_id))
     create_chunks(page_id, chunk_data)
   end
 

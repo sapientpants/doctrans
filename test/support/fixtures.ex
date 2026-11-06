@@ -266,22 +266,15 @@ defmodule Doctrans.Fixtures do
   One extracted page in a completed document of its own: the smallest thing
   global search is allowed to find. Returns the page.
 
-  The page carries no embedding unless `attrs` give one, so only the keyword
-  half of a search can find it. `attrs` may also carry `:title` for the document
-  and `:page_number` for the page.
+  The page carries no embedding unless `attrs` give one, in which case its
+  embedding stage completes with it; without one only the keyword half of a
+  search can find it. `attrs` may also carry `:title` for the document and
+  `:page_number` for the page.
   """
   def searchable_page_fixture(text, attrs \\ %{}) do
     {title, attrs} = Map.pop(attrs, :title, "Searchable Doc")
-    {embedding, attrs} = Map.pop(attrs, :embedding)
     document = document_fixture(%{status: "completed", title: title})
-
-    page = page_fixture(document, Map.put(attrs, :original_markdown, text))
-
-    if embedding do
-      page |> Ecto.Changeset.change(embedding: embedding) |> Repo.update!()
-    else
-      page
-    end
+    page_fixture(document, Map.put(attrs, :original_markdown, text))
   end
 
   @doc """

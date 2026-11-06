@@ -238,9 +238,9 @@ defmodule Doctrans.Documents.PageLifecycle do
   the page holds once locked -- not the copy the caller read, which a job may
   have finished since. The default is the two content stages.
   """
-  @spec resume(Page.t(), stage() | [stage()]) :: {:ok, Page.t()} | {:error, refusal()}
-  def resume(%Page{} = page, stages \\ @content_stages) do
-    fields = stages |> List.wrap() |> Enum.map(&fields/1)
+  @spec resume(Page.t(), [stage()]) :: {:ok, Page.t()} | {:error, refusal()}
+  def resume(%Page{} = page, stages \\ @content_stages) when is_list(stages) do
+    fields = Enum.map(stages, &fields/1)
 
     transition(page, :resume, fn current ->
       Page.stage_changeset(
@@ -322,7 +322,7 @@ defmodule Doctrans.Documents.PageLifecycle do
   # Only under the page lock: the delete and the next run's re-insert must not
   # be visible to a concurrent indexing run as an empty page.
   defp forget_chunks(page) do
-    _ = from(c in Chunk, where: c.page_id == ^page.id) |> Repo.delete_all()
+    _ = Repo.delete_all(Chunk.for_page(page.id))
     :ok
   end
 
