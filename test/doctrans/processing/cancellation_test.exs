@@ -7,7 +7,15 @@ defmodule Doctrans.Processing.CancellationTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Layout, Lifecycle, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
-  alias Doctrans.Processing.{Cancellation, DocumentReprocessing, JobStates, OpenAIMock, PageWork}
+
+  alias Doctrans.Processing.{
+    Cancellation,
+    DocumentReprocessing,
+    JobStates,
+    OpenAIMock,
+    PageWork,
+    Run
+  }
 
   describe "cancel_document/1" do
     test "cancels the queued jobs, leaves an executing one, and settles the document" do
@@ -191,7 +199,7 @@ defmodule Doctrans.Processing.CancellationTest do
         document = document_fixture()
 
         {:ok, extraction} =
-          DocumentExtractionJob.enqueue_document(document.id, "/tmp/document.pdf")
+          Run.start(document.id, "/tmp/document.pdf")
 
         assert :ok = Cancellation.cancel_jobs(document.id)
         assert Repo.get!(Oban.Job, extraction.id).state == "cancelled"
@@ -217,7 +225,7 @@ defmodule Doctrans.Processing.CancellationTest do
         bystander = document_fixture()
 
         {:ok, untouched} =
-          DocumentExtractionJob.enqueue_document(bystander.id, "/uploads/original.pdf")
+          Run.start(bystander.id, "/uploads/original.pdf")
 
         assert :ok = Cancellation.cancel_jobs(Ecto.UUID.generate())
         assert Repo.get!(Oban.Job, untouched.id).state == "available"
@@ -241,7 +249,7 @@ defmodule Doctrans.Processing.CancellationTest do
         File.mkdir_p!(dir)
         on_exit(fn -> File.rm_rf!(dir) end)
 
-        {:ok, job} = DocumentExtractionJob.enqueue_document(doc.id, "/tmp/original.pdf")
+        {:ok, job} = Run.start(doc.id, "/tmp/original.pdf")
         assert Repo.get!(Oban.Job, job.id).state == "available"
 
         assert {:ok, deleted} = Cancellation.cancel_and_delete(doc)
@@ -258,7 +266,7 @@ defmodule Doctrans.Processing.CancellationTest do
       Oban.Testing.with_testing_mode(:manual, fn ->
         doc = document_fixture()
         other = document_fixture()
-        {:ok, job} = DocumentExtractionJob.enqueue_document(other.id, "/tmp/original.pdf")
+        {:ok, job} = Run.start(other.id, "/tmp/original.pdf")
 
         assert {:ok, _deleted} = Cancellation.cancel_and_delete(doc)
 

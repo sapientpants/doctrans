@@ -14,7 +14,6 @@ defmodule Doctrans.Fixtures do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Layout, Lifecycle, PageLifecycle, Source}
-  alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.{OpenAIMock, PageContentStub, Run}
   alias Doctrans.Repo
   alias Doctrans.Search.Embedding
@@ -338,7 +337,7 @@ defmodule Doctrans.Fixtures do
       )
 
     source_path = document_source_fixture(document)
-    {:ok, _job} = DocumentExtractionJob.enqueue_document(document.id, source_path)
+    {:ok, _job} = Run.start(document.id, source_path)
 
     document = Documents.get_document_with_pages(document.id)
 

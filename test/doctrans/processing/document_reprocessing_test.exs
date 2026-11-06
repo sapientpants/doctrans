@@ -169,7 +169,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       # Enqueueing takes a fresh upload only.
       upload = document_fixture(%{original_filename: "report.docx"})
       source = document_source_fixture(upload, "original office bytes")
-      assert {:ok, job} = DocumentExtractionJob.enqueue_document(upload.id, source)
+      assert {:ok, job} = Run.start(upload.id, source)
 
       document = Documents.get_document!(upload.id)
       assert document.source_extension == ".docx"
