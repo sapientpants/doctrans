@@ -274,7 +274,7 @@ defmodule DoctransWeb.ErrorMessages do
         command: binding(bindings, :command)
       )
 
-  # --- Model inference (`Doctrans.Processing.OpenAI`, `LlmProcessor`) ---------
+  # --- Model inference (`Doctrans.Processing.OpenAI`, `PageWork`) ---------
 
   defp lookup(:incomplete_output),
     do:

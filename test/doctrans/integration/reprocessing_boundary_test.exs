@@ -4,9 +4,9 @@ defmodule Doctrans.Integration.ReprocessingBoundaryTest do
   on.
 
   Reprocessing stamps a page with a new generation; every job queued for the old
-  one is then a job whose work has already been replaced. `LlmProcessor` refuses
-  to run such a job, and `LlmProcessingJob` refuses to report such a job's final
-  failure against the document. The second half is the one with teeth: a stale
+  one is then a job whose work has already been replaced. `PageWork.attempt/2`
+  refuses to run such a job, and refuses to settle such a job's final failure
+  against the document. The second half is the one with teeth: a stale
   run that exhausts its retries would otherwise flip a document to "error" while
   the generation that replaced it is still processing happily.
 
