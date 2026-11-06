@@ -105,14 +105,15 @@ defmodule Doctrans.Integration.RestartBoundaryTest do
         page_number: 2,
         extraction_status: "completed",
         original_markdown: "Half a page",
-        translation_status: "processing"
+        translation_status: "processing",
+        embedding_status: "completed"
       })
       # Stamped so the generation the recovered job carries is a value the test
       # can tell apart from "no generation at all".
       |> Ecto.Changeset.change(processing_generation: Uniq.UUID.uuid7())
       |> Repo.update!()
 
-    {document, done, indexed(stalled)}
+    {document, done, stalled}
   end
 
   # Extraction finished for this page but indexing never did, and its document
@@ -132,13 +133,7 @@ defmodule Doctrans.Integration.RestartBoundaryTest do
 
   defp settled_page(document, number) do
     document
-    |> completed_page_fixture(%{page_number: number})
-    |> indexed()
-  end
-
-  # Keeps the embeddings phase to the one page each test means it to find.
-  defp indexed(page) do
-    Repo.update!(Page.embedding_changeset(page, %{embedding_status: "completed"}))
+    |> completed_page_fixture(%{page_number: number, embedding_status: "completed"})
   end
 
   defp jobs_for(module) do

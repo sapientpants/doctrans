@@ -128,15 +128,12 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_fixture(%{status: "completed"})
       translated = completed_page_fixture(document)
-      indexed = completed_page_fixture(document, %{page_number: 2})
-      Repo.update!(Page.embedding_changeset(indexed, %{embedding_status: "completed"}))
-
-      errored = completed_page_fixture(document, %{page_number: 3})
-      Repo.update!(Page.embedding_changeset(errored, %{embedding_status: "error"}))
+      indexed = completed_page_fixture(document, %{page_number: 2, embedding_status: "completed"})
+      errored = completed_page_fixture(document, %{page_number: 3, embedding_status: "error"})
 
       # Interrupted mid-indexing: the status stayed "processing" across the restart.
-      interrupted = completed_page_fixture(document, %{page_number: 4})
-      Repo.update!(Page.embedding_changeset(interrupted, %{embedding_status: "processing"}))
+      interrupted =
+        completed_page_fixture(document, %{page_number: 4, embedding_status: "processing"})
 
       pending = page_fixture(document, %{page_number: 5, extraction_status: "processing"})
 
@@ -203,8 +200,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
   test "leaves a revision that a cancelled job already gave up on alone" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_fixture(%{status: "completed"})
-      page = completed_page_fixture(document)
-      Repo.update!(Page.embedding_changeset(page, %{embedding_status: "error"}))
+      page = completed_page_fixture(document, %{embedding_status: "error"})
 
       page
       |> EmbeddingJob.page_args()
@@ -223,8 +219,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
   test "re-queues a revision whose retries were exhausted" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_fixture(%{status: "completed"})
-      page = completed_page_fixture(document)
-      Repo.update!(Page.embedding_changeset(page, %{embedding_status: "error"}))
+      page = completed_page_fixture(document, %{embedding_status: "error"})
 
       page
       |> EmbeddingJob.page_args()

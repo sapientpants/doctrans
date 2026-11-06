@@ -2,20 +2,18 @@ defmodule Doctrans.Fixtures do
   @moduledoc """
   Test fixtures for creating documents and pages.
 
-  The page fixtures come in two kinds. `page_fixture/2`, `completed_page_fixture/2`
-  and `searchable_page_fixture/2` go through the `Documents` API and the real
-  transitions of `Doctrans.Documents.PageLifecycle`, so they produce what the
-  pipeline would; like `document_fixture/1` they walk inside a bare
-  `Repo.transaction/1`, which drops the announcements the transitions queue, so
-  no test receives a fixture's own broadcasts. `indexed_page_fixture/2` writes
-  through `Repo`, because the lifecycle takes no embedding yet and a page that
-  search can rank needs one in the same write as its text.
+  Every page fixture -- `page_fixture/2`, `completed_page_fixture/2`,
+  `searchable_page_fixture/2`, `indexed_page_fixture/2` -- goes through the
+  `Documents` API and the real transitions of `Doctrans.Documents.PageLifecycle`,
+  so it produces what the pipeline would; like `document_fixture/1` they walk
+  inside a bare `Repo.transaction/1`, which drops the announcements the
+  transitions queue, so no test receives a fixture's own broadcasts.
   """
 
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Layout, Lifecycle, Page, PageLifecycle}
+  alias Doctrans.Documents.{Document, Layout, Lifecycle, PageLifecycle}
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.{OpenAIMock, PageContentStub, Run}
   alias Doctrans.Repo
@@ -145,19 +143,22 @@ defmodule Doctrans.Fixtures do
   @doc """
   Creates a page for a document, with its stages where `attrs` say.
 
-  `:extraction_status` and `:translation_status` are reached through the real
-  transitions of `Doctrans.Documents.PageLifecycle`, silently: `"processing"`
-  begins the stage, `"error"` fails it, and `"completed"` completes it with the
-  stage's markdown (`:original_markdown` or `:translated_markdown`, `""` when
-  not given) and model (`:extraction_model` or `:translation_model`). Markdown
-  given without a status completes the stage, since only completion produces
-  any. Everything else goes to the page row.
+  `:extraction_status`, `:translation_status` and `:embedding_status` are
+  reached through the real transitions of `Doctrans.Documents.PageLifecycle`,
+  silently: `"processing"` begins the stage, `"error"` fails it, and
+  `"completed"` completes it with the stage's product -- `:original_markdown`
+  or `:translated_markdown` (`""` when not given) and `:extraction_model` or
+  `:translation_model` for the content stages, `:embedding` (`fake_embedding/0`
+  when not given) for the embedding stage. A product given without a status
+  completes its stage, since only completion produces one. Everything else
+  goes to the page row.
   """
   def page_fixture(document, attrs \\ %{}) do
     attrs = Enum.into(attrs, %{})
 
     {extraction, attrs} = pop_stage(attrs, :extraction)
     {translation, attrs} = pop_stage(attrs, :translation)
+    {embedding, attrs} = pop_stage(attrs, :embedding)
 
     {:ok, page} =
       Repo.transaction(fn ->
@@ -170,19 +171,24 @@ defmodule Doctrans.Fixtures do
             })
           )
 
-        page |> walk_stage(:extraction, extraction) |> walk_stage(:translation, translation)
+        page
+        |> walk_stage(:extraction, extraction)
+        |> walk_stage(:translation, translation)
+        |> walk_stage(:embedding, embedding)
       end)
 
     page
   end
 
+  # The embedding stage names no model, so its model key is `nil` and pops
+  # nothing.
   defp pop_stage(attrs, stage) do
     fields = PageLifecycle.fields(stage)
     {status, attrs} = Map.pop(attrs, fields.status)
-    {markdown, attrs} = Map.pop(attrs, fields.markdown)
-    {model, attrs} = Map.pop(attrs, fields.model)
-    status = status || if(markdown != nil, do: "completed", else: "pending")
-    {{status, markdown, model}, attrs}
+    {product, attrs} = Map.pop(attrs, fields.product)
+    {model, attrs} = Map.pop(attrs, fields[:model])
+    status = status || if(product != nil, do: "completed", else: "pending")
+    {{status, product, model}, attrs}
   end
 
   defp walk_stage(page, _stage, {"pending", nil, nil}), do: page
@@ -199,6 +205,12 @@ defmodule Doctrans.Fixtures do
     page
     |> walk_stage(stage, {"completed", markdown, model})
     |> walk_stage(stage, {"error", nil, nil})
+  end
+
+  defp walk_stage(page, :embedding, {"completed", embedding, nil}) do
+    page
+    |> PageLifecycle.complete(:embedding, %{embedding: embedding || fake_embedding()})
+    |> transition()
   end
 
   defp walk_stage(page, stage, {"completed", markdown, model}) do
@@ -225,30 +237,29 @@ defmodule Doctrans.Fixtures do
   end
 
   @doc """
-  Inserts a fully processed page -- extracted, translated and indexed -- into
-  `document`, and returns it.
+  Creates a fully processed page -- extracted, translated and indexed -- in
+  `document`, through the real transitions, and returns it.
 
-  `attrs` override any `Page` field. The embedding defaults to `fake_embedding/1`,
+  `attrs` are `page_fixture/2`'s. The embedding defaults to `fake_embedding/1`,
   the page number to 1, and the text names the document and page so a result can
   be told apart from its neighbours.
   """
   def indexed_page_fixture(document, attrs \\ %{}) do
     page_number = Map.get(attrs, :page_number, 1)
 
-    page = %Page{
-      id: Ecto.UUID.generate(),
-      document_id: document.id,
-      page_number: page_number,
-      image_path: "documents/#{document.id}/pages/page_#{page_number}.png",
-      original_markdown: "Content in document #{document.title} page #{page_number}",
-      translated_markdown: "Translated content page #{page_number}",
-      extraction_status: "completed",
-      translation_status: "completed",
-      embedding_status: "completed",
-      embedding: fake_embedding()
-    }
-
-    Repo.insert!(struct!(page, attrs))
+    page_fixture(
+      document,
+      Enum.into(attrs, %{
+        page_number: page_number,
+        image_path: "documents/#{document.id}/pages/page_#{page_number}.png",
+        extraction_status: "completed",
+        original_markdown: "Content in document #{document.title} page #{page_number}",
+        translation_status: "completed",
+        translated_markdown: "Translated content page #{page_number}",
+        embedding_status: "completed",
+        embedding: fake_embedding()
+      })
+    )
   end
 
   @doc """

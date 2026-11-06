@@ -2,21 +2,22 @@ defmodule Doctrans.Documents.Page do
   @moduledoc """
   Schema for a single page within a document.
 
-  Each page goes through two processing stages:
+  Each page goes through three stages:
   1. Extraction - the configured vision model extracts markdown from the page image
   2. Translation - the configured text model translates the markdown
+  3. Embedding - the page's source text is chunked and embedded for retrieval
 
   ## Statuses
 
-  Both `extraction_status` and `translation_status` can be:
+  `extraction_status`, `translation_status` and `embedding_status` can be:
   - `pending` - Not yet started
   - `processing` - Currently being processed
   - `completed` - Successfully completed
   - `error` - An error occurred
 
-  Neither is written here. Every stage status change is a named transition of
+  None is written here. Every stage status change is a named transition of
   `Doctrans.Documents.PageLifecycle`; `changeset/2` casts neither a stage
-  status nor a stage's markdown or model.
+  status nor a stage's product or model.
   """
   use Doctrans.Schema
   import Ecto.Changeset
@@ -106,8 +107,9 @@ defmodule Doctrans.Documents.Page do
     |> validate_required([:page_number])
   end
 
-  # The one changeset that writes a stage: its status, its markdown and the
-  # model that produced it. Only `Doctrans.Documents.PageLifecycle` calls it.
+  # The one changeset that writes a stage: its status and its product -- the
+  # markdown and the model for a content stage, the vector for embedding. Only
+  # `Doctrans.Documents.PageLifecycle` calls it.
   @doc false
   @spec stage_changeset(t(), map()) :: Ecto.Changeset.t()
   def stage_changeset(page, attrs) do
@@ -115,13 +117,16 @@ defmodule Doctrans.Documents.Page do
     |> cast(attrs, [
       :extraction_status,
       :translation_status,
+      :embedding_status,
       :original_markdown,
       :translated_markdown,
       :extraction_model,
-      :translation_model
+      :translation_model,
+      :embedding
     ])
     |> validate_inclusion(:extraction_status, @statuses)
     |> validate_inclusion(:translation_status, @statuses)
+    |> validate_inclusion(:embedding_status, @statuses)
   end
 
   # The one changeset that starts a page over: a new processing generation, no
@@ -144,15 +149,5 @@ defmodule Doctrans.Documents.Page do
       embedding: nil,
       embedding_status: "pending"
     })
-  end
-
-  @doc """
-  Changeset for updating embedding results.
-  """
-  @spec embedding_changeset(t(), map()) :: Ecto.Changeset.t()
-  def embedding_changeset(page, attrs) do
-    page
-    |> cast(attrs, [:embedding, :embedding_status])
-    |> validate_inclusion(:embedding_status, @statuses)
   end
 end

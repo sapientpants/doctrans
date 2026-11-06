@@ -3,12 +3,12 @@ defmodule Doctrans.Documents.PageLifecycle do
   The page stage machine: every status a page's processing stages can hold,
   and the named transitions between them.
 
-  Two of a page's three stages belong here -- extraction and translation; the
-  index pipeline moves embedding. `Doctrans.Documents.Lifecycle` does for a
-  document's status what this module does for those two: nothing else writes
-  them. The schema's general changeset does not cast a stage status, and every
-  caller -- the processor, cancellation, recovery, reprocessing -- names a
-  transition rather than a status string.
+  A page has three stages of its own -- extraction, translation and embedding
+  -- and each stage has a status. `Doctrans.Documents.Lifecycle` does for a
+  document's status what this module does for a page's stages: nothing else
+  writes them. The schema's general changeset does not cast a stage status, and
+  every caller -- the processor, the indexer, cancellation, recovery,
+  reprocessing, reindexing -- names a transition rather than a status string.
 
   Every transition is fenced by `Doctrans.Documents.Revision.with_page/2`: the
   write lands only while the page still holds the content revision and
@@ -31,14 +31,15 @@ defmodule Doctrans.Documents.PageLifecycle do
 
   ## Transitions
 
-  | transition   | to          | writes                                        |
-  |--------------|-------------|-----------------------------------------------|
-  | `begin/2`    | processing  | the status                                    |
-  | `complete/3` | completed   | the status and the stage's product            |
-  | `fail/2`     | error       | the status                                    |
-  | `release/1`  | pending     | every `processing` stage; the rest is kept    |
-  | `resume/1`   | pending     | every stage not `completed`; the rest is kept |
-  | `reset/2`    | pending     | every stage, a new generation, no content     |
+  | transition       | to          | writes                                           |
+  |------------------|-------------|--------------------------------------------------|
+  | `begin/2`        | processing  | the status                                       |
+  | `complete/3`     | completed   | the status and the stage's product               |
+  | `fail/2`         | error       | the status                                       |
+  | `release/1`      | pending     | every `processing` content stage; the rest kept  |
+  | `resume/2`       | pending     | the given stages not `completed`; the rest kept  |
+  | `forget_index/1` | pending     | the embedding stage: no chunks, no vector        |
+  | `reset/2`        | pending     | every stage, a new generation, no content, index |
 
   There is no legal-from table: a retried job may begin a stage from `pending`,
   `processing` or `error` alike, and a stage with nothing to do may complete
@@ -46,9 +47,12 @@ defmodule Doctrans.Documents.PageLifecycle do
   replaced or deleted under the caller -- and the fence refuses that in every
   transition. `complete/3` requires the stage's product, so a stage cannot be
   completed without saying what it produced: `original_markdown` for
-  extraction, `translated_markdown` for translation. An empty product is legal
-  -- a page with nothing on it -- and is stored as `nil`, the column's empty
-  value, as the schema casts an empty string.
+  extraction, `translated_markdown` for translation, the page-level vector for
+  embedding. An empty product is legal and must still be said: an empty
+  markdown is stored as `nil`, the column's empty value, as the schema casts an
+  empty string, and a page with nothing to embed completes with `embedding: nil`
+  -- stated, not omitted, because global semantic search ranks on that vector
+  and a page marked indexed by mistake would silently never be found.
 
   `release/1` is the rule for a stage nobody is working on any more: the job
   that held it `processing` is gone with the cancellation, so the stored value
@@ -57,16 +61,22 @@ defmodule Doctrans.Documents.PageLifecycle do
   so a cancelled document still offers to retry its failed pages. It takes a
   whole document, set-based.
 
-  `resume/1` is the rule for a page whose owed work is queued again under its
-  current generation, as recovery does after a restart: every stage that has
-  not completed -- interrupted or failed -- goes back to `pending`, so the page
-  reads as queued rather than as failed while its retry waits, and a completed
-  stage keeps its product. It is to a page what `Lifecycle.resume/1` is to a
-  document.
+  `resume/2` is the rule for a page whose owed work is queued again under its
+  current generation: every given stage that has not completed -- interrupted
+  or failed -- goes back to `pending`, so the page reads as queued rather than
+  as failed while its retry waits, and a completed stage keeps its product. The
+  stages are the ones the job being queued will redo: the content stages for a
+  recovered page job (the default), the embedding stage for a re-queued
+  indexing job. It is to a page what `Lifecycle.resume/1` is to a document.
+
+  `forget_index/1` throws the page's index away -- its chunks, its page-level
+  vector, its embedding status -- so the next indexing run starts from scratch
+  rather than keeping every chunk that already carries a vector. The content
+  revision is not touched: the page's text has not changed.
 
   `reset/2` starts the page over for a reprocess: a new processing generation,
-  so work queued under the old one is obsolete; no content, no models, every
-  stage `pending`; and the models the user asked for recorded as
+  so work queued under the old one is obsolete; no content, no models, no
+  index, every stage `pending`; and the models the user asked for recorded as
   `requested_*`, where the next run reads them.
   """
 
@@ -74,24 +84,35 @@ defmodule Doctrans.Documents.PageLifecycle do
 
   require Logger
 
-  alias Doctrans.Documents.{Document, Page, Revision, Topics}
+  alias Doctrans.Documents.{Chunk, Document, Page, Revision, Topics}
   alias Doctrans.Repo
 
   @typedoc "A stage of a page's work."
-  @type stage :: :extraction | :translation
+  @type stage :: :extraction | :translation | :embedding
 
   @typedoc """
-  What completing a stage stores: the markdown the stage produced and the
-  model that produced it.
+  What completing a stage stores: for a content stage the markdown it produced
+  and the model that produced it; for the embedding stage the page-level
+  vector.
 
   `:model` is stored as given, `nil` included, so a caller that completes a
-  stage without naming a model clears the one an earlier attempt recorded.
-  Leave the key out to keep it.
+  content stage without naming a model clears the one an earlier attempt
+  recorded. Leave the key out to keep it.
   """
-  @type product :: %{required(:markdown) => String.t(), optional(:model) => String.t() | nil}
+  @type product ::
+          %{required(:markdown) => String.t(), optional(:model) => String.t() | nil}
+          | %{required(:embedding) => Pgvector.t() | [float()] | nil}
 
-  @typedoc "The page fields a stage owns: its status, its markdown and its model."
-  @type fields :: %{status: atom(), markdown: atom(), model: atom()}
+  @typedoc """
+  The page fields a stage owns: its status, its product -- the markdown of a
+  content stage, the vector of the embedding stage -- and, for a content
+  stage, the model that produced it.
+  """
+  @type fields :: %{
+          required(:status) => atom(),
+          required(:product) => atom(),
+          optional(:model) => atom()
+        }
 
   @typedoc "The models a reprocess asks for; either may be absent."
   @type choices :: %{
@@ -102,18 +123,23 @@ defmodule Doctrans.Documents.PageLifecycle do
   @typedoc "The reason a transition was refused."
   @type refusal :: :obsolete_run
 
-  @stages [:extraction, :translation]
+  @stages [:extraction, :translation, :embedding]
+  @content_stages [:extraction, :translation]
 
   @fields %{
     extraction: %{
       status: :extraction_status,
-      markdown: :original_markdown,
+      product: :original_markdown,
       model: :extraction_model
     },
     translation: %{
       status: :translation_status,
-      markdown: :translated_markdown,
+      product: :translated_markdown,
       model: :translation_model
+    },
+    embedding: %{
+      status: :embedding_status,
+      product: :embedding
     }
   }
 
@@ -152,16 +178,23 @@ defmodule Doctrans.Documents.PageLifecycle do
   @doc """
   Marks the stage `completed` and stores its product in the same write.
 
-  A product without `:markdown` matches no clause: a stage cannot be completed
-  with nothing to show for it.
+  A product without `:markdown` for a content stage, or without `:embedding`
+  for the embedding stage, matches no clause: a stage cannot be completed with
+  nothing to show for it.
   """
   @spec complete(Page.t(), stage(), product()) :: {:ok, Page.t()} | {:error, refusal()}
+  def complete(%Page{} = page, :embedding, %{embedding: vector}) do
+    fields = fields(:embedding)
+    changes = %{fields.status => "completed", fields.product => vector}
+    transition(page, :complete, &Page.stage_changeset(&1, changes))
+  end
+
   def complete(%Page{} = page, stage, %{markdown: markdown} = product)
-      when stage in @stages and is_binary(markdown) do
+      when stage in @content_stages and is_binary(markdown) do
     fields = fields(stage)
 
     changes =
-      %{fields.status => "completed", fields.markdown => markdown}
+      %{fields.status => "completed", fields.product => markdown}
       |> put_model(fields, product)
 
     transition(page, :complete, &Page.stage_changeset(&1, changes))
@@ -174,9 +207,9 @@ defmodule Doctrans.Documents.PageLifecycle do
   end
 
   @doc """
-  Returns every `processing` stage of the document's pages to `pending`,
-  keeping everything else, in one statement under the document lock. Answers
-  the pages it changed.
+  Returns every `processing` content stage of the document's pages to
+  `pending`, keeping everything else, in one statement under the document
+  lock. Answers the pages it changed.
   """
   @spec release(Document.t()) :: {:ok, [Page.t()]} | {:error, refusal()}
   def release(%Document{} = document) do
@@ -201,17 +234,31 @@ defmodule Doctrans.Documents.PageLifecycle do
   end
 
   @doc """
-  Returns every stage of the page that has not completed to `pending`, from
-  the stages it holds once locked -- not the copy the caller read, which a job
-  may have finished since.
+  Returns each of `stages` that has not completed to `pending`, from the stages
+  the page holds once locked -- not the copy the caller read, which a job may
+  have finished since. The default is the two content stages.
   """
-  @spec resume(Page.t()) :: {:ok, Page.t()} | {:error, refusal()}
-  def resume(%Page{} = page) do
+  @spec resume(Page.t(), stage() | [stage()]) :: {:ok, Page.t()} | {:error, refusal()}
+  def resume(%Page{} = page, stages \\ @content_stages) do
+    fields = stages |> List.wrap() |> Enum.map(&fields/1)
+
     transition(page, :resume, fn current ->
-      Page.stage_changeset(current, %{
-        extraction_status: resumed(current.extraction_status),
-        translation_status: resumed(current.translation_status)
-      })
+      Page.stage_changeset(
+        current,
+        Map.new(fields, &{&1.status, resumed(Map.fetch!(current, &1.status))})
+      )
+    end)
+  end
+
+  @doc """
+  Throws the page's index away: deletes its chunks, drops its page-level vector
+  and returns its embedding stage to `pending`, under the fence.
+  """
+  @spec forget_index(Page.t()) :: {:ok, Page.t()} | {:error, refusal()}
+  def forget_index(%Page{} = page) do
+    transition(page, :forget_index, fn current ->
+      forget_chunks(current)
+      Page.stage_changeset(current, %{embedding_status: "pending", embedding: nil})
     end)
   end
 
@@ -221,7 +268,10 @@ defmodule Doctrans.Documents.PageLifecycle do
   """
   @spec reset(Page.t(), choices()) :: {:ok, Page.t()} | {:error, refusal()}
   def reset(%Page{} = page, choices \\ %{}) do
-    transition(page, :reset, &Page.reset_changeset(&1, choices))
+    transition(page, :reset, fn current ->
+      forget_chunks(current)
+      Page.reset_changeset(current, choices)
+    end)
   end
 
   # ---------------------------------------------------------------------------
@@ -231,8 +281,9 @@ defmodule Doctrans.Documents.PageLifecycle do
   # One shape for every page transition: fence the write behind the revision
   # and generation the caller loaded, build the changeset from the row as
   # locked -- so a transition that depends on what the page holds now reads
-  # that, not the caller's copy -- write it, then announce the page once it
-  # is committed, or say why nothing was written. The changeset is built from
+  # that, not the caller's copy, and one that discards the page's chunks does
+  # so under the same lock -- write it, then announce the page once it is
+  # committed, or say why nothing was written. The changeset is built from
   # statuses this module names and fields the schema owns, so the only way the
   # update can fail is a lost connection, which raises here as it would
   # anywhere else.
@@ -267,6 +318,13 @@ defmodule Doctrans.Documents.PageLifecycle do
 
   defp resumed("completed"), do: "completed"
   defp resumed(_status), do: "pending"
+
+  # Only under the page lock: the delete and the next run's re-insert must not
+  # be visible to a concurrent indexing run as an empty page.
+  defp forget_chunks(page) do
+    _ = from(c in Chunk, where: c.page_id == ^page.id) |> Repo.delete_all()
+    :ok
+  end
 
   defp status(page, stage), do: Map.fetch!(page, fields(stage).status)
 

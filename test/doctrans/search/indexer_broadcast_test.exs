@@ -6,7 +6,7 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
   nothing was wrong with that. Now the document viewer renders an indexing row,
   and a run that finishes without saying so leaves that row asserting whatever it
   last computed -- "queued", most visibly, for a page that has since been indexed.
-  These drive both terminal writes and pin the one write that stays silent.
+  These drive the run's transitions and pin that each announces itself.
   """
   use Doctrans.DataCase, async: true
 
@@ -36,16 +36,16 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
     assert id == page.id
   end
 
-  test "the run announces its outcome once, not its start" do
-    page = extracted_page("Announced once")
+  test "the run announces its start and its outcome, once each" do
+    page = extracted_page("Announced twice")
     :ok = Topics.subscribe_document(page.document_id)
 
     assert :ok = Indexer.index_page(page.id)
 
-    # A running job is already visible through its Oban row, so the
-    # `"processing"` write has nothing to add and must not spend a broadcast.
+    # Every page stage transition announces itself, the start included; the
+    # chunk writes in between are the indexer's own and say nothing.
+    assert_received {:page_updated, %Page{embedding_status: "processing"}}
     assert_received {:page_updated, %Page{embedding_status: "completed"}}
-    refute_received {:page_updated, %Page{embedding_status: "processing"}}
     refute_received {:page_updated, _page}
   end
 

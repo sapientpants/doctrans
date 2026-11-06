@@ -29,10 +29,13 @@ defmodule Doctrans.Search.Reindex do
 
   import Ecto.Query
 
-  alias Doctrans.Documents.{Chunk, Document, Page}
+  alias Doctrans.Documents.{Document, Page, PageLifecycle}
   alias Doctrans.Errors
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Repo
+
+  # The ways `rebuild_page/1` declines a page, as distinct from failing on it.
+  @skips [:indexing_in_progress, :not_extracted, :page_not_found]
 
   @doc """
   Queues indexing for every page of the document that is extracted but not indexed.
@@ -68,55 +71,53 @@ defmodule Doctrans.Search.Reindex do
 
   # One page per transaction: the rows are independent, so a page that cannot be
   # queued costs that page rather than the batch, and the lock below is held
-  # across one insert instead of the whole document.
+  # across one insert instead of the whole document. A safe transaction, so the
+  # stage the lifecycle resumes below announces itself on commit.
   #
   # The predicate is re-read under that lock, so a page rewritten since it was
   # selected is queued at the revision it now holds rather than one the job
   # would cancel on.
   defp queue_page(row) do
-    Repo.transact(fn ->
+    Repo.safe_transaction(fn ->
       case lock_page(row.id) do
         %Page{extraction_status: "completed", embedding_status: status} = page
         when status != "completed" ->
           queue_locked_page(page)
 
         _ ->
-          {:ok, false}
+          false
       end
     end)
     |> case do
       {:ok, queued?} -> queued?
       {:error, reason} -> skip_page(row.id, reason)
     end
-  rescue
-    error in [Postgrex.Error, DBConnection.ConnectionError, Ecto.ConstraintError] ->
-      skip_page(row.id, error)
   end
 
   defp lock_page(page_id) do
     from(p in Page, where: p.id == ^page_id, lock: "FOR UPDATE") |> Repo.one()
   end
 
-  # Insert before writing the status: uniqueness also covers a job queued since
+  # Insert before resuming the stage: uniqueness also covers a job queued since
   # selection, and a conflicting job already owns this page's revision, so the
   # stored failure is that job's to clear rather than this call's.
+  #
+  # A stored `error` would otherwise go on reporting a failure that is being
+  # retried, and keep drawing the viewer to a recovery already under way. Only
+  # the embedding stage moves: every field the translation produced is kept.
   defp queue_locked_page(page) do
     case EmbeddingJob.enqueue_page(page) do
-      {:ok, %Oban.Job{conflict?: true}} -> {:ok, false}
-      {:ok, %Oban.Job{}} -> {:ok, clear_failure(page)}
-      {:error, reason} -> {:error, reason}
+      {:ok, %Oban.Job{conflict?: true}} ->
+        false
+
+      {:ok, %Oban.Job{}} ->
+        {:ok, _resumed} = PageLifecycle.resume(page, :embedding)
+        true
+
+      {:error, reason} ->
+        Repo.rollback(reason)
     end
   end
-
-  # A stored `error` would go on reporting a failure that is being retried, and
-  # would keep drawing the viewer to a recovery already under way. Only the
-  # indexing status moves: every field the translation produced is left alone.
-  defp clear_failure(%Page{embedding_status: "error"} = page) do
-    _ = page |> Page.embedding_changeset(%{embedding_status: "pending"}) |> Repo.update!()
-    true
-  end
-
-  defp clear_failure(_page), do: true
 
   defp skip_page(page_id, reason) do
     Logger.warning("Reindex could not queue indexing for page #{page_id}: #{inspect(reason)}")
@@ -141,11 +142,12 @@ defmodule Doctrans.Search.Reindex do
   @doc """
   Clears the page's index and queues it for indexing from scratch.
 
-  Under the page lock, the page's chunks are deleted, its page-level vector is
-  dropped and its status returns to `pending`, then the current revision is
-  queued. The reset is what makes this a rebuild rather than a retry: the
-  Indexer alone would keep every chunk that already has a vector, and so would
-  re-embed nothing on a page whose text has not changed.
+  Under the page lock, the page's index is forgotten -- its chunks deleted, its
+  page-level vector dropped, its embedding stage returned to `pending` through
+  `PageLifecycle.forget_index/1` -- then the current revision is queued. The
+  reset is what makes this a rebuild rather than a retry: the Indexer alone
+  would keep every chunk that already has a vector, and so would re-embed
+  nothing on a page whose text has not changed.
 
   The reset is rolled back when an active indexing job already owns the page's
   revision — that job is mid-run on the index this call would have deleted from
@@ -160,45 +162,37 @@ defmodule Doctrans.Search.Reindex do
           | {:skipped, :indexing_in_progress | :not_extracted | :page_not_found}
           | {:error, Errors.reason()}
   def rebuild_page(page_id) do
-    Repo.transact(fn ->
+    # A safe transaction: the forgotten index announces its page on commit, and
+    # a database failure comes back as a reason rather than a raise.
+    Repo.safe_transaction(fn ->
       case lock_page(page_id) do
         %Page{extraction_status: "completed"} = page -> rebuild_locked_page(page)
-        %Page{} -> {:error, {:skipped, :not_extracted}}
-        nil -> {:error, {:skipped, :page_not_found}}
+        %Page{} -> Repo.rollback(:not_extracted)
+        nil -> Repo.rollback(:page_not_found)
       end
     end)
     |> case do
       {:ok, :queued} -> {:ok, :queued}
-      {:error, {:skipped, reason}} -> {:skipped, reason}
+      {:error, reason} when reason in @skips -> {:skipped, reason}
       {:error, reason} -> {:error, reason}
     end
-  rescue
-    error in [Postgrex.Error, DBConnection.ConnectionError, Ecto.ConstraintError] ->
-      {:error, Errors.normalize(error)}
   end
 
-  # Reset before inserting, so that a conflict — which is only known once the
+  # Forget before inserting, so that a conflict — which is only known once the
   # insert has run — ends in a rollback that leaves the page untouched, rather
   # than in a reset the owning job is not expecting. The order also keeps an
   # inline job (Oban's `:inline` testing mode runs it inside this insert) from
   # indexing the chunks the reset is about to delete.
   defp rebuild_locked_page(page) do
-    page = reset_index(page)
+    page = or_rollback(PageLifecycle.forget_index(page))
 
     case EmbeddingJob.enqueue_page(page) do
-      {:ok, %Oban.Job{conflict?: true}} -> {:error, {:skipped, :indexing_in_progress}}
-      {:ok, %Oban.Job{}} -> {:ok, :queued}
-      {:error, reason} -> {:error, reason}
+      {:ok, %Oban.Job{conflict?: true}} -> Repo.rollback(:indexing_in_progress)
+      {:ok, %Oban.Job{}} -> :queued
+      {:error, reason} -> Repo.rollback(reason)
     end
   end
 
-  # Only valid under the page lock: a delete-then-recreate must never be visible
-  # to a concurrent indexing run as an empty page (see `Indexer.recreate_chunks/2`).
-  defp reset_index(page) do
-    _ = Chunk |> where([c], c.page_id == ^page.id) |> Repo.delete_all()
-
-    page
-    |> Page.embedding_changeset(%{embedding: nil, embedding_status: "pending"})
-    |> Repo.update!()
-  end
+  defp or_rollback({:ok, page}), do: page
+  defp or_rollback({:error, reason}), do: Repo.rollback(reason)
 end

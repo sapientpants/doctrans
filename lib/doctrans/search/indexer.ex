@@ -5,7 +5,9 @@ defmodule Doctrans.Search.Indexer do
   The unit of indexing is a page at a `content_revision`. Every write is fenced
   by `Doctrans.Documents.Revision.with_page/2`, so a call that started before
   the page changed cannot write vectors for text that is no longer there; a
-  fence refusal is reported as `{:cancel, :stale_page}`.
+  fence refusal is reported as `{:cancel, :stale_page}`. The page's embedding
+  stage moves through `Doctrans.Documents.PageLifecycle`, which fences and
+  announces it; the chunk rows are this module's own and are fenced here.
 
   This module adds no retry loop of its own: a transient failure is reported to
   the caller — `Doctrans.Jobs.EmbeddingJob`, which owns the retry schedule — and
@@ -21,7 +23,7 @@ defmodule Doctrans.Search.Indexer do
   import Ecto.Query
 
   alias Doctrans.Deps
-  alias Doctrans.Documents.{Chunk, Page, Revision, Topics}
+  alias Doctrans.Documents.{Chunk, Page, PageLifecycle, Revision}
   alias Doctrans.Errors
   alias Doctrans.Repo
   alias Doctrans.Resilience.ErrorClassifier
@@ -66,7 +68,7 @@ defmodule Doctrans.Search.Indexer do
   end
 
   defp start_page_embedding(page) do
-    case fenced_update(Page.embedding_changeset(page, %{embedding_status: "processing"}), page) do
+    case PageLifecycle.begin(page, :embedding) do
       {:error, :obsolete_run} -> stale(page)
       {:ok, page} -> embed_page_chunks(page)
     end
@@ -157,46 +159,24 @@ defmodule Doctrans.Search.Indexer do
     end
   end
 
-  # The vector and the status land in one fenced write, so "completed" implies a
-  # page vector by construction rather than by the two writes happening to both
-  # succeed. The write is fenced like every other one, so a page that changed or
-  # was deleted while its chunks were embedding reports the run as superseded
-  # rather than as a completed index it never wrote.
+  # The vector and the status land in one transition, so "completed" implies a
+  # page vector by construction rather than by two writes happening to both
+  # succeed. A page that changed or was deleted while its chunks were embedding
+  # reports the run as superseded rather than as a completed index it never
+  # wrote.
   defp mark_page_indexed(page, embedding, attempted, total) do
-    changeset =
-      Page.embedding_changeset(page, %{embedding: embedding, embedding_status: "completed"})
-
-    case fenced_update(changeset, page) do
+    case PageLifecycle.complete(page, :embedding, %{embedding: embedding}) do
       {:error, :obsolete_run} ->
         stale(page)
 
-      {:ok, indexed} ->
+      {:ok, _indexed} ->
         Logger.info("Indexed #{attempted} of #{total} chunks on page #{page.id}")
-        publish(indexed)
+        :ok
     end
   end
 
   defp mark_page_errored(page) do
-    case fenced_update(Page.embedding_changeset(page, %{embedding_status: "error"}), page) do
-      {:ok, errored} -> publish(errored)
-      {:error, :obsolete_run} -> :ok
-    end
-  end
-
-  # Only the terminal writes are announced, and only since indexing got a place
-  # in the interface: before that, no view read `embedding_status`, so a
-  # broadcast had no subscriber and the run stayed silent. A viewer that is told
-  # "queued" and never told anything else goes on claiming it long after the
-  # page was indexed.
-  #
-  # The `"processing"` write stays silent on purpose. A running job is already
-  # visible through its Oban row, so announcing it would add a broadcast per page
-  # to say what the queue already says.
-  #
-  # After the fence's transaction, never inside it: a subscriber that re-queries
-  # on this message must find the row it describes already committed.
-  defp publish(page) do
-    _ = Topics.broadcast_page_updated(page)
+    _ = PageLifecycle.fail(page, :embedding)
     :ok
   end
 
