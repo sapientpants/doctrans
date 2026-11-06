@@ -35,9 +35,9 @@
             id="show-document-reprocess"
             type="button"
             phx-click="show_document_reprocess_modal"
-            disabled={!@source_available || !can_reprocess_document?(@document)}
-            aria-label={reprocess_document_hint(@source_available, @document)}
-            title={reprocess_document_hint(@source_available, @document)}
+            disabled={@processing_status.actions.reprocess_document != :offered}
+            aria-label={reprocess_document_hint(@processing_status.actions.reprocess_document)}
+            title={reprocess_document_hint(@processing_status.actions.reprocess_document)}
             class="inline-flex items-center gap-2 rounded-lg border border-base-300 px-3 py-2 text-sm transition-colors hover:bg-base-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <.icon name="hero-arrow-path" class="size-4" />
@@ -86,7 +86,7 @@
           progress={@processing_status.progress}
         />
         <p
-          :if={!@source_available}
+          :if={!@processing_status.source_available?}
           id="original-upload-missing"
           class="text-xs text-base-content/60"
         >
@@ -138,7 +138,9 @@
             </span>
             <div class="flex items-center gap-2">
               <button
-                :if={can_reprocess?(@current_page)}
+                :if={
+                  ProcessingStatus.reprocess_page(@processing_status, @current_page) == :offered
+                }
                 type="button"
                 id="show-reprocess"
                 phx-click="show_reprocess_modal"

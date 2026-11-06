@@ -1,6 +1,6 @@
 defmodule Doctrans.Processing.Run do
   @moduledoc """
-  Stored source paths, model choices, and whether a document's run is still live.
+  Stored source paths, model choices, and the fence on a document's run.
 
   The fence (`lock/1`, `current?/2`, `with_current/2`, `with_page/2`) lives in
   `Doctrans.Documents.Revision`, which owns the revision columns it compares.
@@ -10,23 +10,8 @@ defmodule Doctrans.Processing.Run do
   """
   alias Doctrans.Config.OpenAI
   alias Doctrans.Documents.{Document, Formats, Layout, Page, Revision}
-  alias Doctrans.Jobs.{Keys, LlmProcessingJob}
-  alias Doctrans.Processing.JobQuery
+  alias Doctrans.Jobs.{DocumentExtractionJob, Keys, RunCleanupJob}
   alias Doctrans.Repo
-
-  @doc """
-  True while an extraction or LLM job of the document can still run.
-
-  Indexing jobs are not counted: `EmbeddingJob` cancels itself when the
-  revision it holds is superseded, so it never owns the content a reprocess
-  would replace.
-  """
-  @spec active?(Ecto.UUID.t()) :: boolean()
-  def active?(document_id) do
-    document_id
-    |> JobQuery.document_work_query([LlmProcessingJob])
-    |> Repo.exists?()
-  end
 
   @spec choices(keyword()) :: %{extraction_model: String.t(), translation_model: String.t()}
   def choices(opts \\ []) do
@@ -74,6 +59,25 @@ defmodule Doctrans.Processing.Run do
   @spec args(Document.t()) :: %{String.t() => Ecto.UUID.t() | nil}
   def args(document),
     do: %{Keys.document_id() => document.id, "run_id" => document.processing_run_id}
+
+  @doc """
+  Queues the jobs of the run `document` has just been requeued under: its
+  extraction job and, with `cleanup: true`, the removal of the files the run
+  it replaced left behind. Call inside the transaction that made the
+  `Doctrans.Documents.Lifecycle.requeue/2` transition, so the run and its job
+  commit together; a job already waiting for the document rolls that
+  transaction back with `:already_processing`. Returns the extraction job.
+  """
+  @spec enqueue(Document.t(), cleanup: boolean()) :: Oban.Job.t()
+  def enqueue(document, opts \\ []) do
+    args = args(document)
+    job = args |> DocumentExtractionJob.new() |> Repo.insert_job!()
+
+    _ =
+      if Keyword.get(opts, :cleanup, false), do: args |> RunCleanupJob.new() |> Repo.insert_job!()
+
+    job
+  end
 
   @spec source_path(Document.t()) :: String.t() | nil
   def source_path(document) do

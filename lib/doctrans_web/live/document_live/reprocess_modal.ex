@@ -6,7 +6,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
 
   alias Doctrans.Config
   alias Doctrans.Deps
-  alias Doctrans.Documents.Lifecycle
+  alias Doctrans.Documents.ProcessingStatus
   alias Doctrans.Processing.DocumentReprocessing
   alias DoctransWeb.ErrorMessages
 
@@ -23,44 +23,18 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
     |> put_models(Config.OpenAI.vision_model(), Config.OpenAI.translation_model())
   end
 
-  # Show reprocess button when page has completed processing or has an error
-  # but not when it's currently processing (to prevent double-processing)
-  def can_reprocess?(nil), do: false
-
-  def can_reprocess?(page) do
-    page.extraction_status in ["completed", "error"] &&
-      page.translation_status in ["completed", "error", "pending"]
-  end
-
   @doc """
-  Whether the whole-document reprocess control is offered.
-
-  The status rule is `Doctrans.Documents.Lifecycle`'s, the same one the
-  `DocumentReprocessing` transaction applies, so the button and the transaction
-  behind it cannot disagree; the original upload still has to be on disk, which
-  the caller knows and this does not.
-  """
-  def can_reprocess_document?(%Doctrans.Documents.Document{} = document),
-    do: Lifecycle.reprocessable?(document)
-
-  @doc """
-  Names the reprocess-document button and fills its tooltip.
+  Names the reprocess-document button and fills its tooltip, from the
+  `ProcessingStatus` answer for the action.
 
   The two must say the same thing: `aria-label` overrides `title` for the
   accessible name, so a tooltip-only explanation of why the button is disabled
-  never reaches a screen reader. One clause per reason the viewer disables it
-  for, so a disabled control always says why.
+  never reaches a screen reader. A withheld action names its refusal, so a
+  disabled control always says why.
   """
-  @spec reprocess_document_hint(boolean(), Doctrans.Documents.Document.t()) :: String.t()
-  def reprocess_document_hint(false, _document) do
-    gettext("Original upload unavailable. Re-upload this document to process it again.")
-  end
-
-  def reprocess_document_hint(true, document) do
-    if can_reprocess_document?(document),
-      do: gettext("Reprocess document"),
-      else: ErrorMessages.message(:already_processing)
-  end
+  @spec reprocess_document_hint(ProcessingStatus.offer()) :: String.t()
+  def reprocess_document_hint(:offered), do: gettext("Reprocess document")
+  def reprocess_document_hint({:refused, reason}), do: ErrorMessages.message(reason)
 
   def handle_event("show_document_reprocess_modal", params, socket) do
     handle_event("show_reprocess_modal", params, assign(socket, :reprocess_scope, :document))

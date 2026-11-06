@@ -38,31 +38,35 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
 
   # Each action is re-authorized against a status read here, not against the
   # markup: an event arrives over the socket whether or not its button was
-  # rendered, and the rendered flags are as old as the last refresh. The domain
-  # functions refuse too, but a UI that relies on that has no answer for the
-  # day a refusal is relaxed -- and `Reindex.retry_document/1` has no refusal to
-  # rely on at all, since re-queueing an already-ready index is legal and would
-  # report "queued 0 pages" to a user who was offered no button.
+  # rendered, and the rendered answers are as old as the last refresh. The
+  # domain functions refuse too, but a UI that relies on that has no answer for
+  # the day a refusal is relaxed -- and `Reindex.retry_document/1` has no
+  # refusal to rely on at all, since re-queueing an already-ready index is
+  # legal and would report "queued 0 pages" to a user who was offered no
+  # button. A withheld action is reported with its reason, like any other
+  # refusal: the user clicked a control the state had moved out from under.
   def handle_event("retry_indexing", _params, socket) do
-    {:noreply, act(socket, & &1.retry_index?, &retry_indexing/1)}
+    {:noreply, act(socket, :retry_index, &retry_indexing/1)}
   end
 
   def handle_event("retry_failed_pages", _params, socket) do
-    {:noreply, act(socket, & &1.retry_pages?, &retry_failed_pages/1)}
+    {:noreply, act(socket, :retry_pages, &retry_failed_pages/1)}
   end
 
   def handle_event("cancel_processing", _params, socket) do
-    {:noreply, act(socket, & &1.cancellable?, &cancel_processing/1)}
+    {:noreply, act(socket, :cancel, &cancel_processing/1)}
   end
 
-  defp act(socket, allowed?, run) do
+  defp act(socket, action, run) do
     document = socket.assigns.document
     status = ProcessingStatus.for_document(document)
 
-    if allowed?.(status) do
-      socket |> put_outcome(run.(document)) |> refresh()
-    else
-      assign(socket, :processing_status, status)
+    case status.actions[action] do
+      :offered ->
+        socket |> put_outcome(run.(document)) |> refresh()
+
+      {:refused, reason} ->
+        socket |> put_outcome({:error, reason}) |> assign(:processing_status, status)
     end
   end
 
@@ -152,12 +156,15 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
         </div>
 
         <div
-          :if={@status.retry_index? or @status.retry_pages? or @status.cancellable?}
+          :if={
+            offered?(@status, :retry_index) or offered?(@status, :retry_pages) or
+              offered?(@status, :cancel)
+          }
           id="processing-status-actions"
           class="flex flex-wrap items-center gap-2"
         >
           <button
-            :if={@status.retry_index?}
+            :if={offered?(@status, :retry_index)}
             id="retry-indexing"
             type="button"
             phx-click="retry_indexing"
@@ -168,7 +175,7 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
             {gettext("Retry indexing")}
           </button>
           <button
-            :if={@status.retry_pages?}
+            :if={offered?(@status, :retry_pages)}
             id="retry-failed-pages"
             type="button"
             phx-click="retry_failed_pages"
@@ -179,7 +186,7 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
             {gettext("Retry failed pages")}
           </button>
           <button
-            :if={@status.cancellable?}
+            :if={offered?(@status, :cancel)}
             id="cancel-processing"
             type="button"
             phx-click="cancel_processing"
@@ -194,6 +201,8 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
     </section>
     """
   end
+
+  defp offered?(%ProcessingStatus{actions: actions}, action), do: actions[action] == :offered
 
   # A string, not a list: a nested list inside a `class={[...]}` attribute is not
   # flattened, so the variant button below would render its shared classes as one

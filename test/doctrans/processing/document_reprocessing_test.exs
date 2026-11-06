@@ -4,7 +4,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   import Doctrans.Fixtures
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Chunk, Layout, Lifecycle, Page}
+  alias Doctrans.Documents.{Chunk, Layout, Lifecycle, Page, ProcessingStatus}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
 
   alias Doctrans.Processing.{
@@ -15,8 +15,6 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     Run,
     StartupRecovery
   }
-
-  alias DoctransWeb.DocumentLive.ReprocessModal
 
   setup do
     ResumablePdfExtractorStub.install()
@@ -45,18 +43,24 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     %{document: document, page: page, source: source, old_image: old_image}
   end
 
-  test "the UI control offers a reprocess exactly where the lifecycle admits one" do
-    for status <- ~w(completed error cancelled) do
-      document = %Documents.Document{status: status}
-      assert Lifecycle.reprocessable?(document)
-      assert ReprocessModal.can_reprocess_document?(document)
+  test "the transaction refuses with the reason the read model withholds the control for" do
+    for status <- ~w(uploading queued extracting processing) do
+      document = document_fixture(%{status: status})
+      document_source_fixture(document)
+
+      assert ProcessingStatus.for_document(document).actions.reprocess_document ==
+               {:refused, :already_processing}
+
+      assert {:error, :already_processing} = DocumentReprocessing.reprocess_document(document.id)
     end
 
-    for status <- ~w(uploading queued extracting processing) do
-      document = %Documents.Document{status: status}
-      refute Lifecycle.reprocessable?(document)
-      refute ReprocessModal.can_reprocess_document?(document)
-    end
+    missing = document_fixture(%{status: "completed"})
+
+    assert ProcessingStatus.for_document(missing).actions.reprocess_document ==
+             {:refused, :original_upload_missing}
+
+    assert {:error, :original_upload_missing} =
+             DocumentReprocessing.reprocess_document(missing.id)
   end
 
   test "full restart reconverts the actual original and renders fresh pages", c do

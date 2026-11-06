@@ -70,7 +70,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
         {:error, reason} -> Repo.rollback(reason)
       end
 
-    {queued, queued |> Run.args() |> new() |> Repo.insert_job!()}
+    {queued, Run.enqueue(queued)}
   end
 
   # A document row that is gone stays gone, so the job is cancelled rather than
