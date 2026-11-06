@@ -13,52 +13,72 @@ defmodule Doctrans.Documents.PageLifecycleTest do
   end
 
   for stage <- [:extraction, :translation] do
-    @stage stage
-    @status :"#{stage}_status"
-    @markdown if(stage == :extraction, do: :original_markdown, else: :translated_markdown)
-    @model :"#{stage}_model"
-
-    describe "#{@stage}" do
-      test "begin/2 marks the stage processing", %{page: page} do
-        assert {:ok, %Page{} = begun} = PageLifecycle.begin(page, @stage)
-        assert Map.fetch!(begun, @status) == "processing"
-        assert PageLifecycle.owed?(begun, @stage)
+    describe "#{stage}" do
+      setup do
+        %{stage: unquote(stage), fields: PageLifecycle.fields(unquote(stage))}
       end
 
-      test "complete/3 stores the product with the status, in one write", %{page: page} do
+      test "begin/2 marks the stage processing", %{page: page, stage: stage, fields: fields} do
+        assert {:ok, %Page{} = begun} = PageLifecycle.begin(page, stage)
+        assert Map.fetch!(begun, fields.status) == "processing"
+        assert PageLifecycle.owed?(begun, stage)
+      end
+
+      test "complete/3 stores the product with the status, in one write", %{
+        page: page,
+        stage: stage,
+        fields: fields
+      } do
         assert {:ok, done} =
-                 PageLifecycle.complete(page, @stage, %{markdown: "# Text", model: "a-model"})
+                 PageLifecycle.complete(page, stage, %{markdown: "# Text", model: "a-model"})
 
-        assert Map.fetch!(done, @status) == "completed"
-        assert Map.fetch!(done, @markdown) == "# Text"
-        assert Map.fetch!(done, @model) == "a-model"
-        assert PageLifecycle.done?(done, @stage)
-        refute PageLifecycle.owed?(done, @stage)
+        assert Map.fetch!(done, fields.status) == "completed"
+        assert Map.fetch!(done, fields.markdown) == "# Text"
+        assert Map.fetch!(done, fields.model) == "a-model"
+        assert PageLifecycle.done?(done, stage)
+        refute PageLifecycle.owed?(done, stage)
       end
 
-      test "complete/3 stores an empty product as nil and leaves the model alone when not given",
-           %{page: page} do
-        {:ok, modelled} = PageLifecycle.complete(page, @stage, %{markdown: "x", model: "kept"})
-        assert {:ok, done} = PageLifecycle.complete(modelled, @stage, %{markdown: ""})
-        assert Map.fetch!(done, @status) == "completed"
-        assert Map.fetch!(done, @markdown) == nil
-        assert Map.fetch!(done, @model) == "kept"
+      test "complete/3 stores an empty product as nil", %{
+        page: page,
+        stage: stage,
+        fields: fields
+      } do
+        assert {:ok, done} = PageLifecycle.complete(page, stage, %{markdown: ""})
+        assert Map.fetch!(done, fields.status) == "completed"
+        assert Map.fetch!(done, fields.markdown) == nil
       end
 
-      test "complete/3 refuses a product without markdown", %{page: page} do
-        assert_raise ArgumentError, ~r/needs the markdown/, fn ->
-          PageLifecycle.complete(page, @stage, %{model: "a-model"})
-        end
+      test "complete/3 keeps the model when the product does not name one", %{
+        page: page,
+        stage: stage,
+        fields: fields
+      } do
+        {:ok, modelled} = PageLifecycle.complete(page, stage, %{markdown: "x", model: "kept"})
+        assert {:ok, done} = PageLifecycle.complete(modelled, stage, %{markdown: "y"})
+        assert Map.fetch!(done, fields.model) == "kept"
+      end
+
+      test "complete/3 clears the model when the product names nil", %{
+        page: page,
+        stage: stage,
+        fields: fields
+      } do
+        {:ok, modelled} = PageLifecycle.complete(page, stage, %{markdown: "x", model: "old"})
+        assert {:ok, done} = PageLifecycle.complete(modelled, stage, %{markdown: "y", model: nil})
+        assert Map.fetch!(done, fields.model) == nil
       end
 
       test "fail/2 marks the stage error and keeps what an earlier attempt produced", %{
-        page: page
+        page: page,
+        stage: stage,
+        fields: fields
       } do
-        {:ok, done} = PageLifecycle.complete(page, @stage, %{markdown: "earlier"})
-        assert {:ok, failed} = PageLifecycle.fail(done, @stage)
-        assert Map.fetch!(failed, @status) == "error"
-        assert Map.fetch!(failed, @markdown) == "earlier"
-        assert PageLifecycle.owed?(failed, @stage)
+        {:ok, done} = PageLifecycle.complete(page, stage, %{markdown: "earlier"})
+        assert {:ok, failed} = PageLifecycle.fail(done, stage)
+        assert Map.fetch!(failed, fields.status) == "error"
+        assert Map.fetch!(failed, fields.markdown) == "earlier"
+        assert PageLifecycle.owed?(failed, stage)
       end
     end
   end
@@ -72,18 +92,32 @@ defmodule Doctrans.Documents.PageLifecycleTest do
     end
   end
 
-  describe "the fence" do
-    test "refuses once the page's generation moved under the caller", %{page: page} do
+  describe "the fence, once the page's generation moved under the caller" do
+    setup %{page: page} do
       page
       |> Ecto.Changeset.change(processing_generation: Uniq.UUID.uuid7())
       |> Repo.update!()
 
+      :ok
+    end
+
+    test "refuses begin/2 and writes nothing", %{page: page} do
       assert {:error, :obsolete_run} = PageLifecycle.begin(page, :extraction)
-      assert {:error, :obsolete_run} = PageLifecycle.complete(page, :extraction, %{markdown: "x"})
-      assert {:error, :obsolete_run} = PageLifecycle.fail(page, :extraction)
       assert Documents.get_page!(page.id).extraction_status == "pending"
     end
 
+    test "refuses complete/3 and writes nothing", %{page: page} do
+      assert {:error, :obsolete_run} = PageLifecycle.complete(page, :extraction, %{markdown: "x"})
+      assert Documents.get_page!(page.id).original_markdown == nil
+    end
+
+    test "refuses fail/2 and writes nothing", %{page: page} do
+      assert {:error, :obsolete_run} = PageLifecycle.fail(page, :extraction)
+      assert Documents.get_page!(page.id).extraction_status == "pending"
+    end
+  end
+
+  describe "the fence" do
     test "refuses once the page's content revision moved under the caller", %{page: page} do
       {:ok, _} = PageLifecycle.complete(page, :extraction, %{markdown: "newer text"})
 

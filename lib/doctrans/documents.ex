@@ -11,8 +11,8 @@ defmodule Doctrans.Documents do
   Chat readiness (`embeddings_ready?/1`) is not part of this context: its only
   consumer is `Doctrans.Chat`, which reaches `Pages` for it. Nor is the
   document's status: every status write is a named transition of
-  `Doctrans.Documents.Lifecycle`, and every write to a page's stages one of
-  `Doctrans.Documents.PageLifecycle`.
+  `Doctrans.Documents.Lifecycle`, and processing moves a page's stages only
+  through one of `Doctrans.Documents.PageLifecycle`.
 
   The module sits at Credo's first-party dependency ceiling, so a new
   collaborator has to displace one.

@@ -87,7 +87,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
       page = page_fixture(document, %{extraction_status: "processing"})
 
       after_candidate_selection(fn ->
-        PageLifecycle.complete(page, :extraction, %{markdown: "Concurrent result"})
+        {:ok, _} = PageLifecycle.complete(page, :extraction, %{markdown: "Concurrent result"})
 
         %{"page_id" => page.id} |> LlmProcessingJob.new() |> Oban.insert!()
       end)
@@ -106,7 +106,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
       page = page_fixture(document, %{extraction_status: "processing"})
 
       after_candidate_selection(fn ->
-        PageLifecycle.complete(page, :extraction, %{markdown: "Concurrent result"})
+        {:ok, _} = PageLifecycle.complete(page, :extraction, %{markdown: "Concurrent result"})
       end)
 
       assert {:embeddings, nil} = StartupRecovery.run_batch({:pages, nil})
@@ -261,7 +261,8 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
       page = completed_page_fixture(document)
 
       after_candidate_selection(fn ->
-        PageLifecycle.complete(page, :extraction, %{markdown: "Rewritten after selection"})
+        {:ok, _} =
+          PageLifecycle.complete(page, :extraction, %{markdown: "Rewritten after selection"})
       end)
 
       assert {:completion, nil} = StartupRecovery.run_batch({:embeddings, nil})

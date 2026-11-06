@@ -300,7 +300,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
     test "shows processing state for extracting page", %{conn: conn} do
       doc = document_with_pages_fixture(%{}, 1)
       [page] = doc.pages
-      PageLifecycle.begin(page, :extraction)
+      {:ok, _} = PageLifecycle.begin(page, :extraction)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
@@ -314,7 +314,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       {:ok, page} =
         PageLifecycle.complete(page, :extraction, %{markdown: "test"})
 
-      PageLifecycle.begin(page, :translation)
+      {:ok, _} = PageLifecycle.begin(page, :translation)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
@@ -324,7 +324,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
     test "shows error state for failed page", %{conn: conn} do
       doc = document_with_pages_fixture(%{}, 1)
       [page] = doc.pages
-      PageLifecycle.fail(page, :extraction)
+      {:ok, _} = PageLifecycle.fail(page, :extraction)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
@@ -338,7 +338,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       {:ok, page} =
         PageLifecycle.complete(page, :extraction, %{markdown: "# Original"})
 
-      PageLifecycle.complete(page, :translation, %{markdown: "# Translated Text Here"})
+      {:ok, _} = PageLifecycle.complete(page, :translation, %{markdown: "# Translated Text Here"})
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
@@ -352,7 +352,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       {:ok, page} =
         PageLifecycle.complete(page, :extraction, %{markdown: "# Original Text Here"})
 
-      PageLifecycle.complete(page, :translation, %{markdown: "# Translated"})
+      {:ok, _} = PageLifecycle.complete(page, :translation, %{markdown: "# Translated"})
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
@@ -484,7 +484,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       {:ok, page} =
         PageLifecycle.complete(page, :extraction, %{markdown: "# Test"})
 
-      PageLifecycle.complete(page, :translation, %{markdown: "# Translated"})
+      {:ok, _} = PageLifecycle.complete(page, :translation, %{markdown: "# Translated"})
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
@@ -495,7 +495,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       doc = document_with_pages_fixture(%{status: "error"}, 1)
       [page] = doc.pages
 
-      PageLifecycle.fail(page, :extraction)
+      {:ok, _} = PageLifecycle.fail(page, :extraction)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
@@ -521,7 +521,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       {:ok, page} =
         PageLifecycle.complete(page, :extraction, %{markdown: "# Test"})
 
-      PageLifecycle.complete(page, :translation, %{markdown: "# Translated"})
+      {:ok, _} = PageLifecycle.complete(page, :translation, %{markdown: "# Translated"})
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
@@ -538,7 +538,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       {:ok, page} =
         PageLifecycle.complete(page, :extraction, %{markdown: "# Test"})
 
-      PageLifecycle.complete(page, :translation, %{markdown: "# Translated"})
+      {:ok, _} = PageLifecycle.complete(page, :translation, %{markdown: "# Translated"})
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
@@ -558,7 +558,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       {:ok, page} =
         PageLifecycle.complete(page, :extraction, %{markdown: "# Test"})
 
-      PageLifecycle.complete(page, :translation, %{markdown: "# Translated"})
+      {:ok, _} = PageLifecycle.complete(page, :translation, %{markdown: "# Translated"})
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 

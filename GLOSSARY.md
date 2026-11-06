@@ -38,12 +38,15 @@ The set of statuses a Document can hold and the named transitions between them. 
 transitions; there is no generic "set status".
 
 **Page lifecycle**:
-The set of statuses a Page's Stages can hold and the named transitions between them. Every Stage status change is one
-of those transitions, refused when the Page is Obsolete work; there is no generic "set stage status".
+The set of statuses a Page's extraction and translation Stages can hold and the named transitions between them.
+Processing moves those Stages only through such a transition, refused when the Page is Obsolete work; there is no
+generic "set stage status". A Reprocess returns them to pending outside it, and the embedding Stage belongs to the
+index pipeline, not to it.
 
 **Transition**:
-A named move of a Document from one status to another, legal only from specific starting statuses. A transition from an
-illegal status is refused, not ignored.
+A named move of a Document from one status to another, or of a Page's Stage from one status to another. A Document
+transition is legal only from specific starting statuses, and one from an illegal status is refused, not ignored. A
+Stage transition has no such table: it is refused only for Obsolete work.
 
 **Terminal status**:
 A status no job-side transition leaves: only the user's own request does, by starting a new Run or by
@@ -58,11 +61,6 @@ _Avoid_: complete (as a verb for this), check completion
 **Requeue**:
 The transition that starts a new Run for a Document, from a fresh upload or a reprocess alike.
 _Avoid_: start run, reset
-
-**Release**:
-The transition that returns a processing Stage nobody is working on to pending, keeping everything a finished Stage
-produced. Cancellation and Recovery both release.
-_Avoid_: reset (for this), clear
 
 **Cancellation**:
 The user's decision to stop a Document's work that has not started. Work already running finishes on its own but cannot

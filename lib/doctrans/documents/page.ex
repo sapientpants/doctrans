@@ -14,8 +14,10 @@ defmodule Doctrans.Documents.Page do
   - `completed` - Successfully completed
   - `error` - An error occurred
 
-  Neither is written here. Every stage status change is a named transition of
-  `Doctrans.Documents.PageLifecycle`; `changeset/2` does not cast them.
+  Neither is written here. Processing moves a stage only through a named
+  transition of `Doctrans.Documents.PageLifecycle`, and a reprocess returns it
+  to `pending` through `Doctrans.Documents.Pages.reset_page_for_reprocessing/1`;
+  `changeset/2` casts neither a stage status nor a stage's markdown or model.
   """
   use Doctrans.Schema
   import Ecto.Changeset

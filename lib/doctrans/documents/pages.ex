@@ -7,8 +7,10 @@ defmodule Doctrans.Documents.Pages do
   directly. The one exception is `embeddings_ready?/1`, which `Doctrans.Chat`
   reaches here because chat is its only consumer.
 
-  A page's stages are not written here: every stage status change is a named
-  transition of `Doctrans.Documents.PageLifecycle`.
+  Processing moves a page's stages only through the named transitions of
+  `Doctrans.Documents.PageLifecycle`. The one stage write here is
+  `reset_page_for_reprocessing/1`, which returns them to `pending` for a new
+  run.
   """
 
   import Ecto.Query

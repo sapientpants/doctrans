@@ -156,11 +156,8 @@ defmodule Doctrans.Fixtures do
   def page_fixture(document, attrs \\ %{}) do
     attrs = Enum.into(attrs, %{})
 
-    {extraction, attrs} =
-      pop_stage(attrs, :extraction_status, :original_markdown, :extraction_model)
-
-    {translation, attrs} =
-      pop_stage(attrs, :translation_status, :translated_markdown, :translation_model)
+    {extraction, attrs} = pop_stage(attrs, :extraction)
+    {translation, attrs} = pop_stage(attrs, :translation)
 
     {:ok, page} =
       Repo.transaction(fn ->
@@ -179,10 +176,11 @@ defmodule Doctrans.Fixtures do
     page
   end
 
-  defp pop_stage(attrs, status_key, markdown_key, model_key) do
-    {status, attrs} = Map.pop(attrs, status_key)
-    {markdown, attrs} = Map.pop(attrs, markdown_key)
-    {model, attrs} = Map.pop(attrs, model_key)
+  defp pop_stage(attrs, stage) do
+    fields = PageLifecycle.fields(stage)
+    {status, attrs} = Map.pop(attrs, fields.status)
+    {markdown, attrs} = Map.pop(attrs, fields.markdown)
+    {model, attrs} = Map.pop(attrs, fields.model)
     status = status || if(markdown != nil, do: "completed", else: "pending")
     {{status, markdown, model}, attrs}
   end
