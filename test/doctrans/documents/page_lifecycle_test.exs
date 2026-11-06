@@ -4,7 +4,7 @@ defmodule Doctrans.Documents.PageLifecycleTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Page, PageLifecycle, Topics}
+  alias Doctrans.Documents.{Chunk, Page, PageLifecycle, Topics}
   alias Doctrans.Repo
 
   setup do
@@ -33,7 +33,7 @@ defmodule Doctrans.Documents.PageLifecycleTest do
                  PageLifecycle.complete(page, stage, %{markdown: "# Text", model: "a-model"})
 
         assert Map.fetch!(done, fields.status) == "completed"
-        assert Map.fetch!(done, fields.markdown) == "# Text"
+        assert Map.fetch!(done, fields.product) == "# Text"
         assert Map.fetch!(done, fields.model) == "a-model"
         assert PageLifecycle.done?(done, stage)
         refute PageLifecycle.owed?(done, stage)
@@ -46,7 +46,7 @@ defmodule Doctrans.Documents.PageLifecycleTest do
       } do
         assert {:ok, done} = PageLifecycle.complete(page, stage, %{markdown: ""})
         assert Map.fetch!(done, fields.status) == "completed"
-        assert Map.fetch!(done, fields.markdown) == nil
+        assert Map.fetch!(done, fields.product) == nil
       end
 
       test "complete/3 keeps the model when the product does not name one", %{
@@ -77,9 +77,75 @@ defmodule Doctrans.Documents.PageLifecycleTest do
         {:ok, done} = PageLifecycle.complete(page, stage, %{markdown: "earlier"})
         assert {:ok, failed} = PageLifecycle.fail(done, stage)
         assert Map.fetch!(failed, fields.status) == "error"
-        assert Map.fetch!(failed, fields.markdown) == "earlier"
+        assert Map.fetch!(failed, fields.product) == "earlier"
         assert PageLifecycle.owed?(failed, stage)
       end
+    end
+  end
+
+  describe "embedding" do
+    test "begin/2, complete/3 and fail/2 move the stage with the vector as its product", %{
+      page: page
+    } do
+      assert {:ok, begun} = PageLifecycle.begin(page, :embedding)
+      assert begun.embedding_status == "processing"
+      assert PageLifecycle.owed?(begun, :embedding)
+
+      vector = fake_embedding()
+      assert {:ok, done} = PageLifecycle.complete(begun, :embedding, %{embedding: vector})
+      assert done.embedding_status == "completed"
+      assert Pgvector.to_list(done.embedding) == Pgvector.to_list(vector)
+      assert PageLifecycle.done?(done, :embedding)
+
+      assert {:ok, failed} = PageLifecycle.fail(done, :embedding)
+      assert failed.embedding_status == "error"
+      assert failed.embedding != nil
+    end
+
+    # A product without `:embedding` matches no clause, which the compiler's
+    # type checker reports at the call site, so there is no test for it here.
+    test "complete/3 takes a stated nil for a page with nothing to embed", %{page: page} do
+      assert {:ok, done} = PageLifecycle.complete(page, :embedding, %{embedding: nil})
+      assert done.embedding_status == "completed"
+      assert done.embedding == nil
+    end
+  end
+
+  describe "forget_index/1" do
+    test "deletes the chunks, drops the vector and returns the stage to pending", %{
+      document: document
+    } do
+      page = indexed_page_fixture(document, %{page_number: 2})
+      chunk = Repo.insert!(%Chunk{page_id: page.id, chunk_index: 0, content: "a chunk"})
+      Topics.subscribe_document(document.id)
+
+      assert {:ok, forgotten} = PageLifecycle.forget_index(page)
+      assert forgotten.embedding_status == "pending"
+      assert forgotten.embedding == nil
+      assert forgotten.content_revision == page.content_revision
+      assert forgotten.original_markdown == page.original_markdown
+      assert Repo.get(Chunk, chunk.id) == nil
+      assert_receive {:page_updated, %Page{embedding_status: "pending"}}
+    end
+
+    test "is fenced like every transition", %{page: page} do
+      {:ok, _} = PageLifecycle.complete(page, :extraction, %{markdown: "moved the revision"})
+      assert {:error, :obsolete_run} = PageLifecycle.forget_index(page)
+    end
+  end
+
+  describe "resume/2 for the embedding stage" do
+    test "returns a failed or interrupted index to pending and touches no content stage", %{
+      page: page
+    } do
+      {:ok, page} = PageLifecycle.complete(page, :extraction, %{markdown: "kept"})
+      {:ok, page} = PageLifecycle.fail(page, :translation)
+      {:ok, page} = PageLifecycle.fail(page, :embedding)
+
+      assert {:ok, resumed} = PageLifecycle.resume(page, [:embedding])
+      assert resumed.embedding_status == "pending"
+      assert resumed.translation_status == "error"
+      assert resumed.extraction_status == "completed"
     end
   end
 
@@ -187,16 +253,9 @@ defmodule Doctrans.Documents.PageLifecycleTest do
       page =
         completed_page_fixture(document, %{
           extraction_model: "old-vision",
-          translation_model: "old-text"
-        })
-
-      page =
-        page
-        |> Page.embedding_changeset(%{
-          embedding: Pgvector.new(List.duplicate(0.5, 1024)),
+          translation_model: "old-text",
           embedding_status: "completed"
         })
-        |> Repo.update!()
 
       assert page.embedding != nil
 
@@ -221,6 +280,14 @@ defmodule Doctrans.Documents.PageLifecycleTest do
       {:ok, failed} = PageLifecycle.fail(page, :extraction)
       assert {:ok, reset} = PageLifecycle.reset(failed)
       assert reset.extraction_status == "pending"
+    end
+
+    test "forgets the page's index with its content", %{document: document} do
+      page = indexed_page_fixture(document, %{page_number: 2})
+      chunk = Repo.insert!(%Chunk{page_id: page.id, chunk_index: 0, content: "a chunk"})
+
+      assert {:ok, _reset} = PageLifecycle.reset(page)
+      assert Repo.get(Chunk, chunk.id) == nil
     end
 
     test "records no requested model when none is chosen", %{page: page} do

@@ -4,8 +4,7 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Page, Topics}
-  alias Doctrans.Repo
+  alias Doctrans.Documents.PageLifecycle
   alias DoctransWeb.ErrorMessages
 
   @content "#processing-status-content"
@@ -14,9 +13,7 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
     document = document_fixture(%{status: "completed", total_pages: 1})
     page = completed_page_fixture(document)
 
-    page =
-      page |> Page.embedding_changeset(%{embedding_status: "error"}) |> Repo.update!()
-
+    {:ok, page} = PageLifecycle.fail(page, :embedding)
     {document, page}
   end
 
@@ -101,10 +98,8 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
       assert has_element?(view, "#retry-indexing")
 
-      indexed =
-        page |> Page.embedding_changeset(%{embedding_status: "completed"}) |> Repo.update!()
-
-      Topics.broadcast_page_updated(indexed)
+      # Completing the stage announces the page to the panel.
+      {:ok, _indexed} = PageLifecycle.complete(page, :embedding, %{embedding: fake_embedding()})
 
       # Observe the real timer-driven refresh, allowing scheduler delay without
       # making a fixed sleep part of every successful run.

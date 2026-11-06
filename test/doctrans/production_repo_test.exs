@@ -62,7 +62,7 @@ defmodule Doctrans.ProductionRepoTest do
                vector = Pgvector.new(List.duplicate(0.5, 1024))
 
                page
-               |> Page.embedding_changeset(%{embedding: vector, embedding_status: "completed"})
+               |> Ecto.Changeset.change(embedding: vector, embedding_status: "completed")
                |> Repo.update!()
 
                stored_page = Repo.get!(Page, page.id)

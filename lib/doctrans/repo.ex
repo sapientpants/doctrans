@@ -24,6 +24,19 @@ defmodule Doctrans.Repo do
   end
 
   @doc """
+  Unwraps a domain result inside a transaction: the value of `{:ok, value}`, or
+  a rollback carrying the reason of `{:error, reason}`, which the enclosing
+  `safe_transaction/1` then reports.
+
+  For a transition asked for under a lock the caller already holds, a refusal
+  is a rule the two disagree on; rolling it back reports it rather than hiding
+  it.
+  """
+  @spec or_rollback({:ok, value} | {:error, Doctrans.Errors.reason()}) :: value when value: var
+  def or_rollback({:ok, value}), do: value
+  def or_rollback({:error, reason}), do: rollback(reason)
+
+  @doc """
   Runs `fun` once the transaction in progress has committed, or right away when
   none is open.
 

@@ -50,7 +50,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   end
 
   defp requeue(document, opts) do
-    document = or_rollback(Lifecycle.requeue(document, Run.new_attrs(opts)))
+    document = Repo.or_rollback(Lifecycle.requeue(document, Run.new_attrs(opts)))
     _ = Run.enqueue(document, cleanup: true)
     document
   end
@@ -79,7 +79,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     ensure_offered!(document, :reprocess_page)
 
     updated = restart_page(current, document, Run.choices(opts))
-    {or_rollback(Lifecycle.resume(document)), updated}
+    {Repo.or_rollback(Lifecycle.resume(document)), updated}
   end
 
   @doc """
@@ -103,7 +103,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     pages = failed_pages(document_id)
     choices = Run.choices(opts)
     retried = Enum.map(pages, &restart_page(&1, document, choices))
-    {or_rollback(Lifecycle.resume(document)), retried}
+    {Repo.or_rollback(Lifecycle.resume(document)), retried}
   end
 
   defp failed_pages(document_id) do
@@ -119,7 +119,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   # conversation context would answer the next question from the content just
   # discarded. The document lock also serializes this with in-flight answers.
   defp restart_page(page, document, choices) do
-    updated = or_rollback(PageLifecycle.reset(page, choices))
+    updated = Repo.or_rollback(PageLifecycle.reset(page, choices))
     _ = purge_page_context(document.id, page.id)
 
     _ =
@@ -162,9 +162,4 @@ defmodule Doctrans.Processing.DocumentReprocessing do
            end),
            do: Repo.rollback(:invalid_model)
   end
-
-  # The eligibility check above ran under the same lock, so a refusal here is a
-  # rule the two disagree on; rolling it back reports it rather than hiding it.
-  defp or_rollback({:ok, document}), do: document
-  defp or_rollback({:error, reason}), do: Repo.rollback(reason)
 end

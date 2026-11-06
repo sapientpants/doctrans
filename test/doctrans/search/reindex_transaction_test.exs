@@ -42,10 +42,7 @@ defmodule Doctrans.Search.ReindexTransactionTest do
       Oban.Testing.with_testing_mode(:manual, fn ->
         [first, rejected, last] =
           for number <- 1..3 do
-            document
-            |> completed_page_fixture(%{page_number: number})
-            |> Ecto.Changeset.change(embedding_status: "error")
-            |> Repo.update!()
+            completed_page_fixture(document, %{page_number: number, embedding_status: "error"})
           end
 
         before = content_of([first, rejected, last])

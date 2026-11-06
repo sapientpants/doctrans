@@ -38,9 +38,9 @@ The set of statuses a Document can hold and the named transitions between them. 
 transitions; there is no generic "set status".
 
 **Page lifecycle**:
-The set of statuses a Page's extraction and translation Stages can hold and the named transitions between them. Every
-change to those Stages is one of those transitions, refused when the Page is Obsolete work; there is no generic "set
-stage status". The embedding Stage belongs to the index pipeline, not to it.
+The set of statuses a Page's three Stages can hold and the named transitions between them. Every change to a Stage is
+one of those transitions, refused when the Page is Obsolete work; there is no generic "set stage status". The index
+pipeline moves the embedding Stage through it like the content pipeline moves the other two.
 
 **Transition**:
 A named move of a Document from one status to another, or of a Page's Stage from one status to another. A Document
@@ -63,9 +63,16 @@ _Avoid_: start run, reset
 
 **Release**:
 The transition that returns a processing Stage nobody is working on to pending, keeping the verdict and the product
-of every other Stage. Cancellation releases; Recovery instead resumes a Page, returning every Stage not yet completed
-to pending.
+of every other Stage. Cancellation releases; Recovery and Reindexing instead resume a Page, returning each Stage the
+queued job will redo -- the content Stages for a recovered Page job, the embedding Stage for a re-queued indexing job
+-- to pending unless it completed.
 _Avoid_: reset (for this), clear
+
+**Forget index**:
+The transition that throws a Page's index away -- its Chunks, its page-level vector, its embedding Stage back to
+pending -- so the next indexing run starts from scratch instead of keeping every Chunk that already carries a vector.
+Rebuilding a Page's index forgets it first; a Reprocess forgets it along with the Page's content.
+_Avoid_: reset index, clear index
 
 **Cancellation**:
 The user's decision to stop a Document's work that has not started. Work already running finishes on its own but cannot

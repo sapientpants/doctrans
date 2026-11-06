@@ -7,6 +7,7 @@ defmodule Doctrans.Documents.Chunk do
   """
   use Doctrans.Schema
   import Ecto.Changeset
+  import Ecto.Query, only: [from: 2]
 
   @statuses ~w(pending processing completed error)
 
@@ -31,6 +32,13 @@ defmodule Doctrans.Documents.Chunk do
   end
 
   @type t :: %__MODULE__{}
+
+  @doc """
+  The chunks of one page, as a query: the one shape every bulk read or delete
+  of a page's chunks starts from.
+  """
+  @spec for_page(Ecto.UUID.t()) :: Ecto.Query.t()
+  def for_page(page_id), do: from(c in __MODULE__, where: c.page_id == ^page_id)
 
   @doc false
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
