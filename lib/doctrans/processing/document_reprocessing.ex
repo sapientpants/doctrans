@@ -3,7 +3,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   import Ecto.Query
   alias Doctrans.Chat.Session
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Lifecycle, ProcessingStatus, Topics}
+  alias Doctrans.Documents.{Lifecycle, PageLifecycle, ProcessingStatus}
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
@@ -64,40 +64,21 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     end
   end
 
+  # The reset announces the page itself once the transaction commits.
   defp reset_page(page, opts) do
-    result = Repo.safe_transaction(fn -> do_reset_page(page, opts) end)
-
-    case result do
-      {:ok, {_document, page}} ->
-        Topics.broadcast_page_updated(page)
-        {:ok, page}
-
-      error ->
-        error
+    case Repo.safe_transaction(fn -> do_reset_page(page, opts) end) do
+      {:ok, {_document, page}} -> {:ok, page}
+      error -> error
     end
   end
 
-  # The page's saved chunks are gone; leaving their text in the conversation
-  # context would answer the next question from the content just discarded.
-  # The document lock held here also serializes this with in-flight answers.
   defp do_reset_page(page, opts) do
     document = Run.lock(page.document_id) || Repo.rollback(:document_not_found)
     current = Documents.get_page(page.id) || Repo.rollback(:page_not_found)
     validate_models!(opts)
     ensure_offered!(document, :reprocess_page)
 
-    {:ok, reset} = Documents.reset_page_for_reprocessing(current)
-    _ = purge_page_context(document.id, current.id)
-
-    choices = Run.choices(opts)
-    updated = request_models(reset, choices)
-
-    _ =
-      page
-      |> page_job_args(updated, choices)
-      |> LlmProcessingJob.new(priority: 1)
-      |> Repo.insert_job!()
-
+    updated = restart_page(current, document, Run.choices(opts))
     {or_rollback(Lifecycle.resume(document)), updated}
   end
 
@@ -111,7 +92,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   @spec retry_failed_pages(Ecto.UUID.t(), keyword()) ::
           {:ok, non_neg_integer()} | {:error, Doctrans.Errors.reason()}
   def retry_failed_pages(document_id, opts \\ []) do
-    Repo.safe_transaction(fn -> do_retry_failed_pages(document_id, opts) end) |> publish_retried()
+    Repo.safe_transaction(fn -> do_retry_failed_pages(document_id, opts) end) |> count_retried()
   end
 
   defp do_retry_failed_pages(document_id, opts) do
@@ -121,7 +102,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
 
     pages = failed_pages(document_id)
     choices = Run.choices(opts)
-    retried = Enum.map(pages, &retry_page(&1, document, choices))
+    retried = Enum.map(pages, &restart_page(&1, document, choices))
     {or_rollback(Lifecycle.resume(document)), retried}
   end
 
@@ -132,13 +113,14 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     |> Repo.all()
   end
 
-  # The per-page half of `do_reset_page/2`, under the batch's single eligibility
-  # check. Purging the page's saved context is as required here as it is there:
-  # the chunks it quotes are discarded along with the content they described.
-  defp retry_page(page, document, choices) do
-    {:ok, reset} = Documents.reset_page_for_reprocessing(page)
+  # The per-page half of a reset and of a retry, under the caller's eligibility
+  # check and document lock: start the page over, drop its saved chat context,
+  # queue its run. The page's saved chunks are gone; leaving their text in the
+  # conversation context would answer the next question from the content just
+  # discarded. The document lock also serializes this with in-flight answers.
+  defp restart_page(page, document, choices) do
+    updated = or_rollback(PageLifecycle.reset(page, choices))
     _ = purge_page_context(document.id, page.id)
-    updated = request_models(reset, choices)
 
     _ =
       page
@@ -149,21 +131,10 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     updated
   end
 
-  defp publish_retried({:ok, {_document, pages}}) do
-    Enum.each(pages, &Topics.broadcast_page_updated/1)
-    {:ok, length(pages)}
-  end
-
-  defp publish_retried(error), do: error
-
-  defp request_models(page, choices) do
-    page
-    |> Ecto.Changeset.change(
-      requested_extraction_model: choices.extraction_model,
-      requested_translation_model: choices.translation_model
-    )
-    |> Repo.update!()
-  end
+  # Each reset announced its page as the transaction committed; only the count
+  # is left to report.
+  defp count_retried({:ok, {_document, pages}}), do: {:ok, length(pages)}
+  defp count_retried(error), do: error
 
   defp page_job_args(page, updated, choices) do
     LlmProcessingJob.page_args(

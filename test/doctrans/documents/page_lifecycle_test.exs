@@ -92,6 +92,159 @@ defmodule Doctrans.Documents.PageLifecycleTest do
     end
   end
 
+  describe "release/1" do
+    test "returns processing stages to pending and keeps everything else" do
+      document = document_fixture(%{status: "processing", total_pages: 4})
+      extracting = page_fixture(document, %{page_number: 1, extraction_status: "processing"})
+
+      translating =
+        page_fixture(document, %{
+          page_number: 2,
+          extraction_status: "completed",
+          original_markdown: "Extracted text",
+          translation_status: "processing"
+        })
+
+      failed = page_fixture(document, %{page_number: 3, extraction_status: "error"})
+      done = completed_page_fixture(document, %{page_number: 4})
+
+      assert {:ok, released} = PageLifecycle.release(document)
+      assert Enum.sort(Enum.map(released, & &1.id)) == Enum.sort([extracting.id, translating.id])
+
+      assert Documents.get_page!(extracting.id).extraction_status == "pending"
+
+      settled = Documents.get_page!(translating.id)
+      assert settled.translation_status == "pending"
+      assert settled.extraction_status == "completed"
+      assert settled.original_markdown == "Extracted text"
+
+      assert Documents.get_page!(failed.id).extraction_status == "error"
+
+      finished = Documents.get_page!(done.id)
+      assert finished.translation_status == "completed"
+      assert finished.translated_markdown == done.translated_markdown
+    end
+
+    test "announces each page it changed and none it did not" do
+      document = document_fixture(%{status: "processing", total_pages: 2})
+      changed = page_fixture(document, %{page_number: 1, extraction_status: "processing"})
+      _untouched = completed_page_fixture(document, %{page_number: 2})
+      Topics.subscribe_document(document.id)
+
+      assert {:ok, [_]} = PageLifecycle.release(document)
+      assert_receive {:page_updated, %Page{id: id, extraction_status: "pending"}}
+      assert id == changed.id
+      refute_receive {:page_updated, _}
+    end
+
+    test "refuses once the document's run moved under the caller" do
+      document = document_fixture(%{status: "processing", total_pages: 1})
+      page_fixture(document, %{extraction_status: "processing"})
+
+      document
+      |> Ecto.Changeset.change(processing_run_id: Uniq.UUID.uuid7())
+      |> Repo.update!()
+
+      assert {:error, :obsolete_run} = PageLifecycle.release(document)
+    end
+  end
+
+  describe "resume/1" do
+    test "returns a failed stage to pending", %{page: page} do
+      {:ok, failed} = PageLifecycle.fail(page, :translation)
+      assert {:ok, resumed} = PageLifecycle.resume(failed)
+      assert resumed.translation_status == "pending"
+    end
+
+    test "returns an interrupted stage to pending", %{page: page} do
+      {:ok, begun} = PageLifecycle.begin(page, :translation)
+      assert {:ok, resumed} = PageLifecycle.resume(begun)
+      assert resumed.translation_status == "pending"
+    end
+
+    test "keeps a completed stage and its product", %{page: page} do
+      {:ok, done} = PageLifecycle.complete(page, :extraction, %{markdown: "kept"})
+      assert {:ok, resumed} = PageLifecycle.resume(done)
+      assert resumed.extraction_status == "completed"
+      assert resumed.original_markdown == "kept"
+    end
+
+    test "reads the stages the page holds now, not the copy the caller read", %{page: page} do
+      {:ok, stale} = PageLifecycle.begin(page, :extraction)
+      {:ok, _} = PageLifecycle.complete(stale, :extraction, %{markdown: ""})
+
+      # The caller still holds the page as "processing"; the stage completed
+      # since, at the same revision (an empty product leaves it alone).
+      assert {:ok, resumed} = PageLifecycle.resume(stale)
+      assert resumed.extraction_status == "completed"
+    end
+  end
+
+  describe "reset/2" do
+    test "starts the page over under a new generation with the requested models" do
+      document = document_fixture(%{status: "completed", total_pages: 1})
+
+      page =
+        completed_page_fixture(document, %{
+          extraction_model: "old-vision",
+          translation_model: "old-text"
+        })
+
+      page =
+        page
+        |> Page.embedding_changeset(%{
+          embedding: Pgvector.new(List.duplicate(0.5, 1024)),
+          embedding_status: "completed"
+        })
+        |> Repo.update!()
+
+      assert page.embedding != nil
+
+      choices = %{extraction_model: "new-vision", translation_model: "new-text"}
+      assert {:ok, reset} = PageLifecycle.reset(page, choices)
+
+      assert reset.processing_generation != page.processing_generation
+      assert reset.content_revision > page.content_revision
+      assert reset.extraction_status == "pending"
+      assert reset.translation_status == "pending"
+      assert reset.embedding_status == "pending"
+      assert reset.original_markdown == nil
+      assert reset.translated_markdown == nil
+      assert reset.embedding == nil
+      assert reset.extraction_model == nil
+      assert reset.translation_model == nil
+      assert reset.requested_extraction_model == "new-vision"
+      assert reset.requested_translation_model == "new-text"
+    end
+
+    test "returns a failed stage to pending", %{page: page} do
+      {:ok, failed} = PageLifecycle.fail(page, :extraction)
+      assert {:ok, reset} = PageLifecycle.reset(failed)
+      assert reset.extraction_status == "pending"
+    end
+
+    test "records no requested model when none is chosen", %{page: page} do
+      assert {:ok, reset} = PageLifecycle.reset(page)
+      assert reset.requested_extraction_model == nil
+      assert reset.requested_translation_model == nil
+    end
+
+    test "announces the page like every transition", %{document: document, page: page} do
+      Topics.subscribe_document(document.id)
+      {:ok, _} = PageLifecycle.reset(page)
+      assert_receive {:page_updated, %Page{id: id}}
+      assert id == page.id
+    end
+
+    test "is fenced like every transition: the caller's copy is a generation behind", %{
+      page: page
+    } do
+      {:ok, moved} = PageLifecycle.reset(page)
+      assert {:error, :obsolete_run} = PageLifecycle.reset(page)
+      assert {:ok, _} = PageLifecycle.reset(moved)
+    end
+  end
+
   describe "the fence, once the page's generation moved under the caller" do
     setup %{page: page} do
       page

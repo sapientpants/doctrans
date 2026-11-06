@@ -14,10 +14,9 @@ defmodule Doctrans.Documents.Page do
   - `completed` - Successfully completed
   - `error` - An error occurred
 
-  Neither is written here. Processing moves a stage only through a named
-  transition of `Doctrans.Documents.PageLifecycle`, and a reprocess returns it
-  to `pending` through `Doctrans.Documents.Pages.reset_page_for_reprocessing/1`;
-  `changeset/2` casts neither a stage status nor a stage's markdown or model.
+  Neither is written here. Every stage status change is a named transition of
+  `Doctrans.Documents.PageLifecycle`; `changeset/2` casts neither a stage
+  status nor a stage's markdown or model.
   """
   use Doctrans.Schema
   import Ecto.Changeset
@@ -123,6 +122,28 @@ defmodule Doctrans.Documents.Page do
     ])
     |> validate_inclusion(:extraction_status, @statuses)
     |> validate_inclusion(:translation_status, @statuses)
+  end
+
+  # The one changeset that starts a page over: a new processing generation, no
+  # content, no models, every stage pending, the requested models recorded.
+  # Written with `change/2` because it sets fields no cast admits (the
+  # generation, the embedding). Only `Doctrans.Documents.PageLifecycle` calls it.
+  @doc false
+  @spec reset_changeset(t(), map()) :: Ecto.Changeset.t()
+  def reset_changeset(page, choices) do
+    change(page, %{
+      processing_generation: Uniq.UUID.uuid7(),
+      requested_extraction_model: Map.get(choices, :extraction_model),
+      requested_translation_model: Map.get(choices, :translation_model),
+      extraction_model: nil,
+      translation_model: nil,
+      original_markdown: nil,
+      translated_markdown: nil,
+      extraction_status: "pending",
+      translation_status: "pending",
+      embedding: nil,
+      embedding_status: "pending"
+    })
   end
 
   @doc """

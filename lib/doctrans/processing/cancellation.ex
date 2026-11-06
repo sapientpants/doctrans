@@ -19,17 +19,13 @@ defmodule Doctrans.Processing.Cancellation do
   the row and files go.
   """
 
-  import Ecto.Query
-
   require Logger
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Lifecycle, Page}
+  alias Doctrans.Documents.{Document, Lifecycle, PageLifecycle}
   alias Doctrans.Errors
   alias Doctrans.Processing.{JobQuery, Run}
   alias Doctrans.Repo
-
-  @clear_processing "CASE WHEN ? = 'processing' THEN 'pending' ELSE ? END"
 
   @doc """
   Cancels the document's queued work and marks the document `cancelled`.
@@ -61,27 +57,13 @@ defmodule Doctrans.Processing.Cancellation do
       {:error, reason} -> Repo.rollback(reason)
     end
 
-    reset_abandoned_stages(document.id)
-    cancelled
-  end
-
-  # The job that owned a `processing` stage is gone, so the stored value would
-  # show the viewer a spinner for work nobody is doing. Only the stage markers
-  # move: a stage that finished keeps everything it produced.
-  defp reset_abandoned_stages(document_id) do
-    from(p in Page,
-      where: p.document_id == ^document_id,
-      where: p.extraction_status == "processing" or p.translation_status == "processing",
-      update: [
-        set: [
-          extraction_status:
-            fragment(@clear_processing, p.extraction_status, p.extraction_status),
-          translation_status:
-            fragment(@clear_processing, p.translation_status, p.translation_status)
-        ]
-      ]
-    )
-    |> Repo.update_all([])
+    # The jobs that held stages `processing` are gone with the cancellation;
+    # the page lifecycle releases those stages so the viewer shows no spinner
+    # for work nobody is doing.
+    case PageLifecycle.release(cancelled) do
+      {:ok, _pages} -> cancelled
+      {:error, reason} -> Repo.rollback(reason)
+    end
   end
 
   @doc """
