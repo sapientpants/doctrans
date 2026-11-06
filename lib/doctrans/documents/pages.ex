@@ -6,12 +6,17 @@ defmodule Doctrans.Documents.Pages do
   so the page API has a single path; only this module's own tests name it
   directly. The one exception is `embeddings_ready?/1`, which `Doctrans.Chat`
   reaches here because chat is its only consumer.
+
+  Processing moves a page's stages only through the named transitions of
+  `Doctrans.Documents.PageLifecycle`. The one stage write here is
+  `reset_page_for_reprocessing/1`, which returns them to `pending` for a new
+  run.
   """
 
   import Ecto.Query
   import Doctrans.Documents.Page, only: [failed?: 1]
 
-  alias Doctrans.Documents.{Chunk, Document, Page, Revision}
+  alias Doctrans.Documents.{Chunk, Document, Page}
   alias Doctrans.Repo
 
   @doc """
@@ -109,34 +114,6 @@ defmodule Doctrans.Documents.Pages do
     |> Page.changeset(attrs)
     |> Repo.update()
     |> Doctrans.Errors.result()
-  end
-
-  @doc """
-  Updates extraction results for a page.
-  """
-  @spec update_page_extraction(Page.t(), map()) ::
-          {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
-  def update_page_extraction(%Page{} = page, attrs) do
-    Revision.with_page(page, fn current ->
-      current
-      |> Page.extraction_changeset(attrs)
-      |> Repo.update()
-      |> Doctrans.Errors.result()
-    end)
-  end
-
-  @doc """
-  Updates translation results for a page.
-  """
-  @spec update_page_translation(Page.t(), map()) ::
-          {:ok, Page.t()} | {:error, Doctrans.Errors.reason()}
-  def update_page_translation(%Page{} = page, attrs) do
-    Revision.with_page(page, fn current ->
-      current
-      |> Page.translation_changeset(attrs)
-      |> Repo.update()
-      |> Doctrans.Errors.result()
-    end)
   end
 
   @doc """

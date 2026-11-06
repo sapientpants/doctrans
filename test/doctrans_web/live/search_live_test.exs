@@ -3,7 +3,7 @@ defmodule DoctransWeb.SearchLiveTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Documents
+  alias Doctrans.Documents.PageLifecycle
 
   # Search runs off the LiveView process now, so assertions on results await it.
   @async_timeout 2_000
@@ -160,16 +160,10 @@ defmodule DoctransWeb.SearchLiveTest do
       page = page_fixture(doc, %{page_number: 7})
 
       {:ok, page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "LinkableContent unique"
-        })
+        PageLifecycle.complete(page, :extraction, %{markdown: "LinkableContent unique"})
 
       {:ok, _page} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "LinkableContent translated"
-        })
+        PageLifecycle.complete(page, :translation, %{markdown: "LinkableContent translated"})
 
       {:ok, view, _html} = live(conn, ~p"/search?q=LinkableContent")
 
@@ -292,10 +286,8 @@ defmodule DoctransWeb.SearchLiveTest do
       page = page_fixture(document, %{page_number: rank})
 
       {:ok, page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown:
-            String.duplicate("#{term} ", count + 1 - rank) <> "and some filler text"
+        PageLifecycle.complete(page, :extraction, %{
+          markdown: String.duplicate("#{term} ", count + 1 - rank) <> "and some filler text"
         })
 
       page

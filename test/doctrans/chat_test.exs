@@ -3,6 +3,7 @@ defmodule Doctrans.ChatTest do
 
   alias Doctrans.Chat
   alias Doctrans.Documents
+  alias Doctrans.Documents.PageLifecycle
 
   import Doctrans.Fixtures, only: [indexed_page_fixture: 1]
 
@@ -201,11 +202,7 @@ defmodule Doctrans.ChatTest do
       document = create_document(status: "completed")
 
       page =
-        create_page(document,
-          page_number: 1,
-          extraction_status: "completed",
-          original_markdown: "Assets are 10"
-        )
+        create_page(document, page_number: 1, original_markdown: "Assets are 10")
 
       %{document: document, page: page}
     end
@@ -230,10 +227,7 @@ defmodule Doctrans.ChatTest do
       assert Chat.current_context(context) == context
 
       {:ok, translated} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "Aktiva sind 10"
-        })
+        PageLifecycle.complete(page, :translation, %{markdown: "Aktiva sind 10"})
 
       assert translated.content_revision == page.content_revision
       assert Chat.current_context(context) == []
@@ -241,10 +235,7 @@ defmodule Doctrans.ChatTest do
 
     test "keeps page context carrying the page's current translation", %{page: page} do
       {:ok, translated} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "Aktiva sind 10"
-        })
+        PageLifecycle.complete(page, :translation, %{markdown: "Aktiva sind 10"})
 
       context = [
         chunk(page.id, nil, 0.9,
@@ -262,10 +253,7 @@ defmodule Doctrans.ChatTest do
       context = [chunk(page.id, 0, 0.9, content_revision: page.content_revision, content: nil)]
 
       {:ok, _translated} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "Aktiva sind 10"
-        })
+        PageLifecycle.complete(page, :translation, %{markdown: "Aktiva sind 10"})
 
       assert Chat.current_context(context) == context
     end
@@ -274,10 +262,7 @@ defmodule Doctrans.ChatTest do
     # translation rewritten at one revision also leaves saved context stale.
     test "drops page context holding a superseded translation", %{page: page} do
       {:ok, first} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "Aktiva sind 10"
-        })
+        PageLifecycle.complete(page, :translation, %{markdown: "Aktiva sind 10"})
 
       context = [
         chunk(page.id, nil, 0.9,
@@ -289,7 +274,7 @@ defmodule Doctrans.ChatTest do
       assert Chat.current_context(context) == context
 
       {:ok, second} =
-        Documents.update_page_translation(first, %{translated_markdown: "Assets are 10"})
+        PageLifecycle.complete(first, :translation, %{markdown: "Assets are 10"})
 
       assert second.content_revision == first.content_revision
       assert Chat.current_context(context) == []
@@ -311,11 +296,7 @@ defmodule Doctrans.ChatTest do
       document = create_document(status: "completed")
 
       page =
-        create_page(document,
-          page_number: 1,
-          extraction_status: "completed",
-          original_markdown: "Assets are 10"
-        )
+        create_page(document, page_number: 1, original_markdown: "Assets are 10")
 
       %{page: page}
     end
@@ -333,10 +314,7 @@ defmodule Doctrans.ChatTest do
       refute Chat.superseded_by?(untranslated, page)
 
       {:ok, translated} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "Aktiva sind 10"
-        })
+        PageLifecycle.complete(page, :translation, %{markdown: "Aktiva sind 10"})
 
       assert Chat.superseded_by?(untranslated, translated)
 
@@ -353,10 +331,7 @@ defmodule Doctrans.ChatTest do
       context = chunk(page.id, 0, 0.9, content_revision: page.content_revision, content: nil)
 
       {:ok, translated} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "Aktiva sind 10"
-        })
+        PageLifecycle.complete(page, :translation, %{markdown: "Aktiva sind 10"})
 
       refute Chat.superseded_by?(context, translated)
       assert Chat.superseded_by?(context, %{translated | content_revision: 99})
@@ -451,16 +426,25 @@ defmodule Doctrans.ChatTest do
     document
   end
 
+  # A page whose extraction, when `:original_markdown` is given, has completed
+  # through the lifecycle, so the row carries the content revision production
+  # would give it.
   defp create_page(document, opts) do
+    {markdown, opts} = Keyword.pop(opts, :original_markdown)
+
     attrs =
       Enum.into(opts, %{
         image_path: "documents/#{document.id}/pages/page_1.png",
-        extraction_status: "pending",
-        translation_status: "pending",
         embedding_status: "pending"
       })
 
     {:ok, page} = Documents.create_page(document, attrs)
-    page
+
+    if markdown do
+      {:ok, page} = PageLifecycle.complete(page, :extraction, %{markdown: markdown})
+      page
+    else
+      page
+    end
   end
 end

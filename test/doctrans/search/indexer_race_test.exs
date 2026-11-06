@@ -5,7 +5,7 @@ defmodule Doctrans.Search.IndexerRaceTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Chunk, Page}
+  alias Doctrans.Documents.{Chunk, Page, PageLifecycle}
   alias Doctrans.Search.{EmbeddingMocks, Indexer}
 
   import Doctrans.Fixtures
@@ -34,10 +34,7 @@ defmodule Doctrans.Search.IndexerRaceTest do
       assert reset.content_revision > page.content_revision
 
       {:ok, corrected} =
-        Documents.update_page_extraction(reset, %{
-          original_markdown: new_text,
-          extraction_status: "completed"
-        })
+        PageLifecycle.complete(reset, :extraction, %{markdown: new_text})
 
       assert corrected.content_revision > reset.content_revision
       assert page |> chunks_for() |> Repo.all() == []
@@ -46,10 +43,7 @@ defmodule Doctrans.Search.IndexerRaceTest do
       # Translation can finish before the obsolete run releases. Regenerated
       # chunks must still use only source content.
       {:ok, _translated} =
-        Documents.update_page_translation(corrected, %{
-          translated_markdown: translated_text,
-          translation_status: "completed"
-        })
+        PageLifecycle.complete(corrected, :translation, %{markdown: translated_text})
 
       # Installing the next barrier before releasing the obsolete run lets that run
       # finish: it embeds the old text, which no longer matches the barrier.

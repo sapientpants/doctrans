@@ -4,7 +4,7 @@ defmodule Doctrans.Documents.LifecycleTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Lifecycle, Topics}
+  alias Doctrans.Documents.{Document, Lifecycle, PageLifecycle, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.Run
 
@@ -303,16 +303,10 @@ defmodule Doctrans.Documents.LifecycleTest do
       assert :failed = Lifecycle.settle_unguarded(document.id)
 
       {:ok, failed} =
-        Documents.update_page_extraction(failed, %{
-          extraction_status: "completed",
-          original_markdown: "# Recovered"
-        })
+        PageLifecycle.complete(failed, :extraction, %{markdown: "# Recovered"})
 
       {:ok, _} =
-        Documents.update_page_translation(failed, %{
-          translation_status: "completed",
-          translated_markdown: "# Recovered translation"
-        })
+        PageLifecycle.complete(failed, :translation, %{markdown: "# Recovered translation"})
 
       assert :completed = Lifecycle.settle_unguarded(document.id)
 

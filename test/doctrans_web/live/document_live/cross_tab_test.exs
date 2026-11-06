@@ -26,7 +26,7 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Lifecycle, Topics}
+  alias Doctrans.Documents.{Document, Lifecycle, PageLifecycle, Topics}
   alias Doctrans.Repo
   alias Doctrans.Search.EmbeddingMocks
   alias DoctransWeb.DocumentLive.Index
@@ -132,18 +132,17 @@ defmodule DoctransWeb.DocumentLive.CrossTabTest do
 
       [page, second] = document.pages
 
-      {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "completed"})
-      Topics.broadcast_page_updated(page)
+      {:ok, page} = PageLifecycle.complete(page, :extraction, %{markdown: ""})
 
       assert has_element?(observer, "#{card} progress[value='25.0']")
       assert has_element?(observer, "#documents-#{untouched.id} progress[value='0.0']")
 
       # Settling is the one way to `completed`, and it announces itself.
-      {:ok, _page} = Documents.update_page_translation(page, %{translation_status: "completed"})
-      {:ok, second} = Documents.update_page_extraction(second, %{extraction_status: "completed"})
+      {:ok, _page} = PageLifecycle.complete(page, :translation, %{markdown: ""})
+      {:ok, second} = PageLifecycle.complete(second, :extraction, %{markdown: ""})
 
       {:ok, _second} =
-        Documents.update_page_translation(second, %{translation_status: "completed"})
+        PageLifecycle.complete(second, :translation, %{markdown: ""})
 
       assert :completed = Lifecycle.settle(document)
 

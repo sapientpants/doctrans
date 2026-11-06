@@ -2,7 +2,7 @@ defmodule Doctrans.DocumentsTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Layout, Summary}
+  alias Doctrans.Documents.{Document, Layout, PageLifecycle, Summary}
 
   import Doctrans.Fixtures
 
@@ -148,16 +148,10 @@ defmodule Doctrans.DocumentsTest do
 
       # Complete extraction and translation for first page
       {:ok, page1} =
-        Documents.update_page_extraction(page1, %{
-          extraction_status: "completed",
-          original_markdown: "test"
-        })
+        PageLifecycle.complete(page1, :extraction, %{markdown: "test"})
 
       {:ok, _page1} =
-        Documents.update_page_translation(page1, %{
-          translation_status: "completed",
-          translated_markdown: "test"
-        })
+        PageLifecycle.complete(page1, :translation, %{markdown: "test"})
 
       [result] = Documents.list_documents_with_progress()
       # 2 steps completed out of 4 total (2 pages * 2 steps each)

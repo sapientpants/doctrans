@@ -7,6 +7,7 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Layout
+  alias Doctrans.Documents.PageLifecycle
   alias Doctrans.Processing.{LlmProcessor, OpenAI, OpenAIMock}
   alias Doctrans.Resilience.ErrorClassifier
   alias Doctrans.TestEnv
@@ -65,10 +66,7 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
       page =
         if @stage == :translation do
           {:ok, page} =
-            Documents.update_page_extraction(context.page, %{
-              extraction_status: "completed",
-              original_markdown: "Verified source"
-            })
+            PageLifecycle.complete(context.page, :extraction, %{markdown: "Verified source"})
 
           page
         else

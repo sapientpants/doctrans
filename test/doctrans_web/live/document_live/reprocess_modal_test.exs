@@ -10,7 +10,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   import ExUnit.CaptureLog
 
   alias Doctrans.{Config, Documents, ProcessProbe}
-  alias Doctrans.Documents.{Layout, Topics}
+  alias Doctrans.Documents.{Layout, PageLifecycle, Topics}
   alias Doctrans.Processing.{OpenAIMock, Run}
   alias DoctransWeb.DocumentLive.ReprocessModal
   alias DoctransWeb.ErrorMessages
@@ -20,9 +20,13 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     stub_models(["vision", "translation", "alternative"])
 
     document = document_fixture(%{total_pages: 1, status: "completed"})
-    page = completed_page_fixture(document)
-    {:ok, page} = Documents.update_page_extraction(page, %{extraction_model: "vision"})
-    {:ok, page} = Documents.update_page_translation(page, %{translation_model: "translation"})
+
+    page =
+      completed_page_fixture(document, %{
+        extraction_model: "vision",
+        translation_model: "translation"
+      })
+
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
     view |> element("#show-reprocess") |> render_click()
@@ -80,7 +84,6 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
       stub_models(["available"])
 
       document = document_fixture(%{total_pages: 1, status: "completed"})
-      page = completed_page_fixture(document)
 
       models =
         Map.put(
@@ -89,10 +92,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
           "removed"
         )
 
-      {:ok, page} = Documents.update_page_extraction(page, Map.take(models, [:extraction_model]))
-
-      {:ok, _page} =
-        Documents.update_page_translation(page, Map.take(models, [:translation_model]))
+      page = completed_page_fixture(document, models)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
@@ -243,15 +243,11 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     Topics.broadcast_document_updated(retitled)
     assert has_element?(view, "header h1", "Still serving updates")
 
-    {:ok, page_two} =
+    {:ok, _page_two} =
       document.id
       |> Documents.get_page_by_number(2)
-      |> Documents.update_page_extraction(%{
-        extraction_status: "completed",
-        original_markdown: "# Progress arrived"
-      })
+      |> PageLifecycle.complete(:extraction, %{markdown: "# Progress arrived"})
 
-    Topics.broadcast_page_updated(page_two)
     render_click(view, "toggle_original")
     assert has_element?(view, ".markdown h1", "Progress arrived")
 

@@ -5,6 +5,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Layout
+  alias Doctrans.Documents.PageLifecycle
   alias Doctrans.Processing.LlmProcessor
 
   import Doctrans.Fixtures
@@ -33,10 +34,7 @@ defmodule Doctrans.Processing.LlmProcessorTest do
 
       # Mark extraction as completed
       {:ok, page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "# Test Content"
-        })
+        PageLifecycle.complete(page, :extraction, %{markdown: "# Test Content"})
 
       result = LlmProcessor.process_page(page.id)
 

@@ -2,6 +2,7 @@ defmodule Doctrans.Documents.PagesTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents.Page
+  alias Doctrans.Documents.PageLifecycle
   alias Doctrans.Documents.Pages
 
   import Doctrans.Fixtures
@@ -115,66 +116,15 @@ defmodule Doctrans.Documents.PagesTest do
       assert updated.image_path == "new/path.png"
     end
 
-    test "validates extraction_status" do
+    test "does not write a stage: that is a PageLifecycle transition" do
       doc = document_fixture()
       page = page_fixture(doc)
 
-      assert {:error, {:validation_failed, [changeset: changeset]}} =
-               Pages.update_page(page, %{extraction_status: "invalid"})
+      assert {:ok, updated} =
+               Pages.update_page(page, %{extraction_status: "completed", original_markdown: "x"})
 
-      assert %{extraction_status: ["is invalid"]} = errors_on(changeset)
-    end
-  end
-
-  describe "update_page_extraction/2" do
-    test "updates extraction status and original markdown" do
-      doc = document_fixture()
-      page = page_fixture(doc)
-
-      attrs = %{
-        extraction_status: "completed",
-        original_markdown: "# Test Content"
-      }
-
-      assert {:ok, updated} = Pages.update_page_extraction(page, attrs)
-      assert updated.extraction_status == "completed"
-      assert updated.original_markdown == "# Test Content"
-    end
-
-    test "validates extraction_status" do
-      doc = document_fixture()
-      page = page_fixture(doc)
-
-      assert {:error, {:validation_failed, [changeset: changeset]}} =
-               Pages.update_page_extraction(page, %{extraction_status: "invalid"})
-
-      assert %{extraction_status: ["is invalid"]} = errors_on(changeset)
-    end
-  end
-
-  describe "update_page_translation/2" do
-    test "updates translation status and translated markdown" do
-      doc = document_fixture()
-      page = page_fixture(doc)
-
-      attrs = %{
-        translation_status: "completed",
-        translated_markdown: "# Translated Content"
-      }
-
-      assert {:ok, updated} = Pages.update_page_translation(page, attrs)
-      assert updated.translation_status == "completed"
-      assert updated.translated_markdown == "# Translated Content"
-    end
-
-    test "validates translation_status" do
-      doc = document_fixture()
-      page = page_fixture(doc)
-
-      assert {:error, {:validation_failed, [changeset: changeset]}} =
-               Pages.update_page_translation(page, %{translation_status: "invalid"})
-
-      assert %{translation_status: ["is invalid"]} = errors_on(changeset)
+      assert updated.extraction_status == "pending"
+      assert updated.original_markdown == nil
     end
   end
 
@@ -250,12 +200,12 @@ defmodule Doctrans.Documents.PagesTest do
       assert Pages.completion_state(doc.id) == :failed
       assert Pages.failed_page_numbers(doc.id) == [1, 2]
 
-      {:ok, _} = Pages.update_page_translation(page, %{translation_status: "completed"})
+      {:ok, _} = PageLifecycle.complete(page, :translation, %{markdown: ""})
       assert Pages.completion_state(doc.id) == :failed
       assert Pages.failed_page_numbers(doc.id) == [1]
 
-      {:ok, failed} = Pages.update_page_extraction(failed, %{extraction_status: "completed"})
-      {:ok, _} = Pages.update_page_translation(failed, %{translation_status: "completed"})
+      {:ok, failed} = PageLifecycle.complete(failed, :extraction, %{markdown: ""})
+      {:ok, _} = PageLifecycle.complete(failed, :translation, %{markdown: ""})
       assert Pages.completion_state(doc.id) == :completed
     end
 
@@ -272,17 +222,15 @@ defmodule Doctrans.Documents.PagesTest do
 
       # First complete the page processing
       {:ok, page} =
-        Pages.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "# Test",
-          extraction_model: "recorded-extraction-model"
+        PageLifecycle.complete(page, :extraction, %{
+          markdown: "# Test",
+          model: "recorded-extraction-model"
         })
 
       {:ok, page} =
-        Pages.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "# Translated",
-          translation_model: "recorded-translation-model"
+        PageLifecycle.complete(page, :translation, %{
+          markdown: "# Translated",
+          model: "recorded-translation-model"
         })
 
       page =
@@ -320,7 +268,7 @@ defmodule Doctrans.Documents.PagesTest do
       doc = document_fixture()
       page = page_fixture(doc)
 
-      {:ok, page} = Pages.update_page_extraction(page, %{extraction_status: "error"})
+      {:ok, page} = PageLifecycle.fail(page, :extraction)
 
       {:ok, reset_page} = Pages.reset_page_for_reprocessing(page)
 

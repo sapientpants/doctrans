@@ -4,8 +4,7 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Documents
-  alias Doctrans.Documents.{Chunk, Page}
+  alias Doctrans.Documents.{Chunk, Page, PageLifecycle}
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Search.EmbeddingMocks
 
@@ -35,10 +34,7 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
         assert Repo.aggregate(Oban.Job, :count) == 1
 
         {:ok, rewritten} =
-          Documents.update_page_extraction(page, %{
-            original_markdown: "Rewritten text",
-            extraction_status: "completed"
-          })
+          PageLifecycle.complete(page, :extraction, %{markdown: "Rewritten text"})
 
         assert rewritten.content_revision > page.content_revision
         assert {:ok, next} = EmbeddingJob.enqueue_page(rewritten)
@@ -105,10 +101,7 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
       args = EmbeddingJob.page_args(page)
 
       {:ok, _rewritten} =
-        Documents.update_page_extraction(page, %{
-          original_markdown: "Current text",
-          extraction_status: "completed"
-        })
+        PageLifecycle.complete(page, :extraction, %{markdown: "Current text"})
 
       assert {:cancel, {:obsolete_revision, _}} = perform_job(EmbeddingJob, args)
 

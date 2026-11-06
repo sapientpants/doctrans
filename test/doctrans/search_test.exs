@@ -1,8 +1,8 @@
 defmodule Doctrans.SearchTest do
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.Documents
   alias Doctrans.Documents.Page
+  alias Doctrans.Documents.PageLifecycle
   alias Doctrans.Repo
   alias Doctrans.Search
   alias Doctrans.Search.EmbeddingMocks
@@ -35,9 +35,8 @@ defmodule Doctrans.SearchTest do
       page = page_fixture(document, %{page_number: 3})
 
       {:ok, page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "This is searchable content about cats and dogs"
+        PageLifecycle.complete(page, :extraction, %{
+          markdown: "This is searchable content about cats and dogs"
         })
 
       assert {:ok, %{results: [result]}} = Search.search_with_count("cats")
@@ -53,15 +52,11 @@ defmodule Doctrans.SearchTest do
       page = page_fixture(document, %{page_number: 2})
 
       {:ok, page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "Original content"
-        })
+        PageLifecycle.complete(page, :extraction, %{markdown: "Original content"})
 
       {:ok, page} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "Translated content about elephants"
+        PageLifecycle.complete(page, :translation, %{
+          markdown: "Translated content about elephants"
         })
 
       assert {:ok, %{results: [result]}} = Search.search_with_count("elephants")
@@ -75,15 +70,11 @@ defmodule Doctrans.SearchTest do
       page = page_fixture(document, %{page_number: 1})
 
       {:ok, page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "placeholder"
-        })
+        PageLifecycle.complete(page, :extraction, %{markdown: "placeholder"})
 
       {:ok, page} =
-        Documents.update_page_translation(page, %{
-          translation_status: "completed",
-          translated_markdown: "The runner was running fast through the field"
+        PageLifecycle.complete(page, :translation, %{
+          markdown: "The runner was running fast through the field"
         })
 
       # "run" should match "running" and "runner" due to English stemming
@@ -96,10 +87,7 @@ defmodule Doctrans.SearchTest do
       page = page_fixture(document, %{page_number: 5})
 
       {:ok, page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "Unique searchterm findme content"
-        })
+        PageLifecycle.complete(page, :extraction, %{markdown: "Unique searchterm findme content"})
 
       assert {:ok, %{results: [result]}} = Search.search_with_count("findme")
 
@@ -205,10 +193,7 @@ defmodule Doctrans.SearchTest do
       page = page_fixture(document, %{page_number: 1})
 
       {:ok, _page} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "Content with uniqueword99"
-        })
+        PageLifecycle.complete(page, :extraction, %{markdown: "Content with uniqueword99"})
 
       # Should not find anything because document status is "processing"
       assert {:ok, %{results: []}} = Search.search_with_count("uniqueword99")
@@ -238,8 +223,7 @@ defmodule Doctrans.SearchTest do
         assert result.page_id == completed.id
 
         # The same text/vector becomes eligible when only its stage changes.
-        assert {:ok, _} =
-                 Documents.update_page_extraction(pending, %{extraction_status: "completed"})
+        assert {:ok, _} = PageLifecycle.complete(pending, :extraction, %{markdown: text})
 
         assert {:ok, %{results: results}} = Search.search_with_count(query)
         assert Enum.sort(Enum.map(results, & &1.page_id)) == Enum.sort([completed.id, pending.id])
