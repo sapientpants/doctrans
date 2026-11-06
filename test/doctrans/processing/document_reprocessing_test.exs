@@ -132,7 +132,8 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       assert :ok = DocumentExtractionJob.perform(job)
       refute_received {:extracted_pdf_page, _}
       assert length(all_enqueued(worker: LlmProcessingJob)) == 3
-      assert :ok = RunCleanupJob.perform(%Oban.Job{args: Run.args(run)})
+      cleanup_args = %{"document_id" => run.id, "run_id" => run.processing_run_id}
+      assert :ok = RunCleanupJob.perform(%Oban.Job{args: cleanup_args})
       refute File.exists?(c.old_image)
       assert File.exists?(c.source)
       assert Enum.all?(pages, &File.regular?(Path.join(Layout.root(), &1.image_path)))

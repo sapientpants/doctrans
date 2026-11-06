@@ -7,7 +7,7 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
   alias Doctrans.Chat.Session
   alias Doctrans.Documents.{Document, Lifecycle, Page, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{DocumentReprocessing, Run}
+  alias Doctrans.Processing.DocumentReprocessing
 
   setup do
     document = document_fixture(%{status: "error", total_pages: 3})
@@ -148,7 +148,7 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
         {:ok, queued} =
           Lifecycle.requeue(
             context.document,
-            Run.new_attrs()
+            run_attrs_fixture()
           )
 
         {:ok, extracting} = Lifecycle.begin_extraction(queued)

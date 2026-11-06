@@ -6,7 +6,6 @@ defmodule Doctrans.Documents.LifecycleTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Lifecycle, PageLifecycle, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.Run
 
   @statuses ~w(uploading queued extracting processing completed error cancelled)
   @pre_processing ~w(uploading queued extracting)
@@ -29,7 +28,7 @@ defmodule Doctrans.Documents.LifecycleTest do
   defp run(:fail, document), do: Lifecycle.fail(document, :render_failed)
   defp run(:cancel, document), do: Lifecycle.cancel(document)
   defp run(:resume, document), do: Lifecycle.resume(document)
-  defp run(:requeue, document), do: Lifecycle.requeue(document, Run.new_attrs())
+  defp run(:requeue, document), do: Lifecycle.requeue(document, run_attrs_fixture())
 
   defp subscribed_document(status, attrs \\ %{}) do
     document = document_fixture(Map.merge(%{status: status, total_pages: 1}, attrs))
@@ -104,7 +103,7 @@ defmodule Doctrans.Documents.LifecycleTest do
 
     test "requeue/2 installs the new run and forgets the page count and diagnostic" do
       document = document_fixture(%{status: "error", total_pages: 3, error_message: "old"})
-      attrs = Run.new_attrs(extraction_model: "vision-x", translation_model: "text-y")
+      attrs = run_attrs_fixture(extraction_model: "vision-x", translation_model: "text-y")
 
       assert {:ok, queued} = Lifecycle.requeue(document, attrs)
       assert queued.processing_run_id == attrs.processing_run_id
@@ -118,7 +117,7 @@ defmodule Doctrans.Documents.LifecycleTest do
   describe "the run guard" do
     test "a document that has moved on to another run refuses every transition" do
       document = document_fixture(%{status: "error"})
-      {:ok, _requeued} = Lifecycle.requeue(document, Run.new_attrs())
+      {:ok, _requeued} = Lifecycle.requeue(document, run_attrs_fixture())
 
       # `document` still names the replaced run.
       assert {:error, :obsolete_run} = Lifecycle.begin_extraction(document)
@@ -126,7 +125,7 @@ defmodule Doctrans.Documents.LifecycleTest do
       assert {:error, :obsolete_run} = Lifecycle.fail(document, :late)
       assert {:error, :obsolete_run} = Lifecycle.cancel(document)
       assert {:error, :obsolete_run} = Lifecycle.resume(document)
-      assert {:error, :obsolete_run} = Lifecycle.requeue(document, Run.new_attrs())
+      assert {:error, :obsolete_run} = Lifecycle.requeue(document, run_attrs_fixture())
       assert {:error, :obsolete_run} = Lifecycle.settle(document)
     end
 

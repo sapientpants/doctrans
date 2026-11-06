@@ -7,7 +7,6 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Lifecycle
   alias Doctrans.Documents.PageLifecycle
-  alias Doctrans.Processing.Run
   alias Doctrans.Repo
   alias DoctransWeb.DocumentLive.ChatComponents
   alias DoctransWeb.DocumentLive.ChatSession
@@ -345,7 +344,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       # below reaches the socket.
       {:ok, {:ok, _requeued}} =
         Repo.transaction(fn ->
-          Lifecycle.requeue(document, Run.new_attrs())
+          Lifecycle.requeue(document, run_attrs_fixture())
         end)
 
       result = {:ok, {token, {:ok, "Stale answer", []}}}
