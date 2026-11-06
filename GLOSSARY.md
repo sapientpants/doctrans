@@ -13,7 +13,12 @@ An uploaded file being translated. It has exactly one status at a time, and that
 its pages.
 
 **Page**:
-One rendered page of a Document, with its own extraction and translation stages and an embedding status.
+One rendered page of a Document, with three Stages of its own: extraction, translation and embedding.
+
+**Stage**:
+One of a Page's three pieces of work, each with its own status: pending, processing, completed or failed. A Stage's
+status belongs to the Page, not to the Document.
+_Avoid_: step, phase (as a name for one of these)
 
 **Run**:
 One processing attempt of a whole Document. A newer Run makes work from an older Run obsolete.
@@ -32,6 +37,10 @@ A paragraph-bounded slice of a Page's original text, embedded for retrieval.
 The set of statuses a Document can hold and the named transitions between them. Every status change is one of those
 transitions; there is no generic "set status".
 
+**Page lifecycle**:
+The set of statuses a Page's Stages can hold and the named transitions between them. Every Stage status change is one
+of those transitions, refused when the Page is Obsolete work; there is no generic "set stage status".
+
 **Transition**:
 A named move of a Document from one status to another, legal only from specific starting statuses. A transition from an
 illegal status is refused, not ignored.
@@ -49,6 +58,11 @@ _Avoid_: complete (as a verb for this), check completion
 **Requeue**:
 The transition that starts a new Run for a Document, from a fresh upload or a reprocess alike.
 _Avoid_: start run, reset
+
+**Release**:
+The transition that returns a processing Stage nobody is working on to pending, keeping everything a finished Stage
+produced. Cancellation and Recovery both release.
+_Avoid_: reset (for this), clear
 
 **Cancellation**:
 The user's decision to stop a Document's work that has not started. Work already running finishes on its own but cannot

@@ -3,7 +3,7 @@ defmodule DoctransWeb.DocumentExportControllerTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Documents
+  alias Doctrans.Documents.PageLifecycle
 
   # The exported scaffolding is fixed English on purpose (see
   # `Doctrans.Documents.Export`), so these assertions name literal strings rather
@@ -23,18 +23,13 @@ defmodule DoctransWeb.DocumentExportControllerTest do
       })
 
     {:ok, page} =
-      Documents.update_page_extraction(page, %{
-        extraction_status: "completed",
-        extraction_model: "qwen3-vl:8b",
-        original_markdown: "Original page #{page_number}"
+      PageLifecycle.complete(page, :extraction, %{
+        markdown: "Original page #{page_number}",
+        model: "qwen3-vl:8b"
       })
 
     {:ok, page} =
-      Documents.update_page_translation(page, %{
-        translation_status: "completed",
-        translation_model: "qwen3:14b",
-        translated_markdown: markdown
-      })
+      PageLifecycle.complete(page, :translation, %{markdown: markdown, model: "qwen3:14b"})
 
     page
   end
@@ -47,10 +42,7 @@ defmodule DoctransWeb.DocumentExportControllerTest do
       })
 
     {:ok, page} =
-      Documents.update_page_extraction(page, %{
-        extraction_status: "completed",
-        original_markdown: "Original page #{page_number}"
-      })
+      PageLifecycle.complete(page, :extraction, %{markdown: "Original page #{page_number}"})
 
     page
   end
@@ -62,7 +54,7 @@ defmodule DoctransWeb.DocumentExportControllerTest do
         image_path: image_path(document, page_number)
       })
 
-    {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "error"})
+    {:ok, page} = PageLifecycle.fail(page, :extraction)
 
     page
   end

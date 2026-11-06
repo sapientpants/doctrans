@@ -4,7 +4,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   import Doctrans.Fixtures
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Chunk, Layout, Lifecycle, Page, ProcessingStatus}
+  alias Doctrans.Documents.{Chunk, Layout, Lifecycle, Page, PageLifecycle, ProcessingStatus}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
 
   alias Doctrans.Processing.{
@@ -134,16 +134,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
 
       for page <- Documents.list_pages(run.id) do
         {:ok, page} =
-          Documents.update_page_extraction(page, %{
-            extraction_status: "completed",
-            original_markdown: "New OCR"
-          })
+          PageLifecycle.complete(page, :extraction, %{markdown: "New OCR"})
 
         {:ok, _} =
-          Documents.update_page_translation(page, %{
-            translation_status: "completed",
-            translated_markdown: "New translation"
-          })
+          PageLifecycle.complete(page, :translation, %{markdown: "New translation"})
       end
 
       assert :completed = Lifecycle.settle_unguarded(run.id)
@@ -209,9 +203,8 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       page = Documents.get_page_by_number(run.id, 1)
 
       {:ok, _} =
-        Documents.update_page_extraction(page, %{
-          extraction_status: "completed",
-          original_markdown: "Extracted before rendering finished"
+        PageLifecycle.complete(page, :extraction, %{
+          markdown: "Extracted before rendering finished"
         })
 
       page_job =
@@ -235,10 +228,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       # Once the remaining jobs finish, the failed document can be restarted.
       for remaining <- Documents.list_pages(run.id), remaining.id != page.id do
         {:ok, remaining} =
-          Documents.update_page_extraction(remaining, %{extraction_status: "completed"})
+          PageLifecycle.complete(remaining, :extraction, %{markdown: ""})
 
         {:ok, _} =
-          Documents.update_page_translation(remaining, %{translation_status: "completed"})
+          PageLifecycle.complete(remaining, :translation, %{markdown: ""})
       end
 
       # Settled pages with a discarded failure are a terminal partial failure,
@@ -414,7 +407,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       assert {:error, :obsolete_run} = Lifecycle.begin_extraction(c.document)
 
       assert {:error, :obsolete_run} =
-               Documents.update_page_extraction(c.page, %{original_markdown: "late"})
+               PageLifecycle.complete(c.page, :extraction, %{markdown: "late"})
 
       assert :ok = DocumentExtractionJob.perform(%Oban.Job{args: %{"document_id" => run.id}})
       assert Documents.list_pages(run.id) == []
@@ -474,13 +467,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   end
 
   test "empty extracted text skips translation without inventing a model", c do
-    {:ok, page} =
-      Documents.update_page_extraction(c.page, %{
-        original_markdown: "",
-        extraction_status: "completed"
-      })
-
-    {:ok, page} = Documents.update_page_translation(page, %{translation_status: "pending"})
+    {:ok, page} = PageLifecycle.complete(c.page, :extraction, %{markdown: ""})
     assert :ok = LlmProcessingJob.perform(%Oban.Job{args: %{"page_id" => page.id}})
     page = Documents.get_page!(page.id)
     assert page.translation_status == "completed"

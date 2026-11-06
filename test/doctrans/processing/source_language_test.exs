@@ -21,6 +21,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Layout
+  alias Doctrans.Documents.PageLifecycle
   alias Doctrans.Processing.{LlmProcessor, OpenAIMock, OpenAIProbe, SourceLanguage}
   alias Doctrans.TestEnv
 
@@ -85,10 +86,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
       {:ok, _page} =
         page.id
         |> Documents.get_page!()
-        |> Documents.update_page_translation(%{
-          translation_status: "error",
-          translated_markdown: nil
-        })
+        |> PageLifecycle.fail(:translation)
 
       assert :ok = LlmProcessor.process_page(page.id)
 

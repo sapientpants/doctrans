@@ -3,16 +3,19 @@ defmodule Doctrans.Fixtures do
   Test fixtures for creating documents and pages.
 
   The page fixtures come in two kinds. `page_fixture/2`, `completed_page_fixture/2`
-  and `searchable_page_fixture/2` go through the `Documents` API, so they produce
-  what the pipeline would. `indexed_page_fixture/2` writes through `Repo`, because
-  that API takes no embedding and a page that search can rank needs one in the
-  same write as its text.
+  and `searchable_page_fixture/2` go through the `Documents` API and the real
+  transitions of `Doctrans.Documents.PageLifecycle`, so they produce what the
+  pipeline would; like `document_fixture/1` they walk inside a bare
+  `Repo.transaction/1`, which drops the announcements the transitions queue, so
+  no test receives a fixture's own broadcasts. `indexed_page_fixture/2` writes
+  through `Repo`, because the lifecycle takes no embedding yet and a page that
+  search can rank needs one in the same write as its text.
   """
 
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Layout, Lifecycle, Page}
+  alias Doctrans.Documents.{Document, Layout, Lifecycle, Page, PageLifecycle}
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.{OpenAIMock, PageContentStub, Run}
   alias Doctrans.Repo
@@ -140,19 +143,75 @@ defmodule Doctrans.Fixtures do
   end
 
   @doc """
-  Creates a page for a document.
+  Creates a page for a document, with its stages where `attrs` say.
+
+  `:extraction_status` and `:translation_status` are reached through the real
+  transitions of `Doctrans.Documents.PageLifecycle`, silently: `"processing"`
+  begins the stage, `"error"` fails it, and `"completed"` completes it with the
+  stage's markdown (`:original_markdown` or `:translated_markdown`, `""` when
+  not given) and model (`:extraction_model` or `:translation_model`). Markdown
+  given without a status completes the stage, since only completion produces
+  any. Everything else goes to the page row.
   """
   def page_fixture(document, attrs \\ %{}) do
+    attrs = Enum.into(attrs, %{})
+
+    {extraction, attrs} =
+      pop_stage(attrs, :extraction_status, :original_markdown, :extraction_model)
+
+    {translation, attrs} =
+      pop_stage(attrs, :translation_status, :translated_markdown, :translation_model)
+
     {:ok, page} =
-      Documents.create_page(
-        document,
-        Enum.into(attrs, %{
-          page_number: 1,
-          image_path: "documents/#{document.id}/pages/page_1.png"
-        })
-      )
+      Repo.transaction(fn ->
+        {:ok, page} =
+          Documents.create_page(
+            document,
+            Enum.into(attrs, %{
+              page_number: 1,
+              image_path: "documents/#{document.id}/pages/page_1.png"
+            })
+          )
+
+        page |> walk_stage(:extraction, extraction) |> walk_stage(:translation, translation)
+      end)
 
     page
+  end
+
+  defp pop_stage(attrs, status_key, markdown_key, model_key) do
+    {status, attrs} = Map.pop(attrs, status_key)
+    {markdown, attrs} = Map.pop(attrs, markdown_key)
+    {model, attrs} = Map.pop(attrs, model_key)
+    status = status || if(markdown != nil, do: "completed", else: "pending")
+    {{status, markdown, model}, attrs}
+  end
+
+  defp walk_stage(page, _stage, {"pending", nil, nil}), do: page
+
+  defp walk_stage(page, stage, {"processing", nil, nil}),
+    do: page |> PageLifecycle.begin(stage) |> transition()
+
+  defp walk_stage(page, stage, {"error", nil, nil}),
+    do: page |> PageLifecycle.fail(stage) |> transition()
+
+  # A stage that failed after an earlier attempt produced something: complete
+  # it with that product, then fail it, as a retried job would leave it.
+  defp walk_stage(page, stage, {"error", markdown, model}) do
+    page
+    |> walk_stage(stage, {"completed", markdown, model})
+    |> walk_stage(stage, {"error", nil, nil})
+  end
+
+  defp walk_stage(page, stage, {"completed", markdown, model}) do
+    page
+    |> PageLifecycle.complete(stage, %{markdown: markdown || "", model: model})
+    |> transition()
+  end
+
+  defp walk_stage(_page, stage, {status, markdown, _model}) do
+    raise ArgumentError,
+          "page_fixture: no transition leaves #{stage} #{inspect(status)} with #{inspect(markdown)}"
   end
 
   @doc """
@@ -207,13 +266,7 @@ defmodule Doctrans.Fixtures do
     {embedding, attrs} = Map.pop(attrs, :embedding)
     document = document_fixture(%{status: "completed", title: title})
 
-    {:ok, page} =
-      document
-      |> page_fixture(attrs)
-      |> Documents.update_page_extraction(%{
-        extraction_status: "completed",
-        original_markdown: text
-      })
+    page = page_fixture(document, Map.put(attrs, :original_markdown, text))
 
     if embedding do
       page |> Ecto.Changeset.change(embedding: embedding) |> Repo.update!()
@@ -300,23 +353,22 @@ defmodule Doctrans.Fixtures do
   end
 
   @doc """
-  Creates a completed page (extraction and translation done).
+  Creates a completed page (extraction and translation done) through the real
+  transitions, silently.
+
+  `attrs` go to the page row, except `:extraction_model` and
+  `:translation_model`, which are recorded as the models that completed the
+  two stages.
   """
   def completed_page_fixture(document, attrs \\ %{}) do
-    page = page_fixture(document, attrs)
-
-    {:ok, page} =
-      Documents.update_page_extraction(page, %{
+    page_fixture(
+      document,
+      Enum.into(attrs, %{
         extraction_status: "completed",
-        original_markdown: "# Original Content\n\nSome text here."
-      })
-
-    {:ok, page} =
-      Documents.update_page_translation(page, %{
+        original_markdown: "# Original Content\n\nSome text here.",
         translation_status: "completed",
         translated_markdown: "# Translated Content\n\nSome translated text."
       })
-
-    page
+    )
   end
 end

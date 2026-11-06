@@ -11,7 +11,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Topics}
+  alias Doctrans.Documents.{Layout, PageLifecycle, Topics}
 
   import Doctrans.Fixtures
 
@@ -20,7 +20,7 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     [first_page | _] = document.pages
 
     {:ok, _} =
-      Doctrans.Documents.update_page_extraction(first_page, %{extraction_status: "completed"})
+      PageLifecycle.complete(first_page, :extraction, %{markdown: ""})
 
     empty_document = document_fixture()
     {:ok, view, _html} = live(conn, ~p"/")
@@ -37,9 +37,9 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     document = document_with_pages_fixture(%{status: "error"}, 2)
     [failed, done] = document.pages
 
-    {:ok, _} = Documents.update_page_extraction(failed, %{extraction_status: "error"})
-    {:ok, done} = Documents.update_page_extraction(done, %{extraction_status: "completed"})
-    {:ok, _} = Documents.update_page_translation(done, %{translation_status: "completed"})
+    {:ok, _} = PageLifecycle.fail(failed, :extraction)
+    {:ok, done} = PageLifecycle.complete(done, :extraction, %{markdown: ""})
+    {:ok, _} = PageLifecycle.complete(done, :translation, %{markdown: ""})
 
     whole = document_fixture(%{status: "error", total_pages: 2})
 
@@ -82,18 +82,18 @@ defmodule DoctransWeb.DocumentLive.IndexTest do
     [page, last_page] = first.pages
 
     {:ok, page} =
-      Doctrans.Documents.update_page_extraction(page, %{extraction_status: "completed"})
+      PageLifecycle.complete(page, :extraction, %{markdown: ""})
 
     send(view.pid, {:page_updated, page})
     assert has_element?(view, "#documents-#{first.id} progress[value='25.0']")
 
     {:ok, last_page} =
-      Doctrans.Documents.update_page_extraction(last_page, %{extraction_status: "completed"})
+      PageLifecycle.complete(last_page, :extraction, %{markdown: ""})
 
     [other_page] = second.pages
 
     {:ok, other_page} =
-      Doctrans.Documents.update_page_extraction(other_page, %{extraction_status: "completed"})
+      PageLifecycle.complete(other_page, :extraction, %{markdown: ""})
 
     send(view.pid, {:page_updated, last_page})
     send(view.pid, {:page_updated, other_page})

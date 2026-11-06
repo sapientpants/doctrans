@@ -8,7 +8,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Topics}
+  alias Doctrans.Documents.{Layout, PageLifecycle, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.{LlmProcessor, OpenAIMock, OpenAIStub}
   alias Doctrans.Resilience.ErrorClassifier
@@ -134,10 +134,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       # Translation only runs on an extracted page, and pre-completing the stage
       # keeps the model calls under test to the translation ones.
       {:ok, page} =
-        Documents.update_page_extraction(context.page, %{
-          extraction_status: "completed",
-          original_markdown: "Source text"
-        })
+        PageLifecycle.complete(context.page, :extraction, %{markdown: "Source text"})
 
       %{page: page}
     end
@@ -239,10 +236,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
 
     test "a translation failure is reported under its own stage", context do
       {:ok, page} =
-        Documents.update_page_extraction(context.page, %{
-          extraction_status: "completed",
-          original_markdown: "Source text"
-        })
+        PageLifecycle.complete(context.page, :extraction, %{markdown: "Source text"})
 
       fail_translation(:timeout)
 

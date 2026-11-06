@@ -6,6 +6,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Documents.Lifecycle
+  alias Doctrans.Documents.PageLifecycle
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
   alias DoctransWeb.DocumentLive.ChatComponents
@@ -184,10 +185,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
         ])
 
       {:ok, translated} =
-        Documents.update_page_translation(untranslated, %{
-          translation_status: "completed",
-          translated_markdown: "Assets are 10"
-        })
+        PageLifecycle.complete(untranslated, :translation, %{markdown: "Assets are 10"})
 
       assert translated.content_revision == untranslated.content_revision
 
@@ -241,7 +239,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
         })
 
       {:ok, other} =
-        Documents.update_page_translation(
+        PageLifecycle.complete(
           Repo.insert!(%Doctrans.Documents.Page{
             document_id: document.id,
             page_number: 5,
@@ -250,7 +248,10 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
             extraction_status: "completed",
             translation_status: "processing"
           }),
-          %{translation_status: "completed", translated_markdown: "Assets are 20"}
+          :translation,
+          %{
+            markdown: "Assets are 20"
+          }
         )
 
       socket =

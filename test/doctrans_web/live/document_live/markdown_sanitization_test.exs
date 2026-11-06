@@ -33,6 +33,7 @@ defmodule DoctransWeb.DocumentLive.MarkdownSanitizationTest do
 
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
+  alias Doctrans.Documents.PageLifecycle
 
   # One payload for all three surfaces. The first block is HTML-native -- what
   # the unit tests already cover -- and the second is Markdown-native, which they
@@ -172,16 +173,10 @@ defmodule DoctransWeb.DocumentLive.MarkdownSanitizationTest do
     page = page_fixture(document, %{page_number: 1})
 
     {:ok, page} =
-      Documents.update_page_extraction(page, %{
-        extraction_status: "completed",
-        original_markdown: @payload
-      })
+      PageLifecycle.complete(page, :extraction, %{markdown: @payload})
 
     {:ok, _page} =
-      Documents.update_page_translation(page, %{
-        translation_status: "completed",
-        translated_markdown: @payload
-      })
+      PageLifecycle.complete(page, :translation, %{markdown: @payload})
 
     Documents.get_document_with_pages(document.id)
   end

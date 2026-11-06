@@ -13,6 +13,9 @@ defmodule Doctrans.Documents.Page do
   - `processing` - Currently being processed
   - `completed` - Successfully completed
   - `error` - An error occurred
+
+  Neither is written here. Every stage status change is a named transition of
+  `Doctrans.Documents.PageLifecycle`; `changeset/2` does not cast them.
   """
   use Doctrans.Schema
   import Ecto.Changeset
@@ -98,36 +101,25 @@ defmodule Doctrans.Documents.Page do
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(page, attrs) do
     page
+    |> cast(attrs, [:page_number, :image_path])
+    |> validate_required([:page_number])
+  end
+
+  # The one changeset that writes a stage: its status, its markdown and the
+  # model that produced it. Only `Doctrans.Documents.PageLifecycle` calls it.
+  @doc false
+  @spec stage_changeset(t(), map()) :: Ecto.Changeset.t()
+  def stage_changeset(page, attrs) do
+    page
     |> cast(attrs, [
-      :page_number,
-      :image_path,
+      :extraction_status,
+      :translation_status,
       :original_markdown,
       :translated_markdown,
-      :extraction_status,
-      :translation_status
+      :extraction_model,
+      :translation_model
     ])
-    |> validate_required([:page_number])
     |> validate_inclusion(:extraction_status, @statuses)
-    |> validate_inclusion(:translation_status, @statuses)
-  end
-
-  @doc """
-  Changeset for updating extraction results.
-  """
-  @spec extraction_changeset(t(), map()) :: Ecto.Changeset.t()
-  def extraction_changeset(page, attrs) do
-    page
-    |> cast(attrs, [:original_markdown, :extraction_status, :extraction_model])
-    |> validate_inclusion(:extraction_status, @statuses)
-  end
-
-  @doc """
-  Changeset for updating translation results.
-  """
-  @spec translation_changeset(t(), map()) :: Ecto.Changeset.t()
-  def translation_changeset(page, attrs) do
-    page
-    |> cast(attrs, [:translated_markdown, :translation_status, :translation_model])
     |> validate_inclusion(:translation_status, @statuses)
   end
 

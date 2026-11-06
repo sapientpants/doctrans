@@ -11,7 +11,7 @@ defmodule Doctrans.Processing.ExtractionTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Lifecycle, Topics}
+  alias Doctrans.Documents.{Layout, Lifecycle, PageLifecycle, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
   alias Doctrans.Processing.{Extraction, ResumablePdfExtractorStub, Run}
 
@@ -138,10 +138,7 @@ defmodule Doctrans.Processing.ExtractionTest do
         translating = page_fixture(document, %{page_number: 3})
 
         {:ok, translating} =
-          Documents.update_page_extraction(translating, %{
-            extraction_status: "completed",
-            original_markdown: "Already extracted"
-          })
+          PageLifecycle.complete(translating, :extraction, %{markdown: "Already extracted"})
 
         assert :ok = Extraction.run(document)
 
@@ -256,8 +253,8 @@ defmodule Doctrans.Processing.ExtractionTest do
   end
 
   defp complete_page(page) do
-    {:ok, page} = Documents.update_page_extraction(page, %{extraction_status: "completed"})
-    {:ok, _page} = Documents.update_page_translation(page, %{translation_status: "completed"})
+    {:ok, page} = PageLifecycle.complete(page, :extraction, %{markdown: ""})
+    {:ok, _page} = PageLifecycle.complete(page, :translation, %{markdown: ""})
   end
 
   defp processing_jobs do
