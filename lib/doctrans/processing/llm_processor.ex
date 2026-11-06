@@ -59,14 +59,20 @@ defmodule Doctrans.Processing.LlmProcessor do
         {:cancel, :page_not_found}
 
       page ->
-        if generation != :error && generation != {:ok, page.processing_generation} do
+        if current_generation?(page, generation) do
+          page |> do_process_page(opts) |> settle_obsolete_run(page)
+        else
           Logger.info("Page #{page_id} has moved on to a newer generation, skipping it")
           :ok
-        else
-          page |> do_process_page(opts) |> settle_obsolete_run(page)
         end
     end
   end
+
+  # A job that names no generation acts for whatever the page holds now.
+  defp current_generation?(_page, :error), do: true
+
+  defp current_generation?(page, {:ok, generation}),
+    do: Run.current?(page, generation: generation)
 
   # Every page write goes through `Run.with_page/2`, which answers
   # `{:error, :obsolete_run}` once the page has been reset, replaced or deleted

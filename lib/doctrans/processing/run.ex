@@ -2,10 +2,11 @@ defmodule Doctrans.Processing.Run do
   @moduledoc """
   Stored source paths, model choices, and whether a document's run is still live.
 
-  The transactional guards (`lock/1`, `current?/2`, `with_current/2`,
-  `with_page/2`) live in `Doctrans.Documents.Revision`, which owns the
-  revision columns they compare; they are delegated here so the processing
-  layer keeps one entry point for run concerns.
+  The fence (`lock/1`, `current?/2`, `with_current/2`, `with_page/2`) lives in
+  `Doctrans.Documents.Revision`, which owns the revision columns it compares.
+  It is delegated here so the Processing and Jobs contexts have one door for
+  run concerns: they name `Run`, and only `Run`, for it; the Documents, Chat
+  and Search contexts name `Revision` directly.
   """
   alias Doctrans.Config.OpenAI
   alias Doctrans.Documents.{Document, Formats, Layout, Page, Revision}
