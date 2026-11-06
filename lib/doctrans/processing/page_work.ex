@@ -2,9 +2,9 @@ defmodule Doctrans.Processing.PageWork do
   @moduledoc """
   One Page's content work, from the queue to the Settle of its Document.
 
-  A page job is queued from three places -- Extraction as each page is
-  rendered, Reprocessing when the user resets or retries pages, Recovery when
-  a boot finds pages still owed -- and the three used to agree only by
+  Page work is queued from three places -- Extraction as each page is
+  rendered, a Reprocess or Retry failed pages when the user asks, Recovery
+  when a boot finds pages still owed -- and the three used to agree only by
   restating the job's shape, priority and uniqueness semantics. `queue/3` is
   now the one statement of them: the caller says what kind of work this is,
   and the kind decides the rest.
@@ -17,7 +17,7 @@ defmodule Doctrans.Processing.PageWork do
 
   A recovered page was interrupted mid-stage, so once its job is queued the
   content stages that job will redo go back to `pending` through
-  `PageLifecycle.resume/2`: the page reads as queued, not as stuck or failed,
+  `PageLifecycle.resume/1`: the page reads as queued, not as stuck or failed,
   while its retry waits. A requested page needs no such step, because the
   reset that preceded it already returned every stage to `pending`.
 
@@ -27,7 +27,7 @@ defmodule Doctrans.Processing.PageWork do
   requested page carries them without the caller encoding them again.
 
   `queue/3` opens no transaction and takes no lock. Extraction queues under the
-  Run fence, Reprocessing and Recovery under the Document lock, and the job
+  Run fence, a Reprocess, a Retry and Recovery under the Document lock, and the job
   commits with whatever its caller's transaction commits. The generation the
   job carries is the one the Page holds as it is handed in, so the caller
   passes the Page it has just read or written.
@@ -39,6 +39,7 @@ defmodule Doctrans.Processing.PageWork do
   alias Doctrans.Errors
   alias Doctrans.Jobs.{Keys, LlmProcessingJob}
   alias Doctrans.Processing.Run
+  alias Doctrans.Repo
 
   @typedoc "Who is asking for the work, which decides how the job is queued."
   @type kind :: :fresh | :requested | :recovered
@@ -50,7 +51,7 @@ defmodule Doctrans.Processing.PageWork do
   - `:owned` -- an active job already holds this page; it is that job's to finish
   - `:not_owed` -- both content stages are complete, so there is nothing to queue
   """
-  @type queued :: {:ok, :queued | :owned | :not_owed} | {:error, Errors.reason()}
+  @type outcome :: {:ok, :queued | :owned | :not_owed} | {:error, Errors.reason()}
 
   @doc """
   Queues the Page's content work as the given `kind` of request.
@@ -60,7 +61,7 @@ defmodule Doctrans.Processing.PageWork do
   that means is the caller's to say -- Extraction carries on, a Reprocess
   refuses, Recovery leaves the page's stages to the job that owns them.
   """
-  @spec queue(Page.t(), Document.t(), as: kind()) :: queued()
+  @spec queue(Page.t(), Document.t(), as: kind()) :: outcome()
   def queue(%Page{} = page, %Document{} = document, as: kind)
       when kind in [:fresh, :requested, :recovered] do
     if owed?(page) do
@@ -69,10 +70,10 @@ defmodule Doctrans.Processing.PageWork do
       page
       |> args(document)
       |> LlmProcessingJob.new(options(kind))
-      |> Oban.insert()
+      |> Repo.insert_job()
       |> case do
-        {:ok, %Oban.Job{conflict?: true}} -> {:ok, :owned}
-        {:ok, %Oban.Job{}} -> queued(kind, page)
+        {:ok, %Oban.Job{}} -> follow_up(kind, page)
+        {:conflict, %Oban.Job{}} -> {:ok, :owned}
         {:error, _reason} = error -> Errors.result(error)
       end
     else
@@ -82,11 +83,11 @@ defmodule Doctrans.Processing.PageWork do
 
   # Queue first, then resume: uniqueness also covers a job queued since the
   # page was selected, and a job that already owns the page owns its stages.
-  defp queued(:recovered, page) do
+  defp follow_up(:recovered, page) do
     with {:ok, _resumed} <- PageLifecycle.resume(page), do: {:ok, :queued}
   end
 
-  defp queued(_kind, _page), do: {:ok, :queued}
+  defp follow_up(_kind, _page), do: {:ok, :queued}
 
   # A page is owed work until both of its content stages have completed; the
   # embedding stage is the index pipeline's and queued separately.

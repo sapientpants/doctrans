@@ -117,11 +117,7 @@ defmodule Doctrans.Processing.CancellationTest do
 
         # Executing when the user cancels, so cancellation leaves it to finish.
         executing =
-          insert_job(
-            LlmProcessingJob,
-            %{"page_id" => page.id, "generation" => page.processing_generation},
-            "executing"
-          )
+          insert_job(LlmProcessingJob, page_job_args(page), "executing")
 
         assert {:ok, _cancelled} = Cancellation.cancel_document(document.id)
         :ok = Topics.subscribe_document(document.id)
@@ -209,7 +205,9 @@ defmodule Doctrans.Processing.CancellationTest do
 
         assert [%{state: "cancelled"}, %{state: "cancelled"}] =
                  Repo.all(
-                   from(j in Oban.Job, where: j.worker == "Doctrans.Jobs.LlmProcessingJob")
+                   from(j in Oban.Job,
+                     where: j.worker == ^Oban.Worker.to_string(LlmProcessingJob)
+                   )
                  )
       end)
     end

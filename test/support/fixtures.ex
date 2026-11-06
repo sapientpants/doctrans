@@ -355,6 +355,16 @@ defmodule Doctrans.Fixtures do
   end
 
   @doc """
+  The arguments `Doctrans.Jobs.LlmProcessingJob.perform/1` needs for `page`,
+  for a test that performs or inserts the job by hand instead of queueing it
+  through `Doctrans.Processing.PageWork.queue/3`: the page and the generation
+  it holds now, with no models, so the attempt falls back to the defaults.
+  """
+  def page_job_args(page) do
+    %{"page_id" => page.id, "generation" => page.processing_generation}
+  end
+
+  @doc """
   Creates a completed page (extraction and translation done) through the real
   transitions, silently.
 

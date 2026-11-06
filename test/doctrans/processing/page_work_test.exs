@@ -3,9 +3,9 @@ defmodule Doctrans.Processing.PageWorkTest do
   `PageWork.queue/3` at its interface: the three kinds of request, what each
   writes to the queue, and the three answers a request can get.
 
-  The Oban rows are checked here and nowhere else: this is the one module that
-  writes them, so the tests of Extraction, Reprocessing and Recovery can assert
-  on its answer and on the page instead.
+  The Oban rows are checked here, where the one module that writes them is
+  under test, so the tests of Extraction, Reprocess and Recovery can assert on
+  its answer and on the page instead.
   """
   use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
