@@ -5,9 +5,9 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Chat.Session
-  alias Doctrans.Documents.{Document, Page, Topics}
+  alias Doctrans.Documents.{Document, Lifecycle, Page, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.DocumentReprocessing
+  alias Doctrans.Processing.{DocumentReprocessing, Run}
 
   setup do
     document = document_fixture(%{status: "error", total_pages: 3})
@@ -146,10 +146,13 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
 
     test "refuses while the run still owns the document", context do
       Oban.Testing.with_testing_mode(:manual, fn ->
-        {:ok, extracting} =
-          context.document
-          |> Ecto.Changeset.change(status: "extracting")
-          |> Repo.update()
+        {:ok, queued} =
+          Lifecycle.requeue(
+            context.document,
+            Run.new_attrs()
+          )
+
+        {:ok, extracting} = Lifecycle.begin_extraction(queued)
 
         assert {:error, :already_processing} =
                  DocumentReprocessing.retry_failed_pages(extracting.id)

@@ -219,7 +219,7 @@ defmodule Doctrans.DocumentsTest do
                Documents.create_document(%{})
     end
 
-    test "validates status is a valid value" do
+    test "ignores a status in the attrs; a new document is uploading" do
       attrs = %{
         title: "Test",
         original_filename: "test.pdf",
@@ -228,10 +228,10 @@ defmodule Doctrans.DocumentsTest do
         status: "invalid"
       }
 
-      assert {:error, {:validation_failed, [changeset: changeset]}} =
-               Documents.create_document(attrs)
-
-      assert %{status: ["is invalid"]} = errors_on(changeset)
+      # The status is the lifecycle's: a new row starts `uploading` whatever
+      # the caller sends.
+      assert {:ok, document} = Documents.create_document(attrs)
+      assert document.status == "uploading"
     end
   end
 
@@ -242,13 +242,14 @@ defmodule Doctrans.DocumentsTest do
       assert updated.title == "Updated Title"
     end
 
-    test "returns error changeset with invalid attrs" do
+    test "does not write the status or the diagnostic, which are the lifecycle's" do
       doc = document_fixture()
 
-      assert {:error, {:validation_failed, [changeset: changeset]}} =
-               Documents.update_document(doc, %{status: "invalid"})
+      assert {:ok, updated} =
+               Documents.update_document(doc, %{status: "completed", error_message: "x"})
 
-      assert %{status: ["is invalid"]} = errors_on(changeset)
+      assert updated.status == "uploading"
+      assert updated.error_message == nil
     end
 
     test "rejects a language the translation list does not offer" do

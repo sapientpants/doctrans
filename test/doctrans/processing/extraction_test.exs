@@ -218,7 +218,7 @@ defmodule Doctrans.Processing.ExtractionTest do
     # other document instead of a silent skip.
     test "a legacy document without a run extracts into the legacy pages directory" do
       Oban.Testing.with_testing_mode(:manual, fn ->
-        document = document_fixture(%{status: "queued"})
+        document = legacy_document_fixture(%{status: "queued"})
         document_source_fixture(document)
         assert document.processing_run_id == nil
         Topics.subscribe_document(document.id)

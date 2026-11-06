@@ -15,7 +15,11 @@ defmodule Doctrans.Documents.Document do
   - `cancelled` - processing was stopped by the user; the document can be reprocessed
 
   The transitions between them, and which are legal from where, are
-  `Doctrans.Documents.Lifecycle`'s; this schema only validates the column.
+  `Doctrans.Documents.Lifecycle`'s. `status` and the `error_message` diagnostic
+  are written through `status_changeset/3` alone, which only `Lifecycle` calls;
+  the general `changeset/2` does not cast them, so no other write can set a
+  status. `total_pages` is `Doctrans.Documents.set_total_pages/2`'s, for the
+  same reason.
   """
   use Doctrans.Schema
   import Ecto.Changeset
@@ -55,14 +59,10 @@ defmodule Doctrans.Documents.Document do
       :id,
       :title,
       :original_filename,
-      :total_pages,
-      :status,
       :target_language,
-      :source_language,
-      :error_message
+      :source_language
     ])
     |> validate_required([:title, :original_filename, :target_language])
-    |> validate_inclusion(:status, @statuses)
     # Both languages are checked here, on the update path as well as on create,
     # so a document can never hold a language the translation list does not
     # offer. A nil source language is "detect it" and passes untouched.

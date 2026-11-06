@@ -64,18 +64,6 @@ defmodule Doctrans.Processing.CancellationTest do
       end)
     end
 
-    test "clears the diagnostic the document carried" do
-      Oban.Testing.with_testing_mode(:manual, fn ->
-        document =
-          document_fixture(%{status: "processing", total_pages: 1, error_message: "page failed"})
-
-        assert Repo.get!(Document, document.id).error_message
-
-        assert {:ok, cancelled} = Cancellation.cancel_document(document)
-        assert cancelled.error_message == nil
-      end)
-    end
-
     test "returns the mid-flight page stages to pending without touching content" do
       Oban.Testing.with_testing_mode(:manual, fn ->
         document = document_fixture(%{status: "processing", total_pages: 3})

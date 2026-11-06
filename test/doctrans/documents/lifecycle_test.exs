@@ -192,7 +192,8 @@ defmodule Doctrans.Documents.LifecycleTest do
   describe "settle/1" do
     test "completes a document whose pages all succeeded, from any live status" do
       for status <- @in_flight ++ ~w(error) do
-        document = subscribed_document(status, %{error_message: "earlier"})
+        diagnostic = if status == "error", do: %{error_message: "earlier"}, else: %{}
+        document = subscribed_document(status, diagnostic)
         completed_page_fixture(document)
         id = document.id
 

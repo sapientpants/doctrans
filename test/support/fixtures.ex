@@ -12,28 +12,113 @@ defmodule Doctrans.Fixtures do
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Page}
+  alias Doctrans.Documents.{Document, Layout, Lifecycle, Page}
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.{OpenAIMock, PageContentStub, Run}
   alias Doctrans.Repo
   alias Doctrans.Search.Embedding
 
   @doc """
-  Creates a document with valid attributes.
+  Creates a document in `status`, reached the way production reaches it.
+
+  The row is created `uploading`, then walked through the real transitions of
+  `Doctrans.Documents.Lifecycle`: a run is requeued, extraction and processing
+  begin, and `error` or `cancelled` come from `fail/2` (with `error_message`
+  as the reason) or `cancel/1`. Every document past `uploading` therefore
+  holds a run. The walk happens inside one transaction, so the transitions
+  stay silent and no test receives the fixture's own broadcasts; `total_pages`
+  is applied after it, because requeueing clears the count.
+
+  `completed` is the one shortcut: settling needs pages, and callers create
+  their own, so the status is written through `Document.status_changeset/3`
+  (the changeset the lifecycle uses) after the walk reaches `processing`. A
+  test that needs a document settled for real uses
+  `processed_document_fixture/1`.
+
+  An `error_message` with any status but `error` raises: no transition leaves
+  a diagnostic on a document that is not failed.
   """
   def document_fixture(attrs \\ %{}) do
-    {:ok, document} =
-      attrs
-      |> Enum.into(%{
+    attrs =
+      Enum.into(attrs, %{
         title: "Test Document",
         original_filename: "test.pdf",
         target_language: "en",
-        source_language: "de",
-        status: "uploading"
+        source_language: "de"
       })
-      |> Documents.create_document()
+
+    {status, attrs} = Map.pop(attrs, :status, "uploading")
+    {error_message, attrs} = Map.pop(attrs, :error_message)
+    {total_pages, attrs} = Map.pop(attrs, :total_pages)
+
+    if error_message && status != "error" do
+      raise ArgumentError,
+            "a #{status} document cannot carry a diagnostic; only `fail/2` writes one"
+    end
+
+    {:ok, document} = Documents.create_document(attrs)
+
+    {:ok, document} =
+      Repo.transaction(fn ->
+        document
+        |> walk(status, error_message)
+        |> with_total_pages(total_pages)
+      end)
 
     document
+  end
+
+  @doc """
+  A row from before runs existed: a status past `uploading` with no run, which
+  no transition produces. Written structurally for exactly that reason, so a
+  test of the legacy branches says what it is testing.
+  """
+  def legacy_document_fixture(attrs \\ %{}) do
+    {status, attrs} = Map.pop(attrs, :status, "queued")
+    {error_message, attrs} = Map.pop(attrs, :error_message)
+    {total_pages, attrs} = Map.pop(attrs, :total_pages)
+
+    document = document_fixture(attrs)
+
+    document
+    |> Document.status_changeset(status, error_message)
+    |> Ecto.Changeset.change(total_pages: total_pages)
+    |> Repo.update!()
+  end
+
+  defp walk(document, "uploading", _reason), do: document
+
+  defp walk(document, "queued", _reason),
+    do: transition(Lifecycle.requeue(document, Run.new_attrs()))
+
+  defp walk(document, "extracting", _reason),
+    do: document |> walk("queued", nil) |> Lifecycle.begin_extraction() |> transition()
+
+  defp walk(document, "processing", _reason) do
+    :ok = document |> walk("extracting", nil) |> Lifecycle.begin_processing()
+    Documents.get_document!(document.id)
+  end
+
+  defp walk(document, "completed", _reason) do
+    document
+    |> walk("processing", nil)
+    |> Document.status_changeset("completed")
+    |> Repo.update!()
+  end
+
+  defp walk(document, "error", reason),
+    do: document |> walk("processing", nil) |> Lifecycle.fail(reason) |> transition()
+
+  defp walk(document, "cancelled", _reason),
+    do: document |> walk("processing", nil) |> Lifecycle.cancel() |> transition()
+
+  defp transition({:ok, document}), do: document
+
+  defp with_total_pages(document, nil), do: document
+
+  defp with_total_pages(document, total_pages) do
+    {:ok, counted} = Documents.set_total_pages(document, total_pages)
+    counted
   end
 
   @doc """
