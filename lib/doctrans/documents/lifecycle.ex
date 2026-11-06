@@ -4,8 +4,9 @@ defmodule Doctrans.Documents.Lifecycle do
   transitions between them.
 
   `Doctrans.Documents.ProcessingStatus` reads a document's state; this module
-  writes it. Nothing else sets `status`: the schema validates the column, and
-  every caller names a transition rather than a status string. A transition
+  writes it. Nothing else can set `status`: the schema's general changeset
+  does not cast it, and every caller names a transition rather than a status
+  string. A transition
   checks the status it starts from under the document lock, refuses an illegal
   move with a reason the caller can show or log, writes the new status and the
   `error_message` column in one update, and broadcasts `document_updated` once

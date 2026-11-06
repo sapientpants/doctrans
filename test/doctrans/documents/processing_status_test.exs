@@ -25,8 +25,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
   defp stage_index_job(page, opts),
     do: page |> EmbeddingJob.page_args() |> EmbeddingJob.new() |> stage(opts)
 
-  # `embedding_status` is outside every page changeset, and `cancelled` is not
-  # in the document changeset's inclusion list, so both are set structurally.
+  # `embedding_status` is outside every page changeset, so it is set structurally.
   defp force(record, attrs), do: record |> change(attrs) |> Repo.update!()
 
   defp indexed_page(document, page_number, embedding_status) do
@@ -65,7 +64,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
     end
 
     test "a cancelled document reports cancelled" do
-      document = document_fixture(%{status: "processing"}) |> force(%{status: "cancelled"})
+      document = document_fixture(%{status: "cancelled"})
 
       status = ProcessingStatus.for_document(document)
 

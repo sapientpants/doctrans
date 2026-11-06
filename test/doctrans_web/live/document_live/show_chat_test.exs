@@ -5,6 +5,8 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
+  alias Doctrans.Documents.Lifecycle
+  alias Doctrans.Processing.Run
   alias Doctrans.Repo
   alias DoctransWeb.DocumentLive.ChatComponents
   alias DoctransWeb.DocumentLive.ChatSession
@@ -337,9 +339,13 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
           chat_last_question: question.content
         )
 
-      document
-      |> Ecto.Changeset.change(processing_run_id: Ecto.UUID.generate())
-      |> Repo.update!()
+      # A fresh run replaces the one the turn was asked under; inside a
+      # transaction the transition stays silent, so only the stale result
+      # below reaches the socket.
+      {:ok, {:ok, _requeued}} =
+        Repo.transaction(fn ->
+          Lifecycle.requeue(document, Run.new_attrs())
+        end)
 
       result = {:ok, {token, {:ok, "Stale answer", []}}}
       {:noreply, updated} = Show.handle_async(:chat_turn, result, socket)

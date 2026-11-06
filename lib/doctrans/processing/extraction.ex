@@ -130,7 +130,7 @@ defmodule Doctrans.Processing.Extraction do
   # The page count is announced as soon as it is known, so the viewer can show
   # progress before the first page lands.
   defp set_total_pages(document, page_count) do
-    with {:ok, updated} <- Documents.update_document(document, %{total_pages: page_count}) do
+    with {:ok, updated} <- Documents.set_total_pages(document, page_count) do
       _ = Topics.broadcast_document_updated(updated)
       {:ok, updated}
     end

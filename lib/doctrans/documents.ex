@@ -210,7 +210,8 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
-  Updates a document.
+  Updates a document's own attributes: title, filename and languages. Its
+  status is `Lifecycle`'s and its page count is `set_total_pages/2`'s.
   """
   @spec update_document(Document.t(), map()) ::
           {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
@@ -218,6 +219,24 @@ defmodule Doctrans.Documents do
     Revision.with_current(document, fn current ->
       current
       |> Document.changeset(attrs)
+      |> Repo.update()
+      |> Doctrans.Errors.result()
+    end)
+  end
+
+  @doc """
+  Records the page count extraction found for the document's current run.
+
+  The one write to `total_pages` outside `Lifecycle.requeue/2`, which clears
+  it when a run starts; the general changeset does not cast it.
+  """
+  @spec set_total_pages(Document.t(), non_neg_integer()) ::
+          {:ok, Document.t()} | {:error, Doctrans.Errors.reason()}
+  def set_total_pages(%Document{} = document, total_pages)
+      when is_integer(total_pages) and total_pages >= 0 do
+    Revision.with_current(document, fn current ->
+      current
+      |> Ecto.Changeset.change(total_pages: total_pages)
       |> Repo.update()
       |> Doctrans.Errors.result()
     end)

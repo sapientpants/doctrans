@@ -157,19 +157,20 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     end)
   end
 
-  test "reprocessing resolves the persisted source extension after a metadata rename", c do
+  test "reprocessing resolves the persisted source extension after a metadata rename" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       # Enqueueing takes a fresh upload only.
-      {:ok, upload} = Documents.update_document(c.document, %{status: "uploading"})
-      assert {:ok, job} = DocumentExtractionJob.enqueue_document(upload.id, c.source)
+      upload = document_fixture(%{original_filename: "report.docx"})
+      source = document_source_fixture(upload, "original office bytes")
+      assert {:ok, job} = DocumentExtractionJob.enqueue_document(upload.id, source)
 
-      document = Documents.get_document!(c.document.id)
+      document = Documents.get_document!(upload.id)
       assert document.source_extension == ".docx"
 
       assert {:ok, document} =
                Documents.update_document(document, %{original_filename: "renamed.pdf"})
 
-      assert Run.source_path(document) == c.source
+      assert Run.source_path(document) == source
 
       # Enqueueing started a run; a reprocess needs it settled, so stop it.
       Repo.delete!(job)
@@ -379,7 +380,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
                DocumentReprocessing.reprocess_document(c.document.id)
 
       assert Documents.get_page!(c.page.id).original_markdown == "Old OCR"
-      assert Documents.get_document!(c.document.id).processing_run_id == nil
+
+      assert Documents.get_document!(c.document.id).processing_run_id ==
+               c.document.processing_run_id
+
       assert File.read!(c.source) == "original office bytes"
       refute_enqueued(worker: DocumentExtractionJob)
     end)
@@ -498,7 +502,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       assert page.extraction_model == "page-vision"
       assert page.translation_model == "page-text"
       assert page.translation_status == "completed"
-      assert Documents.get_document!(c.document.id).extraction_model == nil
+
+      assert Documents.get_document!(c.document.id).extraction_model ==
+               c.document.extraction_model
+
       # Metadata survives removal of its queue record.
       Repo.delete!(job)
       assert Repo.get!(Page, page.id).translation_model == "page-text"
