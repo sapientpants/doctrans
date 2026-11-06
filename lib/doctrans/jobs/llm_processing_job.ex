@@ -1,9 +1,11 @@
 defmodule Doctrans.Jobs.LlmProcessingJob do
   @moduledoc """
-  Job for processing individual pages through LLM pipeline.
+  The Oban side of a page's content work.
 
-  This job handles both extraction and translation of page content
-  using vision and text models.
+  `Doctrans.Processing.PageWork.queue/3` is the one place a job of this kind is
+  queued, and the one statement of the argument map `perform/1` destructures:
+  the page, its generation, and the models its run chose. Uniqueness on the
+  page keeps one job per page across every active state.
 
   The retry schedule is Oban's: `Doctrans.Processing.LlmProcessor` calls each
   model once per attempt and reports a transient failure as `{:error, _}` for
@@ -27,49 +29,6 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
   alias Doctrans.Processing.{LlmProcessor, Run}
 
   @page_id_key Keys.page_id()
-
-  @spec model_args(keyword()) :: %{String.t() => String.t()}
-  def model_args(opts) do
-    opts
-    |> Keyword.take([:extraction_model, :translation_model])
-    |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
-  end
-
-  @doc """
-  Builds the argument map `perform/1` destructures.
-
-  Stated here so that every enqueue site agrees with the consumer on the shape
-  and on the key names, rather than each restating them.
-  """
-  @spec page_args(Documents.Page.t(), integer() | nil, map()) :: map()
-  def page_args(page, generation, model_args) do
-    Map.merge(
-      %{
-        @page_id_key => page.id,
-        "page_number" => page.page_number,
-        "generation" => generation
-      },
-      model_args
-    )
-  end
-
-  @doc """
-  Queues a freshly extracted page for processing at the ordinary priority.
-
-  The page's own `processing_generation` is the guard a replayed job checks
-  against, so the caller passes the page it just read rather than an id. The
-  options are the run's model choices (`Run.model_opts/1`). Uniqueness on
-  `page_id` returns the job already queued for the page instead of a second one.
-  """
-  @spec enqueue_page(Documents.Page.t(), keyword()) ::
-          {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
-  def enqueue_page(%Documents.Page{} = page, opts \\ []) do
-    page
-    |> page_args(page.processing_generation, model_args(opts))
-    |> new(priority: 2)
-    |> Oban.insert()
-    |> Doctrans.Errors.result()
-  end
 
   @impl true
   def perform(%Oban.Job{args: %{@page_id_key => page_id} = args} = job) do

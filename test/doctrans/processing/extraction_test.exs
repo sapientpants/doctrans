@@ -13,7 +13,7 @@ defmodule Doctrans.Processing.ExtractionTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Layout, Lifecycle, PageLifecycle, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
-  alias Doctrans.Processing.{Extraction, ResumablePdfExtractorStub, Run}
+  alias Doctrans.Processing.{Extraction, PageWork, ResumablePdfExtractorStub, Run}
 
   import Doctrans.Fixtures
 
@@ -164,7 +164,8 @@ defmodule Doctrans.Processing.ExtractionTest do
       Oban.Testing.with_testing_mode(:manual, fn ->
         document = queued_document()
         page = page_fixture(document, %{extraction_status: "processing"})
-        {:ok, job} = LlmProcessingJob.enqueue_page(page)
+        assert {:ok, :queued} = PageWork.queue(page, document, as: :fresh)
+        [job] = processing_jobs()
         job |> Ecto.Changeset.change(state: "retryable", attempt: 1) |> Repo.update!()
 
         assert :ok = Extraction.run(document)

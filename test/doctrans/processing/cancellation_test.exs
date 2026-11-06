@@ -7,7 +7,7 @@ defmodule Doctrans.Processing.CancellationTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Layout, Lifecycle, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
-  alias Doctrans.Processing.{Cancellation, DocumentReprocessing, JobStates, OpenAIMock}
+  alias Doctrans.Processing.{Cancellation, DocumentReprocessing, JobStates, OpenAIMock, PageWork}
 
   describe "cancel_document/1" do
     test "cancels the queued jobs, leaves an executing one, and settles the document" do
@@ -117,11 +117,7 @@ defmodule Doctrans.Processing.CancellationTest do
 
         # Executing when the user cancels, so cancellation leaves it to finish.
         executing =
-          insert_job(
-            LlmProcessingJob,
-            LlmProcessingJob.page_args(page, page.processing_generation, %{}),
-            "executing"
-          )
+          insert_job(LlmProcessingJob, page_job_args(page), "executing")
 
         assert {:ok, _cancelled} = Cancellation.cancel_document(document.id)
         :ok = Topics.subscribe_document(document.id)
@@ -200,18 +196,19 @@ defmodule Doctrans.Processing.CancellationTest do
         assert :ok = Cancellation.cancel_jobs(document.id)
         assert Repo.get!(Oban.Job, extraction.id).state == "cancelled"
 
-        page = page_fixture(document)
-        {:ok, processing} = LlmProcessingJob.enqueue_page(page)
-
-        {:ok, reprocessing} =
-          page
-          |> LlmProcessingJob.page_args(page.processing_generation, %{"extraction_model" => "x"})
-          |> LlmProcessingJob.new(priority: 1)
-          |> Oban.insert()
+        fresh = page_fixture(document, %{page_number: 1})
+        retried = page_fixture(document, %{page_number: 2})
+        assert {:ok, :queued} = PageWork.queue(fresh, document, as: :fresh)
+        assert {:ok, :queued} = PageWork.queue(retried, document, as: :requested)
 
         assert :ok = Cancellation.cancel_jobs(document.id)
-        assert Repo.get!(Oban.Job, processing.id).state == "cancelled"
-        assert Repo.get!(Oban.Job, reprocessing.id).state == "cancelled"
+
+        assert [%{state: "cancelled"}, %{state: "cancelled"}] =
+                 Repo.all(
+                   from(j in Oban.Job,
+                     where: j.worker == ^Oban.Worker.to_string(LlmProcessingJob)
+                   )
+                 )
       end)
     end
 

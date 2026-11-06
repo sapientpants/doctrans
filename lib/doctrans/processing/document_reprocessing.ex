@@ -4,8 +4,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   alias Doctrans.Chat.Session
   alias Doctrans.Documents
   alias Doctrans.Documents.{Lifecycle, PageLifecycle, ProcessingStatus}
-  alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.Run
+  alias Doctrans.Processing.{PageWork, Run}
   alias Doctrans.Repo
 
   # Whether an action may run is `ProcessingStatus`'s answer, read again under
@@ -118,31 +117,25 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   # queue its run. The page's saved chunks are gone; leaving their text in the
   # conversation context would answer the next question from the content just
   # discarded. The document lock also serializes this with in-flight answers.
+  #
+  # The reset wrote the chosen models on the page, so the queued work carries
+  # them. A job that already owns the page is a run still in flight, which the
+  # eligibility check should have refused: the whole batch rolls back.
   defp restart_page(page, document, choices) do
     updated = Repo.or_rollback(PageLifecycle.reset(page, choices))
     _ = purge_page_context(document.id, page.id)
 
-    _ =
-      page
-      |> page_job_args(updated, choices)
-      |> LlmProcessingJob.new(priority: 1)
-      |> Repo.insert_job!()
-
-    updated
+    case PageWork.queue(updated, document, as: :requested) do
+      {:ok, :owned} -> Repo.rollback(:already_processing)
+      {:ok, _queued} -> updated
+      {:error, reason} -> Repo.rollback(reason)
+    end
   end
 
   # Each reset announced its page as the transaction committed; only the count
   # is left to report.
   defp count_retried({:ok, {_document, pages}}), do: {:ok, length(pages)}
   defp count_retried(error), do: error
-
-  defp page_job_args(page, updated, choices) do
-    LlmProcessingJob.page_args(
-      page,
-      updated.processing_generation,
-      LlmProcessingJob.model_args(Map.to_list(choices))
-    )
-  end
 
   defp purge_page_context(document_id, page_id) do
     from(s in Session, where: s.document_id == ^document_id, lock: "FOR UPDATE")

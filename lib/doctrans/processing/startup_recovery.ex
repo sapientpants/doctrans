@@ -13,9 +13,9 @@ defmodule Doctrans.Processing.StartupRecovery do
   import Doctrans.Documents.Lifecycle, only: [awaiting_pages?: 1, processing?: 1]
   import Doctrans.Documents.Page, only: [settled?: 1]
 
-  alias Doctrans.Documents.{Document, Lifecycle, Page, PageLifecycle}
+  alias Doctrans.Documents.{Document, Lifecycle, Page}
   alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, LlmProcessingJob}
-  alias Doctrans.Processing.{JobQuery, Run}
+  alias Doctrans.Processing.{JobQuery, PageWork, Run}
   alias Doctrans.Repo
 
   @batch_size 50
@@ -268,38 +268,22 @@ defmodule Doctrans.Processing.StartupRecovery do
 
     case {document, page} do
       {%Document{} = document, %Page{} = page} ->
-        if processing?(document), do: maybe_recover_page(page, document), else: :ok
+        if processing?(document), do: recover_owed_page(page, document), else: :ok
 
       _ ->
         :ok
     end
   end
 
-  defp maybe_recover_page(page, document) do
-    done? = PageLifecycle.done?(page, :extraction) and PageLifecycle.done?(page, :translation)
-
-    if done?, do: :ok, else: recover_owed_page(page, document)
-  end
-
+  # Recovered work queues the job and resumes the page's interrupted stages;
+  # a page an active job already owns, or one re-read under the lock with both
+  # stages complete, is left as it is. The fence cannot refuse the resume:
+  # `recover_page/1` locked this row in this transaction, so nothing has moved
+  # its revision or generation since.
   defp recover_owed_page(page, document) do
-    # Insert before resuming the page: uniqueness also covers jobs queued since
-    # candidate selection. A conflicting job owns this page's processing state.
-    job =
-      page
-      |> LlmProcessingJob.page_args(
-        page.processing_generation,
-        Run.page_model_args(page, document)
-      )
-      |> LlmProcessingJob.new(priority: 2, meta: %{recovered: true})
-      |> Oban.insert!()
-
-    if job.conflict? do
-      :ok
-    else
-      # The fence cannot refuse: `recover_page/1` locked this row in this
-      # transaction, so nothing has moved its revision or generation since.
-      {:ok, _resumed} = PageLifecycle.resume(page)
-      :ok
+    case PageWork.queue(page, document, as: :recovered) do
+      {:ok, _queued_owned_or_not_owed} -> :ok
+      {:error, reason} -> Repo.rollback(reason)
     end
   end
 

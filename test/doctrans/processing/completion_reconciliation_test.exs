@@ -50,11 +50,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
     test "a replayed Oban job completes the document" do
       {document, [_first, last]} = interrupted_document([{1, :completed}, {2, :completed}])
 
-      assert perform_job(
-               LlmProcessingJob,
-               LlmProcessingJob.page_args(last, last.processing_generation, %{})
-             ) ==
-               :ok
+      assert perform_job(LlmProcessingJob, page_job_args(last)) == :ok
 
       assert Documents.get_document!(document.id).status == "completed"
     end

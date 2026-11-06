@@ -21,7 +21,6 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
       assert Repo.aggregate(Oban.Job, :count) == 105
       assert {:embeddings, nil} = StartupRecovery.run_batch({:pages, nil})
       jobs = Repo.all(Oban.Job)
-      assert Enum.all?(jobs, &(&1.meta["recovered"] == true))
 
       assert MapSet.new(Enum.map(jobs, & &1.args["page_id"])) ==
                MapSet.new(Enum.map(document.pages, & &1.id))

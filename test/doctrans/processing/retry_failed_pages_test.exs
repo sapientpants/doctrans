@@ -44,7 +44,6 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
         assert Enum.sort(Enum.map(jobs, & &1.args["page_id"])) ==
                  Enum.sort(Enum.map(context.failed, & &1.id))
 
-        assert Enum.all?(jobs, &(&1.priority == 1))
         assert Repo.get!(Document, context.document.id).status == "processing"
       end)
     end

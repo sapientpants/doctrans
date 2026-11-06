@@ -353,8 +353,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   end
 
   defp perform_page_job(page, opts) do
-    args = LlmProcessingJob.page_args(page, page.processing_generation, %{})
-    perform_job(LlmProcessingJob, args, opts)
+    perform_job(LlmProcessingJob, page_job_args(page), opts)
   end
 
   # Answers the extraction only after resetting the page, the way a reprocess
