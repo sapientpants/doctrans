@@ -267,7 +267,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
                  generation: stale_generation
                )
 
-      {:ok, reset} = Documents.reset_page_for_reprocessing(Documents.get_page!(context.page.id))
+      {:ok, reset} = PageLifecycle.reset(Documents.get_page!(context.page.id))
       recover(:extract_markdown)
 
       # The replayed attempt belongs to the generation the reset superseded, and
@@ -361,7 +361,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   # requested from another tab lands while the model is still working.
   defp reset_page_during_extraction(page) do
     stub_extraction(fn _image, _opts ->
-      {:ok, _reset} = Documents.reset_page_for_reprocessing(Documents.get_page!(page.id))
+      {:ok, _reset} = PageLifecycle.reset(Documents.get_page!(page.id))
       {:ok, "# Markdown from the superseded run"}
     end)
   end

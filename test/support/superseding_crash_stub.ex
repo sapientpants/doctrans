@@ -17,6 +17,7 @@ defmodule Doctrans.Processing.SupersedingCrashStub do
   import Mox
 
   alias Doctrans.Documents
+  alias Doctrans.Documents.PageLifecycle
   alias Doctrans.Processing.OpenAIMock
 
   @doc """
@@ -38,7 +39,7 @@ defmodule Doctrans.Processing.SupersedingCrashStub do
   # correct typing of a correct function.
   @dialyzer {:nowarn_function, supersede_then_crash: 2}
   defp supersede_then_crash(page_id, stage) do
-    {:ok, _page} = page_id |> Documents.get_page!() |> Documents.reset_page_for_reprocessing()
+    {:ok, _page} = page_id |> Documents.get_page!() |> PageLifecycle.reset()
     raise "#{stage} crashed after the page was superseded"
   end
 end

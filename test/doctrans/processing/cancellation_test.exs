@@ -64,35 +64,18 @@ defmodule Doctrans.Processing.CancellationTest do
       end)
     end
 
-    test "returns the mid-flight page stages to pending without touching content" do
+    # What a release keeps and what it moves is `PageLifecycle.release/1`'s rule,
+    # tested there; this asserts only that cancelling releases.
+    test "releases the mid-flight page stages" do
       Oban.Testing.with_testing_mode(:manual, fn ->
-        document = document_fixture(%{status: "processing", total_pages: 3})
-
+        document = document_fixture(%{status: "processing", total_pages: 2})
         extracting = page_fixture(document, %{page_number: 1, extraction_status: "processing"})
-
-        translating =
-          page_fixture(document, %{
-            page_number: 2,
-            extraction_status: "completed",
-            translation_status: "processing",
-            original_markdown: "Extracted text"
-          })
-
-        done = completed_page_fixture(document, %{page_number: 3})
+        failed = page_fixture(document, %{page_number: 2, extraction_status: "error"})
 
         assert {:ok, _cancelled} = Cancellation.cancel_document(document.id)
 
         assert Repo.get!(Page, extracting.id).extraction_status == "pending"
-
-        settled = Repo.get!(Page, translating.id)
-        assert settled.translation_status == "pending"
-        # The finished stage keeps its verdict and its output.
-        assert settled.extraction_status == "completed"
-        assert settled.original_markdown == "Extracted text"
-
-        finished = Repo.get!(Page, done.id)
-        assert finished.translation_status == "completed"
-        assert finished.translated_markdown == done.translated_markdown
+        assert Repo.get!(Page, failed.id).extraction_status == "error"
       end)
     end
 

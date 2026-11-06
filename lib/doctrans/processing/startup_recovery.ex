@@ -13,7 +13,7 @@ defmodule Doctrans.Processing.StartupRecovery do
   import Doctrans.Documents.Lifecycle, only: [awaiting_pages?: 1, processing?: 1]
   import Doctrans.Documents.Page, only: [settled?: 1]
 
-  alias Doctrans.Documents.{Document, Lifecycle, Page, Topics}
+  alias Doctrans.Documents.{Document, Lifecycle, Page, PageLifecycle}
   alias Doctrans.Jobs.{DocumentExtractionJob, EmbeddingJob, LlmProcessingJob}
   alias Doctrans.Processing.{JobQuery, Run}
   alias Doctrans.Repo
@@ -79,14 +79,11 @@ defmodule Doctrans.Processing.StartupRecovery do
       |> without_active_job(LlmProcessingJob)
       |> fetch_batch(after_id)
 
-    pages =
-      Repo.transact(fn ->
-        pages = Enum.flat_map(rows, &recover_page/1)
-        {:ok, pages}
-      end)
-      |> unwrap!()
+    # A safe transaction, not a bare one: the pages resumed below announce
+    # themselves once this batch commits, and only `safe_transaction/1`
+    # delivers what they queue.
+    Repo.safe_transaction(fn -> Enum.each(rows, &recover_page/1) end) |> unwrap!()
 
-    Enum.each(pages, &Topics.broadcast_page_updated/1)
     next_cursor(rows, :pages, {:embeddings, nil})
   end
 
@@ -271,21 +268,21 @@ defmodule Doctrans.Processing.StartupRecovery do
 
     case {document, page} do
       {%Document{} = document, %Page{} = page} ->
-        if processing?(document), do: maybe_recover_page(page, document), else: []
+        if processing?(document), do: maybe_recover_page(page, document), else: :ok
 
       _ ->
-        []
+        :ok
     end
   end
 
-  defp maybe_recover_page(
-         %Page{extraction_status: "completed", translation_status: "completed"},
-         _document
-       ),
-       do: []
-
   defp maybe_recover_page(page, document) do
-    # Insert before changing statuses: uniqueness also covers jobs queued since
+    done? = PageLifecycle.done?(page, :extraction) and PageLifecycle.done?(page, :translation)
+
+    if done?, do: :ok, else: recover_owed_page(page, document)
+  end
+
+  defp recover_owed_page(page, document) do
+    # Insert before resuming the page: uniqueness also covers jobs queued since
     # candidate selection. A conflicting job owns this page's processing state.
     job =
       page
@@ -297,19 +294,12 @@ defmodule Doctrans.Processing.StartupRecovery do
       |> Oban.insert!()
 
     if job.conflict? do
-      []
+      :ok
     else
-      changes = %{
-        extraction_status: recovered_status(page.extraction_status),
-        translation_status: recovered_status(page.translation_status)
-      }
-
-      [page |> Ecto.Changeset.change(changes) |> Repo.update!()]
+      {:ok, _resumed} = PageLifecycle.resume(page)
+      :ok
     end
   end
-
-  defp recovered_status("completed"), do: "completed"
-  defp recovered_status(_status), do: "pending"
 
   defp next_cursor(rows, phase, _fallback) when length(rows) == @batch_size,
     do: {phase, List.last(rows).id}

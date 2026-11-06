@@ -4,7 +4,6 @@ defmodule Doctrans.Search.IndexerRaceTest do
   # embedding stub without a shared sandbox or a global stub.
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.Documents
   alias Doctrans.Documents.{Chunk, Page, PageLifecycle}
   alias Doctrans.Search.{EmbeddingMocks, Indexer}
 
@@ -30,7 +29,7 @@ defmodule Doctrans.Search.IndexerRaceTest do
         assert_receive {:embedding_started, ^old_barrier, ^old_task}, 5_000
       end
 
-      {:ok, reset} = Documents.reset_page_for_reprocessing(page)
+      {:ok, reset} = PageLifecycle.reset(page)
       assert reset.content_revision > page.content_revision
 
       {:ok, corrected} =

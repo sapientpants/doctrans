@@ -216,7 +216,7 @@ defmodule Doctrans.ChatTest do
     test "drops chunks whose page has been reprocessed since retrieval", %{page: page} do
       context = [chunk(page.id, 0, 0.9, content_revision: page.content_revision)]
 
-      {:ok, _reset} = Documents.reset_page_for_reprocessing(page)
+      {:ok, _reset} = PageLifecycle.reset(page)
 
       assert Chat.current_context(context) == []
     end

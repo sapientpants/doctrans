@@ -151,7 +151,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
           context_chunk(other, "Unrelated")
         ])
 
-      {:ok, corrected} = Documents.reset_page_for_reprocessing(page)
+      {:ok, corrected} = PageLifecycle.reset(page)
       refute corrected.content_revision == page.content_revision
 
       {:noreply, updated} = Show.handle_info({:page_updated, corrected}, socket)
@@ -289,7 +289,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
         |> Phoenix.Component.assign(:chat_last_question, question.content)
 
       # The page is corrected while this answer is still generating.
-      {:ok, _corrected} = Documents.reset_page_for_reprocessing(page)
+      {:ok, _corrected} = PageLifecycle.reset(page)
 
       assert {:ok, answered} = ChatSession.put_response(socket, "Assets are 10", context)
 

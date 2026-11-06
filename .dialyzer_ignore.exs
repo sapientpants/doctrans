@@ -58,12 +58,12 @@
   #   is the scenario under test, so "no local return" is the correct typing of a correct
   #   closure. An anonymous function cannot carry `@dialyzer`, hence the register, and
   #   with no attribute alternative there is the least to re-decide, so it comes due last.
-  {"test/support/superseding_crash_stub.ex", :no_return, 26},
+  {"test/support/superseding_crash_stub.ex", :no_return, 27},
 
   # owner: @sapientpants
   # expires: 2027-03-31
   # upstream: none
   # rationale: See the entry above — the closure installed for `translate/4` is the
   #   second one of the superseding stub, re-decided together with it.
-  {"test/support/superseding_crash_stub.ex", :no_return, 30}
+  {"test/support/superseding_crash_stub.ex", :no_return, 31}
 ]
