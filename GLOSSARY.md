@@ -49,6 +49,12 @@ Page goes ahead of fresh ones. A Page already being worked on is owned by that w
 Page whose content Stages are both completed owes none.
 _Avoid_: page job, processing job (as a name for the work rather than its queue entry)
 
+**Attempt**:
+One run of a Page's work: the content Stages the Page still owes, each one model call, and the Settle of its Document
+whenever the outcome is final. The queue entry makes one Attempt each time it is performed; its last Attempt settles
+the Document on any failure, an earlier one only on a failure that retrying cannot fix.
+_Avoid_: run (reserved for the Document's), process page
+
 **Transition**:
 A named move of a Document from one status to another, or of a Page's Stage from one status to another. A Document
 transition is legal only from specific starting statuses, and one from an illegal status is refused, not ignored. A

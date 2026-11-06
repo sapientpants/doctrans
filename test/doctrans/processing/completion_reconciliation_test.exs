@@ -11,7 +11,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Lifecycle, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{LlmProcessor, OpenAICrashStub, OpenAIMock, StartupRecovery}
+  alias Doctrans.Processing.{OpenAICrashStub, OpenAIMock, PageWork, StartupRecovery}
 
   # The state a crash between the last page write and the document update
   # leaves behind: every page saved, the document still "processing".
@@ -37,7 +37,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
     test "a replay whose stages are all saved completes the document" do
       {document, [_first, last]} = interrupted_document([{1, :completed}, {2, :completed}])
 
-      assert LlmProcessor.process_page(last.id,
+      assert PageWork.attempt(last.id,
                generation: last.processing_generation
              ) == :ok
 
@@ -59,7 +59,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
       {document, [_failed, last]} =
         interrupted_document([{1, %{extraction_status: "error"}}, {2, :completed}])
 
-      assert LlmProcessor.process_page(last.id,
+      assert PageWork.attempt(last.id,
                generation: last.processing_generation
              ) == :ok
 
@@ -71,7 +71,7 @@ defmodule Doctrans.Processing.CompletionReconciliationTest do
     test "a replay leaves a document with outstanding work processing" do
       {document, [saved, _pending]} = interrupted_document([{1, :completed}, {2, %{}}])
 
-      assert LlmProcessor.process_page(saved.id,
+      assert PageWork.attempt(saved.id,
                generation: saved.processing_generation
              ) == :ok
 

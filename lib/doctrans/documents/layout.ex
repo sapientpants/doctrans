@@ -10,7 +10,7 @@ defmodule Doctrans.Documents.Layout do
       documents/<document-id>/pages/                  page images from before runs existed
 
   Writers (`Doctrans.Documents.Intake`, `Doctrans.Processing.Extraction`),
-  readers (`Doctrans.Processing.LlmProcessor`), cleanup
+  readers (`Doctrans.Processing.PageWork`), cleanup
   (`Doctrans.Jobs.RunCleanupJob`, `Doctrans.Documents.Sweeper`) and the restore
   check (`Doctrans.Backup`) all build paths through this module, so the layout is
   spelled out once. Page image filenames are deliberately not modelled here:

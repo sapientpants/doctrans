@@ -8,7 +8,7 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Layout
   alias Doctrans.Documents.PageLifecycle
-  alias Doctrans.Processing.{LlmProcessor, OpenAI, OpenAIMock}
+  alias Doctrans.Processing.{OpenAI, OpenAIMock, PageWork}
   alias Doctrans.Resilience.ErrorClassifier
   alias Doctrans.TestEnv
   alias DoctransWeb.ErrorMessages
@@ -81,7 +81,7 @@ defmodule Doctrans.Processing.IncompleteOutputTest do
 
       # Replaying the request would buy the same truncated output again, so the
       # run tells the job to stop rather than to retry.
-      assert {:cancel, {stage_error, bindings}} = LlmProcessor.process_page(page.id)
+      assert {:cancel, {stage_error, bindings}} = PageWork.attempt(page.id)
 
       assert stage_error ==
                if(@stage == :extraction,

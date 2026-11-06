@@ -1,4 +1,4 @@
-defmodule Doctrans.Processing.LlmProcessorRetryTest do
+defmodule Doctrans.Processing.PageWorkRetryTest do
   # `async: false`: the retry telemetry and the `[:oban, :job, :stop]` event
   # this file listens to are VM-global, so a concurrent test's retries and job
   # completions would reach the handlers attached here.
@@ -10,10 +10,10 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Layout, PageLifecycle, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{LlmProcessor, OpenAIMock, OpenAIStub}
+  alias Doctrans.Processing.{OpenAIMock, OpenAIStub, PageWork}
   alias Doctrans.Resilience.ErrorClassifier
 
-  # The processor owns no retry loop: a stage calls the model once per run and
+  # The attempt owns no retry loop: a stage calls the model once per run and
   # reports the failure for the job to schedule, so a page costs at most one
   # model call per Oban attempt.
   @max_attempts Ecto.Changeset.get_field(LlmProcessingJob.new(%{}), :max_attempts)
@@ -39,7 +39,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       fail_extraction(:timeout)
 
       assert {:error, {:page_extraction_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id)
+               PageWork.attempt(context.page.id)
 
       assert bindings[:page_number] == context.page.page_number
       assert bindings[:reason] == :timeout
@@ -67,10 +67,10 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
 
     test "the next attempt resumes the errored stage and completes the page", context do
       fail_extraction(:timeout)
-      assert {:error, _} = LlmProcessor.process_page(context.page.id)
+      assert {:error, _} = PageWork.attempt(context.page.id)
       recover(:extract_markdown)
 
-      assert :ok = LlmProcessor.process_page(context.page.id)
+      assert :ok = PageWork.attempt(context.page.id)
 
       # The attempt that ran after the failure is the one whose markdown lands
       # on the page.
@@ -93,7 +93,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       fail_extraction(reason)
 
       assert {:cancel, {:page_extraction_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id)
+               PageWork.attempt(context.page.id)
 
       assert bindings[:page_number] == context.page.page_number
       assert bindings[:reason] == reason
@@ -110,7 +110,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       fail_extraction(reason)
 
       assert {:error, {:page_extraction_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id)
+               PageWork.attempt(context.page.id)
 
       assert bindings[:reason] == reason
       assert Documents.get_page!(context.page.id).extraction_status == "error"
@@ -122,7 +122,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       # The breaker closes on its own; the backoff before the next attempt is
       # the wait for it, which is why this is a retry and not a cancel.
       assert {:error, {:page_extraction_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id)
+               PageWork.attempt(context.page.id)
 
       assert bindings[:reason] == :circuit_open
       assert_calls(extract_markdown: 1)
@@ -143,7 +143,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       fail_translation(:timeout)
 
       assert {:error, {:page_translation_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id)
+               PageWork.attempt(context.page.id)
 
       assert bindings[:page_number] == context.page.page_number
       assert bindings[:reason] == :timeout
@@ -166,10 +166,10 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
     test "the next attempt resumes at translation without paying for the image again",
          context do
       fail_translation(:timeout)
-      assert {:error, _} = LlmProcessor.process_page(context.page.id)
+      assert {:error, _} = PageWork.attempt(context.page.id)
       recover(:translate)
 
-      assert :ok = LlmProcessor.process_page(context.page.id)
+      assert :ok = PageWork.attempt(context.page.id)
 
       # The retry repeats the same request: the source text and the document's
       # target language both survive into the attempt that succeeds.
@@ -190,7 +190,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       fail_translation(reason)
 
       assert {:cancel, {:page_translation_failed, bindings}} =
-               LlmProcessor.process_page(context.page.id)
+               PageWork.attempt(context.page.id)
 
       assert bindings[:reason] == reason
       assert_calls(translate: 1)
@@ -202,7 +202,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   end
 
   # The job is the layer that owns the schedule, so it is the job that reports
-  # each retry and that decides when a failure is final for the document.
+  # each retry and that tells the attempt when a failure is its last.
   describe "the job's retry schedule" do
     test "a transient failure before the last attempt is a retry", context do
       fail_extraction(:timeout)
@@ -257,13 +257,66 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
     end
   end
 
+  # Finality is the job's to know and the attempt's to act on: the same failure
+  # settles the document only when the caller says no attempt is to come.
+  describe "settling on the last attempt" do
+    test "a transient failure before the last attempt leaves the document processing",
+         context do
+      fail_extraction(:timeout)
+
+      assert {:error, _} = attempt(context.page, last_attempt?: false)
+      assert Documents.get_document!(context.document.id).status == "processing"
+    end
+
+    test "a transient failure on the last attempt fails the document", context do
+      fail_extraction(:timeout)
+
+      assert {:error, _} = attempt(context.page, last_attempt?: true)
+      assert Documents.get_document!(context.document.id).status == "error"
+    end
+
+    test "a permanent failure fails the document whatever the attempt", context do
+      fail_extraction({:http_error, [status: 404]})
+
+      assert {:cancel, _} = attempt(context.page, last_attempt?: false)
+      assert Documents.get_document!(context.document.id).status == "error"
+    end
+
+    # The extraction this attempt saved moved the page's revision on before the
+    # translation failed; settling from the page as it was read would be
+    # refused as obsolete, and the document would never learn of the failure.
+    test "a translation failing on the last attempt settles from the page as it now is",
+         context do
+      fail_translation(:timeout)
+
+      assert {:error, _} = attempt(context.page, last_attempt?: true)
+
+      saved = Documents.get_page!(context.page.id)
+      assert saved.extraction_status == "completed"
+      assert saved.translation_status == "error"
+      assert Documents.get_document!(context.document.id).status == "error"
+    end
+
+    # An attempt made without the option acts for whatever generation the page
+    # holds now, on the settle as on the run check, so a reset page -- the one
+    # kind that holds a generation at all -- still fails its document.
+    test "an attempt that names no generation settles the page as it now is", context do
+      {:ok, reset} = PageLifecycle.reset(context.page)
+      assert reset.processing_generation != nil
+      fail_extraction(:timeout)
+
+      assert {:error, _} = PageWork.attempt(context.page.id, last_attempt?: true)
+      assert Documents.get_document!(context.document.id).status == "error"
+    end
+  end
+
   describe "runs interrupted mid-flight" do
     test "a page reset between attempts is left to the generation that replaced it", context do
       fail_extraction(:timeout)
       stale_generation = context.page.processing_generation
 
       assert {:error, _} =
-               LlmProcessor.process_page(context.page.id,
+               PageWork.attempt(context.page.id,
                  generation: stale_generation
                )
 
@@ -274,7 +327,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       # the job reports success rather than running: Oban must not retry work a
       # newer generation owns.
       assert :ok =
-               LlmProcessor.process_page(context.page.id,
+               PageWork.attempt(context.page.id,
                  generation: stale_generation
                )
 
@@ -293,7 +346,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
 
       # The run guard refuses the stale write, and the run reports success:
       # there is no retry to schedule for work the reset's generation now owns.
-      assert :ok = LlmProcessor.process_page(context.page.id)
+      assert :ok = PageWork.attempt(context.page.id)
       assert_calls(extract_markdown: 1)
 
       saved = Documents.get_page!(context.page.id)
@@ -309,7 +362,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       # page, so a deletion there lands in the window the rescue exists for.
       delete_document_after_indexing(context.document)
 
-      assert :ok = LlmProcessor.process_page(context.page.id)
+      assert :ok = PageWork.attempt(context.page.id)
 
       assert Documents.get_document(context.document.id) == nil
       assert Documents.get_page(context.page.id) == nil
@@ -350,6 +403,10 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
       send(owner, {:model_call, :translate})
       implementation.(markdown, source, target, opts)
     end)
+  end
+
+  defp attempt(page, opts) do
+    PageWork.attempt(page.id, [generation: page.processing_generation] ++ opts)
   end
 
   defp perform_page_job(page, opts) do
