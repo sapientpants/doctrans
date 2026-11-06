@@ -5,10 +5,10 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   Owns the chat half of `DoctransWeb.DocumentLive.Show`: every `chat_*` assign,
   the turn task, and the messages that task sends back. `Show` forwards the
   `{:chat_event, _, _}` messages to `handle_info/2` and the `:chat_turn` result
-  to `handle_async/3`, and calls `interrupt/1` when the document under the
-  conversation changes; nothing else writes these assigns. Kept out of the
-  LiveView module so that `Show` handles requests and does not reach into the
-  chat contexts itself.
+  to `handle_async/3`, and hands `document_changed/2` and `page_changed/3` what
+  `DoctransWeb.DocumentLive.Viewer` answered about a broadcast; nothing else
+  writes these assigns. Kept out of the LiveView module so that `Show` handles
+  requests and does not reach into the chat contexts itself.
 
   A turn runs through `start_async/3` under `Doctrans.TaskSupervisor`. Each turn
   is identified by the token in `:chat_token`, which it carries in every
@@ -169,6 +169,36 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   end
 
   defp land(socket, {:error, reason}), do: put_failure(socket, reason)
+
+  @doc """
+  Reacts to what a document broadcast changed, as `Viewer.document_updated/2`
+  or `Viewer.document_deleted/1` answered it: a run replaced or a document
+  gone stops the turn in flight; anything else is no concern of the chat's.
+  """
+  @spec document_changed(
+          Phoenix.LiveView.Socket.t(),
+          DoctransWeb.DocumentLive.Viewer.document_change()
+        ) ::
+          Phoenix.LiveView.Socket.t()
+  def document_changed(socket, change) when change in [:run_replaced, :vanished],
+    do: interrupt(socket)
+
+  def document_changed(socket, :changed), do: socket
+
+  @doc """
+  Reacts to a page broadcast, as `Viewer.page_updated/2` placed it: a page of
+  this document, on screen or not, may have superseded accumulated context and
+  may have made the document searchable; a foreign page changes nothing.
+  """
+  @spec page_changed(
+          Phoenix.LiveView.Socket.t(),
+          DoctransWeb.DocumentLive.Viewer.page_change(),
+          Doctrans.Documents.Page.t()
+        ) :: Phoenix.LiveView.Socket.t()
+  def page_changed(socket, :foreign, _page), do: socket
+
+  def page_changed(socket, _change, page),
+    do: socket |> prune_context(page) |> refresh_embeddings_status()
 
   @doc """
   Stops the turn in flight, if there is one, and drops the accumulated context.

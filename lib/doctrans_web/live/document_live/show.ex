@@ -8,9 +8,9 @@ defmodule DoctransWeb.DocumentLive.Show do
   alias DoctransWeb.DocumentLive.{
     ChatComponents,
     ChatSession,
-    PageViewer,
     ReprocessModal,
-    StatusPanel
+    StatusPanel,
+    Viewer
   }
 
   alias DoctransWeb.ErrorMessages
@@ -46,8 +46,8 @@ defmodule DoctransWeb.DocumentLive.Show do
     cancel_processing
   )
 
-  # Every event `PageViewer` owns, forwarded the same way.
-  @page_viewer_events ~w(
+  # Every event `Viewer` owns, forwarded the same way.
+  @viewer_events ~w(
     prev_page
     next_page
     goto_page
@@ -56,12 +56,6 @@ defmodule DoctransWeb.DocumentLive.Show do
     zoom_out
     select_view_tab
   )
-
-  # Trailing debounce on `{:page_updated, _}`. A run reports every page as it
-  # settles, and the status behind the panel is three queries, so a burst is
-  # folded into one refresh once it has gone quiet for this long. Short where
-  # `DocumentStream` coalesces for 1.5 s: this is one document, not a grid.
-  @progress_refresh_ms 100
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -109,10 +103,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   defp mount_document(socket, document) do
     socket =
       socket
-      |> assign(:document, document)
-      |> assign(:progress_refresh_pending, false)
-      |> StatusPanel.refresh()
-      |> PageViewer.init()
+      |> Viewer.init(document)
       |> ReprocessModal.init()
       |> ChatSession.init(document)
 
@@ -128,7 +119,7 @@ defmodule DoctransWeb.DocumentLive.Show do
     socket =
       socket
       |> assign_origin(params)
-      |> PageViewer.apply_params(params)
+      |> Viewer.apply_params(params)
 
     {:noreply, socket}
   end
@@ -161,8 +152,8 @@ defmodule DoctransWeb.DocumentLive.Show do
     {:noreply, socket}
   end
 
-  def handle_event(event, params, socket) when event in @page_viewer_events do
-    PageViewer.handle_event(event, params, socket)
+  def handle_event(event, params, socket) when event in @viewer_events do
+    Viewer.handle_event(event, params, socket)
   end
 
   def handle_event(event, params, socket) when event in @reprocess_events do
@@ -194,7 +185,8 @@ defmodule DoctransWeb.DocumentLive.Show do
     ChatSession.handle_async(:chat_turn, result, socket)
   end
 
-  # PubSub Handlers
+  # PubSub handlers. Each broadcast goes to `Viewer`, which applies it and says
+  # what changed; `ChatSession` reacts to that answer. Nothing is decided here.
 
   @impl true
   def terminate(_reason, socket) do
@@ -215,80 +207,38 @@ defmodule DoctransWeb.DocumentLive.Show do
     {:noreply, socket}
   end
 
-  def handle_info({:document_updated, _document}, socket) do
-    document = Documents.get_document(socket.assigns.document.id)
-
-    if document do
-      changed? = document.processing_run_id != socket.assigns.document.processing_run_id
-      socket = if changed?, do: ChatSession.interrupt(socket), else: socket
-
-      {:noreply,
-       socket
-       |> assign(:document, document)
-       |> PageViewer.goto_page(socket.assigns.current_page_number)
-       |> StatusPanel.refresh()}
-    else
-      {:noreply, document_vanished(socket)}
-    end
+  # The broadcast carries the committed row, so nothing is re-read here.
+  def handle_info({:document_updated, document}, socket) do
+    {change, socket} = Viewer.document_updated(socket, document)
+    {:noreply, ChatSession.document_changed(socket, change)}
   end
 
   # Already showing not-found. Nothing to clear, and this socket may never have
   # mounted a document at all -- `mount/3` subscribes before it reads -- so it has
-  # no chat assigns for `document_vanished/1` to reach for.
+  # no chat assigns to reach for.
   @impl true
   def handle_info({:document_deleted, _id}, %{assigns: %{document: nil}} = socket) do
     {:noreply, socket}
   end
 
-  # A deletion from elsewhere reaches this viewer on its own document topic. The
-  # document is gone, so the assign says so and the template's not-found branch
-  # renders -- the same landing as a `{:document_updated, _}` that re-reads a row
-  # already deleted.
+  # A deletion from elsewhere reaches this viewer on its own document topic.
   def handle_info({:document_deleted, _id}, socket) do
-    {:noreply, document_vanished(socket)}
+    {change, socket} = Viewer.document_deleted(socket)
+    {:noreply, ChatSession.document_changed(socket, change)}
   end
 
   @impl true
   def handle_info({:page_updated, page}, socket) do
-    if socket.assigns.document && page.document_id == socket.assigns.document.id do
-      socket =
-        if socket.assigns.current_page_number == page.page_number,
-          do:
-            assign(
-              socket,
-              :current_page,
-              Documents.get_page_by_number(page.document_id, page.page_number)
-            ),
-          else: socket
-
-      socket =
-        if socket.assigns.progress_refresh_pending do
-          socket
-        else
-          Process.send_after(self(), :refresh_progress, @progress_refresh_ms)
-          assign(socket, :progress_refresh_pending, true)
-        end
-
-      {:noreply,
-       socket |> ChatSession.prune_context(page) |> ChatSession.refresh_embeddings_status()}
-    else
-      {:noreply, socket}
-    end
+    {change, socket} = Viewer.page_updated(socket, page)
+    {:noreply, ChatSession.page_changed(socket, change, page)}
   end
 
-  def handle_info(:refresh_progress, socket) do
-    {:noreply, socket |> assign(:progress_refresh_pending, false) |> StatusPanel.refresh()}
+  def handle_info(:refresh_status, socket) do
+    {:noreply, Viewer.refresh_pending(socket)}
   end
 
   # Streaming events from the chat turn in flight
   def handle_info({:chat_event, _token, _event} = message, socket) do
     ChatSession.handle_info(message, socket)
-  end
-
-  # The document this viewer is on has gone: deleted in another tab, or already
-  # gone by the time a `{:document_updated, _}` made us re-read it. A turn in
-  # flight is stopped with it; `ChatSession.interrupt/1` says why it cannot wait.
-  defp document_vanished(socket) do
-    socket |> ChatSession.interrupt() |> assign(:document, nil)
   end
 end

@@ -2,7 +2,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
   @moduledoc """
   Components for the document viewer page.
 
-  Every control here renders state `DoctransWeb.DocumentLive.PageViewer` owns
+  Every control here renders state `DoctransWeb.DocumentLive.Viewer` owns
   and pushes an event it handles; the two pagers, the zoom buttons and the
   panel tabs all land in the same `handle_event/3`.
   """
@@ -10,7 +10,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
 
   import DoctransWeb.DocumentLive.MarkdownHelpers, only: [markdown_content: 1]
 
-  alias DoctransWeb.DocumentLive.PageViewer
+  alias DoctransWeb.DocumentLive.Viewer
 
   @doc """
   Panel switcher for viewports too narrow for the side-by-side split.
@@ -95,7 +95,7 @@ defmodule DoctransWeb.DocumentLive.ViewerComponents do
   attr :zoom_level, :integer, required: true
 
   def zoom_controls(assigns) do
-    {min_zoom, max_zoom} = PageViewer.zoom_bounds()
+    {min_zoom, max_zoom} = Viewer.zoom_bounds()
     assigns = assign(assigns, min_zoom: min_zoom, max_zoom: max_zoom)
 
     ~H"""
