@@ -19,6 +19,10 @@ One rendered page of a Document, with its own extraction and translation stages 
 One processing attempt of a whole Document. A newer Run makes work from an older Run obsolete.
 _Avoid_: generation, revision (as a name for the run itself)
 
+**Obsolete work**:
+Work planned under a Run, or against a Page's content revision or generation, that the Document or Page no longer
+holds. It is refused when it tries to write, and the attempt counts as done, not failed.
+
 **Chunk**:
 A paragraph-bounded slice of a Page's original text, embedded for retrieval.
 

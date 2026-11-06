@@ -31,6 +31,20 @@ defmodule Doctrans.Documents.RevisionTest do
       refute Revision.current?(document, Uniq.UUID.uuid7())
       refute Revision.current?(nil, document.processing_run_id)
     end
+
+    test "compares a page's processing generation with the one the caller holds" do
+      page = page_fixture(document_fixture())
+      assert Revision.current?(page, generation: page.processing_generation)
+      refute Revision.current?(page, generation: Uniq.UUID.uuid7())
+      refute Revision.current?(nil, generation: page.processing_generation)
+    end
+
+    test "compares a page's content revision with the one the caller holds" do
+      page = page_fixture(document_fixture())
+      assert Revision.current?(page, revision: page.content_revision)
+      refute Revision.current?(page, revision: page.content_revision + 1)
+      refute Revision.current?(nil, revision: page.content_revision)
+    end
   end
 
   describe "with_current/2" do
@@ -71,6 +85,20 @@ defmodule Doctrans.Documents.RevisionTest do
 
       page
       |> Ecto.Changeset.change(content_revision: page.content_revision + 1)
+      |> Repo.update!()
+
+      assert {:error, :obsolete_run} =
+               Revision.with_page(page, fn _ -> flunk("must not run") end)
+    end
+
+    # The revision is advanced by the database whenever extraction leaves
+    # "completed", so an index planned against the completed text is fenced
+    # out by the same compare as any other stale write.
+    test "refuses a write once extraction has left completed under the caller" do
+      page = page_fixture(document_fixture(), %{extraction_status: "completed"})
+
+      page
+      |> Ecto.Changeset.change(extraction_status: "pending")
       |> Repo.update!()
 
       assert {:error, :obsolete_run} =

@@ -2,9 +2,10 @@ defmodule Doctrans.Search.Indexer do
   @moduledoc """
   Chunks and embeds one page revision.
 
-  The unit of indexing is a page at a `content_revision`. Every write is fenced on
-  that revision, so a call that started before the page changed cannot write
-  vectors for text that is no longer there.
+  The unit of indexing is a page at a `content_revision`. Every write is fenced
+  by `Doctrans.Documents.Revision.with_page/2`, so a call that started before
+  the page changed cannot write vectors for text that is no longer there; a
+  fence refusal is reported as `{:cancel, :stale_page}`.
 
   This module adds no retry loop of its own: a transient failure is reported to
   the caller — `Doctrans.Jobs.EmbeddingJob`, which owns the retry schedule — and
@@ -20,7 +21,7 @@ defmodule Doctrans.Search.Indexer do
   import Ecto.Query
 
   alias Doctrans.Deps
-  alias Doctrans.Documents.{Chunk, Page, Topics}
+  alias Doctrans.Documents.{Chunk, Page, Revision, Topics}
   alias Doctrans.Errors
   alias Doctrans.Repo
   alias Doctrans.Resilience.ErrorClassifier
@@ -51,7 +52,7 @@ defmodule Doctrans.Search.Indexer do
 
   defp index_current(page, revision) do
     cond do
-      not is_nil(revision) and page.content_revision != revision ->
+      not is_nil(revision) and not Revision.current?(page, revision: revision) ->
         Logger.debug("Page #{page.id} moved past revision #{revision}; skipping")
         {:cancel, {:obsolete_revision, [requested: revision, current: page.content_revision]}}
 
@@ -66,7 +67,7 @@ defmodule Doctrans.Search.Indexer do
 
   defp start_page_embedding(page) do
     case fenced_update(Page.embedding_changeset(page, %{embedding_status: "processing"}), page) do
-      {:error, :stale_entry} -> stale(page)
+      {:error, :obsolete_run} -> stale(page)
       {:ok, page} -> embed_page_chunks(page)
     end
   end
@@ -94,15 +95,15 @@ defmodule Doctrans.Search.Indexer do
   end
 
   defp chunk_and_embed(page) do
-    case with_current_revision(page, &ensure_chunks/1) do
-      {:error, :stale_entry} ->
+    case Revision.with_page(page, &ensure_chunks/1) do
+      {:error, :obsolete_run} ->
         stale(page)
 
-      {:ok, {[], _chunk_data}} ->
+      {[], _chunk_data} ->
         Logger.info("No chunks to embed for page #{page.id} (empty content)")
         finish_page_embedding([], page, 0, 0)
 
-      {:ok, {chunks, chunk_data}} ->
+      {chunks, chunk_data} ->
         # Chunks already carrying a vector are left alone, so a retry costs only
         # the chunks that have not been embedded yet.
         pending = Enum.reject(chunks, & &1.embedding)
@@ -166,7 +167,7 @@ defmodule Doctrans.Search.Indexer do
       Page.embedding_changeset(page, %{embedding: embedding, embedding_status: "completed"})
 
     case fenced_update(changeset, page) do
-      {:error, :stale_entry} ->
+      {:error, :obsolete_run} ->
         stale(page)
 
       {:ok, indexed} ->
@@ -178,7 +179,7 @@ defmodule Doctrans.Search.Indexer do
   defp mark_page_errored(page) do
     case fenced_update(Page.embedding_changeset(page, %{embedding_status: "error"}), page) do
       {:ok, errored} -> publish(errored)
-      {:error, :stale_entry} -> :ok
+      {:error, :obsolete_run} -> :ok
     end
   end
 
@@ -268,7 +269,7 @@ defmodule Doctrans.Search.Indexer do
 
   defp embed_chunk(chunk, embed_content, page) do
     case fenced_update(Chunk.embedding_changeset(chunk, %{embedding_status: "processing"}), page) do
-      {:error, :stale_entry} ->
+      {:error, :obsolete_run} ->
         # Either the page moved to a new revision or this chunk row is gone.
         # Either way there is nothing left to embed, and the fenced page-level
         # write in `mark_page_indexed/3` sees the same staleness and reports the
@@ -305,33 +306,12 @@ defmodule Doctrans.Search.Indexer do
   defp embed(content), do: Deps.embedding().generate(content, [])
 
   # `Repo.update!` raises `Ecto.StaleEntryError` when the row it targets is gone
-  # by the time the UPDATE runs. `with_current_revision/2` holds the page, so in
-  # practice this is a chunk row deleted under a still-current page. Nothing was
-  # written — treat it as a no-op.
+  # by the time the UPDATE runs. The fence holds the page, so in practice this
+  # is a chunk row deleted under a still-current page. Nothing was written, and
+  # there is nothing left to write: it is reported like any other refusal.
   defp fenced_update(changeset, page) do
-    with_current_revision(page, fn _current -> Repo.update!(changeset) end)
+    Revision.with_page(page, fn _current -> {:ok, Repo.update!(changeset)} end)
   rescue
-    Ecto.StaleEntryError -> {:error, :stale_entry}
+    Ecto.StaleEntryError -> {:error, :obsolete_run}
   end
-
-  # Serialize writes with content invalidation, without holding a lock during API
-  # calls. The stale branch reports itself through the return value rather than
-  # `Repo.rollback/1` so that this composes: rolling back would abort an
-  # enclosing transaction the caller owns, for what is a routine, expected miss.
-  defp with_current_revision(page, fun) do
-    Repo.transaction(fn ->
-      current = Repo.one(from p in Page, where: p.id == ^page.id, lock: "FOR UPDATE")
-
-      if current && current.content_revision == page.content_revision &&
-           current.extraction_status == "completed" do
-        {:ok, fun.(current)}
-      else
-        {:error, :stale_entry}
-      end
-    end)
-    |> unwrap_transaction()
-  end
-
-  defp unwrap_transaction({:ok, {:ok, value}}), do: {:ok, value}
-  defp unwrap_transaction({:ok, {:error, reason}}), do: {:error, reason}
 end

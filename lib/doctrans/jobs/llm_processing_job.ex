@@ -24,7 +24,7 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
   alias Doctrans.Documents
   alias Doctrans.Documents.Lifecycle
   alias Doctrans.Jobs.{Keys, RetryTelemetry}
-  alias Doctrans.Processing.LlmProcessor
+  alias Doctrans.Processing.{LlmProcessor, Run}
 
   @page_id_key Keys.page_id()
 
@@ -132,13 +132,8 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
   defp final?(_job, _result), do: false
 
   defp settle_page(page_id, generation) do
-    case Documents.get_page(page_id) do
-      %{processing_generation: ^generation} = page ->
-        _ = Lifecycle.settle(page)
-        :ok
-
-      _ ->
-        :ok
-    end
+    page = Documents.get_page(page_id)
+    _ = if Run.current?(page, generation: generation), do: Lifecycle.settle(page)
+    :ok
   end
 end
