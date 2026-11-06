@@ -150,19 +150,23 @@ defmodule Doctrans.Documents.PageLifecycleTest do
   end
 
   describe "resume/1" do
-    test "returns interrupted and failed stages to pending, keeping completed ones", %{
-      page: page
-    } do
-      {:ok, page} = PageLifecycle.complete(page, :extraction, %{markdown: "kept"})
-      {:ok, page} = PageLifecycle.fail(page, :translation)
-      assert {:ok, resumed} = PageLifecycle.resume(page)
-      assert resumed.extraction_status == "completed"
-      assert resumed.original_markdown == "kept"
+    test "returns a failed stage to pending", %{page: page} do
+      {:ok, failed} = PageLifecycle.fail(page, :translation)
+      assert {:ok, resumed} = PageLifecycle.resume(failed)
       assert resumed.translation_status == "pending"
+    end
 
-      {:ok, begun} = PageLifecycle.begin(resumed, :translation)
+    test "returns an interrupted stage to pending", %{page: page} do
+      {:ok, begun} = PageLifecycle.begin(page, :translation)
       assert {:ok, resumed} = PageLifecycle.resume(begun)
       assert resumed.translation_status == "pending"
+    end
+
+    test "keeps a completed stage and its product", %{page: page} do
+      {:ok, done} = PageLifecycle.complete(page, :extraction, %{markdown: "kept"})
+      assert {:ok, resumed} = PageLifecycle.resume(done)
+      assert resumed.extraction_status == "completed"
+      assert resumed.original_markdown == "kept"
     end
 
     test "reads the stages the page holds now, not the copy the caller read", %{page: page} do
@@ -186,7 +190,15 @@ defmodule Doctrans.Documents.PageLifecycleTest do
           translation_model: "old-text"
         })
 
-      page = page |> Page.embedding_changeset(%{embedding_status: "completed"}) |> Repo.update!()
+      page =
+        page
+        |> Page.embedding_changeset(%{
+          embedding: Pgvector.new(List.duplicate(0.5, 1024)),
+          embedding_status: "completed"
+        })
+        |> Repo.update!()
+
+      assert page.embedding != nil
 
       choices = %{extraction_model: "new-vision", translation_model: "new-text"}
       assert {:ok, reset} = PageLifecycle.reset(page, choices)
@@ -205,19 +217,29 @@ defmodule Doctrans.Documents.PageLifecycleTest do
       assert reset.requested_translation_model == "new-text"
     end
 
+    test "returns a failed stage to pending", %{page: page} do
+      {:ok, failed} = PageLifecycle.fail(page, :extraction)
+      assert {:ok, reset} = PageLifecycle.reset(failed)
+      assert reset.extraction_status == "pending"
+    end
+
     test "records no requested model when none is chosen", %{page: page} do
       assert {:ok, reset} = PageLifecycle.reset(page)
       assert reset.requested_extraction_model == nil
       assert reset.requested_translation_model == nil
     end
 
-    test "is fenced and announced like every transition", %{document: document, page: page} do
+    test "announces the page like every transition", %{document: document, page: page} do
       Topics.subscribe_document(document.id)
-      {:ok, moved} = PageLifecycle.reset(page)
+      {:ok, _} = PageLifecycle.reset(page)
       assert_receive {:page_updated, %Page{id: id}}
       assert id == page.id
+    end
 
-      # The caller's copy is now a generation behind.
+    test "is fenced like every transition: the caller's copy is a generation behind", %{
+      page: page
+    } do
+      {:ok, moved} = PageLifecycle.reset(page)
       assert {:error, :obsolete_run} = PageLifecycle.reset(page)
       assert {:ok, _} = PageLifecycle.reset(moved)
     end

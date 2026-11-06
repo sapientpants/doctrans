@@ -146,7 +146,7 @@ defmodule Doctrans.Documents.PageLifecycle do
   @doc "Marks the stage `processing`."
   @spec begin(Page.t(), stage()) :: {:ok, Page.t()} | {:error, refusal()}
   def begin(%Page{} = page, stage) when stage in @stages do
-    transition(page, :begin, %{fields(stage).status => "processing"})
+    transition(page, :begin, &Page.stage_changeset(&1, %{fields(stage).status => "processing"}))
   end
 
   @doc """
@@ -164,13 +164,13 @@ defmodule Doctrans.Documents.PageLifecycle do
       %{fields.status => "completed", fields.markdown => markdown}
       |> put_model(fields, product)
 
-    transition(page, :complete, changes)
+    transition(page, :complete, &Page.stage_changeset(&1, changes))
   end
 
   @doc "Marks the stage `error`, keeping whatever an earlier attempt produced."
   @spec fail(Page.t(), stage()) :: {:ok, Page.t()} | {:error, refusal()}
   def fail(%Page{} = page, stage) when stage in @stages do
-    transition(page, :fail, %{fields(stage).status => "error"})
+    transition(page, :fail, &Page.stage_changeset(&1, %{fields(stage).status => "error"}))
   end
 
   @doc """
@@ -208,10 +208,10 @@ defmodule Doctrans.Documents.PageLifecycle do
   @spec resume(Page.t()) :: {:ok, Page.t()} | {:error, refusal()}
   def resume(%Page{} = page) do
     transition(page, :resume, fn current ->
-      %{
+      Page.stage_changeset(current, %{
         extraction_status: resumed(current.extraction_status),
         translation_status: resumed(current.translation_status)
-      }
+      })
     end)
   end
 
@@ -221,38 +221,25 @@ defmodule Doctrans.Documents.PageLifecycle do
   """
   @spec reset(Page.t(), choices()) :: {:ok, Page.t()} | {:error, refusal()}
   def reset(%Page{} = page, choices \\ %{}) do
-    page
-    |> Revision.with_page(fn current ->
-      {:ok, current |> Page.reset_changeset(choices) |> Repo.update!()}
-    end)
-    |> publish(page, :reset)
+    transition(page, :reset, &Page.reset_changeset(&1, choices))
   end
 
   # ---------------------------------------------------------------------------
   # Plumbing
   # ---------------------------------------------------------------------------
 
-  # One shape for every stage transition: fence the write behind the revision
-  # and generation the caller loaded, then announce the page once it is
-  # committed, or say why nothing was written. `changes` may be a map, or a
-  # function of the locked row for a transition that depends on what the page
-  # holds now.
-  defp transition(page, name, changes) do
+  # One shape for every page transition: fence the write behind the revision
+  # and generation the caller loaded, build the changeset from the row as
+  # locked -- so a transition that depends on what the page holds now reads
+  # that, not the caller's copy -- write it, then announce the page once it
+  # is committed, or say why nothing was written. The changeset is built from
+  # statuses this module names and fields the schema owns, so the only way the
+  # update can fail is a lost connection, which raises here as it would
+  # anywhere else.
+  defp transition(page, name, changeset) when is_function(changeset, 1) do
     page
-    |> Revision.with_page(fn current ->
-      changes = if is_function(changes, 1), do: changes.(current), else: changes
-      {:ok, write(current, changes)}
-    end)
+    |> Revision.with_page(fn current -> {:ok, current |> changeset.() |> Repo.update!()} end)
     |> publish(page, name)
-  end
-
-  # The changeset is built from a status this module names and fields it owns,
-  # so the only way the update can fail is a lost connection, which raises
-  # here as it would anywhere else.
-  defp write(page, changes) do
-    page
-    |> Page.stage_changeset(changes)
-    |> Repo.update!()
   end
 
   # Called after the fence's transaction returns; a caller's enclosing

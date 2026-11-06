@@ -296,6 +296,8 @@ defmodule Doctrans.Processing.StartupRecovery do
     if job.conflict? do
       :ok
     else
+      # The fence cannot refuse: `recover_page/1` locked this row in this
+      # transaction, so nothing has moved its revision or generation since.
       {:ok, _resumed} = PageLifecycle.resume(page)
       :ok
     end

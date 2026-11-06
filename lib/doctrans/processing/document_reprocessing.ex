@@ -72,25 +72,13 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     end
   end
 
-  # The page's saved chunks are gone; leaving their text in the conversation
-  # context would answer the next question from the content just discarded.
-  # The document lock held here also serializes this with in-flight answers.
   defp do_reset_page(page, opts) do
     document = Run.lock(page.document_id) || Repo.rollback(:document_not_found)
     current = Documents.get_page(page.id) || Repo.rollback(:page_not_found)
     validate_models!(opts)
     ensure_offered!(document, :reprocess_page)
 
-    choices = Run.choices(opts)
-    updated = or_rollback(PageLifecycle.reset(current, choices))
-    _ = purge_page_context(document.id, current.id)
-
-    _ =
-      page
-      |> page_job_args(updated, choices)
-      |> LlmProcessingJob.new(priority: 1)
-      |> Repo.insert_job!()
-
+    updated = restart_page(current, document, Run.choices(opts))
     {or_rollback(Lifecycle.resume(document)), updated}
   end
 
@@ -114,7 +102,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
 
     pages = failed_pages(document_id)
     choices = Run.choices(opts)
-    retried = Enum.map(pages, &retry_page(&1, document, choices))
+    retried = Enum.map(pages, &restart_page(&1, document, choices))
     {or_rollback(Lifecycle.resume(document)), retried}
   end
 
@@ -125,10 +113,12 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     |> Repo.all()
   end
 
-  # The per-page half of `do_reset_page/2`, under the batch's single eligibility
-  # check. Purging the page's saved context is as required here as it is there:
-  # the chunks it quotes are discarded along with the content they described.
-  defp retry_page(page, document, choices) do
+  # The per-page half of a reset and of a retry, under the caller's eligibility
+  # check and document lock: start the page over, drop its saved chat context,
+  # queue its run. The page's saved chunks are gone; leaving their text in the
+  # conversation context would answer the next question from the content just
+  # discarded. The document lock also serializes this with in-flight answers.
+  defp restart_page(page, document, choices) do
     updated = or_rollback(PageLifecycle.reset(page, choices))
     _ = purge_page_context(document.id, page.id)
 
