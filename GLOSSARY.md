@@ -76,5 +76,5 @@ Re-queuing only the Pages that failed, within the current Run.
 The pass at boot that re-queues work the previous process left owed.
 
 **Processing status**:
-The read model that reports a Document's content pipeline and index pipeline separately, with the actions it is safe to
-offer.
+The read model that reports a Document's content pipeline and index pipeline separately and, for each action a user
+can take, whether it is offered or why it is withheld.

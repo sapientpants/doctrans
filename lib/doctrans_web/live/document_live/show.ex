@@ -3,8 +3,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   use DoctransWeb, :live_view
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Topics
-  alias Doctrans.Processing.Run
+  alias Doctrans.Documents.{ProcessingStatus, Topics}
 
   alias DoctransWeb.DocumentLive.{
     ChatComponents,
@@ -22,12 +21,7 @@ defmodule DoctransWeb.DocumentLive.Show do
   import DoctransWeb.DocumentLive.ViewerComponents
 
   import DoctransWeb.DocumentLive.ReprocessModal,
-    only: [
-      reprocess_modal: 1,
-      can_reprocess?: 1,
-      can_reprocess_document?: 1,
-      reprocess_document_hint: 2
-    ]
+    only: [reprocess_modal: 1, reprocess_document_hint: 1]
 
   import DoctransWeb.DocumentLive.StatusPanel, only: [status_panel: 1]
 
@@ -116,7 +110,6 @@ defmodule DoctransWeb.DocumentLive.Show do
     socket =
       socket
       |> assign(:document, document)
-      |> assign(:source_available, Run.source_available?(document))
       |> assign(:progress_refresh_pending, false)
       |> StatusPanel.refresh()
       |> PageViewer.init()
@@ -232,7 +225,6 @@ defmodule DoctransWeb.DocumentLive.Show do
       {:noreply,
        socket
        |> assign(:document, document)
-       |> assign(:source_available, Run.source_available?(document))
        |> PageViewer.goto_page(socket.assigns.current_page_number)
        |> StatusPanel.refresh()}
     else

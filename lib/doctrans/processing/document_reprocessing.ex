@@ -3,16 +3,14 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   import Ecto.Query
   alias Doctrans.Chat.Session
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Lifecycle, Topics}
-  alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
+  alias Doctrans.Documents.{Lifecycle, ProcessingStatus, Topics}
+  alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.Run
   alias Doctrans.Repo
 
-  # Every status rule here is `Lifecycle`'s: `reprocessable?/1` is the check a
-  # fresh run needs, and `pre_processing?/1` says a run has not produced its
-  # pages yet, so there is no per-page work to replace. `reprocess_document/2`
-  # also requires that no run is active and that the original upload is still
-  # on disk, which a caller cannot know without the lock.
+  # Whether an action may run is `ProcessingStatus`'s answer, read again under
+  # the document lock: the viewer offered the control from the same answer, so
+  # a refusal here is the state having moved since, never a second rule.
 
   @spec reprocess_document(Ecto.UUID.t(), keyword()) ::
           {:ok, Documents.Document.t()} | {:error, Doctrans.Errors.reason()}
@@ -32,11 +30,14 @@ defmodule Doctrans.Processing.DocumentReprocessing do
        do: Repo.rollback(:obsolete_run)
 
     validate_models!(opts)
+    ensure_offered!(document, :reprocess_document)
+  end
 
-    if not Lifecycle.reprocessable?(document) || Run.active?(document.id),
-      do: Repo.rollback(:already_processing)
-
-    unless Run.source_available?(document), do: Repo.rollback(:original_upload_missing)
+  defp ensure_offered!(document, action) do
+    case ProcessingStatus.for_document(document).actions[action] do
+      :offered -> :ok
+      {:refused, reason} -> Repo.rollback(reason)
+    end
   end
 
   defp purge_generated_content(document) do
@@ -51,8 +52,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
 
   defp requeue(document, opts) do
     document = or_rollback(Lifecycle.requeue(document, Run.new_attrs(opts)))
-    _ = document |> Run.args() |> DocumentExtractionJob.new() |> Repo.insert_job!()
-    _ = document |> Run.args() |> RunCleanupJob.new() |> Repo.insert_job!()
+    _ = Run.enqueue(document, cleanup: true)
     document
   end
 
@@ -86,9 +86,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     document = Run.lock(page.document_id) || Repo.rollback(:document_not_found)
     current = Documents.get_page(page.id) || Repo.rollback(:page_not_found)
     validate_models!(opts)
-
-    if Lifecycle.pre_processing?(document) || Run.active?(document.id),
-      do: Repo.rollback(:already_processing)
+    ensure_offered!(document, :reprocess_page)
 
     {:ok, reset} = Documents.reset_page_for_reprocessing(current)
     _ = purge_page_context(document.id, current.id)
@@ -109,8 +107,8 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   Queues a fresh attempt for the document's failed pages, and only those.
 
   One transaction and one eligibility check covers the batch: queueing the first
-  page makes `Run.active?/1` true, so a loop over `reprocess_page/2` would
-  refuse every page after it.
+  page puts work in flight, so a loop over `reprocess_page/2` would refuse
+  every page after it.
   """
   @spec retry_failed_pages(Ecto.UUID.t(), keyword()) ::
           {:ok, non_neg_integer()} | {:error, Doctrans.Errors.reason()}
@@ -121,13 +119,9 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   defp do_retry_failed_pages(document_id, opts) do
     document = Run.lock(document_id) || Repo.rollback(:document_not_found)
     validate_models!(opts)
-
-    if Lifecycle.pre_processing?(document) || Run.active?(document.id),
-      do: Repo.rollback(:already_processing)
+    ensure_offered!(document, :retry_pages)
 
     pages = failed_pages(document_id)
-    if pages == [], do: Repo.rollback(:nothing_to_retry)
-
     choices = Run.choices(opts)
     retried = Enum.map(pages, &retry_page(&1, document, choices))
     {or_rollback(Lifecycle.resume(document)), retried}

@@ -497,7 +497,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
 
   describe "Reprocess functionality" do
     test "shows reprocess button for completed page", %{conn: conn} do
-      doc = document_with_pages_fixture(%{}, 1)
+      doc = document_with_pages_fixture(%{status: "completed"}, 1)
       [page] = doc.pages
 
       {:ok, page} =
@@ -517,7 +517,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
     end
 
     test "shows reprocess button for page with error", %{conn: conn} do
-      doc = document_with_pages_fixture(%{}, 1)
+      doc = document_with_pages_fixture(%{status: "error"}, 1)
       [page] = doc.pages
 
       Documents.update_page_extraction(page, %{extraction_status: "error"})
@@ -527,11 +527,12 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
       assert has_element?(view, "button[phx-click='show_reprocess_modal']")
     end
 
-    test "does not show reprocess button for processing page", %{conn: conn} do
-      doc = document_with_pages_fixture(%{}, 1)
-      [page] = doc.pages
-
-      Documents.update_page_extraction(page, %{extraction_status: "processing"})
+    # The page's own status does not decide this: the run has to have produced
+    # its pages, and nothing may be working on them.
+    test "does not show reprocess button while the run is still rendering pages", %{
+      conn: conn
+    } do
+      doc = document_with_pages_fixture(%{status: "extracting"}, 1)
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{doc.id}")
 
@@ -539,7 +540,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
     end
 
     test "opens reprocess modal on button click", %{conn: conn} do
-      doc = document_with_pages_fixture(%{}, 1)
+      doc = document_with_pages_fixture(%{status: "completed"}, 1)
       [page] = doc.pages
 
       {:ok, page} =
@@ -562,7 +563,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
     end
 
     test "closes reprocess modal on cancel", %{conn: conn} do
-      doc = document_with_pages_fixture(%{}, 1)
+      doc = document_with_pages_fixture(%{status: "completed"}, 1)
       [page] = doc.pages
 
       {:ok, page} =
@@ -588,7 +589,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
     end
 
     test "reprocess modal shows model selection form", %{conn: conn} do
-      doc = document_with_pages_fixture(%{}, 1)
+      doc = document_with_pages_fixture(%{status: "completed"}, 1)
       [page] = doc.pages
 
       {:ok, page} =
@@ -614,7 +615,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
     end
 
     test "reprocess form rejects invalid model selection", %{conn: conn} do
-      doc = document_with_pages_fixture(%{}, 1)
+      doc = document_with_pages_fixture(%{status: "completed"}, 1)
       [page] = doc.pages
 
       {:ok, page} =
@@ -647,7 +648,7 @@ defmodule DoctransWeb.DocumentLive.ShowTest do
   end
 
   defp completed_page_document(original_markdown, translated_markdown) do
-    doc = document_with_pages_fixture(%{}, 1)
+    doc = document_with_pages_fixture(%{status: "completed"}, 1)
     [page] = doc.pages
 
     {:ok, page} =

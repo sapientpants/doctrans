@@ -6,6 +6,7 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Page, Topics}
   alias Doctrans.Repo
+  alias DoctransWeb.ErrorMessages
 
   @content "#processing-status-content"
 
@@ -178,21 +179,24 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
   end
 
   # A flash is the tell. Every handler that runs reports its outcome -- info on
-  # success, the translated reason on a domain refusal -- so a refused event is
-  # the one case that leaves the page with neither.
+  # success, the translated reason on a domain refusal -- and an event whose
+  # action the status withholds is reported the same way, with the reason the
+  # control would have been disabled for, while the document is left alone.
   describe "refusing an event whose button was not rendered" do
-    test "cancel_processing does nothing to a completed document", %{conn: conn} do
+    test "cancel_processing leaves a completed document alone and says why", %{conn: conn} do
       {document, _page} = index_failure_fixture()
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
       queue_only(view, fn -> render_click(view, "cancel_processing", %{}) end)
 
       assert Documents.get_document(document.id).status == "completed"
-      refute has_element?(view, "#flash-error")
+      assert has_element?(view, "#flash-error", ErrorMessages.message(:not_cancellable))
       refute has_element?(view, "#flash-info")
     end
 
-    test "retry_failed_pages does nothing to a document with no failed page", %{conn: conn} do
+    test "retry_failed_pages leaves a document with no failed page alone and says why", %{
+      conn: conn
+    } do
       {document, page} = index_failure_fixture()
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
@@ -202,11 +206,11 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
       assert reloaded.translation_status == "completed"
       assert reloaded.processing_generation == page.processing_generation
       assert Documents.get_document(document.id).status == "completed"
-      refute has_element?(view, "#flash-error")
+      assert has_element?(view, "#flash-error", ErrorMessages.message(:nothing_to_retry))
       refute has_element?(view, "#flash-info")
     end
 
-    test "retry_indexing does nothing once the index is ready", %{conn: conn} do
+    test "retry_indexing queues nothing once the index is ready and says why", %{conn: conn} do
       document = completed_document_with_embedding_fixture()
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
@@ -214,8 +218,8 @@ defmodule DoctransWeb.DocumentLive.StatusPanelTest do
 
       queue_only(view, fn -> render_click(view, "retry_indexing", %{}) end)
 
+      assert has_element?(view, "#flash-error", ErrorMessages.message(:nothing_to_retry))
       refute has_element?(view, "#flash-info")
-      refute has_element?(view, "#flash-error")
     end
   end
 end

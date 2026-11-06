@@ -38,6 +38,8 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
     |> force(%{embedding_status: embedding_status})
   end
 
+  defp offered?(status, action), do: status.actions[action] == :offered
+
   defp failed_page(document, page_number) do
     page_fixture(document, %{
       page_number: page_number,
@@ -58,8 +60,8 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       assert status.failed_page_count == 0
       assert status.failed_pages == []
       assert status.progress == 100.0
-      refute status.cancellable?
-      refute status.retry_pages?
+      refute offered?(status, :cancel)
+      refute offered?(status, :retry_pages)
     end
 
     test "a cancelled document reports cancelled" do
@@ -68,7 +70,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       status = ProcessingStatus.for_document(document)
 
       assert status.content == :cancelled
-      refute status.cancellable?
+      refute offered?(status, :cancel)
     end
 
     test "an errored document with a failed page reports failed and lists the page" do
@@ -84,7 +86,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       # One page through both steps, one through neither: two of four steps.
       assert status.progress == 50.0
       assert status.pages == %{expected: 2, translated: 1, failed: 1, outstanding: 0}
-      assert status.retry_pages?
+      assert offered?(status, :retry_pages)
     end
 
     test "an errored document whose failed page still has a retry reports retrying" do
@@ -97,7 +99,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       assert status.content == :retrying
       assert status.failed_page_count == 1
       # A retry already scheduled must not be offered again.
-      refute status.retry_pages?
+      refute offered?(status, :retry_pages)
     end
 
     test "an errored document with a job still executing reports running" do
@@ -112,7 +114,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       # `Run.active?/1` would refuse.
       assert status.content == :running
       assert status.failed_pages == [failed.page_number, 2]
-      refute status.retry_pages?
+      refute offered?(status, :retry_pages)
     end
 
     test "an in-progress document with no job is idle, not running" do
@@ -207,7 +209,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
 
       assert status.index == :none
       assert status.indexing == %{indexable: 0, indexed: 0, failed: 0, outstanding: 0}
-      refute status.retry_index?
+      refute offered?(status, :retry_index)
     end
 
     test "extracted but unindexed pages are pending" do
@@ -218,7 +220,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
 
       assert status.index == :pending
       assert status.indexing == %{indexable: 1, indexed: 0, failed: 0, outstanding: 1}
-      assert status.retry_index?
+      assert offered?(status, :retry_index)
     end
 
     test "every extracted page indexed is ready" do
@@ -230,7 +232,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
 
       assert status.index == :ready
       assert status.indexing == %{indexable: 2, indexed: 2, failed: 0, outstanding: 0}
-      refute status.retry_index?
+      refute offered?(status, :retry_index)
     end
 
     test "some indexed and none failed is partial" do
@@ -242,7 +244,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
 
       assert status.index == :partial
       assert status.indexing == %{indexable: 2, indexed: 1, failed: 0, outstanding: 1}
-      assert status.retry_index?
+      assert offered?(status, :retry_index)
     end
 
     test "an errored embedding is failed and stays outstanding" do
@@ -254,7 +256,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
 
       assert status.index == :failed
       assert status.indexing == %{indexable: 2, indexed: 1, failed: 1, outstanding: 1}
-      assert status.retry_index?
+      assert offered?(status, :retry_index)
     end
 
     test "a running index job outranks the stored counts" do
@@ -268,7 +270,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       assert status.index == :running
       # The counts still say partial; the job is about to change them.
       assert status.indexing.indexed == 1
-      refute status.retry_index?
+      refute offered?(status, :retry_index)
     end
 
     test "a retrying index job is reported as retrying" do
@@ -279,7 +281,7 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       status = ProcessingStatus.for_document(document)
 
       assert status.index == :retrying
-      refute status.retry_index?
+      refute offered?(status, :retry_index)
     end
 
     test "a queued index job is reported as queued" do
@@ -302,20 +304,21 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
     end
   end
 
-  describe "action flags" do
-    test "cancellable while the document is still in flight" do
+  describe "actions" do
+    test "cancel is offered while the document is still in flight" do
       for status <- ~w(uploading queued extracting processing) do
         document = document_fixture(%{status: status})
 
-        assert ProcessingStatus.for_document(document).cancellable?
+        assert ProcessingStatus.for_document(document).actions.cancel == :offered
       end
     end
 
-    test "not cancellable once the document is terminal" do
+    test "cancel is withheld once the document is terminal, with the transaction's refusal" do
       for status <- ~w(completed error) do
         document = document_fixture(%{status: status})
 
-        refute ProcessingStatus.for_document(document).cancellable?
+        assert ProcessingStatus.for_document(document).actions.cancel ==
+                 {:refused, :not_cancellable}
       end
     end
 
@@ -323,12 +326,13 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
       document = document_fixture(%{status: "error", total_pages: 1})
       page = failed_page(document, 1)
 
-      assert ProcessingStatus.for_document(document).retry_pages?
+      assert ProcessingStatus.for_document(document).actions.retry_pages == :offered
 
       # The same failure with a retry still scheduled is not settled.
       stage_page_job(page, state: "retryable", attempt: 1)
 
-      refute ProcessingStatus.for_document(document).retry_pages?
+      assert ProcessingStatus.for_document(document).actions.retry_pages ==
+               {:refused, :already_processing}
     end
 
     test "page retry is withheld while the pipeline is still working" do
@@ -341,21 +345,99 @@ defmodule Doctrans.Documents.ProcessingStatusTest do
 
       assert status.failed_page_count == 1
       assert status.content == :running
-      refute status.retry_pages?
+      assert status.actions.retry_pages == {:refused, :already_processing}
     end
 
     test "page retry is withheld when nothing failed" do
       document = document_fixture(%{status: "completed", total_pages: 1})
       _page = indexed_page(document, 1, "completed")
 
-      refute ProcessingStatus.for_document(document).retry_pages?
+      assert ProcessingStatus.for_document(document).actions.retry_pages ==
+               {:refused, :nothing_to_retry}
     end
 
     test "index retry is withheld once the index is ready" do
       document = document_fixture(%{status: "completed", total_pages: 1})
       _page = indexed_page(document, 1, "completed")
 
-      refute ProcessingStatus.for_document(document).retry_index?
+      assert ProcessingStatus.for_document(document).actions.retry_index ==
+               {:refused, :nothing_to_retry}
+    end
+
+    test "index retry is withheld while an index job is live, and offered once it is not" do
+      document = document_fixture(%{status: "completed", total_pages: 1})
+      page = indexed_page(document, 1, "error")
+
+      assert ProcessingStatus.for_document(document).actions.retry_index == :offered
+
+      stage_index_job(page, state: "executing")
+
+      assert ProcessingStatus.for_document(document).actions.retry_index ==
+               {:refused, :already_processing}
+    end
+
+    test "document reprocess is offered exactly where the lifecycle admits a fresh run" do
+      for status <- ~w(completed error cancelled) do
+        document = document_fixture(%{status: status})
+        document_source_fixture(document)
+
+        assert ProcessingStatus.for_document(document).actions.reprocess_document == :offered
+      end
+
+      for status <- ~w(uploading queued extracting processing) do
+        document = document_fixture(%{status: status})
+        document_source_fixture(document)
+
+        assert ProcessingStatus.for_document(document).actions.reprocess_document ==
+                 {:refused, :already_processing}
+      end
+    end
+
+    test "document reprocess needs the original upload, after the status has been checked" do
+      document = document_fixture(%{status: "completed"})
+
+      assert ProcessingStatus.for_document(document).actions.reprocess_document ==
+               {:refused, :original_upload_missing}
+
+      # Both refusals apply: the status one is reported, as the transaction does.
+      processing = document_fixture(%{status: "processing"})
+
+      assert ProcessingStatus.for_document(processing).actions.reprocess_document ==
+               {:refused, :already_processing}
+    end
+
+    test "a straggling job withholds reprocess and retry on a settled document" do
+      document = document_fixture(%{status: "completed", total_pages: 1})
+      document_source_fixture(document)
+      page = failed_page(document, 1)
+      stage_page_job(page, state: "executing", attempt: 1)
+
+      status = ProcessingStatus.for_document(document)
+
+      # The display state keeps the terminal verdict; the actions do not.
+      assert status.content == :completed
+      assert status.actions.reprocess_document == {:refused, :already_processing}
+      assert status.actions.retry_pages == {:refused, :already_processing}
+      assert status.actions.reprocess_page == {:refused, :already_processing}
+    end
+
+    test "page reprocess follows the document, not the page's own status" do
+      document = document_fixture(%{status: "processing", total_pages: 1})
+      stuck = page_fixture(document, %{extraction_status: "processing"})
+
+      # Nothing is running, so a page stuck mid-stage is exactly what a user
+      # would reprocess.
+      status = ProcessingStatus.for_document(document)
+      assert ProcessingStatus.reprocess_page(status, stuck) == :offered
+      assert ProcessingStatus.reprocess_page(status, nil) == {:refused, :page_not_found}
+
+      for pre <- ~w(uploading queued extracting) do
+        early = document_fixture(%{status: pre})
+        page = page_fixture(early)
+
+        assert ProcessingStatus.reprocess_page(ProcessingStatus.for_document(early), page) ==
+                 {:refused, :already_processing}
+      end
     end
   end
 end

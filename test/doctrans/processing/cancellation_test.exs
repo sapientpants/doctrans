@@ -7,7 +7,7 @@ defmodule Doctrans.Processing.CancellationTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Layout, Lifecycle, Page, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
-  alias Doctrans.Processing.{Cancellation, DocumentReprocessing, OpenAIMock, Run}
+  alias Doctrans.Processing.{Cancellation, DocumentReprocessing, JobStates, OpenAIMock}
 
   describe "cancel_document/1" do
     test "cancels the queued jobs, leaves an executing one, and settles the document" do
@@ -55,12 +55,12 @@ defmodule Doctrans.Processing.CancellationTest do
 
         processing = insert_job(LlmProcessingJob, %{"page_id" => page.id}, "suspended")
 
-        assert Run.active?(document.id)
+        assert JobStates.for_document(document.id).content != :idle
         assert {:ok, %Document{status: "cancelled"}} = Cancellation.cancel_document(document.id)
 
         assert Repo.get!(Oban.Job, extraction.id).state == "cancelled"
         assert Repo.get!(Oban.Job, processing.id).state == "cancelled"
-        refute Run.active?(document.id)
+        assert JobStates.for_document(document.id).content == :idle
       end)
     end
 
