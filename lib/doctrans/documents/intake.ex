@@ -9,7 +9,7 @@ defmodule Doctrans.Documents.Intake do
   undoing whichever of those two steps completed when the other fails.
 
   Nothing here knows about sockets, upload entries or flash messages. The web layer
-  (`DoctransWeb.DocumentLive.UploadIntake`) adapts a LiveView entry to these two
+  (`DoctransWeb.DocumentLive.Upload`) adapts a LiveView entry to these two
   calls and renders their outcomes; any other caller -- a mix task, a test fixture,
   an API -- gets the same rules by calling them directly.
   """

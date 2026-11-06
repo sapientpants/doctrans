@@ -10,7 +10,7 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
   """
   use DoctransWeb, :html
 
-  alias DoctransWeb.DocumentLive.{UploadIntake, UploadOutcomes}
+  alias DoctransWeb.DocumentLive.Upload
   alias DoctransWeb.ErrorMessages
   alias DoctransWeb.PrivacyCopy
 
@@ -210,7 +210,7 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
             class="text-error text-xs mt-1"
             data-entry-error={entry.ref}
           >
-            {ErrorMessages.message(UploadIntake.entry_reason([err], entry))}
+            {ErrorMessages.message(Upload.entry_reason([err], entry))}
           </p>
           <progress
             :if={entry.valid?}
@@ -294,7 +294,7 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
     <div id="upload-outcomes" aria-live="polite" class="mt-3 space-y-2 text-left">
       <div :if={@started > 0} id="upload-started" class="alert alert-success items-start">
         <.icon name="hero-check-circle" class="size-5 shrink-0" />
-        <p class="text-sm flex-1">{UploadOutcomes.upload_started_message(@started)}</p>
+        <p class="text-sm flex-1">{Upload.started_message(@started)}</p>
       </div>
 
       <div :if={@failures != []} id="upload-failures" class="alert alert-error items-start">
@@ -348,10 +348,10 @@ defmodule DoctransWeb.DocumentLive.UploadComponents do
   end
 
   # Config-level errors only: `upload_errors/1` never returns an entry's own errors,
-  # and those go through `UploadIntake.entry_reason/2` so that the browser's
+  # and those go through `Upload.entry_reason/2` so that the browser's
   # rejection and the server's are worded by the same `ErrorMessages` clause.
   defp error_to_string(:too_many_files) do
-    gettext("Maximum %{max} files can be uploaded at once", max: UploadIntake.max_entries())
+    gettext("Maximum %{max} files can be uploaded at once", max: Upload.max_entries())
   end
 
   # Never `inspect/1` the term: it is rendered to the user, and a LiveView internal
