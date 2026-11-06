@@ -58,8 +58,9 @@ _Avoid_: errored
 ### Processing
 
 **Extraction**:
-Rendering a Document's source file into Page images. Vision-model text extraction from a Page image is **page
-extraction**, a Page stage, not this.
+Converting a Document's source file to PDF when it is not one already, and rendering it into Page images. One
+step of a Run; the Document's Transitions during it belong to it alone. Vision-model text extraction from a Page
+image is **page extraction**, a Page stage, not this.
 
 **Reprocess**:
 Replacing a whole Run, or resetting one Page, with a chosen model.

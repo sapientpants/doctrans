@@ -1,10 +1,12 @@
 defmodule Doctrans.Jobs.DocumentExtractionJob do
   @moduledoc """
-  Job for extracting document pages in the background.
+  The Oban side of extraction.
 
-  This job processes documents (PDF, Word, etc.) and extracts individual pages
-  as images for further processing. For non-PDF formats, the document is first
-  converted to PDF before extraction.
+  Enqueueing starts a fresh upload's run; performing hands the document to
+  `Doctrans.Processing.Extraction.run/1`, which does the work and makes the
+  document's transitions. What is decided here is only what Oban needs to
+  know: whether the job still names the document's current run, and whether
+  a failure is worth another attempt.
   """
 
   use Oban.Worker,
@@ -20,8 +22,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Lifecycle, Topics}
   alias Doctrans.Jobs.Keys
-  alias Doctrans.Processing.DocumentProcessor
-  alias Doctrans.Processing.Run
+  alias Doctrans.Processing.{Extraction, Run}
   alias Doctrans.Repo
   alias Doctrans.Resilience.ErrorClassifier
 
@@ -92,31 +93,12 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   defp cancel_permanent(result), do: result
 
+  # A run the document has moved on from is not this job's to act on, and is
+  # dropped as a success; `Extraction` makes the same call for a run replaced
+  # or settled while it was under way.
   defp perform_current(document, args) do
-    if Run.current?(document, Map.get(args, "run_id")) do
-      extract_from(document, Run.source_path(document))
-    else
-      :ok
-    end
-  end
-
-  # `Run.source_path/1` is nil for a document whose extension is not a supported
-  # source format, which is reported like a source that is not there. A run the
-  # document has moved on from, or a document that settled while this job was
-  # waiting, is not this job's to act on: both are dropped as a success.
-  defp extract_from(document, path) do
-    if path && File.regular?(path) do
-      case DocumentProcessor.extract_document(document.id, path, document) do
-        {:error, reason} when reason in [:obsolete_run, :already_settled] -> :ok
-        result -> result
-      end
-    else
-      report_missing_source(document)
-    end
-  end
-
-  defp report_missing_source(document) do
-    _ = Lifecycle.fail(document, :document_file_not_found)
-    {:error, :document_file_not_found}
+    if Run.current?(document, Map.get(args, "run_id")),
+      do: Extraction.run(document),
+      else: :ok
   end
 end

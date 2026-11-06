@@ -18,7 +18,7 @@ defmodule Doctrans.Config.Uploads do
   Returns the storage root for uploads and generated files.
 
   A configured path is expanded, so every caller can rely on an absolute root:
-  page paths are persisted relative to it (`Doctrans.Processing.PdfProcessor`),
+  page paths are persisted relative to it (`Doctrans.Processing.Extraction`),
   and a relative root would resolve them against the working directory instead.
   """
   @spec upload_dir() :: String.t()

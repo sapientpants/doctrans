@@ -5,7 +5,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   search, chat, and reprocessing from its retained source.
 
   The units below this one each hold one end of that claim. `Config.Uploads`
-  resolves the root on every call, `PdfProcessor` persists page paths relative
+  resolves the root on every call, `Extraction` persists page paths relative
   to it, `Run.source_path/1` rebuilds the retained original's path from it, and
   `Doctrans.StorageRootTest` proves the endpoint serves images from whichever
   root is configured at the time. None of them establishes that a document
