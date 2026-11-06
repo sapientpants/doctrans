@@ -25,7 +25,7 @@ defmodule Doctrans.Processing.SourceLanguageTest do
   alias Doctrans.Processing.{OpenAIMock, OpenAIProbe, PageWork, SourceLanguage}
   alias Doctrans.TestEnv
 
-  describe "process_page/3 source language" do
+  describe "attempt/2 source language" do
     test "two documents processing concurrently each translate from their own source language" do
       {_german, german_page} = staged_page(%{source_language: "de", target_language: "en"})
       {_french, french_page} = staged_page(%{source_language: "fr", target_language: "en"})

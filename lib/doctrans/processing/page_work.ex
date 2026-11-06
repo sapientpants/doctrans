@@ -46,7 +46,7 @@ defmodule Doctrans.Processing.PageWork do
   no retry loop of its own: a transient failure is answered `{:error, _}` for
   Oban to back off and retry, and a failure that retrying cannot fix
   `{:cancel, _}`, so that no attempt is spent repeating it. A stage that fails
-  is marked errored on the page, which is what lets the next attempt resume at
+  is marked failed on the page, which is what lets the next attempt resume at
   that stage rather than from the start.
 
   The caller says whether this is the job's last attempt, and the document is
@@ -84,8 +84,12 @@ defmodule Doctrans.Processing.PageWork do
   """
   @type queue_outcome :: {:ok, :queued | :owned | :not_owed} | {:error, Errors.reason()}
 
-  @typedoc "What the job should do next: nothing, retry, or stop retrying."
-  @type attempt_outcome :: :ok | {:error, Errors.reason()} | {:cancel, Errors.reason()}
+  @typedoc """
+  What the job should do next: nothing, retry, or stop retrying.
+
+  A stage's outcome is the attempt's: the attempt adds no outcome of its own.
+  """
+  @type attempt_outcome :: Stages.outcome()
 
   @doc """
   Queues the Page's content work as the given `kind` of request.
@@ -169,10 +173,10 @@ defmodule Doctrans.Processing.PageWork do
   @spec attempt(Ecto.UUID.t(), keyword()) :: attempt_outcome()
   def attempt(page_id, opts \\ []) do
     {last?, opts} = Keyword.pop(opts, :last_attempt?, false)
-    generation = Keyword.get(opts, :generation)
+    generation = Keyword.fetch(opts, :generation)
 
     try do
-      process_page(page_id, opts)
+      process_page(page_id, generation, opts)
     catch
       # A crash returns no outcome. The stage it interrupted was marked failed
       # on the way out (`Stages`), so the page has settled and the document can
@@ -194,8 +198,10 @@ defmodule Doctrans.Processing.PageWork do
     end
   end
 
-  defp process_page(page_id, opts) do
-    generation = Keyword.fetch(opts, :generation)
+  # `generation` is the `:generation` option as fetched -- `{:ok, _}` or
+  # `:error` -- so that an attempt made without it is told apart from one made
+  # for a page that holds none.
+  defp process_page(page_id, generation, opts) do
     opts = Map.to_list(Run.choices(opts))
 
     case Repo.get(Page, page_id) do
@@ -204,7 +210,7 @@ defmodule Doctrans.Processing.PageWork do
 
       page ->
         if current_generation?(page, generation) do
-          page |> do_process_page(opts) |> settle_obsolete_run(page)
+          page |> do_process_page(opts) |> concede_obsolete_run(page)
         else
           Logger.info("Page #{page_id} has moved on to a newer generation, skipping it")
           :ok
@@ -212,7 +218,9 @@ defmodule Doctrans.Processing.PageWork do
     end
   end
 
-  # A job that names no generation acts for whatever the page holds now.
+  # An attempt that names no generation acts for whatever the page holds now;
+  # a page that is gone is nobody's.
+  defp current_generation?(nil, _generation), do: false
   defp current_generation?(_page, :error), do: true
 
   defp current_generation?(page, {:ok, generation}),
@@ -221,13 +229,15 @@ defmodule Doctrans.Processing.PageWork do
   # Every page write is a `PageLifecycle` transition, which answers
   # `{:error, :obsolete_run}` once the page has been reset, replaced or deleted
   # under this run. The work belongs to the generation that superseded it, so
-  # the run ends as a success rather than as a retry of work it no longer owns.
-  defp settle_obsolete_run({:error, :obsolete_run}, page) do
+  # the run concedes it and ends as a success rather than as a retry of work it
+  # no longer owns. This is not a Settle: the document is left to that
+  # generation's attempt.
+  defp concede_obsolete_run({:error, :obsolete_run}, page) do
     Logger.info("Page #{page.id} changed mid-run, leaving it to its current generation")
     :ok
   end
 
-  defp settle_obsolete_run(outcome, _page), do: outcome
+  defp concede_obsolete_run(outcome, _page), do: outcome
 
   defp do_process_page(page, opts) do
     with :ok <- maybe_extract(page, opts),
@@ -246,7 +256,7 @@ defmodule Doctrans.Processing.PageWork do
     end
   end
 
-  # A retried or rescued Oban job may have left a stage processing or errored;
+  # A retried or rescued Oban job may have left a stage processing or failed;
   # a stage is owed until it has completed.
   defp maybe_extract(page, opts) do
     if PageLifecycle.owed?(page, :extraction) do
@@ -297,10 +307,11 @@ defmodule Doctrans.Processing.PageWork do
   # A failure settles from a fresh row, unlike a success: the extraction this
   # attempt may have saved before its translation failed moved the revision
   # on, and the lifecycle would refuse the page read at the start as obsolete.
-  # A page whose generation has moved on is not this attempt's to settle.
+  # A page whose generation has moved on is not this attempt's to settle, by
+  # the same reading of the option the run check made.
   defp settle_failed(page_id, generation) do
     page = Repo.get(Page, page_id)
-    _ = if Run.current?(page, generation: generation), do: Lifecycle.settle(page)
+    _ = if current_generation?(page, generation), do: Lifecycle.settle(page)
     :ok
   end
 end

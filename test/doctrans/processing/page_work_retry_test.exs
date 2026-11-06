@@ -296,6 +296,18 @@ defmodule Doctrans.Processing.PageWorkRetryTest do
       assert saved.translation_status == "error"
       assert Documents.get_document!(context.document.id).status == "error"
     end
+
+    # An attempt made without the option acts for whatever generation the page
+    # holds now, on the settle as on the run check, so a reset page -- the one
+    # kind that holds a generation at all -- still fails its document.
+    test "an attempt that names no generation settles the page as it now is", context do
+      {:ok, reset} = PageLifecycle.reset(context.page)
+      assert reset.processing_generation != nil
+      fail_extraction(:timeout)
+
+      assert {:error, _} = PageWork.attempt(context.page.id, last_attempt?: true)
+      assert Documents.get_document!(context.document.id).status == "error"
+    end
   end
 
   describe "runs interrupted mid-flight" do

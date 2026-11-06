@@ -25,7 +25,7 @@ defmodule Doctrans.Processing.PageWork.Stages do
   alias Doctrans.Processing.SourceLanguage
   alias Doctrans.Resilience.ErrorClassifier
 
-  @typedoc "What the caller should do next: nothing, retry, or stop retrying."
+  @typedoc "What the attempt should do next: nothing, retry, or stop retrying."
   @type outcome :: :ok | {:error, Errors.reason()} | {:cancel, Errors.reason()}
 
   @doc """
@@ -147,7 +147,7 @@ defmodule Doctrans.Processing.PageWork.Stages do
     end
   end
 
-  # Marks the stage errored and tells the caller whether to try again. An open
+  # Marks the stage failed and tells the caller whether to try again. An open
   # circuit breaker is unclassified and so retried: the breaker closes on its
   # own, and Oban's backoff is the wait for it that this module used to sleep
   # through. A permanent error is given up on at once — every attempt would pay
