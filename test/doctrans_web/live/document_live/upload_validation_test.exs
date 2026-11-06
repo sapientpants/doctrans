@@ -7,7 +7,7 @@ defmodule DoctransWeb.DocumentLive.UploadValidationTest do
   alias Doctrans.Documents.Layout
   alias Doctrans.Processing.PdfExtractorMock
   alias Doctrans.TestEnv
-  alias DoctransWeb.DocumentLive.UploadIntake
+  alias DoctransWeb.DocumentLive.Upload
 
   @moduletag :capture_log
   @size_limit 64
@@ -108,7 +108,7 @@ defmodule DoctransWeb.DocumentLive.UploadValidationTest do
     entry = %Phoenix.LiveView.UploadEntry{client_name: "empty.pdf", client_size: 0}
 
     assert {:ok, {:error, "empty.pdf", :file_too_small}} =
-             UploadIntake.consume_entry(path, entry)
+             Upload.consume_entry(path, entry)
 
     # Nothing was stored, so no document directory was created for it either.
     assert File.ls!(directory) == []

@@ -4,10 +4,7 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   alias Doctrans.Documents
   alias Doctrans.Processing.Cancellation
-  alias DoctransWeb.DocumentLive.DocumentStream
-  alias DoctransWeb.DocumentLive.UploadIntake
-  alias DoctransWeb.DocumentLive.UploadOutcomes
-  alias DoctransWeb.DocumentLive.UploadReadiness
+  alias DoctransWeb.DocumentLive.{DocumentStream, Upload, UploadReadiness}
   alias DoctransWeb.ErrorMessages
   alias DoctransWeb.PrivacyCopy
 
@@ -16,36 +13,26 @@ defmodule DoctransWeb.DocumentLive.Index do
   import DoctransWeb.DocumentLive.Components
   import DoctransWeb.DocumentLive.UploadComponents
 
+  # Every event `Upload` owns: the dialog and the submissions it makes. The
+  # dialog is a function component, so the events it declares arrive here and
+  # are forwarded verbatim.
+  @upload_events ~w(
+    show_upload_modal
+    hide_upload_modal
+    validate_upload
+    cancel_upload
+    upload_document
+  )
+
   @impl true
   def mount(_params, _session, socket) do
-    defaults = Application.get_env(:doctrans, :defaults, [])
-
     socket =
       socket
-      |> assign(:show_upload_modal, false)
-      |> assign(:upload_failures, [])
-      |> assign(:upload_pending, [])
-      |> assign(:upload_started, 0)
-      # Starts on "Detect automatically", never on the configured language:
-      # `config :doctrans, :defaults, source_language` is no longer a default
-      # *choice*, it is only the fallback recorded when detection cannot identify
-      # the language, so starting the picker on it would put a guess in front of
-      # the user as though they had made it.
-      |> assign(:source_language, "")
-      # The picker's preselection; `config :doctrans, :defaults, target_language:`
-      # overrides it.
-      |> assign(:target_language, defaults[:target_language] || "en")
       |> assign(:sort_by, :inserted_at)
       |> assign(:sort_dir, :desc)
+      |> Upload.init()
       |> UploadReadiness.init()
       |> DocumentStream.init()
-      |> allow_upload(:document,
-        accept: UploadIntake.accept(),
-        max_entries: UploadIntake.max_entries(),
-        # max_file_size: client-side limit; the on-disk size is re-verified
-        # in UploadIntake.consume_entry/2 before the file is accepted
-        max_file_size: UploadIntake.max_file_size()
-      )
 
     {:ok, DocumentStream.refresh(socket)}
   end
@@ -199,51 +186,12 @@ defmodule DoctransWeb.DocumentLive.Index do
     """
   end
 
-  # --- Upload modal ----------------------------------------------------------
+  # --- Upload ----------------------------------------------------------------
 
-  # The check is started per open, not per mount: it costs two HTTP calls, only a
-  # user about to upload needs the answer, and reopening the dialog after fixing a
-  # setting is then the retry, with no control to explain.
   @impl true
-  def handle_event("show_upload_modal", _params, socket) do
-    socket =
-      socket
-      |> assign(:show_upload_modal, true)
-      |> UploadOutcomes.clear()
-      |> UploadReadiness.check()
-
-    {:noreply, socket}
+  def handle_event(event, params, socket) when event in @upload_events do
+    Upload.handle_event(event, params, socket)
   end
-
-  @impl true
-  def handle_event("hide_upload_modal", _params, socket),
-    do: {:noreply, assign(socket, :show_upload_modal, false)}
-
-  @impl true
-  def handle_event("validate_upload", params, socket) do
-    source_language = params["source_language"] || socket.assigns.source_language
-    target_language = params["target_language"] || socket.assigns.target_language
-
-    socket =
-      socket
-      |> assign(:source_language, source_language)
-      |> assign(:target_language, target_language)
-
-    # Picking files again is the retry the failure list asks for, so the list of
-    # what failed last time goes with the submission it described. This event also
-    # fires for the language selects, which are not that retry: clearing there
-    # would take the explanation away from a user who is still reading it.
-    socket =
-      if params["_target"] == ["document"],
-        do: UploadOutcomes.clear(socket),
-        else: socket
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("cancel_upload", %{"ref" => ref}, socket),
-    do: {:noreply, cancel_upload(socket, :document, ref)}
 
   # --- Sorting ---------------------------------------------------------------
 
@@ -263,22 +211,6 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   @impl true
   def handle_event("sort", _params, socket), do: {:noreply, socket}
-
-  # --- Document upload -------------------------------------------------------
-
-  @impl true
-  def handle_event("upload_document", params, socket) do
-    source_language = params["source_language"] || socket.assigns.source_language
-    target_language = params["target_language"] || socket.assigns.target_language
-
-    case UploadIntake.validate_languages(source_language, target_language) do
-      {:ok, languages} ->
-        upload_documents_with_validated_languages(socket, languages)
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, ErrorMessages.message(reason))}
-    end
-  end
 
   # --- Document deletion -----------------------------------------------------
 
@@ -306,73 +238,6 @@ defmodule DoctransWeb.DocumentLive.Index do
 
   defp delete_existing_document(document) do
     with {:ok, _deleted} <- Cancellation.cancel_and_delete(document), do: :ok
-  end
-
-  # One pass over the entries in the order the user picked them, so the outcome list
-  # reads the same way the drop zone above it does. Entries are consumed one at a
-  # time rather than through `consume_uploaded_entries/3`, which takes the whole
-  # config at once and raises while any entry is still pending -- that is how one
-  # file the browser rejected took the outcome of every file beside it down with
-  # the socket.
-  defp upload_documents_with_validated_languages(socket, languages) do
-    upload = socket.assigns.uploads.document
-
-    {socket, outcomes} =
-      Enum.reduce(upload.entries, {socket, []}, fn entry, {socket, acc} ->
-        {socket, outcome} = process_entry(socket, upload, entry, languages)
-        {socket, [outcome | acc]}
-      end)
-
-    outcomes = Enum.reverse(outcomes)
-
-    {:noreply, socket |> UploadOutcomes.report(outcomes) |> refresh_started(outcomes)}
-  end
-
-  # The cards for what this submission started, in the same render: the
-  # `{:document_created, _}` broadcast refreshes them again, unchanged, but only
-  # once it arrives.
-  defp refresh_started(socket, outcomes) do
-    if Enum.any?(outcomes, &match?({:ok, _document_id}, &1)),
-      do: DocumentStream.refresh(socket),
-      else: socket
-  end
-
-  # One entry's whole journey, so that its place in the report is its place in the
-  # list the user is looking at.
-  defp process_entry(socket, upload, entry, languages) do
-    cond do
-      not entry.valid? ->
-        # Cancelled so it stops blocking the config it sits in; its reason travels
-        # in the outcome list instead.
-        {cancel_upload(socket, :document, entry.ref),
-         {:error, entry.client_name,
-          UploadIntake.entry_reason(upload_errors(upload, entry), entry)}}
-
-      not entry.done? ->
-        # Still on its way. Left in the modal for the submission that finishes it,
-        # and reported so it is never silently dropped from a submission that
-        # otherwise succeeded.
-        {socket, {:pending, entry.client_name}}
-
-      true ->
-        {socket, start_entry(socket, entry, languages)}
-    end
-  end
-
-  defp start_entry(socket, entry, languages) do
-    consumed =
-      consume_uploaded_entry(socket, entry, fn meta ->
-        # `meta` is an opaque map from LiveView; coerce the path to a string
-        # so the type stays concrete for downstream File calls.
-        path = to_string(Map.get(meta, :path, ""))
-        UploadIntake.consume_entry(path, entry)
-      end)
-
-    if UploadIntake.accepted?(consumed) do
-      UploadIntake.create_and_process(consumed, languages)
-    else
-      consumed
-    end
   end
 
   # --- Upload readiness ------------------------------------------------------
