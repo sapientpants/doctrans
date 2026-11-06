@@ -20,7 +20,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   alias Doctrans.Config.PdfExtraction
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Lifecycle, Topics}
+  alias Doctrans.Documents.Lifecycle
   alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.{Extraction, Run}
   alias Doctrans.Repo
@@ -39,8 +39,8 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   @doc """
   Queues a fresh upload: records the extension its stored file was validated
   under, requeues it through `Lifecycle.requeue/2`, and inserts the extraction
-  job, in one transaction. The queued document is announced once that
-  transaction has committed.
+  job, in one transaction; the transition announces the queued document once
+  that transaction has committed.
 
   Only a document still `uploading` is taken. One whose run has started --
   under way or settled -- is refused with `{:error, :already_processing}`:
@@ -50,14 +50,9 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   @spec enqueue_document(Ecto.UUID.t(), String.t()) ::
           {:ok, Oban.Job.t()} | {:error, Doctrans.Errors.reason()}
   def enqueue_document(document_id, file_path) do
-    with {:ok, {queued, job}} <- Repo.safe_transaction(fn -> requeue(document_id, file_path) end) do
-      _ = Topics.broadcast_document_updated(queued)
-      {:ok, job}
-    end
+    Repo.safe_transaction(fn -> requeue(document_id, file_path) end)
   end
 
-  # `Lifecycle` does not announce a write made inside the caller's transaction,
-  # which is why `enqueue_document/2` announces the queued document itself.
   defp requeue(document_id, file_path) do
     document = Run.lock(document_id) || Repo.rollback(:document_not_found)
     unless Lifecycle.uploading?(document), do: Repo.rollback(:already_processing)
@@ -70,7 +65,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
         {:error, reason} -> Repo.rollback(reason)
       end
 
-    {queued, Run.enqueue(queued)}
+    Run.enqueue(queued)
   end
 
   # A document row that is gone stays gone, so the job is cancelled rather than

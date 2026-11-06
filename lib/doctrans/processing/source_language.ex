@@ -14,14 +14,12 @@ defmodule Doctrans.Processing.SourceLanguage do
   failed call.
   """
 
-  import Ecto.Query
-
   require Logger
 
   alias Doctrans.Deps
-  alias Doctrans.Documents.{Document, Topics}
+  alias Doctrans.Documents
+  alias Doctrans.Documents.Document
   alias Doctrans.Languages
-  alias Doctrans.Repo
 
   # Detection reads the opening of a page, not the page. Telling German from
   # Dutch does not need the whole of either, and a bounded sample keeps the call
@@ -116,35 +114,19 @@ defmodule Doctrans.Processing.SourceLanguage do
 
   defp language_code(_reply), do: nil
 
-  # Pages of one document translate concurrently, so two of them can find the
-  # column NULL and both detect. The write is conditional on it still being
-  # NULL, so exactly one lands; the row is then read back and the value it holds
-  # -- the winner's, which may not be ours -- is what every page translates
-  # from, so a document is never half translated from one language and half
-  # from another.
-  #
-  # No row lock is taken around the model call on purpose. Holding one across a
-  # multi-second inference request would stall every other page of the document
-  # behind it. A duplicate detection call is cheap; a held lock is not.
+  # The write is `Documents.claim_source_language/2`'s: conditional on the column
+  # still being empty, so of two pages detecting at once exactly one lands, and
+  # the value the row holds afterwards -- the winner's, which may not be ours --
+  # is what every page translates from. No row lock is taken around the model
+  # call on purpose: holding one across a multi-second inference request would
+  # stall every other page of the document behind it. A duplicate detection
+  # call is cheap; a held lock is not.
   defp store(language, document) do
-    {claimed, _} =
-      from(d in Document, where: d.id == ^document.id and is_nil(d.source_language))
-      |> Repo.update_all(set: [source_language: language, updated_at: now()])
-
-    stored = Repo.get(Document, document.id)
-    announce(claimed, stored)
-
-    (stored && stored.source_language) || language
+    case Documents.claim_source_language(document, language) do
+      {_outcome, %Document{source_language: stored}} when is_binary(stored) -> stored
+      _gone -> language
+    end
   end
-
-  # Only the write that won announces the change, so that the document page
-  # shows a detected language without a refresh. A page that lost the race would
-  # only be re-broadcasting what the winner already sent.
-  defp announce(0, _document), do: :ok
-  defp announce(_claimed, nil), do: :ok
-  defp announce(_claimed, document), do: Topics.broadcast_document_updated(document)
-
-  defp now, do: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
   defp fallback do
     Application.get_env(:doctrans, :defaults, [])[:source_language] || @fallback_language

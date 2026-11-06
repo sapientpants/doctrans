@@ -327,7 +327,36 @@ defmodule Doctrans.Documents.LifecycleTest do
   end
 
   describe "broadcasting" do
-    test "a transition inside the caller's transaction is left for the caller to announce" do
+    test "a transition inside the caller's transaction is announced once, after the commit" do
+      document = subscribed_document("processing")
+      id = document.id
+
+      assert {:ok, {:ok, cancelled}} =
+               Repo.safe_transaction(fn ->
+                 result = Lifecycle.cancel(document)
+                 refute_received {:document_updated, _}
+                 result
+               end)
+
+      assert cancelled.status == "cancelled"
+      assert_received {:document_updated, %Document{id: ^id, status: "cancelled"}}
+      refute_received {:document_updated, _}
+    end
+
+    test "a transition in a transaction that rolls back is not announced" do
+      document = subscribed_document("processing")
+
+      assert {:error, :changed_my_mind} =
+               Repo.safe_transaction(fn ->
+                 {:ok, _cancelled} = Lifecycle.cancel(document)
+                 Repo.rollback(:changed_my_mind)
+               end)
+
+      assert Documents.get_document!(document.id).status == "processing"
+      refute_received {:document_updated, _}
+    end
+
+    test "a bare transaction drops the announcement, which the fixtures rely on" do
       document = subscribed_document("processing")
 
       assert {:ok, {:ok, cancelled}} =
