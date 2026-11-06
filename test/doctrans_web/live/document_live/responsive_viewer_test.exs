@@ -200,7 +200,7 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
     end
 
     test "the selected tab survives turning the page", %{conn: conn} do
-      # `:view_tab` and the page number are both PageViewer state, but only the
+      # `:view_tab` and the page number are both Viewer state, but only the
       # page number is URL-driven. Moving the tab assign into `apply_params/2` --
       # a plausible tidy-up, since that is where the other navigation state is
       # handled -- would reset a reader to the translated panel on every page

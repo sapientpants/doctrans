@@ -20,21 +20,8 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
   alias Doctrans.Documents.ProcessingStatus
   alias Doctrans.Processing.{Cancellation, DocumentReprocessing}
   alias Doctrans.Search.Reindex
+  alias DoctransWeb.DocumentLive.Viewer
   alias DoctransWeb.ErrorMessages
-
-  @doc """
-  Computes the status from the current document.
-
-  Called from the debounced progress refresh, which runs on mount and on every
-  `{:document_updated, _}` and `{:page_updated, _}`, so the panel is initialised
-  and then follows the pipelines live without a subscription of its own.
-  """
-  @spec refresh(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
-  def refresh(%{assigns: %{document: nil}} = socket), do: socket
-
-  def refresh(socket) do
-    assign(socket, :processing_status, ProcessingStatus.for_document(socket.assigns.document))
-  end
 
   # Each action is re-authorized against a status read here, not against the
   # markup: an event arrives over the socket whether or not its button was
@@ -63,7 +50,7 @@ defmodule DoctransWeb.DocumentLive.StatusPanel do
 
     case status.actions[action] do
       :offered ->
-        socket |> put_outcome(run.(document)) |> refresh()
+        socket |> put_outcome(run.(document)) |> Viewer.refresh_status()
 
       {:refused, reason} ->
         socket |> put_outcome({:error, reason}) |> assign(:processing_status, status)
