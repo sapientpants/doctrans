@@ -6,9 +6,9 @@ defmodule Doctrans.Processing.DocumentReprocessingRaceTest do
   import Ecto.Query
   import Doctrans.ProcessProbe, only: [eventually: 2]
   alias Doctrans.{Documents, Repo}
-  alias Doctrans.Documents.Layout
+  alias Doctrans.Documents.{Layout, Source}
   alias Doctrans.Jobs.DocumentExtractionJob
-  alias Doctrans.Processing.{DocumentReprocessing, Run}
+  alias Doctrans.Processing.DocumentReprocessing
   alias Ecto.Adapters.SQL.Sandbox
 
   test "independent concurrent requests admit exactly one new run" do
@@ -21,7 +21,7 @@ defmodule Doctrans.Processing.DocumentReprocessingRaceTest do
 
     directory = Layout.document_dir(document.id)
     File.mkdir_p!(directory)
-    File.write!(Run.source_path(document), "original")
+    File.write!(Source.path(document), "original")
 
     on_exit(fn ->
       Sandbox.unboxed_run(Repo, fn ->

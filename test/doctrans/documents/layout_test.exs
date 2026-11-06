@@ -2,7 +2,7 @@ defmodule Doctrans.Documents.LayoutTest do
   # Repoints the shared storage root, so it must not run alongside async tests.
   use Doctrans.EnvCase, async: false
 
-  alias Doctrans.Documents.Layout
+  alias Doctrans.Documents.{Document, Layout}
   alias Doctrans.TestEnv
 
   @root "/srv/doctrans-data"
@@ -40,6 +40,20 @@ defmodule Doctrans.Documents.LayoutTest do
 
   test "a document from before runs existed keeps its pages beside the original" do
     assert Layout.legacy_pages_dir(@document_id) == "#{@root}/documents/#{@document_id}/pages"
+  end
+
+  test "a document's derived files live under the run it holds" do
+    document = %Document{id: @document_id, processing_run_id: @run_id}
+
+    assert Layout.output_dir(document) == Layout.run_dir(@document_id, @run_id)
+    assert Layout.pages_dir(document) == Layout.pages_dir(@document_id, @run_id)
+  end
+
+  test "a document without a run keeps its derived files in its own directory" do
+    document = %Document{id: @document_id, processing_run_id: nil}
+
+    assert Layout.output_dir(document) == Layout.document_dir(@document_id)
+    assert Layout.pages_dir(document) == Layout.legacy_pages_dir(@document_id)
   end
 
   test "stored page paths round-trip through the root" do

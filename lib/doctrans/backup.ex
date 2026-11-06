@@ -7,7 +7,7 @@ defmodule Doctrans.Backup do
   them is an act of faith unless something checks the join afterwards, and only
   the application can check it: the rows name the files, and only the app knows
   how a row's path is rebuilt from the current root
-  (`Doctrans.Processing.Run.source_path/1` for a retained original, `image_path`
+  (`Doctrans.Documents.Source.path/1` for a retained original, `image_path`
   relative to the root for a page image).
 
   `verify/0` is that check. It is a *report, never a repair*: it creates, moves
@@ -39,8 +39,7 @@ defmodule Doctrans.Backup do
 
   import Ecto.Query
 
-  alias Doctrans.Documents.{Document, Layout, Page}
-  alias Doctrans.Processing.Run
+  alias Doctrans.Documents.{Document, Layout, Page, Source}
   alias Doctrans.Repo
 
   @typedoc "The verdict on one storage root, with both directions of disagreement listed."
@@ -120,7 +119,7 @@ defmodule Doctrans.Backup do
     "#{documents} document(s) name files that are not under #{report.root}."
   end
 
-  # Only the fields `Run.source_path/1` rebuilds a path from. The whole library
+  # Only the fields `Source.path/1` rebuilds a path from. The whole library
   # is read in one pass, so a row is kept as narrow as the question allows.
   defp documents_query do
     from(d in Document,
@@ -136,12 +135,12 @@ defmodule Doctrans.Backup do
   end
 
   defp source_reason(document, root) do
-    path = Run.source_path(document)
+    path = Source.path(document)
 
     cond do
       # A format whose original the app never retains names no file to compare.
       is_nil(path) -> []
-      Run.source_available?(document) -> []
+      Source.available?(document) -> []
       true -> [{:source_missing, [document_id: document.id, path: relative(path, root)]}]
     end
   end

@@ -3,8 +3,8 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
   use DoctransWeb.ConnCase, async: false
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.Layout
-  alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock, Run}
+  alias Doctrans.Documents.{Layout, Source}
+  alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock}
 
   @moduletag :capture_log
 
@@ -50,7 +50,7 @@ defmodule DoctransWeb.DocumentLive.UploadPathTest do
       assert Enum.sort(File.ls!(directory)) == ["original.pdf", "runs"]
       assert File.read!(Path.join(directory, "original.pdf")) == content
       assert document.source_extension == ".pdf"
-      assert Run.source_available?(document)
+      assert Source.available?(document)
       refute String.contains?(document.original_filename, ["/", "\\", "\0"])
       refute String.contains?(document.title, "\0")
       assert has_element?(view, "#documents-#{document.id}")

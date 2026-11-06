@@ -2,7 +2,7 @@ defmodule Doctrans.Jobs.RunCleanupJob do
   @moduledoc "Removes superseded derived files while preserving the original upload."
   use Oban.Worker, queue: :pdf_extraction, max_attempts: 5
   alias Doctrans.Documents
-  alias Doctrans.Documents.Layout
+  alias Doctrans.Documents.{Layout, Source}
   alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.Run
 
@@ -54,7 +54,7 @@ defmodule Doctrans.Jobs.RunCleanupJob do
   # A converted office document left its PDF beside the original before runs
   # existed; one converted inside a run is removed with that run's directory.
   defp converted_pdf(document) do
-    if Path.extname(Run.source_path(document) || "") != ".pdf",
+    if Path.extname(Source.path(document) || "") != ".pdf",
       do: [Layout.original_path(document.id, ".pdf")],
       else: []
   end

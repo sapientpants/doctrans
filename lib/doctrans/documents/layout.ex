@@ -23,6 +23,7 @@ defmodule Doctrans.Documents.Layout do
   """
 
   alias Doctrans.Config.Uploads
+  alias Doctrans.Documents.Document
 
   @documents "documents"
   @runs "runs"
@@ -62,6 +63,20 @@ defmodule Doctrans.Documents.Layout do
   @doc "The page images of one processing run of a document."
   @spec pages_dir(Ecto.UUID.t(), Ecto.UUID.t()) :: String.t()
   def pages_dir(document_id, run_id), do: Path.join(run_dir(document_id, run_id), @pages)
+
+  @doc """
+  Where the derived files of the run a document holds live: its run directory,
+  or, for a document without a run, which predates runs, the document directory
+  itself, where its derived files sit directly.
+  """
+  @spec output_dir(Document.t()) :: String.t()
+  def output_dir(%Document{processing_run_id: nil} = document), do: document_dir(document.id)
+  def output_dir(%Document{} = document), do: run_dir(document.id, document.processing_run_id)
+
+  @doc "Where the page images of the run a document holds live; see `output_dir/1`."
+  @spec pages_dir(Document.t()) :: String.t()
+  def pages_dir(%Document{processing_run_id: nil} = document), do: legacy_pages_dir(document.id)
+  def pages_dir(%Document{} = document), do: pages_dir(document.id, document.processing_run_id)
 
   @doc """
   The page images of a document processed before runs existed.

@@ -20,8 +20,8 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
   # global `:uploads` application env.
   use DoctransWeb.ConnCase, async: false
 
-  alias Doctrans.Documents.Layout
-  alias Doctrans.Processing.{OpenAIMock, PdfExtractorMock, Run}
+  alias Doctrans.Documents.{Layout, Source}
+  alias Doctrans.Processing.{OpenAIMock, PdfExtractorMock}
   alias Doctrans.TestEnv
   alias DoctransWeb.DocumentLive.Components
   alias DoctransWeb.ErrorMessages
@@ -355,7 +355,7 @@ defmodule DoctransWeb.DocumentLive.KeyboardAccessibilityTest do
       document = document_fixture(%{total_pages: 1, status: "processing"})
       completed_page_fixture(document)
       File.mkdir_p!(Layout.document_dir(document.id))
-      File.write!(Run.source_path(document), "original pdf")
+      File.write!(Source.path(document), "original pdf")
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 

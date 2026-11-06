@@ -1,6 +1,6 @@
 defmodule Doctrans.Processing.Run do
   @moduledoc """
-  Stored source paths, model choices, and the fence on a document's run.
+  Model choices, the job of a run, and the fence on a document's run.
 
   The fence (`lock/1`, `current?/2`, `with_current/2`, `with_page/2`) lives in
   `Doctrans.Documents.Revision`, which owns the revision columns it compares.
@@ -9,7 +9,7 @@ defmodule Doctrans.Processing.Run do
   and Search contexts name `Revision` directly.
   """
   alias Doctrans.Config.OpenAI
-  alias Doctrans.Documents.{Document, Formats, Layout, Page, Revision}
+  alias Doctrans.Documents.{Document, Revision}
   alias Doctrans.Jobs.{DocumentExtractionJob, Keys, RunCleanupJob}
   alias Doctrans.Repo
 
@@ -27,38 +27,6 @@ defmodule Doctrans.Processing.Run do
           processing_run_id: Ecto.UUID.t()
         }
   def new_attrs(opts \\ []), do: Map.put(choices(opts), :processing_run_id, Uniq.UUID.uuid7())
-
-  defp model_opts(document) do
-    Enum.reject(
-      [
-        extraction_model: document.extraction_model,
-        translation_model: document.translation_model
-      ],
-      fn {_key, value} -> is_nil(value) end
-    )
-  end
-
-  @doc """
-  The models a page's work is queued with, as `Doctrans.Processing.PageWork`
-  stores them on the job: the models the page requested, else the document's,
-  else none, leaving the defaults to the attempt that runs it.
-  """
-  @spec page_model_args(Page.t(), Document.t()) :: %{String.t() => String.t()}
-  def page_model_args(page, document) do
-    overrides =
-      Enum.reject(
-        [
-          extraction_model: page.requested_extraction_model,
-          translation_model: page.requested_translation_model
-        ],
-        fn {_, value} -> is_nil(value) end
-      )
-
-    document
-    |> model_opts()
-    |> Keyword.merge(overrides)
-    |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
-  end
 
   @spec args(Document.t()) :: %{String.t() => Ecto.UUID.t() | nil}
   def args(document),
@@ -82,62 +50,6 @@ defmodule Doctrans.Processing.Run do
 
     job
   end
-
-  @spec source_path(Document.t()) :: String.t() | nil
-  def source_path(document) do
-    # Older documents predate source metadata; retain their filename fallback.
-    extension = document.source_extension || Formats.extension(document.original_filename)
-
-    if Formats.supported?(extension) do
-      Layout.original_path(document.id, extension)
-    end
-  end
-
-  @doc """
-  Records the extension of the stored upload at `path` as the document's source
-  format, unless the document already records one.
-
-  `path` is the stored upload, whose extension passed magic-byte validation; one
-  that is not a supported source format is refused and nothing is written.
-  """
-  @spec record_source_extension(Document.t(), String.t()) ::
-          {:ok, Document.t()} | {:error, {:unsupported_format, [format: String.t()]}}
-  def record_source_extension(document, path) do
-    extension = Formats.extension(path)
-
-    if Formats.supported?(extension) do
-      {:ok,
-       document
-       |> Ecto.Changeset.change(source_extension: document.source_extension || extension)
-       |> Repo.update!()}
-    else
-      {:error, {:unsupported_format, [format: extension]}}
-    end
-  end
-
-  @spec source_available?(Document.t()) :: boolean()
-  def source_available?(document) do
-    case source_path(document) do
-      nil ->
-        false
-
-      path ->
-        match?(
-          {:ok, %File.Stat{type: :regular, access: access}} when access in [:read, :read_write],
-          File.stat(path)
-        )
-    end
-  end
-
-  # A document without a run predates runs: its derived files sit directly in
-  # its document directory, where `Doctrans.Documents.Layout` calls them legacy.
-  @spec output_dir(Document.t()) :: String.t()
-  def output_dir(%{processing_run_id: nil} = document), do: Layout.document_dir(document.id)
-  def output_dir(document), do: Layout.run_dir(document.id, document.processing_run_id)
-
-  @spec pages_dir(Document.t()) :: String.t()
-  def pages_dir(%{processing_run_id: nil} = document), do: Layout.legacy_pages_dir(document.id)
-  def pages_dir(document), do: Layout.pages_dir(document.id, document.processing_run_id)
 
   defdelegate lock(document_id), to: Revision
   defdelegate current?(document, run_id), to: Revision

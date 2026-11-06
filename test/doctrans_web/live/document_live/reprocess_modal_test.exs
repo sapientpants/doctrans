@@ -10,8 +10,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
   import ExUnit.CaptureLog
 
   alias Doctrans.{Config, Documents, ProcessProbe}
-  alias Doctrans.Documents.{Layout, PageLifecycle, Topics}
-  alias Doctrans.Processing.{OpenAIMock, Run}
+  alias Doctrans.Documents.{Layout, PageLifecycle, Source, Topics}
+  alias Doctrans.Processing.OpenAIMock
   alias DoctransWeb.DocumentLive.ReprocessModal
   alias DoctransWeb.ErrorMessages
   alias Phoenix.LiveView.Channel
@@ -496,7 +496,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     # on disk.
     directory = Layout.document_dir(document.id)
     File.mkdir_p!(directory)
-    File.write!(Run.source_path(document), "original pdf")
+    File.write!(Source.path(document), "original pdf")
     on_exit(fn -> File.rm_rf(directory) end)
 
     {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
