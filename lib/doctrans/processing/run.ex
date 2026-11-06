@@ -28,8 +28,7 @@ defmodule Doctrans.Processing.Run do
         }
   def new_attrs(opts \\ []), do: Map.put(choices(opts), :processing_run_id, Uniq.UUID.uuid7())
 
-  @spec model_opts(Document.t()) :: keyword(String.t())
-  def model_opts(document) do
+  defp model_opts(document) do
     Enum.reject(
       [
         extraction_model: document.extraction_model,
@@ -39,6 +38,11 @@ defmodule Doctrans.Processing.Run do
     )
   end
 
+  @doc """
+  The models a page's work is queued with, as `Doctrans.Processing.PageWork`
+  stores them on the job: the models the page requested, else the document's,
+  else none, leaving the defaults to the attempt that runs it.
+  """
   @spec page_model_args(Page.t(), Document.t()) :: %{String.t() => String.t()}
   def page_model_args(page, document) do
     overrides =

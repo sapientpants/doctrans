@@ -353,7 +353,7 @@ defmodule Doctrans.Processing.LlmProcessorRetryTest do
   end
 
   defp perform_page_job(page, opts) do
-    args = LlmProcessingJob.page_args(page, page.processing_generation, %{})
+    args = %{"page_id" => page.id, "generation" => page.processing_generation}
     perform_job(LlmProcessingJob, args, opts)
   end
 

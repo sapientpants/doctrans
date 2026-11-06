@@ -29,8 +29,7 @@ defmodule Doctrans.Processing.Extraction do
   alias Doctrans.Deps
   alias Doctrans.Documents
   alias Doctrans.Documents.{Formats, Layout, Lifecycle, Topics}
-  alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.Run
+  alias Doctrans.Processing.{PageWork, Run}
 
   # A run the document has moved on from, or a document that settled while its
   # job waited, is not this call's to act on: nothing more is written, and the
@@ -153,16 +152,11 @@ defmodule Doctrans.Processing.Extraction do
     end
   end
 
-  defp queue_page(%{extraction_status: "completed", translation_status: "completed"}, _document),
-    do: :ok
-
+  # A page an active job already owns keeps that job, retry state included,
+  # and a page whose stages are both complete owes nothing: either way the
+  # page is accounted for.
   defp queue_page(page, document) do
-    Logger.info("Queueing page #{page.page_number} for LLM processing")
-
-    # Oban uniqueness preserves any active job, including its retry state.
-    with {:ok, _job} <- LlmProcessingJob.enqueue_page(page, Run.model_opts(document)) do
-      :ok
-    end
+    with {:ok, _queued} <- PageWork.queue(page, document, as: :fresh), do: :ok
   end
 
   # A page whose image an earlier attempt stored is reused as it is.

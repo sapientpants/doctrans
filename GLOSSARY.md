@@ -42,6 +42,13 @@ The set of statuses a Page's three Stages can hold and the named transitions bet
 one of those transitions, refused when the Page is Obsolete work; there is no generic "set stage status". The index
 pipeline moves the embedding Stage through it like the content pipeline moves the other two.
 
+**Page work**:
+One Page's passage through its content Stages, from being queued to the Settle of its Document. It is queued fresh
+as Extraction renders the Page, requested by a Reprocess or Retry failed pages, or recovered by Recovery; a requested
+Page goes ahead of fresh ones. A Page already being worked on is owned by that work and is not queued again, and a
+Page whose content Stages are both completed owes none.
+_Avoid_: page job, processing job (as a name for the work rather than its queue entry)
+
 **Transition**:
 A named move of a Document from one status to another, or of a Page's Stage from one status to another. A Document
 transition is legal only from specific starting statuses, and one from an illegal status is refused, not ignored. A
