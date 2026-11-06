@@ -24,7 +24,7 @@ defmodule Doctrans.Processing.Cancellation do
   require Logger
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Lifecycle, Page, Topics}
+  alias Doctrans.Documents.{Document, Lifecycle, Page}
   alias Doctrans.Errors
   alias Doctrans.Processing.{JobQuery, Run}
   alias Doctrans.Repo
@@ -42,12 +42,11 @@ defmodule Doctrans.Processing.Cancellation do
 
   def cancel_document(document_id) do
     Repo.safe_transaction(fn -> cancel_locked(document_id) end)
-    |> Topics.publish_document_updated()
   end
 
   # The status moves first: a document that has already settled is refused
-  # before any job is touched, and the broadcast waits for the commit, which is
-  # why the transition is not asked to publish.
+  # before any job is touched. The transition announces itself once this
+  # transaction commits.
   defp cancel_locked(document_id) do
     document = Run.lock(document_id) || Repo.rollback(:document_not_found)
 

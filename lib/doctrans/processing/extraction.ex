@@ -115,7 +115,7 @@ defmodule Doctrans.Processing.Extraction do
     deadline = System.monotonic_time(:millisecond) + PdfExtraction.job_timeout()
 
     with {:ok, page_count} <- Deps.pdf_extractor().get_page_count(pdf_path),
-         {:ok, document} <- set_total_pages(document, page_count),
+         {:ok, document} <- Documents.set_total_pages(document, page_count),
          :ok <- render_progressively(document, pdf_path, pages_dir, page_count, deadline) do
       Logger.info("Extracted #{page_count} pages for document #{document.id}")
       finish(document)
@@ -124,15 +124,6 @@ defmodule Doctrans.Processing.Extraction do
       # wrapped so the diagnostic says which step the run stopped at.
       {:error, reason} when reason in @not_ours -> {:error, reason}
       {:error, reason} -> {:error, {:pdf_extraction_failed, [reason: reason]}}
-    end
-  end
-
-  # The page count is announced as soon as it is known, so the viewer can show
-  # progress before the first page lands.
-  defp set_total_pages(document, page_count) do
-    with {:ok, updated} <- Documents.set_total_pages(document, page_count) do
-      _ = Topics.broadcast_document_updated(updated)
-      {:ok, updated}
     end
   end
 

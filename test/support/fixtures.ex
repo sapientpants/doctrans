@@ -25,9 +25,10 @@ defmodule Doctrans.Fixtures do
   `Doctrans.Documents.Lifecycle`: a run is requeued, extraction and processing
   begin, and `error` or `cancelled` come from `fail/2` (with `error_message`
   as the reason) or `cancel/1`. Every document past `uploading` therefore
-  holds a run. The walk happens inside one transaction, so the transitions
-  stay silent and no test receives the fixture's own broadcasts; `total_pages`
-  is applied after it, because requeueing clears the count.
+  holds a run. The walk happens inside one bare `Repo.transaction/1`, which
+  drops the announcements the transitions queue with `Repo.after_commit/1`,
+  so no test receives the fixture's own broadcasts; `total_pages` is applied
+  after it, because requeueing clears the count.
 
   `completed` is the one shortcut: settling needs pages, and callers create
   their own, so the status is written through `Document.status_changeset/3`

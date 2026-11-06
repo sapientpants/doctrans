@@ -21,7 +21,6 @@ defmodule Doctrans.Processing.DocumentReprocessing do
       purge_generated_content(document)
       requeue(document, opts)
     end)
-    |> Topics.publish_document_updated()
   end
 
   defp ensure_reprocessable!(document, opts) do
@@ -69,8 +68,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     result = Repo.safe_transaction(fn -> do_reset_page(page, opts) end)
 
     case result do
-      {:ok, {document, page}} ->
-        _ = Topics.broadcast_document_updated(document)
+      {:ok, {_document, page}} ->
         Topics.broadcast_page_updated(page)
         {:ok, page}
 
@@ -151,8 +149,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     updated
   end
 
-  defp publish_retried({:ok, {document, pages}}) do
-    _ = Topics.broadcast_document_updated(document)
+  defp publish_retried({:ok, {_document, pages}}) do
     Enum.each(pages, &Topics.broadcast_page_updated/1)
     {:ok, length(pages)}
   end

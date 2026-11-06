@@ -9,11 +9,10 @@ defmodule Doctrans.Documents.Lifecycle do
   string. A transition
   checks the status it starts from under the document lock, refuses an illegal
   move with a reason the caller can show or log, writes the new status and the
-  `error_message` column in one update, and broadcasts `document_updated` once
-  the write has committed. A caller inside a transaction of its own gets no
-  broadcast from here -- announcing from inside it would advertise a change a
-  rollback could still undo -- and publishes after its own commit instead, as
-  `Doctrans.Processing.Cancellation` and `DocumentReprocessing` do.
+  `error_message` column in one update, and announces `document_updated` once
+  the write has committed: right away, or, inside a caller's transaction, when
+  that transaction commits (`Doctrans.Repo.after_commit/1`), so no caller
+  announces a transition itself and a rollback advertises nothing.
 
   ## Statuses
 
@@ -403,10 +402,8 @@ defmodule Doctrans.Documents.Lifecycle do
     answer
   end
 
-  # Call after the guard's transaction returns, so subscribers read committed
-  # state. A caller mid-transaction publishes after its own commit instead.
-  defp broadcast(document) do
-    unless Repo.in_transaction?(), do: Topics.broadcast_document_updated(document)
-    :ok
-  end
+  # Called after the guard's transaction returns; a caller's enclosing
+  # transaction defers it to that commit, so subscribers read committed state.
+  defp broadcast(document),
+    do: Repo.after_commit(fn -> Topics.broadcast_document_updated(document) end)
 end

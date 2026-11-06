@@ -225,7 +225,9 @@ defmodule Doctrans.Documents do
   end
 
   @doc """
-  Records the page count extraction found for the document's current run.
+  Records the page count extraction found for the document's current run, and
+  announces it once committed, so a viewer can show progress before the first
+  page lands.
 
   The one write to `total_pages` outside `Lifecycle.requeue/2`, which clears
   it when a run starts; the general changeset does not cast it.
@@ -240,7 +242,44 @@ defmodule Doctrans.Documents do
       |> Repo.update()
       |> Doctrans.Errors.result()
     end)
+    |> announce_updated()
   end
+
+  @doc """
+  Records the source language detected for the document, unless one is already
+  on the row.
+
+  Pages of one document translate concurrently, so two of them can find the
+  column empty and both detect. The write is conditional on it still being
+  empty, so exactly one lands, and the row is then read back: the write that
+  won answers `{:claimed, document}` and is announced once committed; one that
+  lost answers `{:lost, document}` holding the winner's language, which is
+  what every page translates from. A row that is gone answers `{:lost, nil}`.
+  """
+  @spec claim_source_language(Document.t(), String.t()) ::
+          {:claimed, Document.t()} | {:lost, Document.t() | nil}
+  def claim_source_language(%Document{id: id}, language) when is_binary(language) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    {claimed, _} =
+      from(d in Document, where: d.id == ^id and is_nil(d.source_language))
+      |> Repo.update_all(set: [source_language: language, updated_at: now])
+
+    case {claimed, Repo.get(Document, id)} do
+      {1, %Document{} = stored} ->
+        {:claimed, _} = announce_updated({:claimed, stored})
+
+      {_, stored} ->
+        {:lost, stored}
+    end
+  end
+
+  defp announce_updated({tag, %Document{} = document} = result) when tag in [:ok, :claimed] do
+    _ = Repo.after_commit(fn -> Topics.broadcast_document_updated(document) end)
+    result
+  end
+
+  defp announce_updated(result), do: result
 
   @doc """
   Deletes a document and all associated files.
