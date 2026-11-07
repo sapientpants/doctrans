@@ -82,7 +82,7 @@ defmodule Doctrans.Processing.Extraction do
   end
 
   defp to_pdf(document, source_path) do
-    if Path.extname(source_path) == ".pdf",
+    if Source.pdf?(document),
       do: {:ok, source_path},
       else: convert(document, source_path)
   end

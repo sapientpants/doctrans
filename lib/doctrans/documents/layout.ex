@@ -5,12 +5,12 @@ defmodule Doctrans.Documents.Layout do
   Every file the application keeps lives under `root/0`, which is the configured
   `Doctrans.Config.Uploads.upload_dir/0`:
 
-      documents/<document-id>/original.<ext>          the retained upload
+      documents/<document-id>/original.<ext>          the Document's Source
       documents/<document-id>/runs/<run-id>/pages/    page images of one run
       documents/<document-id>/pages/                  page images from before runs existed
 
   Writers (`Doctrans.Documents.Intake`, `Doctrans.Processing.Extraction`),
-  readers (`Doctrans.Processing.PageWork`), cleanup
+  readers (`Doctrans.Documents.Source`, `Doctrans.Processing.PageWork`), cleanup
   (`Doctrans.Jobs.RunCleanupJob`, `Doctrans.Documents.Sweeper`) and the restore
   check (`Doctrans.Backup`) all build paths through this module, so the layout is
   spelled out once. Page image filenames are deliberately not modelled here:

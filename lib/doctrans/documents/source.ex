@@ -1,7 +1,7 @@
 defmodule Doctrans.Documents.Source do
   @moduledoc """
-  The retained original upload of a Document: where it is, whether it is
-  there, and the format it was stored under.
+  A Document's retained original: where it is, whether it is there, and the
+  format it was stored under.
 
   Intake stores every accepted upload as `original.<extension>` in the
   document's own directory, and every Run starts from that file. The document
@@ -46,11 +46,20 @@ defmodule Doctrans.Documents.Source do
     end
   end
 
+  @doc "Whether the retained original is already a PDF, so a Run needs no conversion first."
+  @spec pdf?(Document.t()) :: boolean()
+  def pdf?(%Document{} = document) do
+    case path(document) do
+      nil -> false
+      path -> Formats.pdf?(path)
+    end
+  end
+
   @doc """
-  Records the extension of the stored upload at `path` as the document's source
+  Records the extension of the Source stored at `path` as the document's source
   format, unless the document already records one.
 
-  `path` is the stored upload, whose extension passed magic-byte validation; one
+  `path` is the stored file, whose extension passed magic-byte validation; one
   that is not a supported source format is refused and nothing is written.
   """
   @spec record_extension(Document.t(), String.t()) ::

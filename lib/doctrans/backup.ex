@@ -7,7 +7,7 @@ defmodule Doctrans.Backup do
   them is an act of faith unless something checks the join afterwards, and only
   the application can check it: the rows name the files, and only the app knows
   how a row's path is rebuilt from the current root
-  (`Doctrans.Documents.Source.path/1` for a retained original, `image_path`
+  (`Doctrans.Documents.Source.path/1` for a Document's Source, `image_path`
   relative to the root for a page image).
 
   `verify/0` is that check. It is a *report, never a repair*: it creates, moves

@@ -1,8 +1,4 @@
 defmodule Doctrans.Documents.SourceTest do
-  @moduledoc """
-  `Source` at its interface: where a document's retained original is, whether
-  it is there, and how its format is recorded.
-  """
   use Doctrans.DataCase, async: true
 
   import Doctrans.Fixtures
@@ -33,19 +29,45 @@ defmodule Doctrans.Documents.SourceTest do
   end
 
   describe "available?/1" do
-    test "is true only while the original is a readable regular file" do
+    test "is false before the original is stored" do
+      refute Source.available?(document_fixture())
+    end
+
+    test "is true while the original is a readable regular file" do
       document = document_fixture()
-      refute Source.available?(document)
+      document_source_fixture(document)
 
-      path = document_source_fixture(document)
       assert Source.available?(document)
+    end
 
+    test "is false once the original is removed" do
+      document = document_fixture()
+      path = document_source_fixture(document)
       File.rm!(path)
+
       refute Source.available?(document)
     end
 
     test "is false for a document without a retained format" do
       refute Source.available?(document_fixture(%{original_filename: "notes.txt"}))
+    end
+  end
+
+  describe "pdf?/1" do
+    test "is true for an original stored as a PDF" do
+      {:ok, document} = Source.record_extension(document_fixture(), "/uploads/x/original.pdf")
+
+      assert Source.pdf?(document)
+    end
+
+    test "is false for an original that needs conversion first" do
+      {:ok, document} = Source.record_extension(document_fixture(), "/uploads/x/original.docx")
+
+      refute Source.pdf?(document)
+    end
+
+    test "is false for a document without a retained format" do
+      refute Source.pdf?(document_fixture(%{original_filename: "notes.txt"}))
     end
   end
 

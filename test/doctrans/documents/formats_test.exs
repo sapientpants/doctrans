@@ -36,6 +36,19 @@ defmodule Doctrans.Documents.FormatsTest do
     end
   end
 
+  describe "pdf?/1" do
+    test "is true for a PDF path whatever the case of its extension" do
+      assert Formats.pdf?("/uploads/x/original.pdf")
+      assert Formats.pdf?("Report.PDF")
+    end
+
+    test "is false for a convertible or unsupported path" do
+      refute Formats.pdf?("/uploads/x/original.docx")
+      refute Formats.pdf?("notes.txt")
+      refute Formats.pdf?("README")
+    end
+  end
+
   describe "extension/1" do
     test "returns the downcased extension with its dot" do
       assert Formats.extension("report.DocX") == ".docx"

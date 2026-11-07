@@ -25,7 +25,7 @@ One processing attempt of a whole Document. A newer Run makes work from an older
 _Avoid_: generation, revision (as a name for the run itself)
 
 **Source**:
-The retained original upload of a Document, kept in the Document's own directory under the format it arrived in.
+The retained original of a Document, kept in the Document's own directory under the format it arrived in.
 Every Run starts from it; a Document whose Source is missing cannot be reprocessed.
 _Avoid_: original file, upload (for the file once it is stored)
 
