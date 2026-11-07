@@ -83,6 +83,22 @@ defmodule Doctrans.Search.EmbeddingMocks do
   end
 
   @doc """
+  Answers every query with `embedding`.
+
+  For a test that has to retrieve a known row: the stub's own vector matches
+  every indexed page equally, this one matches the page or chunk whose
+  embedding it is.
+  """
+  def vector(%Pgvector{} = embedding) do
+    stub(EmbeddingMock, :generate, fn
+      text, opts when text in [nil, ""] -> EmbeddingStub.generate(text, opts)
+      _text, _opts -> {:ok, embedding}
+    end)
+
+    :ok
+  end
+
+  @doc """
   Succeeds with a vector of the wrong width.
 
   The search statement compares the query vector against stored 1024-dimension
