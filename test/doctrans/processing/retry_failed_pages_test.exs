@@ -94,7 +94,7 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
       end)
     end
 
-    test "drops the retried pages from the saved chat context", context do
+    test "drops the retried pages from the saved Retrieved context", context do
       Oban.Testing.with_testing_mode(:manual, fn ->
         [retried, _other] = context.failed
 
@@ -102,8 +102,8 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
 
         grounded =
           RetrievedContext.add(RetrievedContext.new(), [
-            passage(context.succeeded),
-            passage(retried)
+            passage_fixture(context.succeeded),
+            passage_fixture(retried)
           ])
 
         assert {:ok, _answer, ^grounded} =
@@ -182,17 +182,5 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
                  translation_model: "  "
                )
     end
-  end
-
-  defp passage(page) do
-    %{
-      page_id: page.id,
-      page_number: page.page_number,
-      chunk_index: 0,
-      content_revision: page.content_revision,
-      similarity: 0.9,
-      original_markdown: "Text of page #{page.page_number}",
-      translated_markdown: nil
-    }
   end
 end

@@ -8,7 +8,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   to `handle_async/3`, and hands `document_changed/2` and `page_changed/3` what
   `DoctransWeb.DocumentLive.Viewer` answered about a broadcast; nothing else
   writes these assigns. Kept out of the LiveView module so that `Show` handles
-  requests and does not reach into the chat contexts itself.
+  requests and does not reach into the chat state itself.
 
   A turn runs through `start_async/3` under `Doctrans.TaskSupervisor`. Each turn
   is identified by the token in `:chat_token`, which it carries in every
@@ -72,7 +72,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
 
   Runs the agentic pipeline off-process. Stage and token events are sent back to
   the LiveView as `{:chat_event, token, event}` messages; the task's result
-  carries the final answer and the updated context for history and accumulation.
+  carries the final answer and the Retrieved context for the next turn.
   """
   def ask(socket, message) do
     question = String.trim(message || "")
@@ -187,7 +187,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
 
   @doc """
   Reacts to a page broadcast, as `Viewer.page_updated/2` placed it: a page of
-  this document, on screen or not, may have superseded accumulated context and
+  this document, on screen or not, may have superseded Retrieved context and
   may have made the document searchable; a foreign page changes nothing.
   """
   @spec page_changed(
@@ -269,7 +269,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   just replaced.
   """
   def prune_context(socket, page) do
-    context = RetrievedContext.page_changed(socket.assigns.chat_retrieved_context, page)
+    context = RetrievedContext.current_against(socket.assigns.chat_retrieved_context, page)
 
     assign(socket, :chat_retrieved_context, context)
   end

@@ -15,26 +15,27 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     end
 
     test "dedups by passage identity {page_id, chunk_index}" do
-      merged = context([chunk("p1", 0, 0.9)]) |> add([chunk("p1", 0, 0.8), chunk("p1", 1, 0.7)])
+      merged =
+        context([passage("p1", 0, 0.9)]) |> add([passage("p1", 0, 0.8), passage("p1", 1, 0.7)])
 
       assert length(passages(merged)) == 2
       assert Enum.map(passages(merged), & &1.chunk_index) |> Enum.sort() == [0, 1]
     end
 
     test "keeps the higher-similarity copy on collision" do
-      merged = context([chunk("p1", 0, 0.5)]) |> add([chunk("p1", 0, 0.95)])
+      merged = context([passage("p1", 0, 0.5)]) |> add([passage("p1", 0, 0.95)])
 
       assert [%{similarity: 0.95}] = passages(merged)
     end
 
     test "treats nil chunk_index (whole-page passages) as an identity" do
-      merged = context([chunk("p1", nil, 0.9)]) |> add([chunk("p1", nil, 0.8)])
+      merged = context([passage("p1", nil, 0.9)]) |> add([passage("p1", nil, 0.8)])
 
       assert length(passages(merged)) == 1
     end
 
     test "ranks by similarity and caps the context at #{@max_passages} passages" do
-      merged = context(for i <- 1..20, do: chunk("p#{i}", 0, i / 100))
+      merged = context(for i <- 1..20, do: passage("p#{i}", 0, i / 100))
 
       assert length(passages(merged)) == @max_passages
       # The sixteen highest similarities (0.05..0.20) survive, best first.
@@ -45,7 +46,7 @@ defmodule Doctrans.Chat.RetrievedContextTest do
       formatting = byte_size("[Page 1]\n") + byte_size("\n\n---\n\n") + byte_size("content")
 
       exact = %{
-        chunk("p1", 0, 0.9)
+        passage("p1", 0, 0.9)
         | original_markdown: String.duplicate("x", @max_bytes - formatting)
       }
 
@@ -56,34 +57,36 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     end
 
     test "drops oversized passages and keeps smaller passages in similarity order" do
-      oversized = %{chunk("p1", nil, 1.0) | original_markdown: String.duplicate("x", 32_001)}
-      high = chunk("p2", 0, 0.9)
-      low = chunk("p3", 0, 0.8)
+      oversized = %{passage("p1", nil, 1.0) | original_markdown: String.duplicate("x", 32_001)}
+      high = passage("p2", 0, 0.9)
+      low = passage("p3", 0, 0.8)
 
       assert passages(context([low]) |> add([oversized, high])) == [high, low]
     end
 
     test "a newer page revision wins over a higher-ranked older copy" do
-      prior = context([chunk("p1", 0, 0.95, content_revision: 1, content: "Assets are 10")])
-      merged = add(prior, [chunk("p1", 0, 0.40, content_revision: 2, content: "Assets are 100")])
+      prior = context([passage("p1", 0, 0.95, content_revision: 1, content: "Assets are 10")])
+
+      merged =
+        add(prior, [passage("p1", 0, 0.40, content_revision: 2, content: "Assets are 100")])
 
       assert [%{translated_markdown: "Assets are 100", content_revision: 2}] = passages(merged)
     end
 
     test "prefers the translated page copy over an untranslated one of the same revision" do
-      prior = context([chunk("p1", nil, 0.95, content_revision: 1, content: nil)])
+      prior = context([passage("p1", nil, 0.95, content_revision: 1, content: nil)])
 
       merged =
-        add(prior, [chunk("p1", nil, 0.40, content_revision: 1, content: "Assets are 100")])
+        add(prior, [passage("p1", nil, 0.40, content_revision: 1, content: "Assets are 100")])
 
       assert [%{translated_markdown: "Assets are 100"}] = passages(merged)
     end
 
     test "the translated copy keeps the best similarity of the copies it replaces" do
-      prior = context([chunk("p1", nil, 0.95, content_revision: 1, content: nil)])
+      prior = context([passage("p1", nil, 0.95, content_revision: 1, content: nil)])
 
       merged =
-        add(prior, [chunk("p1", nil, 0.40, content_revision: 1, content: "Assets are 100")])
+        add(prior, [passage("p1", nil, 0.40, content_revision: 1, content: "Assets are 100")])
 
       assert [%{translated_markdown: "Assets are 100", similarity: 0.95}] = passages(merged)
     end
@@ -93,12 +96,12 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     test "preferring the translation does not cost the page its place in the budget" do
       others =
         for i <- 2..(@max_passages + 1),
-            do: chunk("p#{i}", nil, 0.9 - i / 1000, content_revision: 1, content: "Other")
+            do: passage("p#{i}", nil, 0.9 - i / 1000, content_revision: 1, content: "Other")
 
-      prior = context([chunk("p1", nil, 0.95, content_revision: 1, content: nil) | others])
+      prior = context([passage("p1", nil, 0.95, content_revision: 1, content: nil) | others])
 
       merged =
-        add(prior, [chunk("p1", nil, 0.40, content_revision: 1, content: "Assets are 100")])
+        add(prior, [passage("p1", nil, 0.40, content_revision: 1, content: "Assets are 100")])
 
       kept = Enum.map(passages(merged), & &1.page_id)
       assert length(kept) == @max_passages
@@ -107,10 +110,10 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     end
 
     test "a stale copy's similarity is not inherited across a revision bump" do
-      prior = context([chunk("p1", nil, 0.95, content_revision: 1, content: "Assets are 10")])
+      prior = context([passage("p1", nil, 0.95, content_revision: 1, content: "Assets are 10")])
 
       merged =
-        add(prior, [chunk("p1", nil, 0.40, content_revision: 2, content: "Assets are 100")])
+        add(prior, [passage("p1", nil, 0.40, content_revision: 2, content: "Assets are 100")])
 
       assert [%{content_revision: 2, similarity: 0.40}] = passages(merged)
     end
@@ -118,19 +121,21 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     # Chunk retrieval carries no translation, so the translation preference must
     # stay inert there and leave similarity as the only tie-break.
     test "translation presence does not reorder chunk-level copies" do
-      prior = context([chunk("p1", 0, 0.95, content_revision: 1, content: nil)])
-      merged = add(prior, [chunk("p1", 0, 0.40, content_revision: 1, content: "Assets are 100")])
+      prior = context([passage("p1", 0, 0.95, content_revision: 1, content: nil)])
+
+      merged =
+        add(prior, [passage("p1", 0, 0.40, content_revision: 1, content: "Assets are 100")])
 
       assert [%{translated_markdown: nil, similarity: 0.95}] = passages(merged)
     end
 
     test "a newer revision supersedes older chunks of the same page under other indexes" do
-      prior = context([chunk("p1", 0, 0.95, content_revision: 1, content: "Assets are 10")])
+      prior = context([passage("p1", 0, 0.95, content_revision: 1, content: "Assets are 10")])
 
       merged =
         add(prior, [
-          chunk("p1", 2, 0.40, content_revision: 2, content: "Assets are 100"),
-          chunk("p2", 0, 0.90, content_revision: 7, content: "Other page")
+          passage("p1", 2, 0.40, content_revision: 2, content: "Assets are 100"),
+          passage("p2", 0, 0.90, content_revision: 7, content: "Other page")
         ])
 
       assert Enum.map(passages(merged), & &1.translated_markdown) == [
@@ -140,8 +145,8 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     end
 
     test "passages predating revision tracking lose to any known revision of their page" do
-      prior = context([chunk("p1", 0, 0.99, content: "Legacy")])
-      merged = add(prior, [chunk("p1", 1, 0.10, content_revision: 0, content: "Current")])
+      prior = context([passage("p1", 0, 0.99, content: "Legacy")])
+      merged = add(prior, [passage("p1", 1, 0.10, content_revision: 0, content: "Current")])
 
       assert [%{translated_markdown: "Current"}] = passages(merged)
     end
@@ -149,7 +154,11 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     test "repeated turns stay within the byte budget even below the passage limit" do
       final =
         Enum.reduce(1..40, RetrievedContext.new(), fn i, prior ->
-          item = %{chunk("p#{i}", 0, i / 100) | translated_markdown: String.duplicate("é", 4000)}
+          item = %{
+            passage("p#{i}", 0, i / 100)
+            | translated_markdown: String.duplicate("é", 4000)
+          }
+
           merged = add(prior, [item])
 
           assert byte_size(RetrievedContext.prompt_text(merged)) <= @max_bytes
@@ -169,13 +178,13 @@ defmodule Doctrans.Chat.RetrievedContextTest do
       text =
         context([
           %{
-            chunk("p1", nil, 0.9)
+            passage("p1", nil, 0.9)
             | page_number: 1,
               translated_markdown: "Page 1 content",
               original_markdown: "Original 1"
           },
           %{
-            chunk("p2", nil, 0.8)
+            passage("p2", nil, 0.8)
             | page_number: 2,
               translated_markdown: "Page 2 content",
               original_markdown: "Original 2"
@@ -194,7 +203,7 @@ defmodule Doctrans.Chat.RetrievedContextTest do
       text =
         context([
           %{
-            chunk("p1", nil, 0.9)
+            passage("p1", nil, 0.9)
             | translated_markdown: nil,
               original_markdown: "Original content"
           }
@@ -208,11 +217,11 @@ defmodule Doctrans.Chat.RetrievedContextTest do
       text =
         context([
           %{
-            chunk("p1", 1, 0.9)
+            passage("p1", 1, 0.9)
             | original_markdown: "second",
               translated_markdown: "paired wrongly"
           },
-          %{chunk("p1", 0, 0.8) | original_markdown: "first", translated_markdown: nil}
+          %{passage("p1", 0, 0.8) | original_markdown: "first", translated_markdown: nil}
         ])
         |> RetrievedContext.prompt_text()
 
@@ -223,19 +232,19 @@ defmodule Doctrans.Chat.RetrievedContextTest do
       text =
         context([
           %{
-            chunk("p1", nil, 0.9)
+            passage("p1", nil, 0.9)
             | page_number: 1,
               translated_markdown: "Has content",
               original_markdown: nil
           },
           %{
-            chunk("p2", nil, 0.8)
+            passage("p2", nil, 0.8)
             | page_number: 2,
               translated_markdown: nil,
               original_markdown: nil
           },
           %{
-            chunk("p3", nil, 0.7)
+            passage("p3", nil, 0.7)
             | page_number: 3,
               translated_markdown: "",
               original_markdown: ""
@@ -257,13 +266,13 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     end
 
     test "keeps passages matching the page's current revision", %{page: page} do
-      ctx = context([chunk(page.id, 0, 0.9, content_revision: page.content_revision)])
+      ctx = context([passage(page.id, 0, 0.9, content_revision: page.content_revision)])
 
       assert RetrievedContext.current(ctx) == ctx
     end
 
     test "drops passages whose page has been reprocessed since retrieval", %{page: page} do
-      ctx = context([chunk(page.id, 0, 0.9, content_revision: page.content_revision)])
+      ctx = context([passage(page.id, 0, 0.9, content_revision: page.content_revision)])
 
       {:ok, _reset} = PageLifecycle.reset(page)
 
@@ -272,7 +281,9 @@ defmodule Doctrans.Chat.RetrievedContextTest do
 
     test "drops a page passage retrieved before the page was translated", %{page: page} do
       ctx =
-        context([chunk(page.id, nil, 0.9, content_revision: page.content_revision, content: nil)])
+        context([
+          passage(page.id, nil, 0.9, content_revision: page.content_revision, content: nil)
+        ])
 
       assert RetrievedContext.current(ctx) == ctx
 
@@ -289,7 +300,7 @@ defmodule Doctrans.Chat.RetrievedContextTest do
 
       ctx =
         context([
-          chunk(page.id, nil, 0.9,
+          passage(page.id, nil, 0.9,
             content_revision: translated.content_revision,
             content: "Aktiva sind 10"
           )
@@ -302,7 +313,7 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     # cannot be read from a nil `translated_markdown` there.
     test "keeps a chunk passage of a page translated after retrieval", %{page: page} do
       ctx =
-        context([chunk(page.id, 0, 0.9, content_revision: page.content_revision, content: nil)])
+        context([passage(page.id, 0, 0.9, content_revision: page.content_revision, content: nil)])
 
       {:ok, _translated} =
         PageLifecycle.complete(page, :translation, %{markdown: "Aktiva sind 10"})
@@ -318,7 +329,7 @@ defmodule Doctrans.Chat.RetrievedContextTest do
 
       ctx =
         context([
-          chunk(page.id, nil, 0.9,
+          passage(page.id, nil, 0.9,
             content_revision: first.content_revision,
             content: "Aktiva sind 10"
           )
@@ -333,23 +344,29 @@ defmodule Doctrans.Chat.RetrievedContextTest do
       assert RetrievedContext.current(ctx) == RetrievedContext.new()
     end
 
-    test "drops passages from deleted pages and passages without a revision", %{page: page} do
-      empty = RetrievedContext.new()
+    test "drops a passage that predates revision tracking", %{page: page} do
+      assert RetrievedContext.current(context([passage(page.id, 0, 0.9)])) ==
+               RetrievedContext.new()
+    end
 
-      assert RetrievedContext.current(context([chunk(page.id, 0, 0.9)])) == empty
+    test "drops a passage whose page no longer exists" do
+      ctx = context([passage(Ecto.UUID.generate(), 0, 0.9, content_revision: 0)])
 
-      assert RetrievedContext.current(
-               context([chunk(Ecto.UUID.generate(), 0, 0.9, content_revision: 0)])
-             ) == empty
+      assert RetrievedContext.current(ctx) == RetrievedContext.new()
+    end
 
-      assert RetrievedContext.current(context([chunk("not-a-uuid", 0, 0.9, content_revision: 0)])) ==
-               empty
+    test "drops a passage whose page id is not an id at all" do
+      ctx = context([passage("not-a-uuid", 0, 0.9, content_revision: 0)])
 
-      assert RetrievedContext.current(empty) == empty
+      assert RetrievedContext.current(ctx) == RetrievedContext.new()
+    end
+
+    test "leaves an empty context alone without reading any page" do
+      assert RetrievedContext.current(RetrievedContext.new()) == RetrievedContext.new()
     end
   end
 
-  describe "page_changed/2" do
+  describe "current_against/2" do
     setup do
       document = create_document(status: "completed")
       page = create_page(document, page_number: 1, original_markdown: "Assets are 10")
@@ -359,56 +376,58 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     test "a passage read from another page is never superseded", %{page: page} do
       ctx =
         context([
-          chunk(Ecto.UUID.generate(), nil, 0.9, content_revision: page.content_revision + 5)
+          passage(Ecto.UUID.generate(), nil, 0.9, content_revision: page.content_revision + 5)
         ])
 
-      assert RetrievedContext.page_changed(ctx, page) == ctx
+      assert RetrievedContext.current_against(ctx, page) == ctx
     end
 
     test "a page passage is superseded once the translation lands", %{page: page} do
       untranslated =
-        context([chunk(page.id, nil, 0.9, content_revision: page.content_revision, content: nil)])
+        context([
+          passage(page.id, nil, 0.9, content_revision: page.content_revision, content: nil)
+        ])
 
-      assert RetrievedContext.page_changed(untranslated, page) == untranslated
+      assert RetrievedContext.current_against(untranslated, page) == untranslated
 
       {:ok, translated} =
         PageLifecycle.complete(page, :translation, %{markdown: "Aktiva sind 10"})
 
-      assert RetrievedContext.page_changed(untranslated, translated) == RetrievedContext.new()
+      assert RetrievedContext.current_against(untranslated, translated) == RetrievedContext.new()
 
       current =
         context([
-          chunk(page.id, nil, 0.9,
+          passage(page.id, nil, 0.9,
             content_revision: translated.content_revision,
             content: "Aktiva sind 10"
           )
         ])
 
-      assert RetrievedContext.page_changed(current, translated) == current
+      assert RetrievedContext.current_against(current, translated) == current
     end
 
     test "a chunk passage is superseded only by a revision change", %{page: page} do
       ctx =
-        context([chunk(page.id, 0, 0.9, content_revision: page.content_revision, content: nil)])
+        context([passage(page.id, 0, 0.9, content_revision: page.content_revision, content: nil)])
 
       {:ok, translated} =
         PageLifecycle.complete(page, :translation, %{markdown: "Aktiva sind 10"})
 
-      assert RetrievedContext.page_changed(ctx, translated) == ctx
+      assert RetrievedContext.current_against(ctx, translated) == ctx
 
-      assert RetrievedContext.page_changed(ctx, %{translated | content_revision: 99}) ==
+      assert RetrievedContext.current_against(ctx, %{translated | content_revision: 99}) ==
                RetrievedContext.new()
     end
   end
 
-  describe "forget_pages/2" do
-    test "drops every passage of the named pages, whatever its state" do
-      ctx = context([chunk("p1", 0, 0.9), chunk("p1", nil, 0.8), chunk("p2", 0, 0.7)])
+  describe "forget_page/2" do
+    test "drops every passage of the named page, whatever its state" do
+      ctx = context([passage("p1", 0, 0.9), passage("p1", nil, 0.8), passage("p2", 0, 0.7)])
 
-      forgotten = RetrievedContext.forget_pages(ctx, ["p1"])
+      forgotten = RetrievedContext.forget_page(ctx, "p1")
       assert Enum.map(passages(forgotten), & &1.page_id) == ["p2"]
 
-      assert RetrievedContext.forget_pages(ctx, ["p3"]) == ctx
+      assert RetrievedContext.forget_page(ctx, "p3") == ctx
     end
   end
 
@@ -416,8 +435,8 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     test "a context survives the round trip through its stored form" do
       ctx =
         context([
-          chunk("p1", 0, 0.9, content_revision: 3),
-          chunk("p2", nil, 0.8, content_revision: 1)
+          passage("p1", 0, 0.9, content_revision: 3),
+          passage("p2", nil, 0.8, content_revision: 1)
         ])
 
       rows = RetrievedContext.dump(ctx)
@@ -432,7 +451,7 @@ defmodule Doctrans.Chat.RetrievedContextTest do
     end
 
     test "the stored form carries only what a passage is restored from" do
-      ctx = context([Map.put(chunk("p1", 0, 0.9), :rrf_score, 0.5)])
+      ctx = context([Map.put(passage("p1", 0, 0.9), :rrf_score, 0.5)])
 
       assert [row] = RetrievedContext.dump(ctx)
       refute Map.has_key?(row, :rrf_score)
@@ -466,7 +485,7 @@ defmodule Doctrans.Chat.RetrievedContextTest do
   defp add(ctx, items), do: RetrievedContext.add(ctx, items)
   defp passages(ctx), do: RetrievedContext.passages(ctx)
 
-  defp chunk(page_id, chunk_index, similarity, opts \\ []) do
+  defp passage(page_id, chunk_index, similarity, opts \\ []) do
     %{
       page_id: page_id,
       page_number: 1,

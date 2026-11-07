@@ -132,10 +132,10 @@ Finding the Passages of one Document that bear on a question, from one or more p
 from the Document's own text.
 
 **Passage**:
-What Retrieval returns: a Chunk, or a whole Page when the Document has no Chunks to retrieve, together with the
-revision of the Page's text it was read at.
+What Retrieval returns: a Chunk, or a whole Page only when no Chunk of the Document clears the similarity floor,
+together with the revision of the Page's text it was read at.
 
 **Retrieved context**:
 The Passages a conversation has gathered from Retrieval across its turns, bounded in number and size, and kept only
 while each still matches the text of the Page it was read from. Reprocessing a Page forgets its Passages.
-_Avoid_: accumulated context, chat context
+_Avoid_: accumulated context, chat context, retrieval context

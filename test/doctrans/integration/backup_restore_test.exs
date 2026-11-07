@@ -274,7 +274,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   end
 
   defp seed_conversation(document, page) do
-    context = [context_chunk(page)]
+    context = [passage_fixture(page)]
     question = Conversations.start_question(document.id, @question)
 
     assert {:ok, answer, _} =
@@ -320,16 +320,4 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   end
 
   defp temp_root(name), do: Path.join(System.tmp_dir!(), "doctrans-#{name}-#{Uniq.UUID.uuid7()}")
-
-  defp context_chunk(page) do
-    %{
-      page_id: page.id,
-      page_number: page.page_number,
-      chunk_index: 0,
-      content_revision: page.content_revision,
-      similarity: 0.9,
-      original_markdown: page.original_markdown,
-      translated_markdown: nil
-    }
-  end
 end

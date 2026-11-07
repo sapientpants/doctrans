@@ -84,7 +84,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
         question,
         "assistant",
         "Historical answer",
-        retrieved([
+        retrieved_context_fixture([
           %{
             page_id: c.page.id,
             page_number: 1,
@@ -274,7 +274,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   test "chat results are fenced by the run that supplied their context", c do
     Oban.Testing.with_testing_mode(:manual, fn ->
       context =
-        retrieved([
+        retrieved_context_fixture([
           %{
             page_id: c.page.id,
             page_number: 1,
@@ -314,7 +314,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     end)
   end
 
-  test "reprocessing one page invalidates only that page's chat context", c do
+  test "reprocessing one page invalidates only that page's Retrieved context", c do
     Oban.Testing.with_testing_mode(:manual, fn ->
       other =
         page_fixture(c.document, %{
@@ -326,7 +326,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
         })
 
       context =
-        retrieved([page_context(c.page, "Assets are 10"), page_context(other, "Unrelated")])
+        retrieved_context_fixture([
+          passage_fixture(c.page, original_markdown: "Assets are 10"),
+          passage_fixture(other, original_markdown: "Unrelated")
+        ])
 
       answered = Conversations.start_question(c.document.id, "How much are assets?")
       assert {:ok, _, _} = Conversations.finish(answered, "assistant", "10", context, c.document)
@@ -345,20 +348,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     end)
   end
 
-  defp retrieved(items), do: RetrievedContext.add(RetrievedContext.new(), items)
   defp passages(context), do: RetrievedContext.passages(context)
-
-  defp page_context(page, content) do
-    %{
-      page_id: page.id,
-      page_number: page.page_number,
-      chunk_index: 0,
-      content_revision: page.content_revision,
-      similarity: 1.0,
-      original_markdown: content,
-      translated_markdown: nil
-    }
-  end
 
   test "missing original, invalid models, and duplicate submissions do not reset results", c do
     Oban.Testing.with_testing_mode(:manual, fn ->

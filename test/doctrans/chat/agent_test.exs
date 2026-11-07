@@ -5,6 +5,7 @@ defmodule Doctrans.Chat.AgentTest do
 
   alias Doctrans.Chat.{Agent, ContractProbe, RetrievalProbe, RetrievedContext}
   alias Doctrans.Documents
+  alias Doctrans.Documents.PageLifecycle
   alias Doctrans.Processing.{OpenAIMock, OpenAIProbe}
 
   import Doctrans.Fixtures
@@ -90,6 +91,46 @@ defmodule Doctrans.Chat.AgentTest do
                expected_ids
 
       assert ContractProbe.remaining_responses(probe) == []
+    end
+
+    test "checks and merges the prior context before the prompt is built", %{document: document} do
+      first_page = Documents.get_page_by_number(document.id, 1)
+
+      kept_page =
+        completed_page_fixture(document, %{
+          page_number: 2,
+          original_markdown: "Liabilities are 75 million euros."
+        })
+
+      stale_page =
+        completed_page_fixture(document, %{
+          page_number: 3,
+          original_markdown: "Stale retained passage about equity."
+        })
+
+      prior =
+        RetrievedContext.add(RetrievedContext.new(), [
+          passage_fixture(kept_page),
+          passage_fixture(stale_page)
+        ])
+
+      # The reset advances the revision, so the passage read before it is stale.
+      {:ok, _reset} = PageLifecycle.reset(stale_page)
+
+      model_probe(
+        [{:ok, "Standalone: assets"}, {:ok, "Sufficient: yes"}],
+        %{"assets" => first_page.embedding}
+      )
+
+      assert {:ok, _answer, context} =
+               Agent.run(document, "Assets?", [], [retrieved_context: prior], fn _ -> :ok end)
+
+      assert context |> RetrievedContext.passages() |> Enum.map(& &1.page_id) |> Enum.sort() ==
+               Enum.sort([first_page.id, kept_page.id])
+
+      assert_received {:contract_generation, [%{role: "system", content: prompt} | _], _}
+      assert prompt =~ kept_page.original_markdown
+      refute prompt =~ stale_page.original_markdown
     end
 
     test "returns error for an empty question" do

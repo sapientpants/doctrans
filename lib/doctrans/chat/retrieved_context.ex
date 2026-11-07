@@ -7,7 +7,7 @@ defmodule Doctrans.Chat.RetrievedContext do
   identity, prefers a Page's newer text over its older, bounds what is kept by
   count and by size, and ranks the survivors by similarity. A context is only
   as fresh as the Pages it was read from: `current/1` drops every passage whose
-  Page no longer holds the text it was read from, and `page_changed/2` applies
+  Page no longer holds the text it was read from, and `current_against/2` applies
   the same test to one Page a broadcast delivered. `prompt_text/1` is the one
   rendering the model sees, and `dump/1` and `load/1` are the one stored form.
 
@@ -138,8 +138,8 @@ defmodule Doctrans.Chat.RetrievedContext do
   has to be evicted where the context is held. A passage read from another Page
   is never superseded by this one, so the whole context can be passed.
   """
-  @spec page_changed(t(), Documents.Page.t()) :: t()
-  def page_changed(%__MODULE__{passages: passages}, page) do
+  @spec current_against(t(), Documents.Page.t()) :: t()
+  def current_against(%__MODULE__{passages: passages}, page) do
     kept =
       Enum.reject(passages, fn passage ->
         Map.get(passage, :page_id) == page.id and
@@ -150,14 +150,14 @@ defmodule Doctrans.Chat.RetrievedContext do
   end
 
   @doc """
-  Drops every passage read from one of `page_ids`, whatever its state.
+  Drops every passage read from `page_id`, whatever its state.
 
   For a Page whose content is being discarded: its passages would answer the
   next question from text the Document no longer holds.
   """
-  @spec forget_pages(t(), [Ecto.UUID.t()]) :: t()
-  def forget_pages(%__MODULE__{passages: passages}, page_ids) do
-    %__MODULE__{passages: Enum.reject(passages, &(Map.get(&1, :page_id) in page_ids))}
+  @spec forget_page(t(), Ecto.UUID.t()) :: t()
+  def forget_page(%__MODULE__{passages: passages}, page_id) do
+    %__MODULE__{passages: Enum.reject(passages, &(Map.get(&1, :page_id) == page_id))}
   end
 
   @doc """

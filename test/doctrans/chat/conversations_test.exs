@@ -134,7 +134,13 @@ defmodule Doctrans.Chat.ConversationsTest do
     page: page
   } do
     other = Fixtures.completed_page_fixture(document, %{page_number: 2})
-    context = RetrievedContext.add(RetrievedContext.new(), [passage(page), passage(other)])
+
+    context =
+      RetrievedContext.add(RetrievedContext.new(), [
+        Fixtures.passage_fixture(page),
+        Fixtures.passage_fixture(other)
+      ])
+
     question = Conversations.start_question(document.id, "Question")
 
     {:ok, _reset} = PageLifecycle.reset(page)
@@ -144,39 +150,73 @@ defmodule Doctrans.Chat.ConversationsTest do
     assert Conversations.load(document.id).context == saved
   end
 
-  test "forgets the saved context of named pages and of the whole document", %{
+  test "finish hands back the checked context for an answer rotation already removed", %{
     document: document,
     page: page
   } do
     other = Fixtures.completed_page_fixture(document, %{page_number: 2})
-    context = RetrievedContext.add(RetrievedContext.new(), [passage(page), passage(other)])
-    question = Conversations.start_question(document.id, "Question")
-    assert {:ok, _, _} = Conversations.finish(question, "assistant", "Answer", context)
 
-    assert :ok = Conversations.forget_pages(document.id, [page.id])
+    context =
+      RetrievedContext.add(RetrievedContext.new(), [
+        Fixtures.passage_fixture(page),
+        Fixtures.passage_fixture(other)
+      ])
 
-    assert Enum.map(
-             RetrievedContext.passages(Conversations.load(document.id).context),
-             & &1.page_id
-           ) == [other.id]
+    question = Conversations.start_question(document.id, "Expired question")
+    for n <- 1..100, do: Conversations.start_question(document.id, "Pending #{n}")
 
-    assert :ok = Conversations.forget_document(document.id)
-    assert Conversations.load(document.id).context == RetrievedContext.new()
+    {:ok, _reset} = PageLifecycle.reset(page)
 
-    # A document without a conversation has nothing to forget.
-    assert :ok = Conversations.forget_pages(Ecto.UUID.generate(), [page.id])
-    assert :ok = Conversations.forget_document(Ecto.UUID.generate())
+    assert {:ok, %Message{id: "expired-" <> _}, checked} =
+             Conversations.finish(question, "assistant", "Answer", context)
+
+    assert Enum.map(RetrievedContext.passages(checked), & &1.page_id) == [other.id]
+
+    # Nothing is recorded for the expired answer: no message, no context.
+    saved = Conversations.load(document.id)
+    assert length(saved.messages) == 100
+    assert saved.context == RetrievedContext.new()
   end
 
-  defp passage(page) do
-    %{
-      page_id: page.id,
-      page_number: page.page_number,
-      chunk_index: 0,
-      content_revision: page.content_revision,
-      similarity: 0.9,
-      original_markdown: "Source #{page.page_number}",
-      translated_markdown: nil
-    }
+  describe "forgetting saved context" do
+    setup %{document: document, page: page} do
+      other = Fixtures.completed_page_fixture(document, %{page_number: 2})
+
+      context =
+        RetrievedContext.add(RetrievedContext.new(), [
+          Fixtures.passage_fixture(page),
+          Fixtures.passage_fixture(other)
+        ])
+
+      question = Conversations.start_question(document.id, "Question")
+      assert {:ok, _, _} = Conversations.finish(question, "assistant", "Answer", context)
+      %{other: other}
+    end
+
+    test "forget_page drops the saved passages of that page alone", %{
+      document: document,
+      page: page,
+      other: other
+    } do
+      assert :ok = Conversations.forget_page(document.id, page.id)
+
+      assert Enum.map(
+               RetrievedContext.passages(Conversations.load(document.id).context),
+               & &1.page_id
+             ) == [other.id]
+    end
+
+    test "forget_document drops the whole saved context", %{document: document} do
+      assert :ok = Conversations.forget_document(document.id)
+      assert Conversations.load(document.id).context == RetrievedContext.new()
+    end
+
+    test "forget_page on a document without a conversation is a no-op", %{page: page} do
+      assert :ok = Conversations.forget_page(Ecto.UUID.generate(), page.id)
+    end
+
+    test "forget_document on a document without a conversation is a no-op" do
+      assert :ok = Conversations.forget_document(Ecto.UUID.generate())
+    end
   end
 end

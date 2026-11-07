@@ -120,38 +120,38 @@ defmodule Doctrans.Chat.Agent do
       |> Keyword.get(:retrieved_context, RetrievedContext.new())
       |> RetrievedContext.current()
 
-    merged = RetrievedContext.add(prior_context, passages)
+    context = RetrievedContext.add(prior_context, passages)
 
-    # 4. Assess the merged context; search once more if it is insufficient
+    # 4. Assess the context; search once more if it is insufficient
     on_event.({:stage, :assessing})
 
-    merged = assess_and_maybe_refine(document, merged, standalone_question, search_opts, opts)
+    context = assess_and_maybe_refine(document, context, standalone_question, search_opts, opts)
 
     # 5. Generate (streamed)
     on_event.({:stage, :generating})
 
-    case generate(document, merged, chat_history, standalone_question, opts, on_event) do
-      {:ok, response} -> {:ok, response, merged}
+    case generate(document, context, chat_history, standalone_question, opts, on_event) do
+      {:ok, response} -> {:ok, response, context}
       {:error, _reason} = error -> error
     end
   end
 
-  # Iteratively grades the merged context and, while it is insufficient and the
+  # Iteratively grades the context and, while it is insufficient and the
   # grader proposes refined queries, searches again and folds the results in.
   # Bounded to @max_refine_rounds extra rounds so we gather more data without
   # looping forever. Returns the final Retrieved context.
-  defp assess_and_maybe_refine(document, merged, standalone_question, search_opts, opts) do
-    refine(document, merged, standalone_question, search_opts, opts, @max_refine_rounds)
+  defp assess_and_maybe_refine(document, context, standalone_question, search_opts, opts) do
+    refine(document, context, standalone_question, search_opts, opts, @max_refine_rounds)
   end
 
-  defp refine(_document, merged, _standalone_question, _search_opts, _opts, 0), do: merged
+  defp refine(_document, context, _standalone_question, _search_opts, _opts, 0), do: context
 
-  defp refine(document, merged, standalone_question, search_opts, opts, rounds_left) do
-    context_text = RetrievedContext.prompt_text(merged)
+  defp refine(document, context, standalone_question, search_opts, opts, rounds_left) do
+    context_text = RetrievedContext.prompt_text(context)
     grade = Grader.grade(standalone_question, context_text, opts)
 
     if grade.sufficient or grade.refined_queries == [] do
-      merged
+      context
     else
       Logger.info(
         "Context graded insufficient; searching again with #{length(grade.refined_queries)} refined queries (#{rounds_left} round(s) left)"
@@ -159,19 +159,19 @@ defmodule Doctrans.Chat.Agent do
 
       case Retrieval.retrieve(document.id, grade.refined_queries, search_opts) do
         {:ok, refined_passages} ->
-          merged
+          context
           |> RetrievedContext.add(refined_passages)
           |> then(&refine(document, &1, standalone_question, search_opts, opts, rounds_left - 1))
 
         {:error, reason} ->
           Logger.warning("Refined retrieval failed, keeping current context: #{inspect(reason)}")
-          merged
+          context
       end
     end
   end
 
-  defp generate(document, merged, chat_history, standalone_question, opts, on_event) do
-    context_text = RetrievedContext.prompt_text(merged)
+  defp generate(document, context, chat_history, standalone_question, opts, on_event) do
+    context_text = RetrievedContext.prompt_text(context)
     system_prompt = Chat.build_system_prompt(document.title, context_text)
     messages = Chat.build_messages(system_prompt, chat_history, standalone_question)
     stream_answer(document, messages, opts, on_event)

@@ -3,7 +3,7 @@ defmodule Doctrans.Chat.Conversations do
   Durable per-document chat, rotated to the latest 100 messages on each write.
 
   Questions are saved before generation and answers only when finalized. Reloads
-  restore completed history and bounded retrieval context; unfinished questions
+  restore completed history and the bounded Retrieved context; unfinished questions
   remain visible but are never sent as completed history to the model.
 
   The Retrieved context (`Doctrans.Chat.RetrievedContext`) is saved with each
@@ -133,45 +133,46 @@ defmodule Doctrans.Chat.Conversations do
   end
 
   @doc """
-  Forgets the saved context read from `page_ids`, for a Document whose Pages
-  are being reset.
+  Forgets the saved context read from `page_id`, for a Page whose content is
+  being reset.
 
-  Runs in the caller's transaction, under the document lock the caller holds,
-  so an answer in flight either sees the context gone when it saves or is
-  refused by the run fence. The session itself is locked for the write.
+  The session is locked for the write. Processing calls this inside the
+  transaction that resets the Page, under the document lock it holds, so an
+  answer in flight either sees the context gone when it saves or is refused by
+  the run fence; called outside that transaction, the write still happens but
+  nothing fences a concurrent answer.
   """
-  @spec forget_pages(Ecto.UUID.t(), [Ecto.UUID.t()]) :: :ok
-  def forget_pages(document_id, page_ids) do
-    from(s in Session, where: s.document_id == ^document_id, lock: "FOR UPDATE")
-    |> Repo.all()
-    |> Enum.each(fn session ->
-      context = RetrievedContext.load(session.retrieved_context)
-      kept = RetrievedContext.forget_pages(context, page_ids)
+  @spec forget_page(Ecto.UUID.t(), Ecto.UUID.t()) :: :ok
+  def forget_page(document_id, page_id) do
+    case Repo.one(locked_sessions(document_id)) do
+      nil ->
+        :ok
 
-      if kept != context do
-        Repo.update!(
-          Ecto.Changeset.change(session, retrieved_context: RetrievedContext.dump(kept))
-        )
-      end
-    end)
+      session ->
+        context = RetrievedContext.load(session.retrieved_context)
+        kept = RetrievedContext.forget_page(context, page_id)
+        if kept != context, do: save_context(session, kept)
+        :ok
+    end
   end
 
   @doc """
   Forgets the whole saved context of a Document whose content is being
-  replaced. Runs in the caller's transaction, like `forget_pages/2`.
+  replaced. Meant for the reprocess transaction, like `forget_page/2`.
   """
   @spec forget_document(Ecto.UUID.t()) :: :ok
   def forget_document(document_id) do
     _ =
       from(s in Session, where: s.document_id == ^document_id)
-      |> Repo.update_all(set: [retrieved_context: []])
+      |> Repo.update_all(set: [retrieved_context: RetrievedContext.dump(RetrievedContext.new())])
 
     :ok
   end
 
-  defp lock_session(document_id) do
+  defp lock_session(document_id), do: document_id |> locked_sessions() |> Repo.one!()
+
+  defp locked_sessions(document_id) do
     from(s in Session, where: s.document_id == ^document_id, lock: "FOR UPDATE")
-    |> Repo.one!()
   end
 
   defp rotate(session_id) do

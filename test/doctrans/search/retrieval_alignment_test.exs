@@ -63,17 +63,17 @@ defmodule Doctrans.Search.RetrievalAlignmentTest do
                &(&1.content_revision == Repo.get!(Page, page.id).content_revision)
              )
 
-      assert RetrievedContext.prompt_text(retrieved(results)) == "[Page 1]\n" <> source
+      assert RetrievedContext.prompt_text(retrieved_context_fixture(results)) ==
+               "[Page 1]\n" <> source
 
       # Persisted conversation context predating this fix still has the bad pairing.
       legacy =
         Enum.map(results, &Map.put(&1, :translated_markdown, "Unrelated legacy translation"))
 
-      assert RetrievedContext.prompt_text(retrieved(legacy)) == "[Page 1]\n" <> source
+      assert RetrievedContext.prompt_text(retrieved_context_fixture(legacy)) ==
+               "[Page 1]\n" <> source
     end
   end
-
-  defp retrieved(items), do: RetrievedContext.add(RetrievedContext.new(), items)
 
   defp passages(words, labels) do
     Enum.map_join(labels, "\n\n", fn label ->

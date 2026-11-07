@@ -115,7 +115,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   # eligibility check should have refused: the whole batch rolls back.
   defp restart_page(page, document, choices) do
     updated = Repo.or_rollback(PageLifecycle.reset(page, choices))
-    :ok = Conversations.forget_pages(document.id, [page.id])
+    :ok = Conversations.forget_page(document.id, page.id)
 
     case PageWork.queue(updated, document, as: :requested) do
       {:ok, :owned} -> Repo.rollback(:already_processing)

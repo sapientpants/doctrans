@@ -83,7 +83,7 @@ defmodule DoctransWeb.DocumentLive.ResponsiveViewerTest do
       document: document
     } do
       # Hiding is a class, not a removal: the content of both panels stays on the
-      # page so switching tabs is free and nothing downstream (chat context, the
+      # page so switching tabs is free and nothing downstream (the Retrieved context, the
       # page image, the zoom controls) depends on which tab is active.
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 
