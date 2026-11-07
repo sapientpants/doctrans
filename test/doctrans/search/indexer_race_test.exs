@@ -4,6 +4,7 @@ defmodule Doctrans.Search.IndexerRaceTest do
   # embedding stub without a shared sandbox or a global stub.
   use Doctrans.DataCase, async: true
 
+  alias Doctrans.Chat.Retrieval
   alias Doctrans.Documents.{Chunk, Page, PageLifecycle}
   alias Doctrans.Search.{EmbeddingMocks, Indexer}
 
@@ -86,8 +87,8 @@ defmodule Doctrans.Search.IndexerRaceTest do
 
       assert vector != nil
 
-      assert {:ok, [result]} =
-               Doctrans.Search.search_by_embedding(document.id, completed.embedding)
+      EmbeddingMocks.vector(completed.embedding)
+      assert {:ok, [result]} = Retrieval.retrieve(document.id, [new_text])
 
       assert result.original_markdown == new_text
       assert result.translated_markdown == nil

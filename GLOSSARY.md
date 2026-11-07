@@ -129,4 +129,5 @@ and how it is worded.
 
 **Retrieval**:
 Finding the passages of one Document that bear on a question, from one or more phrasings of it, so Chat can answer
-from the Document's own text. A passage is a Chunk, or a whole Page when the Document has no Chunks to retrieve.
+from the Document's own text. A passage is a Chunk, or a whole Page only when no Chunk of the Document clears the
+similarity floor.

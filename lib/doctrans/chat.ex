@@ -7,9 +7,9 @@ defmodule Doctrans.Chat do
   found, and the prompt built from that context.
   """
 
+  alias Doctrans.Chat.Retrieval
   alias Doctrans.Documents
   alias Doctrans.Documents.Pages
-  alias Doctrans.Search
 
   require Logger
 
@@ -46,7 +46,7 @@ defmodule Doctrans.Chat do
   page number for citation. When multiple chunks come from the same page,
   they are sorted by chunk_index and joined together.
   """
-  @spec build_context([Search.document_result()]) :: String.t()
+  @spec build_context([Retrieval.result()]) :: String.t()
   def build_context([]), do: ""
 
   def build_context(results) do
@@ -107,8 +107,8 @@ defmodule Doctrans.Chat do
 
   Returns the merged chunk list, suitable for `build_context/1`.
   """
-  @spec merge_context([Search.document_result()], [Search.document_result()], keyword()) :: [
-          Search.document_result()
+  @spec merge_context([Retrieval.result()], [Retrieval.result()], keyword()) :: [
+          Retrieval.result()
         ]
   def merge_context(prior_chunks, new_chunks, opts \\ []) do
     max_chunks = Keyword.get(opts, :max_chunks, @max_context_chunks)
@@ -222,7 +222,7 @@ defmodule Doctrans.Chat do
   untranslated at a revision that stays current once the translation lands. Such
   context is dropped as well; the next turn retrieves the translated page.
   """
-  @spec current_context([Search.document_result()]) :: [Search.document_result()]
+  @spec current_context([Retrieval.result()]) :: [Retrieval.result()]
   def current_context([]), do: []
 
   def current_context(chunks) do
@@ -258,7 +258,7 @@ defmodule Doctrans.Chat do
   A chunk read from another page is never superseded by this one, so callers can
   pass their whole accumulated context without pre-filtering by `page_id`.
   """
-  @spec superseded_by?(Search.document_result(), Documents.Page.t()) :: boolean()
+  @spec superseded_by?(Retrieval.result(), Documents.Page.t()) :: boolean()
   def superseded_by?(chunk, page) do
     Map.get(chunk, :page_id) == page.id and
       not current_chunk?(chunk, page.content_revision, page.translated_markdown)
