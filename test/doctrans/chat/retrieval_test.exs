@@ -7,8 +7,7 @@ defmodule Doctrans.Chat.RetrievalTest do
 
   import ExUnit.CaptureLog
 
-  alias Doctrans.Chat
-  alias Doctrans.Chat.{ContractProbe, Retrieval, RetrievalProbe}
+  alias Doctrans.Chat.{ContractProbe, Retrieval, RetrievalProbe, RetrievedContext}
   alias Doctrans.Documents
   alias Doctrans.Search.{EmbeddingMock, EmbeddingMocks, EmbeddingStub}
 
@@ -82,7 +81,8 @@ defmodule Doctrans.Chat.RetrievalTest do
 
       assert {:ok, [result]} = Retrieval.retrieve(document.id, ["original question"], limit: 1)
       assert result.content_revision == page.content_revision
-      assert Chat.current_context([result]) == [result]
+      retrieved = RetrievedContext.add(RetrievedContext.new(), [result])
+      assert RetrievedContext.current(retrieved) == retrieved
     end
 
     test "limit caps the passages returned" do

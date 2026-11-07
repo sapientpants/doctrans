@@ -4,13 +4,14 @@ defmodule Doctrans.Chat.Agent do
 
   Runs understand → retrieve → merge → assess → generate on every turn, streaming
   the final answer token-by-token. The document is **always** searched, and the
-  retrieved chunks accumulate into a running, deduped per-conversation context
-  (passed in via `opts[:retrieved_context]` and returned for the next turn). This
-  guarantees the source is searched whenever the conversation lacks the answer,
-  and keeps the real retrieved chunks — not just paraphrased prior answers — in
-  front of the model across turns. Every merge (including refinement) applies
-  `Chat.merge_context/3`'s chunk and byte budgets before grading or generation;
-  only that bounded context is returned for storage in the socket.
+  retrieved passages accumulate into the conversation's Retrieved context
+  (`Doctrans.Chat.RetrievedContext`, passed in via `opts[:retrieved_context]` and
+  returned for the next turn). This guarantees the source is searched whenever
+  the conversation lacks the answer, and keeps the real retrieved passages — not
+  just paraphrased prior answers — in front of the model across turns. Every
+  addition (including refinement) goes through the context, which bounds what
+  accumulates before grading or generation; only that bounded context is
+  returned for the socket to keep.
 
   Progress and streamed tokens are reported through an `on_event` callback so the
   caller (a LiveView) can render stage labels and stream the answer. Events:
@@ -26,7 +27,7 @@ defmodule Doctrans.Chat.Agent do
   """
 
   alias Doctrans.Chat
-  alias Doctrans.Chat.{Grader, QueryExpander, Retrieval}
+  alias Doctrans.Chat.{Grader, QueryExpander, Retrieval, RetrievedContext}
   alias Doctrans.Deps
   alias Doctrans.Documents.Document
 
@@ -41,22 +42,22 @@ defmodule Doctrans.Chat.Agent do
   # (on top of the initial planned multi-query search).
   @max_refine_rounds 2
 
-  # Chunks each retrieval round asks for. `Chat.merge_context/3`
-  # then bounds what accumulates across rounds and turns.
+  # Passages each retrieval round asks for. The Retrieved context then bounds
+  # what accumulates across rounds and turns.
   @context_limit 8
 
   @doc """
   Runs the agentic chat pipeline for `question` against `document`.
 
   `on_event` is a 1-arity function invoked with progress and streaming events
-  (see the module doc). `opts[:retrieved_context]` carries the accumulated context
-  from prior turns (default `[]`).
+  (see the module doc). `opts[:retrieved_context]` carries the Retrieved context
+  from prior turns (default: an empty one).
 
-  Returns `{:ok, full_answer, merged_context}` or `{:error, reason}`, where
-  `merged_context` is the updated accumulated context to feed into the next turn.
+  Returns `{:ok, full_answer, context}` or `{:error, reason}`, where `context`
+  is the Retrieved context to feed into the next turn.
   """
   @spec run(Document.t(), String.t() | nil, [Chat.message()], keyword(), (event() -> any())) ::
-          {:ok, String.t(), [Retrieval.result()]} | {:error, Doctrans.Errors.reason()}
+          {:ok, String.t(), RetrievedContext.t()} | {:error, Doctrans.Errors.reason()}
   def run(document, question, chat_history \\ [], opts \\ [], on_event)
 
   def run(_document, question, _chat_history, _opts, _on_event)
@@ -111,42 +112,46 @@ defmodule Doctrans.Chat.Agent do
          chat_history,
          {search_opts, opts, on_event}
        ) do
-    # 3. Merge new chunks into the accumulated context (dedup + cap).
+    # 3. Add the new passages to the Retrieved context (dedup + cap).
     # The caller's context can predate a single-page reprocess that finished
-    # while this socket held it; re-check it against current page revisions.
-    prior_context = opts |> Keyword.get(:retrieved_context, []) |> Chat.current_context()
-    merged = Chat.merge_context(prior_context, passages)
+    # while this socket held it; re-check it against the pages' current text.
+    prior_context =
+      opts
+      |> Keyword.get(:retrieved_context, RetrievedContext.new())
+      |> RetrievedContext.current()
 
-    # 4. Assess the merged context; search once more if it is insufficient
+    context = RetrievedContext.add(prior_context, passages)
+
+    # 4. Assess the context; search once more if it is insufficient
     on_event.({:stage, :assessing})
 
-    merged = assess_and_maybe_refine(document, merged, standalone_question, search_opts, opts)
+    context = assess_and_maybe_refine(document, context, standalone_question, search_opts, opts)
 
     # 5. Generate (streamed)
     on_event.({:stage, :generating})
 
-    case generate(document, merged, chat_history, standalone_question, opts, on_event) do
-      {:ok, response} -> {:ok, response, merged}
+    case generate(document, context, chat_history, standalone_question, opts, on_event) do
+      {:ok, response} -> {:ok, response, context}
       {:error, _reason} = error -> error
     end
   end
 
-  # Iteratively grades the merged context and, while it is insufficient and the
+  # Iteratively grades the context and, while it is insufficient and the
   # grader proposes refined queries, searches again and folds the results in.
   # Bounded to @max_refine_rounds extra rounds so we gather more data without
-  # looping forever. Returns the final merged chunk list.
-  defp assess_and_maybe_refine(document, merged, standalone_question, search_opts, opts) do
-    refine(document, merged, standalone_question, search_opts, opts, @max_refine_rounds)
+  # looping forever. Returns the final Retrieved context.
+  defp assess_and_maybe_refine(document, context, standalone_question, search_opts, opts) do
+    refine(document, context, standalone_question, search_opts, opts, @max_refine_rounds)
   end
 
-  defp refine(_document, merged, _standalone_question, _search_opts, _opts, 0), do: merged
+  defp refine(_document, context, _standalone_question, _search_opts, _opts, 0), do: context
 
-  defp refine(document, merged, standalone_question, search_opts, opts, rounds_left) do
-    context_text = Chat.build_context(merged)
+  defp refine(document, context, standalone_question, search_opts, opts, rounds_left) do
+    context_text = RetrievedContext.prompt_text(context)
     grade = Grader.grade(standalone_question, context_text, opts)
 
     if grade.sufficient or grade.refined_queries == [] do
-      merged
+      context
     else
       Logger.info(
         "Context graded insufficient; searching again with #{length(grade.refined_queries)} refined queries (#{rounds_left} round(s) left)"
@@ -154,19 +159,19 @@ defmodule Doctrans.Chat.Agent do
 
       case Retrieval.retrieve(document.id, grade.refined_queries, search_opts) do
         {:ok, refined_passages} ->
-          merged
-          |> Chat.merge_context(refined_passages)
+          context
+          |> RetrievedContext.add(refined_passages)
           |> then(&refine(document, &1, standalone_question, search_opts, opts, rounds_left - 1))
 
         {:error, reason} ->
           Logger.warning("Refined retrieval failed, keeping current context: #{inspect(reason)}")
-          merged
+          context
       end
     end
   end
 
-  defp generate(document, merged, chat_history, standalone_question, opts, on_event) do
-    context_text = Chat.build_context(merged)
+  defp generate(document, context, chat_history, standalone_question, opts, on_event) do
+    context_text = RetrievedContext.prompt_text(context)
     system_prompt = Chat.build_system_prompt(document.title, context_text)
     messages = Chat.build_messages(system_prompt, chat_history, standalone_question)
     stream_answer(document, messages, opts, on_event)

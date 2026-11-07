@@ -34,7 +34,7 @@ defmodule Doctrans.Processing.Run do
 
   Only a document still `uploading` is taken. One whose run has started -- under
   way or settled -- is refused with `{:error, :already_processing}`: replacing a
-  settled run also discards its pages and chat context, which is
+  settled run also discards its pages and Retrieved context, which is
   `Doctrans.Processing.DocumentReprocessing`'s to do.
   """
   @spec start(Ecto.UUID.t(), String.t()) :: {:ok, Oban.Job.t()} | {:error, Errors.reason()}
@@ -67,7 +67,7 @@ defmodule Doctrans.Processing.Run do
   caller's transaction.
 
   `document` is the row the caller has locked and found eligible; what the
-  replaced run left behind -- its pages, its chat context -- is the caller's to
+  replaced run left behind -- its pages, its Retrieved context -- is the caller's to
   discard first. The document is requeued through
   `Doctrans.Documents.Lifecycle.requeue/2` under a new run id and the models
   chosen in `opts` (the configured defaults for any not chosen), then its

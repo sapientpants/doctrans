@@ -12,6 +12,7 @@ defmodule Doctrans.Fixtures do
 
   import ExUnit.Callbacks, only: [on_exit: 1]
 
+  alias Doctrans.Chat.RetrievedContext
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Layout, Lifecycle, PageLifecycle, Source}
   alias Doctrans.Processing.{OpenAIMock, PageContentStub, Run}
@@ -404,5 +405,41 @@ defmodule Doctrans.Fixtures do
         translated_markdown: "# Translated Content\n\nSome translated text."
       })
     )
+  end
+
+  @doc """
+  A chunk Passage read from `page` at its current revision, as Retrieval would
+  return it: the page's source text, no translation, similarity 0.9. `attrs`
+  override any field.
+  """
+  def passage_fixture(page, attrs \\ %{}) do
+    Map.merge(
+      %{
+        page_id: page.id,
+        page_number: page.page_number,
+        chunk_index: 0,
+        content_revision: page.content_revision,
+        similarity: 0.9,
+        original_markdown: page.original_markdown,
+        translated_markdown: nil
+      },
+      Map.new(attrs)
+    )
+  end
+
+  @doc """
+  A whole-page Passage of `page`, carrying the page's translation as the one
+  Retrieval returns when no chunk clears the floor.
+  """
+  def page_passage_fixture(page) do
+    passage_fixture(page, chunk_index: nil, translated_markdown: page.translated_markdown)
+  end
+
+  @doc """
+  A Retrieved context holding `passages`, built through the value's own
+  interface so it is deduped, ranked and within budget like any real one.
+  """
+  def retrieved_context_fixture(passages) do
+    RetrievedContext.add(RetrievedContext.new(), passages)
   end
 end

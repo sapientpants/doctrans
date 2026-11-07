@@ -32,7 +32,7 @@ defmodule Doctrans.Documents do
   defdelegate get_page_by_number(document_id, page_number), to: Pages
   defdelegate get_page_by_number!(document_id, page_number), to: Pages
   defdelegate list_pages(document_id), to: Pages
-  defdelegate page_content_state(page_ids), to: Pages
+  defdelegate page_text_state(page_ids), to: Pages
   defdelegate create_page(document, attrs), to: Pages
   defdelegate update_page(page, attrs), to: Pages
   defdelegate completion_state(document_id), to: Pages

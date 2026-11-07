@@ -4,7 +4,7 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Chat.Session
+  alias Doctrans.Chat.{Conversations, RetrievedContext}
   alias Doctrans.Documents.{Document, Lifecycle, Page, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.DocumentReprocessing
@@ -94,24 +94,28 @@ defmodule Doctrans.Processing.RetryFailedPagesTest do
       end)
     end
 
-    test "drops the retried pages from the saved chat context", context do
+    test "drops the retried pages from the saved Retrieved context", context do
       Oban.Testing.with_testing_mode(:manual, fn ->
         [retried, _other] = context.failed
 
-        session =
-          Repo.insert!(%Session{
-            document_id: context.document.id,
-            retrieved_context: [
-              %{"page_id" => context.succeeded.id, "page_number" => 1},
-              %{"page_id" => retried.id, "page_number" => 2}
-            ]
-          })
+        question = Conversations.start_question(context.document.id, "What do the pages say?")
+
+        grounded =
+          RetrievedContext.add(RetrievedContext.new(), [
+            passage_fixture(context.succeeded),
+            passage_fixture(retried)
+          ])
+
+        assert {:ok, _answer, ^grounded} =
+                 Conversations.finish(question, "assistant", "Both pages", grounded)
 
         assert {:ok, 2} = DocumentReprocessing.retry_failed_pages(context.document.id)
 
         # The chunks behind the retried page are gone with its content; answering
         # from them would quote text the document no longer holds.
-        assert [%{"page_id" => kept}] = Repo.get!(Session, session.id).retrieved_context
+        assert [%{page_id: kept}] =
+                 RetrievedContext.passages(Conversations.load(context.document.id).context)
+
         assert kept == context.succeeded.id
       end)
     end

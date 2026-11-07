@@ -32,7 +32,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Chat
-  alias Doctrans.Chat.{Conversations, Retrieval}
+  alias Doctrans.Chat.{Conversations, Retrieval, RetrievedContext}
   alias Doctrans.Documents
   alias Doctrans.Documents.Source
   alias Doctrans.Processing.{DocumentReprocessing, OpenAIProbe, PageContentStub}
@@ -110,7 +110,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
                %{role: "assistant", content: @answer}
              ]
 
-      assert saved.context == context
+      assert RetrievedContext.passages(saved.context) == context
       refute saved.interrupted?
       assert Chat.embeddings_ready?(document)
 
@@ -143,8 +143,13 @@ defmodule Doctrans.Integration.BackupRestoreTest do
       assert prompt =~ @title
       assert prompt =~ PageContentStub.source_term(3)
       assert prompt =~ "Page 3"
-      assert {:ok, _} = Conversations.finish(pending, "assistant", reply, hits)
-      assert Enum.any?(Conversations.load(document.id).context, &(&1.page_number == 3))
+      grounded = RetrievedContext.add(RetrievedContext.new(), hits)
+      assert {:ok, _, _} = Conversations.finish(pending, "assistant", reply, grounded)
+
+      assert Enum.any?(
+               RetrievedContext.passages(Conversations.load(document.id).context),
+               &(&1.page_number == 3)
+             )
 
       assert Conversations.load(document.id).history == [
                %{role: "user", content: @question},
@@ -269,9 +274,17 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   end
 
   defp seed_conversation(document, page) do
-    context = [context_chunk(page)]
+    context = [passage_fixture(page)]
     question = Conversations.start_question(document.id, @question)
-    assert {:ok, answer} = Conversations.finish(question, "assistant", @answer, context)
+
+    assert {:ok, answer, _} =
+             Conversations.finish(
+               question,
+               "assistant",
+               @answer,
+               RetrievedContext.add(RetrievedContext.new(), context)
+             )
+
     %{context: context, answer: answer}
   end
 
@@ -307,16 +320,4 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   end
 
   defp temp_root(name), do: Path.join(System.tmp_dir!(), "doctrans-#{name}-#{Uniq.UUID.uuid7()}")
-
-  defp context_chunk(page) do
-    %{
-      page_id: page.id,
-      page_number: page.page_number,
-      chunk_index: 0,
-      content_revision: page.content_revision,
-      similarity: 0.9,
-      original_markdown: page.original_markdown,
-      translated_markdown: nil
-    }
-  end
 end

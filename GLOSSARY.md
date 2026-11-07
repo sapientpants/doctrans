@@ -128,6 +128,14 @@ Finding the Pages across every completed Document that answer a reader's query, 
 and how it is worded.
 
 **Retrieval**:
-Finding the passages of one Document that bear on a question, from one or more phrasings of it, so Chat can answer
-from the Document's own text. A passage is a Chunk, or a whole Page only when no Chunk of the Document clears the
-similarity floor.
+Finding the Passages of one Document that bear on a question, from one or more phrasings of it, so Chat can answer
+from the Document's own text.
+
+**Passage**:
+What Retrieval returns: a Chunk, or a whole Page only when no Chunk of the Document clears the similarity floor,
+together with the revision of the Page's text it was read at.
+
+**Retrieved context**:
+The Passages a conversation has gathered from Retrieval across its turns, bounded in number and size, and kept only
+while each still matches the text of the Page it was read from. Reprocessing a Page forgets its Passages.
+_Avoid_: accumulated context, chat context, retrieval context

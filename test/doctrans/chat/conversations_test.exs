@@ -1,8 +1,10 @@
 defmodule Doctrans.Chat.ConversationsTest do
   use Doctrans.DataCase, async: true
   alias Doctrans.Chat
-  alias Doctrans.Chat.{Conversations, Message, Session}
+  alias Doctrans.Chat.{Conversations, Message, RetrievedContext, Session}
   alias Doctrans.Documents
+  alias Doctrans.Documents.PageLifecycle
+  alias Doctrans.Fixtures
 
   setup do
     {:ok, document} =
@@ -13,30 +15,31 @@ defmodule Doctrans.Chat.ConversationsTest do
         target_language: "de"
       })
 
-    %{document: document, page: Doctrans.Fixtures.completed_page_fixture(document)}
+    %{document: document, page: Fixtures.completed_page_fixture(document)}
   end
 
   test "restores completed history and context but excludes failed and unfinished questions", %{
     document: document,
     page: page
   } do
-    context = [
-      %{
-        page_id: page.id,
-        page_number: 1,
-        chunk_index: 0,
-        content_revision: page.content_revision,
-        similarity: 0.9,
-        original_markdown: "Source",
-        translated_markdown: nil
-      }
-    ]
+    context =
+      RetrievedContext.add(RetrievedContext.new(), [
+        %{
+          page_id: page.id,
+          page_number: 1,
+          chunk_index: 0,
+          content_revision: page.content_revision,
+          similarity: 0.9,
+          original_markdown: "Source",
+          translated_markdown: nil
+        }
+      ])
 
     question = Conversations.start_question(document.id, "Question")
     assert Conversations.load(document.id).interrupted?
-    assert {:ok, _} = Conversations.finish(question, "assistant", "Answer", context)
+    assert {:ok, _, ^context} = Conversations.finish(question, "assistant", "Answer", context)
     failed = Conversations.start_question(document.id, "Failed question")
-    assert {:ok, _} = Conversations.finish(failed, "error", "Failure", [])
+    assert {:ok, _, _} = Conversations.finish(failed, "error", "Failure", RetrievedContext.new())
     refute Conversations.load(document.id).interrupted?
     _ = Conversations.start_question(document.id, "Pending")
     saved = Conversations.load(document.id)
@@ -57,8 +60,13 @@ defmodule Doctrans.Chat.ConversationsTest do
   } do
     first = Conversations.start_question(document.id, "Question A")
     second = Conversations.start_question(document.id, "Question B")
-    assert {:ok, answer_b} = Conversations.finish(second, "assistant", "Answer B", [])
-    assert {:ok, answer_a} = Conversations.finish(first, "assistant", "Answer A", [])
+
+    assert {:ok, answer_b, _} =
+             Conversations.finish(second, "assistant", "Answer B", RetrievedContext.new())
+
+    assert {:ok, answer_a, _} =
+             Conversations.finish(first, "assistant", "Answer A", RetrievedContext.new())
+
     assert answer_a.question_id == first.id
     assert answer_b.question_id == second.id
 
@@ -72,7 +80,9 @@ defmodule Doctrans.Chat.ConversationsTest do
 
   test "rotation excludes orphan answers from model history", %{document: document} do
     question = Conversations.start_question(document.id, "Old question")
-    assert {:ok, answer} = Conversations.finish(question, "assistant", "Old answer", [])
+
+    assert {:ok, answer, _} =
+             Conversations.finish(question, "assistant", "Old answer", RetrievedContext.new())
 
     for n <- 1..99 do
       Conversations.start_question(document.id, "Pending #{n}")
@@ -104,7 +114,9 @@ defmodule Doctrans.Chat.ConversationsTest do
   test "rotates messages and cascades deletion", %{document: document} do
     for n <- 1..52 do
       question = Conversations.start_question(document.id, "Question #{n}")
-      assert {:ok, _} = Conversations.finish(question, "assistant", "Answer #{n}", [])
+
+      assert {:ok, _, _} =
+               Conversations.finish(question, "assistant", "Answer #{n}", RetrievedContext.new())
     end
 
     saved = Conversations.load(document.id)
@@ -115,5 +127,96 @@ defmodule Doctrans.Chat.ConversationsTest do
     Repo.delete!(document)
     assert Repo.aggregate(Session, :count) == 0
     assert Repo.aggregate(Message, :count) == 0
+  end
+
+  test "finish hands back the context it saved, checked under the lock", %{
+    document: document,
+    page: page
+  } do
+    other = Fixtures.completed_page_fixture(document, %{page_number: 2})
+
+    context =
+      RetrievedContext.add(RetrievedContext.new(), [
+        Fixtures.passage_fixture(page),
+        Fixtures.passage_fixture(other)
+      ])
+
+    question = Conversations.start_question(document.id, "Question")
+
+    {:ok, _reset} = PageLifecycle.reset(page)
+
+    assert {:ok, _answer, saved} = Conversations.finish(question, "assistant", "Answer", context)
+    assert Enum.map(RetrievedContext.passages(saved), & &1.page_id) == [other.id]
+    assert Conversations.load(document.id).context == saved
+  end
+
+  test "finish hands back the checked context for an answer rotation already removed", %{
+    document: document,
+    page: page
+  } do
+    other = Fixtures.completed_page_fixture(document, %{page_number: 2})
+
+    context =
+      RetrievedContext.add(RetrievedContext.new(), [
+        Fixtures.passage_fixture(page),
+        Fixtures.passage_fixture(other)
+      ])
+
+    question = Conversations.start_question(document.id, "Expired question")
+    for n <- 1..100, do: Conversations.start_question(document.id, "Pending #{n}")
+
+    {:ok, _reset} = PageLifecycle.reset(page)
+
+    assert {:ok, %Message{id: "expired-" <> _}, checked} =
+             Conversations.finish(question, "assistant", "Answer", context)
+
+    assert Enum.map(RetrievedContext.passages(checked), & &1.page_id) == [other.id]
+
+    # Nothing is recorded for the expired answer: no message, no context.
+    saved = Conversations.load(document.id)
+    assert length(saved.messages) == 100
+    assert saved.context == RetrievedContext.new()
+  end
+
+  describe "forgetting saved context" do
+    setup %{document: document, page: page} do
+      other = Fixtures.completed_page_fixture(document, %{page_number: 2})
+
+      context =
+        RetrievedContext.add(RetrievedContext.new(), [
+          Fixtures.passage_fixture(page),
+          Fixtures.passage_fixture(other)
+        ])
+
+      question = Conversations.start_question(document.id, "Question")
+      assert {:ok, _, _} = Conversations.finish(question, "assistant", "Answer", context)
+      %{other: other}
+    end
+
+    test "forget_page drops the saved passages of that page alone", %{
+      document: document,
+      page: page,
+      other: other
+    } do
+      assert :ok = Conversations.forget_page(document.id, page.id)
+
+      assert Enum.map(
+               RetrievedContext.passages(Conversations.load(document.id).context),
+               & &1.page_id
+             ) == [other.id]
+    end
+
+    test "forget_document drops the whole saved context", %{document: document} do
+      assert :ok = Conversations.forget_document(document.id)
+      assert Conversations.load(document.id).context == RetrievedContext.new()
+    end
+
+    test "forget_page on a document without a conversation is a no-op", %{page: page} do
+      assert :ok = Conversations.forget_page(Ecto.UUID.generate(), page.id)
+    end
+
+    test "forget_document on a document without a conversation is a no-op" do
+      assert :ok = Conversations.forget_document(Ecto.UUID.generate())
+    end
   end
 end

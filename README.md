@@ -280,7 +280,7 @@ can expand or contract and are not reliably aligned. Whole-page fallback can use
 translation. Translations remain available in the document viewer.
 
 Existing source embeddings remain usable without rebuilding: retrieval ignores legacy chunk
-translations, including those in saved chat context. To rebuild existing chunks and remove their
+translations, including those in the saved Retrieved context. To rebuild existing chunks and remove their
 old translation pairings, run `mix rechunk_documents`: it clears each page's index and queues
 the page for indexing, which the running application carries out with the embedding server
 available.

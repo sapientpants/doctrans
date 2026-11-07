@@ -31,7 +31,7 @@ defmodule DoctransWeb.DocumentLive.MarkdownSanitizationTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Chat.Conversations
+  alias Doctrans.Chat.{Conversations, RetrievedContext}
   alias Doctrans.Documents
   alias Doctrans.Documents.PageLifecycle
 
@@ -99,7 +99,14 @@ defmodule DoctransWeb.DocumentLive.MarkdownSanitizationTest do
     test "neutralises a payload streamed back as an assistant message", %{conn: conn} do
       document = completed_document_with_embedding_fixture()
       question = Conversations.start_question(document.id, "What are the totals?")
-      {:ok, answer} = Conversations.finish(question, "assistant", @payload, [])
+
+      {:ok, answer, _} =
+        Conversations.finish(
+          question,
+          "assistant",
+          @payload,
+          RetrievedContext.new()
+        )
 
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
       view |> element("#toggle-chat") |> render_click()

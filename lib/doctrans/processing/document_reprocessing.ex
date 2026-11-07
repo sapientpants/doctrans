@@ -1,7 +1,7 @@
 defmodule Doctrans.Processing.DocumentReprocessing do
   @moduledoc "Atomically replaces generated document content and starts a fresh run."
   import Ecto.Query
-  alias Doctrans.Chat.Session
+  alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
   alias Doctrans.Documents.{Lifecycle, PageLifecycle, ProcessingStatus}
   alias Doctrans.Processing.{PageWork, Run}
@@ -40,12 +40,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
 
   defp purge_generated_content(document) do
     _ = Documents.delete_pages(document.id)
-
-    _ =
-      from(s in Session, where: s.document_id == ^document.id)
-      |> Repo.update_all(set: [retrieved_context: []])
-
-    :ok
+    Conversations.forget_document(document.id)
   end
 
   defp requeue(document, opts), do: Repo.or_rollback(Run.replace(document, opts))
@@ -109,17 +104,18 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   end
 
   # The per-page half of a reset and of a retry, under the caller's eligibility
-  # check and document lock: start the page over, drop its saved chat context,
-  # queue its run. The page's saved chunks are gone; leaving their text in the
-  # conversation context would answer the next question from the content just
-  # discarded. The document lock also serializes this with in-flight answers.
+  # check and document lock: start the page over, have Chat forget the page's
+  # saved context, queue its run. The page's saved chunks are gone; leaving
+  # their text in the conversation would answer the next question from the
+  # content just discarded. The document lock also serializes this with
+  # in-flight answers.
   #
   # The reset wrote the chosen models on the page, so the queued work carries
   # them. A job that already owns the page is a run still in flight, which the
   # eligibility check should have refused: the whole batch rolls back.
   defp restart_page(page, document, choices) do
     updated = Repo.or_rollback(PageLifecycle.reset(page, choices))
-    _ = purge_page_context(document.id, page.id)
+    :ok = Conversations.forget_page(document.id, page.id)
 
     case PageWork.queue(updated, document, as: :requested) do
       {:ok, :owned} -> Repo.rollback(:already_processing)
@@ -132,18 +128,6 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   # is left to report.
   defp count_retried({:ok, {_document, pages}}), do: {:ok, length(pages)}
   defp count_retried(error), do: error
-
-  defp purge_page_context(document_id, page_id) do
-    from(s in Session, where: s.document_id == ^document_id, lock: "FOR UPDATE")
-    |> Repo.all()
-    |> Enum.each(fn session ->
-      kept = Enum.reject(session.retrieved_context, &(&1["page_id"] == page_id))
-
-      if length(kept) != length(session.retrieved_context) do
-        Repo.update!(Ecto.Changeset.change(session, retrieved_context: kept))
-      end
-    end)
-  end
 
   defp validate_models!(opts) do
     unless Enum.all?(Run.choices(opts), fn {_key, model} ->

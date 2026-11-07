@@ -83,7 +83,7 @@ defmodule Doctrans.Search.Chunker do
 
   This is used for embedding generation so that each chunk has surrounding
   context, improving retrieval quality. The stored `content` field remains
-  overlap-free to avoid duplication when building chat context.
+  overlap-free to avoid duplication when building the Retrieved context.
   """
   @spec content_for_embedding([chunk()], non_neg_integer()) :: String.t()
   def content_for_embedding(chunks, chunk_index) when chunk_index == 0 do
