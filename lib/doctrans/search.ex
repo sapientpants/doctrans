@@ -32,7 +32,7 @@ defmodule Doctrans.Search do
           :content_revision => integer() | nil,
           optional(:chunk_id) => Ecto.UUID.t() | nil,
           optional(:chunk_index) => non_neg_integer(),
-          # Present only on results fused by `Doctrans.Chat.MultiSearch`.
+          # Present only on results fused by `Doctrans.Chat.Retrieval`.
           optional(:rrf_score) => float()
         }
 
@@ -221,7 +221,7 @@ defmodule Doctrans.Search do
   `{:error, :embedding_unavailable}` when the embedder succeeds without a
   vector: nothing can be ranked against it, and `{:ok, []}` would report a
   search that never ran as "nothing matched" -- the same reading
-  `Doctrans.Chat.MultiSearch` and library search give that result. Any other
+  `Doctrans.Chat.Retrieval` and library search give that result. Any other
   embedder or database error is passed through.
   """
   @spec search_in_document(Ecto.UUID.t(), String.t() | nil, keyword()) ::

@@ -198,7 +198,7 @@ defmodule DoctransWeb.ErrorMessagesTest do
     end
 
     test "retrieval outages have specific messages with resolved bindings in every locale" do
-      # Both spellings: `Doctrans.Chat.retrieve/4` returns the tagged tuple, and
+      # Both spellings: `Doctrans.Chat.Retrieval.retrieve/3` returns the tagged tuple, and
       # the bare atom is what the tuple clause delegates to. Without a clause of
       # its own the tuple would fall through to the generic message and nothing
       # else in the suite would notice.
