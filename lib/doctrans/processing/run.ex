@@ -1,7 +1,8 @@
 defmodule Doctrans.Processing.Run do
   @moduledoc """
-  A fresh upload's run, the models and the job a run runs under, and the fence
-  on a document's run.
+  The starts of a document's run -- a fresh upload's, a reprocess's and a
+  boot's recovery -- the models and the job a run runs under, and the fence on
+  a document's run.
 
   A run's extraction job is inserted here and nowhere else: `start/2` starts
   the run of a fresh upload, `replace/2` the run a reprocess puts in a settled
@@ -70,10 +71,14 @@ defmodule Doctrans.Processing.Run do
   discard first. The document is requeued through
   `Doctrans.Documents.Lifecycle.requeue/2` under a new run id and the models
   chosen in `opts` (the configured defaults for any not chosen), then its
-  extraction job and the cleanup of the replaced run's files are inserted. A
-  document whose run is under way is refused with `:already_processing`; a job
-  already waiting for the document rolls the caller's transaction back with
-  the same reason, so the run and its jobs always commit together.
+  extraction job and the cleanup of the replaced run's files are inserted.
+
+  Two refusals share the reason `:already_processing` but not the shape: a
+  document whose run is under way is answered `{:error, :already_processing}`
+  with nothing written, while a job already waiting for the document rolls the
+  caller's transaction back with that reason, so the run and its jobs always
+  commit together. A caller that must undo its own writes on the first kind
+  wraps the call in `Doctrans.Repo.or_rollback/1`, as the reprocess does.
   """
   @spec replace(Document.t(), keyword()) :: {:ok, Document.t()} | {:error, Errors.reason()}
   def replace(%Document{} = document, opts \\ []) do
@@ -96,10 +101,10 @@ defmodule Doctrans.Processing.Run do
     document
     |> args()
     |> DocumentExtractionJob.new(meta: %{recovered: true})
-    |> Oban.insert()
+    |> Repo.insert_job()
     |> case do
-      {:ok, %Oban.Job{conflict?: true}} -> {:ok, :owned}
-      {:ok, %Oban.Job{}} -> {:ok, :queued}
+      {:ok, _job} -> {:ok, :queued}
+      {:conflict, _job} -> {:ok, :owned}
       {:error, _reason} = error -> Errors.result(error)
     end
   end
@@ -110,7 +115,7 @@ defmodule Doctrans.Processing.Run do
   # The argument map `DocumentExtractionJob.perform/1` and `RunCleanupJob.perform/1`
   # destructure: the document and the run the job acts for.
   defp args(document),
-    do: %{Keys.document_id() => document.id, "run_id" => document.processing_run_id}
+    do: %{Keys.document_id() => document.id, Keys.run_id() => document.processing_run_id}
 
   # Inside the transaction that made the requeue transition, so the run and
   # its jobs commit together; a job already waiting for the document rolls

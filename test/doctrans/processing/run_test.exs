@@ -11,7 +11,7 @@ defmodule Doctrans.Processing.RunTest do
   alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
-  alias Doctrans.Jobs.{DocumentExtractionJob, RunCleanupJob}
+  alias Doctrans.Jobs.{DocumentExtractionJob, Keys, RunCleanupJob}
   alias Doctrans.Processing.Run
 
   # The suite runs Oban `testing: :inline`, which executes each job at insert and
@@ -97,10 +97,9 @@ defmodule Doctrans.Processing.RunTest do
   end
 
   describe "replace/2" do
-    test "installs a new run with the chosen models and queues extraction and cleanup" do
+    test "installs a new run under a fresh id with the chosen models" do
       Oban.Testing.with_testing_mode(:manual, fn ->
         document = document_fixture(%{status: "completed", total_pages: 2})
-        :ok = Topics.subscribe_document(document.id)
 
         assert {:ok, {:ok, queued}} =
                  Repo.safe_transaction(fn ->
@@ -112,11 +111,21 @@ defmodule Doctrans.Processing.RunTest do
         assert queued.extraction_model == "vision-x"
         assert queued.translation_model == OpenAI.translation_model()
         assert queued.total_pages == nil
+      end)
+    end
+
+    test "announces the requeue and queues extraction and cleanup for the new run" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "completed", total_pages: 2})
+        :ok = Topics.subscribe_document(document.id)
+
+        assert {:ok, {:ok, queued}} =
+                 Repo.safe_transaction(fn -> Run.replace(Run.lock(document.id)) end)
 
         id = document.id
         assert_received {:document_updated, %{id: ^id, status: "queued"}}
 
-        args = %{"document_id" => document.id, "run_id" => queued.processing_run_id}
+        args = %{Keys.document_id() => document.id, Keys.run_id() => queued.processing_run_id}
         assert [%{args: ^args}] = all_enqueued(worker: DocumentExtractionJob)
         assert [%{args: ^args}] = all_enqueued(worker: RunCleanupJob)
       end)
@@ -159,7 +168,11 @@ defmodule Doctrans.Processing.RunTest do
 
         assert [job] = all_enqueued(worker: DocumentExtractionJob)
         assert job.meta == %{"recovered" => true}
-        assert job.args == %{"document_id" => document.id, "run_id" => document.processing_run_id}
+
+        assert job.args == %{
+                 Keys.document_id() => document.id,
+                 Keys.run_id() => document.processing_run_id
+               }
 
         assert Documents.get_document!(document.id).processing_run_id ==
                  document.processing_run_id

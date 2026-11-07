@@ -59,7 +59,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   # dropped as a success; `Extraction` makes the same call for a run replaced
   # or settled while it was under way.
   defp perform_current(document, args) do
-    if Run.current?(document, Map.get(args, "run_id")),
+    if Run.current?(document, Map.get(args, Keys.run_id())),
       do: Extraction.run(document),
       else: :ok
   end

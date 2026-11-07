@@ -15,7 +15,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
     Source
   }
 
-  alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
+  alias Doctrans.Jobs.{DocumentExtractionJob, Keys, LlmProcessingJob, RunCleanupJob}
 
   alias Doctrans.Processing.{
     DocumentConverterMocks,
@@ -132,7 +132,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       assert :ok = DocumentExtractionJob.perform(job)
       refute_received {:extracted_pdf_page, _}
       assert length(all_enqueued(worker: LlmProcessingJob)) == 3
-      cleanup_args = %{"document_id" => run.id, "run_id" => run.processing_run_id}
+      cleanup_args = %{Keys.document_id() => run.id, Keys.run_id() => run.processing_run_id}
       assert :ok = RunCleanupJob.perform(%Oban.Job{args: cleanup_args})
       refute File.exists?(c.old_image)
       assert File.exists?(c.source)

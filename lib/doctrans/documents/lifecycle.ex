@@ -240,9 +240,9 @@ defmodule Doctrans.Documents.Lifecycle do
   @doc """
   A run starts: the document is `queued` for extraction with the given run
   attributes -- the run id and model choices `Doctrans.Processing.Run` hands
-  it -- its page count and diagnostic cleared. The one transition that starts a run, whether the
-  extraction job of a fresh upload is being enqueued or a reprocess is
-  replacing the run a settled document holds.
+  it -- its page count and diagnostic cleared. The one transition that starts
+  a run, whether the extraction job of a fresh upload is being enqueued or a
+  reprocess is replacing the run a settled document holds.
 
   Legal from `uploading` and from a settled status; refused with
   `:already_processing` while a run is under way.
