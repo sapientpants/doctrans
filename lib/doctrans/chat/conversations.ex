@@ -23,7 +23,7 @@ defmodule Doctrans.Chat.Conversations do
   @spec load(Ecto.UUID.t()) :: %{
           messages: [Message.t()],
           history: [Chat.message()],
-          context: [Doctrans.Search.document_result()],
+          context: [Doctrans.Chat.Retrieval.result()],
           interrupted?: boolean()
         }
   def load(document_id) do
@@ -67,7 +67,7 @@ defmodule Doctrans.Chat.Conversations do
           Message.t(),
           String.t(),
           String.t(),
-          [Doctrans.Search.document_result()],
+          [Doctrans.Chat.Retrieval.result()],
           Doctrans.Documents.Document.t()
         ) :: {:ok, Message.t()} | {:error, term()}
   def finish(question, role, content, context, document) do
@@ -76,7 +76,7 @@ defmodule Doctrans.Chat.Conversations do
     end)
   end
 
-  @spec finish(Message.t(), String.t(), String.t(), [Doctrans.Search.document_result()]) ::
+  @spec finish(Message.t(), String.t(), String.t(), [Doctrans.Chat.Retrieval.result()]) ::
           {:ok, Message.t()} | {:error, term()}
   def finish(question, role, content, context) do
     Repo.transaction(fn ->

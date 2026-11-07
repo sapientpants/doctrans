@@ -29,7 +29,6 @@ defmodule Doctrans.Chat.Agent do
   alias Doctrans.Chat.{Grader, QueryExpander, Retrieval}
   alias Doctrans.Deps
   alias Doctrans.Documents.Document
-  alias Doctrans.Search
 
   require Logger
 
@@ -57,7 +56,7 @@ defmodule Doctrans.Chat.Agent do
   `merged_context` is the updated accumulated context to feed into the next turn.
   """
   @spec run(Document.t(), String.t() | nil, [Chat.message()], keyword(), (event() -> any())) ::
-          {:ok, String.t(), [Search.document_result()]} | {:error, Doctrans.Errors.reason()}
+          {:ok, String.t(), [Retrieval.result()]} | {:error, Doctrans.Errors.reason()}
   def run(document, question, chat_history \\ [], opts \\ [], on_event)
 
   def run(_document, question, _chat_history, _opts, _on_event)

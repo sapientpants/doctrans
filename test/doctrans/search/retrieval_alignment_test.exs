@@ -1,9 +1,10 @@
 defmodule Doctrans.Search.RetrievalAlignmentTest do
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.{Chat, Repo, Search}
+  alias Doctrans.{Chat, Repo}
+  alias Doctrans.Chat.Retrieval
   alias Doctrans.Documents.{Chunk, Page}
-  alias Doctrans.Search.{Chunker, Indexer}
+  alias Doctrans.Search.{Chunker, EmbeddingMocks, Indexer}
 
   import Doctrans.Fixtures
 
@@ -49,8 +50,8 @@ defmodule Doctrans.Search.RetrievalAlignmentTest do
       |> where([c], c.page_id == ^page.id)
       |> Repo.update_all(set: [translated_content: "Unrelated legacy translation"])
 
-      vector = hd(chunks).embedding
-      assert {:ok, results} = Search.search_by_embedding(document.id, vector, limit: 20)
+      EmbeddingMocks.vector(hd(chunks).embedding)
+      assert {:ok, results} = Retrieval.retrieve(document.id, ["Vermögen"], limit: 20)
 
       assert MapSet.new(Enum.map(results, & &1.original_markdown)) ==
                MapSet.new(Enum.map(chunks, & &1.content))

@@ -84,6 +84,54 @@ defmodule Doctrans.Chat.RetrievalTest do
       assert Chat.current_context([result]) == [result]
     end
 
+    test "limit caps the passages returned" do
+      document = completed_document()
+
+      for page_number <- 1..3 do
+        indexed_page_fixture(document, %{page_number: page_number})
+      end
+
+      assert {:ok, passages} = Retrieval.retrieve(document.id, ["test"], limit: 2)
+      assert length(passages) == 2
+    end
+
+    test "only retrieves from the named document" do
+      document = completed_document()
+      other = completed_document()
+
+      page = indexed_page_fixture(document, %{page_number: 1})
+      _other_page = indexed_page_fixture(other, %{page_number: 1})
+
+      assert {:ok, passages} = Retrieval.retrieve(document.id, ["content"])
+      assert Enum.map(passages, & &1.page_id) == [page.id]
+    end
+
+    test "a whole-page passage carries the page's text, revision and similarity" do
+      document = completed_document()
+      page = indexed_page_fixture(document, %{page_number: 4})
+
+      assert {:ok, [passage]} = Retrieval.retrieve(document.id, ["test"])
+
+      assert passage.page_id == page.id
+      assert passage.page_number == 4
+      assert passage.original_markdown == page.original_markdown
+      assert passage.translated_markdown == page.translated_markdown
+      assert passage.content_revision == page.content_revision
+      assert_in_delta passage.similarity, 1.0, 1.0e-6
+      refute Map.has_key?(passage, :chunk_id)
+    end
+
+    test "the similarity floor excludes a page the query points away from" do
+      document = completed_document()
+      aligned = indexed_page_fixture(document, %{page_number: 1})
+      # Half the dimensions zeroed: 0.707 against the query's vector, inside the floor.
+      loose = indexed_page_fixture(document, %{page_number: 2, embedding: half_aligned()})
+      indexed_page_fixture(document, %{page_number: 3, embedding: fake_embedding(-0.1)})
+
+      assert {:ok, passages} = Retrieval.retrieve(document.id, ["test"])
+      assert Enum.map(passages, & &1.page_id) == [aligned.id, loose.id]
+    end
+
     test "returns no matches, not an outage, when every query searches and finds nothing" do
       document = completed_document()
       # Opposite direction to the stub's query vector, so the page is searched
@@ -295,6 +343,8 @@ defmodule Doctrans.Chat.RetrievalTest do
   end
 
   defp vector(first, second), do: Pgvector.new([first, second | List.duplicate(0.0, 1022)])
+
+  defp half_aligned, do: Pgvector.new(List.duplicate(0.1, 512) ++ List.duplicate(0.0, 512))
 
   defp completed_document do
     {:ok, document} =
