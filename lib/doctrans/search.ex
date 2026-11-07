@@ -28,6 +28,7 @@ defmodule Doctrans.Search do
         }
 
   alias Doctrans.Deps
+  alias Doctrans.Repo.Row
   alias Doctrans.Search.HybridQuery
 
   require Logger
@@ -187,7 +188,7 @@ defmodule Doctrans.Search do
   defp execute_hybrid_search(query, query_embedding, retrieval, query_opts) do
     with {:ok, %{rows: rows, columns: columns}} <-
            HybridQuery.run(query, query_embedding, query_opts) do
-      rows = Enum.map(rows, &row_to_map(&1, columns))
+      rows = Enum.map(rows, &Row.to_map(&1, columns))
 
       {:ok,
        %{
@@ -204,35 +205,17 @@ defmodule Doctrans.Search do
   defp total_count([]), do: 0
   defp total_count([row | _rest]), do: Map.fetch!(row, "total_count")
 
-  # A Postgrex row keyed by its column names.
-  defp row_to_map(row, columns), do: columns |> Enum.zip(row) |> Map.new()
-
   defp format_row(result) do
     %{
-      page_id: uuid_to_string(result["page_id"]),
-      document_id: uuid_to_string(result["document_id"]),
+      page_id: Row.uuid_to_string(result["page_id"]),
+      document_id: Row.uuid_to_string(result["document_id"]),
       document_title: result["document_title"],
       page_number: result["page_number"],
       image_path: result["image_path"],
-      score: to_float(result["rrf_score"]),
+      score: Row.to_float(result["rrf_score"]),
       snippet: format_snippet(result["snippet"])
     }
   end
-
-  defp uuid_to_string(<<_::128>> = binary) do
-    case Ecto.UUID.load(binary) do
-      {:ok, uuid} -> uuid
-      :error -> nil
-    end
-  end
-
-  defp uuid_to_string(string) when is_binary(string), do: string
-  defp uuid_to_string(nil), do: nil
-
-  defp to_float(nil), do: 0.0
-  defp to_float(%Decimal{} = d), do: Decimal.to_float(d)
-  defp to_float(f) when is_float(f), do: f
-  defp to_float(i) when is_integer(i), do: i / 1
 
   # Format snippet: normalize whitespace, strip HTML bold tags from ts_headline
   defp format_snippet(nil), do: nil

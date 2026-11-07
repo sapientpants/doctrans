@@ -13,13 +13,6 @@ defmodule Doctrans.SearchTest do
   # 1/(k + rank) is the whole of what a fused score means.
   @default_rrf_k 60
 
-  # Half the dimensions zeroed: cosine similarity 0.707 against the query's
-  # own vector, `fake_embedding/0` -- clear of the 0.55 floor the semantic half
-  # applies, and strictly below a page that carries that vector itself.
-  defp half_aligned_embedding do
-    Pgvector.new(List.duplicate(0.1, 512) ++ List.duplicate(0.0, 512))
-  end
-
   describe "search_with_count/2 ranking" do
     test "returns no matches when nothing in the library answers the query" do
       # A completed, indexed page that simply says something else: the empty

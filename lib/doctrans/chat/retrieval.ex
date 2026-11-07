@@ -11,7 +11,7 @@ defmodule Doctrans.Chat.Retrieval do
   A passage is a Chunk when the document has embedded chunks, and a whole Page
   only when no chunk clears the similarity floor. Retrieval is exact: it ranks
   every eligible row of the document rather than the approximate index's
-  candidates (see `search_by_embedding/3`).
+  candidates; the note above the in-document statements says why.
 
   Retrieval has one meaning for an empty answer and one for an outage. A
   phrasing whose embedder fails, or succeeds without a vector, never ran, and
@@ -29,6 +29,7 @@ defmodule Doctrans.Chat.Retrieval do
   alias Doctrans.Deps
   alias Doctrans.Errors
   alias Doctrans.Repo
+  alias Doctrans.Repo.Row
   alias Doctrans.Search
 
   require Logger
@@ -45,8 +46,8 @@ defmodule Doctrans.Chat.Retrieval do
   on that contract: the chunk keys say which text to quote and whether a
   translated copy may outrank it.
 
-  `:rrf_score` is the rank the passage was retrieved by; context restored from
-  a saved conversation (`Doctrans.Chat.Conversations`) does not carry it.
+  `:rrf_score` is the fused score the passage was ranked by; context restored
+  from a saved conversation (`Doctrans.Chat.Conversations`) does not carry it.
   """
   @type result :: %{
           :page_id => Ecto.UUID.t() | nil,
@@ -210,7 +211,7 @@ defmodule Doctrans.Chat.Retrieval do
   end
 
   # Static heredocs; every value reaches Postgres as a bound parameter ($1..$4)
-  # via `run_query/5`, which owns the `Repo.query/2` call and its skip.
+  # via `run_query/4`, which owns the `Repo.query/2` call and its skip.
   @chunk_sql """
   WITH candidates AS MATERIALIZED (
     SELECT
@@ -269,6 +270,10 @@ defmodule Doctrans.Chat.Retrieval do
   LIMIT $3
   """
 
+  # The two statements by name; the name travels with a failure so the log
+  # says which one failed.
+  @statements [chunks: @chunk_sql, pages: @page_sql]
+
   # One phrasing's ranking: chunks first, whole pages only when no chunk
   # clears the floor.
   #
@@ -291,33 +296,30 @@ defmodule Doctrans.Chat.Retrieval do
   # afterwards. Library search in `Doctrans.Search.HybridQuery` ranks its
   # semantic half the same way, and for the same reason (#218).
   defp search_by_embedding(document_id, query_embedding, limit) do
-    case run_query("Chunk", @chunk_sql, document_id, query_embedding, limit) do
-      {:ok, []} -> run_query("Page", @page_sql, document_id, query_embedding, limit)
+    case run_query(:chunks, document_id, query_embedding, limit) do
+      {:ok, []} -> run_query(:pages, document_id, query_embedding, limit)
       result -> result
     end
   end
 
   # Both statements bind the same four parameters in the same order and fail
   # the same way; what differs is the SQL and the row shape, and the row's own
-  # columns say which shape it is.
+  # columns say which shape it is. A failure is not logged here: `failed/2`
+  # logs it once, with the statement's name, where every query failure lands.
   #
-  # `sql` is one of the two static heredocs above, never built from input, and
-  # every value reaches Postgres as a bound parameter. Flagged only because the
-  # statement arrives in a variable.
+  # The SQL is one of the two static heredocs above, never built from input,
+  # and every value reaches Postgres as a bound parameter. Flagged only because
+  # the statement arrives in a variable.
   # sobelow_skip ["SQL.Query"]
-  defp run_query(label, sql, document_id, query_embedding, limit) do
+  defp run_query(statement, document_id, query_embedding, limit) do
     params = [query_embedding, Ecto.UUID.dump!(document_id), limit, @similarity_floor]
 
-    case Repo.query(sql, params) do
+    case Repo.query(Keyword.fetch!(@statements, statement), params) do
       {:ok, %{rows: rows, columns: columns}} ->
-        {:ok, Enum.map(rows, &format_row(Map.new(Enum.zip(columns, &1))))}
+        {:ok, Enum.map(rows, &format_row(Row.to_map(&1, columns)))}
 
       {:error, error} ->
-        Logger.error(
-          "#{label} retrieval query failed: #{inspect(error, limit: 5, printable_limit: 256)}"
-        )
-
-        {:error, {:database_error, [reason: error]}}
+        {:error, {:database_error, [reason: error, statement: statement]}}
     end
   end
 
@@ -325,35 +327,20 @@ defmodule Doctrans.Chat.Retrieval do
   # carries neither key, which is what `t:result/0` promises.
   defp format_row(row) do
     base = %{
-      page_id: uuid_to_string(row["page_id"]),
+      page_id: Row.uuid_to_string(row["page_id"]),
       page_number: row["page_number"],
       original_markdown: row["original_markdown"],
       translated_markdown: row["translated_markdown"],
       content_revision: row["content_revision"],
-      similarity: to_float(row["similarity"])
+      similarity: Row.to_float(row["similarity"])
     }
 
     case row do
       %{"chunk_id" => chunk_id, "chunk_index" => chunk_index} ->
-        Map.merge(base, %{chunk_id: uuid_to_string(chunk_id), chunk_index: chunk_index})
+        Map.merge(base, %{chunk_id: Row.uuid_to_string(chunk_id), chunk_index: chunk_index})
 
       _page_row ->
         base
     end
   end
-
-  defp uuid_to_string(<<_::128>> = binary) do
-    case Ecto.UUID.load(binary) do
-      {:ok, uuid} -> uuid
-      :error -> nil
-    end
-  end
-
-  defp uuid_to_string(string) when is_binary(string), do: string
-  defp uuid_to_string(nil), do: nil
-
-  defp to_float(nil), do: 0.0
-  defp to_float(%Decimal{} = d), do: Decimal.to_float(d)
-  defp to_float(f) when is_float(f), do: f
-  defp to_float(i) when is_integer(i), do: i / 1
 end

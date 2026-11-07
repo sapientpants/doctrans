@@ -12,7 +12,8 @@ defmodule Doctrans.Chat.RetrievalTest do
   alias Doctrans.Documents
   alias Doctrans.Search.{EmbeddingMock, EmbeddingMocks, EmbeddingStub}
 
-  import Doctrans.Fixtures, only: [fake_embedding: 1, indexed_page_fixture: 2]
+  import Doctrans.Fixtures,
+    only: [fake_embedding: 1, half_aligned_embedding: 0, indexed_page_fixture: 2]
 
   describe "retrieve/3" do
     test "returns no matches when the document has no pages" do
@@ -124,8 +125,10 @@ defmodule Doctrans.Chat.RetrievalTest do
     test "the similarity floor excludes a page the query points away from" do
       document = completed_document()
       aligned = indexed_page_fixture(document, %{page_number: 1})
-      # Half the dimensions zeroed: 0.707 against the query's vector, inside the floor.
-      loose = indexed_page_fixture(document, %{page_number: 2, embedding: half_aligned()})
+      # 0.707 against the query's vector: inside the floor, below the aligned page.
+      loose =
+        indexed_page_fixture(document, %{page_number: 2, embedding: half_aligned_embedding()})
+
       indexed_page_fixture(document, %{page_number: 3, embedding: fake_embedding(-0.1)})
 
       assert {:ok, passages} = Retrieval.retrieve(document.id, ["test"])
@@ -343,8 +346,6 @@ defmodule Doctrans.Chat.RetrievalTest do
   end
 
   defp vector(first, second), do: Pgvector.new([first, second | List.duplicate(0.0, 1022)])
-
-  defp half_aligned, do: Pgvector.new(List.duplicate(0.1, 512) ++ List.duplicate(0.0, 512))
 
   defp completed_document do
     {:ok, document} =

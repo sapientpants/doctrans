@@ -236,6 +236,20 @@ defmodule Doctrans.Fixtures do
   end
 
   @doc """
+  An embedding half aligned with `fake_embedding/0`: the first half of the
+  components `0.1`, the rest zero.
+
+  Cosine similarity 0.707 against the query vector the stub embeds, so a page
+  carrying it clears both the library search floor (0.55) and the retrieval
+  floor (0.30) while ranking strictly below a page that carries
+  `fake_embedding/0` itself.
+  """
+  def half_aligned_embedding do
+    half = div(Embedding.dimensions(), 2)
+    Pgvector.new(List.duplicate(0.1, half) ++ List.duplicate(0.0, Embedding.dimensions() - half))
+  end
+
+  @doc """
   Creates a fully processed page -- extracted, translated and indexed -- in
   `document`, through the real transitions, and returns it.
 
