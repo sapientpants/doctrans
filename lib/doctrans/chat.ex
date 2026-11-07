@@ -2,15 +2,13 @@ defmodule Doctrans.Chat do
   @moduledoc """
   Chat functionality for document Q&A using RAG (Retrieval-Augmented Generation).
 
-  Holds the pieces `Doctrans.Chat.Agent` assembles into a turn: retrieval within
-  a single document, the running context it accumulates across turns, and the
-  prompt built from that context.
+  Holds the pieces `Doctrans.Chat.Agent` assembles into a turn: the running
+  context it accumulates across turns from what `Doctrans.Chat.Retrieval`
+  found, and the prompt built from that context.
   """
 
-  alias Doctrans.Chat.MultiSearch
   alias Doctrans.Documents
   alias Doctrans.Documents.Pages
-  alias Doctrans.Errors
   alias Doctrans.Search
 
   require Logger
@@ -280,46 +278,6 @@ defmodule Doctrans.Chat do
   """
   @spec embeddings_ready?(Documents.Document.t() | Ecto.UUID.t()) :: boolean()
   defdelegate embeddings_ready?(document), to: Pages
-
-  @doc """
-  Retrieves relevant document context for a set of search queries.
-
-  Runs multi-query search with RRF when there are multiple query variants,
-  otherwise a single semantic search using the supplied query, falling back to
-  the standalone question only when no queries are supplied.
-  Returns `{:ok, pages}`, or `{:error, {:retrieval_unavailable, [reason: tag]}}`
-  when retrieval could not run at all -- on any of the three branches, so an
-  outage never reaches the reader as "the document holds nothing relevant".
-  `{:ok, []}` keeps its own meaning: searched, nothing matched.
-  """
-  @spec retrieve(Ecto.UUID.t(), String.t(), [String.t()], keyword()) ::
-          {:ok, [Search.document_result()]} | {:error, Doctrans.Errors.reason()}
-  def retrieve(document_id, standalone_question, queries, search_opts) do
-    result =
-      case queries do
-        [] -> Search.search_in_document(document_id, standalone_question, search_opts)
-        [query] -> Search.search_in_document(document_id, query, search_opts)
-        queries -> MultiSearch.search_with_queries(document_id, queries, search_opts)
-      end
-
-    tag_outage(result)
-  end
-
-  # Retrieval that returned nothing because it is down is a different answer
-  # than retrieval that returned nothing because the document holds nothing, so
-  # every branch has to say which -- the single-query one most of all. The
-  # planner and the embedder are the same server, so a planner outage collapses
-  # the query list to one (`QueryExpander.expand/3` falls back to `[question]`)
-  # and lands on the branch that would otherwise report a bare `:circuit_open`
-  # as the generic "I encountered an error".
-  #
-  # The tag carries the reason's tag alone: the detail is already logged where
-  # it arose, and what reaches the reader is a rendered message, not a payload.
-  defp tag_outage({:error, reason}) do
-    {:error, {:retrieval_unavailable, [reason: Errors.tag(reason)]}}
-  end
-
-  defp tag_outage(result), do: result
 
   @doc false
   @spec build_system_prompt(String.t(), String.t()) :: String.t()
