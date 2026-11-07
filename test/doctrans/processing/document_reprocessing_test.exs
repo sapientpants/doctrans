@@ -166,7 +166,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
 
   test "reprocessing resolves the persisted source extension after a metadata rename" do
     Oban.Testing.with_testing_mode(:manual, fn ->
-      # Enqueueing takes a fresh upload only.
+      # The start takes a fresh upload only.
       upload = document_fixture(%{original_filename: "report.docx"})
       source = document_source_fixture(upload, "original office bytes")
       assert {:ok, job} = Run.start(upload.id, source)
@@ -179,7 +179,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
 
       assert Source.path(document) == source
 
-      # Enqueueing started a run; a reprocess needs it settled, so stop it.
+      # The start queued a run; a reprocess needs it settled, so stop it.
       Repo.delete!(job)
       assert {:ok, document} = Lifecycle.cancel(document)
 

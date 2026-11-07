@@ -67,7 +67,7 @@ defmodule Doctrans.Processing.RunTest do
         assert {:error, {:unsupported_format, [format: ".txt"]}} =
                  Run.start(document.id, "/uploads/original.txt")
 
-        # The whole enqueue is one transaction, so the refusal rolls back the
+        # The whole start is one transaction, so the refusal rolls back the
         # extension and run it had already written.
         untouched = Documents.get_document!(document.id)
         assert untouched.status == "uploading"

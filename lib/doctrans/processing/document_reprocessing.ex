@@ -15,7 +15,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
           {:ok, Documents.Document.t()} | {:error, Doctrans.Errors.reason()}
   def reprocess_document(document_id, opts \\ []) do
     Repo.safe_transaction(fn ->
-      document = Run.lock(document_id) || Repo.rollback(:document_not_found)
+      document = Run.lock!(document_id)
       ensure_reprocessable!(document, opts)
       purge_generated_content(document)
       requeue(document, opts)
@@ -72,7 +72,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   end
 
   defp do_reset_page(page, opts) do
-    document = Run.lock(page.document_id) || Repo.rollback(:document_not_found)
+    document = Run.lock!(page.document_id)
     current = Documents.get_page(page.id) || Repo.rollback(:page_not_found)
     validate_models!(opts)
     ensure_offered!(document, :reprocess_page)
@@ -95,7 +95,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
   end
 
   defp do_retry_failed_pages(document_id, opts) do
-    document = Run.lock(document_id) || Repo.rollback(:document_not_found)
+    document = Run.lock!(document_id)
     validate_models!(opts)
     ensure_offered!(document, :retry_pages)
 

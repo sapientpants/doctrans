@@ -1,11 +1,14 @@
 defmodule Doctrans.Processing.Run do
   @moduledoc """
-  Where a run starts, the models and the job it runs under, and the fence on
-  a document's run.
+  A fresh upload's run, the models and the job a run runs under, and the fence
+  on a document's run.
 
-  `start/2` starts the run of a fresh upload; `Doctrans.Jobs.DocumentExtractionJob`
-  is the row it inserts and the `perform/1` that hands the document to
-  `Doctrans.Processing.Extraction`, and decides nothing about the run itself.
+  `start/2` is the use case around a fresh upload's requeue: the lock, the
+  format check and the extraction job on either side of the
+  `Doctrans.Documents.Lifecycle.requeue/2` transition, which alone starts the
+  run. `Doctrans.Jobs.DocumentExtractionJob` is the row it inserts and the
+  `perform/1` that hands the document to `Doctrans.Processing.Extraction`, and
+  decides nothing about the run itself.
 
   The fence (`lock/1`, `current?/2`, `with_current/2`, `with_page/2`) lives in
   `Doctrans.Documents.Revision`, which owns the revision columns it compares.
@@ -20,7 +23,7 @@ defmodule Doctrans.Processing.Run do
   alias Doctrans.Repo
 
   @doc """
-  Starts the run of a fresh upload.
+  Takes a fresh upload through its requeue.
 
   In one transaction: records the format the stored file was validated under
   through `Doctrans.Documents.Source`, requeues the document through
@@ -39,18 +42,15 @@ defmodule Doctrans.Processing.Run do
   end
 
   defp start_locked(document_id, source_path) do
-    document = lock(document_id) || Repo.rollback(:document_not_found)
+    document = lock!(document_id)
     unless Lifecycle.uploading?(document), do: Repo.rollback(:already_processing)
 
-    queued =
-      with {:ok, recorded} <- Source.record_extension(document, source_path),
-           {:ok, queued} <- Lifecycle.requeue(recorded, new_attrs()) do
-        queued
-      else
-        {:error, reason} -> Repo.rollback(reason)
-      end
-
-    enqueue(queued)
+    document
+    |> Source.record_extension(source_path)
+    |> Repo.or_rollback()
+    |> Lifecycle.requeue(new_attrs())
+    |> Repo.or_rollback()
+    |> enqueue()
   end
 
   @spec choices(keyword()) :: %{extraction_model: String.t(), translation_model: String.t()}
@@ -90,6 +90,14 @@ defmodule Doctrans.Processing.Run do
 
     job
   end
+
+  @doc """
+  Locks the document row for the current transaction, or rolls the transaction
+  back with `:document_not_found` when it is gone: the first line of every
+  transaction that works on a document's run.
+  """
+  @spec lock!(Ecto.UUID.t()) :: Document.t()
+  def lock!(document_id), do: lock(document_id) || Repo.rollback(:document_not_found)
 
   defdelegate lock(document_id), to: Revision
   defdelegate current?(document, run_id), to: Revision
