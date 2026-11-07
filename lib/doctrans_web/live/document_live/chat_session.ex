@@ -28,7 +28,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
     only: [cancel_async: 3, start_async: 4, stream: 3, stream: 4, stream_insert: 3]
 
   alias Doctrans.Chat
-  alias Doctrans.Chat.Conversations
+  alias Doctrans.Chat.{Conversations, RetrievedContext}
   alias DoctransWeb.ErrorMessages
 
   require Logger
@@ -201,7 +201,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
     do: socket |> prune_context(page) |> refresh_embeddings_status()
 
   @doc """
-  Stops the turn in flight, if there is one, and drops the accumulated context.
+  Stops the turn in flight, if there is one, and drops the Retrieved context.
 
   For a document that has gone or been replaced underneath the conversation.
   The turn has to be stopped here rather than when its result lands:
@@ -222,7 +222,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
     socket
     |> cancel_async(@turn, :kill)
     |> reset_transient()
-    |> assign(:chat_retrieved_context, [])
+    |> assign(:chat_retrieved_context, RetrievedContext.new())
     |> assign(:embeddings_ready, false)
   end
 
@@ -260,16 +260,16 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   def refresh_embeddings_status(socket), do: socket
 
   @doc """
-  Drops accumulated context superseded by a page that has just changed.
+  Drops Retrieved context superseded by a page that has just changed.
 
   Another tab may have reprocessed this page, and its translation may have
-  landed after context was retrieved from the untranslated page. The accumulated
-  context lives in this socket, so a content change has to evict it here too;
-  the next answer would otherwise still be grounded in the text that was just
-  replaced.
+  landed after context was retrieved from the untranslated page. The context
+  lives in this socket between turns, so a content change has to evict it here
+  too; the next answer would otherwise still be grounded in the text that was
+  just replaced.
   """
   def prune_context(socket, page) do
-    context = Enum.reject(socket.assigns.chat_retrieved_context, &Chat.superseded_by?(&1, page))
+    context = RetrievedContext.page_changed(socket.assigns.chat_retrieved_context, page)
 
     assign(socket, :chat_retrieved_context, context)
   end
@@ -301,28 +301,25 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   Applies a successful chat response to the socket.
 
   Inserts the assistant message, resets the transient streaming assigns, appends
-  the exchange to the capped history, and stores the accumulated retrieval
-  context for the next turn.
+  the exchange to the capped history, and keeps the Retrieved context for the
+  next turn.
 
-  A page reprocessed while the answer was generating leaves obsolete chunks in
-  the returned context, so it is filtered before it is both saved and kept for
-  the next turn; the socket would otherwise hold chunks the database already
-  dropped. `Conversations.finish/5` filters again under the document lock, which
-  is what actually fences a concurrent reset — this pass only keeps the socket
-  and the saved session in agreement.
+  A page reprocessed while the answer was generating leaves obsolete passages in
+  the returned context. `Conversations.finish/5` checks the context under the
+  document lock, which is what fences a concurrent reset, and hands back what it
+  saved; the socket keeps that, so it never holds passages the database already
+  dropped.
   """
   def put_response(socket, response, retrieved_context) do
-    context = Chat.current_context(retrieved_context)
-
-    with {:ok, assistant_msg} <-
+    with {:ok, assistant_msg, saved_context} <-
            Conversations.finish(
              socket.assigns.chat_question,
              "assistant",
              response,
-             context,
+             retrieved_context,
              socket.assigns.document
            ) do
-      {:ok, apply_response(socket, assistant_msg, response, context)}
+      {:ok, apply_response(socket, assistant_msg, response, saved_context)}
     end
   end
 
@@ -350,8 +347,13 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   socket untouched, in the same shape as `put_response/3`.
   """
   def put_error(socket, message) do
-    with {:ok, error_msg} <-
-           Conversations.finish(socket.assigns.chat_question, "error", message, []) do
+    with {:ok, error_msg, _context} <-
+           Conversations.finish(
+             socket.assigns.chat_question,
+             "error",
+             message,
+             RetrievedContext.new()
+           ) do
       {:ok, socket |> stream_insert(:chat_messages, error_msg) |> reset_transient()}
     end
   end

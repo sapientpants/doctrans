@@ -4,7 +4,7 @@ defmodule Doctrans.Chat.AgentGatherTest do
   # tasks run under `Doctrans.TaskSupervisor`, which carries `$callers`.
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.Chat.{Agent, ContractProbe}
+  alias Doctrans.Chat.{Agent, ContractProbe, RetrievedContext}
 
   import Doctrans.Fixtures
 
@@ -44,7 +44,9 @@ defmodule Doctrans.Chat.AgentGatherTest do
       assert {:ok, "Answer.", context} =
                Agent.run(document, "assess the balance sheet", [], [], fn _ -> :ok end)
 
-      assert Enum.sort(Enum.map(context, & &1.page_id)) == Enum.sort([assets.id, liabilities.id])
+      assert context |> RetrievedContext.passages() |> Enum.map(& &1.page_id) |> Enum.sort() ==
+               Enum.sort([assets.id, liabilities.id])
+
       assert_received {:contract_embedding, "assets"}
       for _ <- 1..@retrieval_rounds, do: assert_received({:contract_embedding, "liabilities"})
       refute_received {:contract_embedding, _}

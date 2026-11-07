@@ -62,10 +62,10 @@ defmodule Doctrans.Documents.Pages do
   Ids that are not UUIDs and pages that no longer exist are absent from the map,
   so a caller can read a missing key as "no such page" without pre-validating.
   """
-  @spec page_content_state([Ecto.UUID.t() | String.t() | nil]) :: %{
+  @spec page_text_state([Ecto.UUID.t() | String.t() | nil]) :: %{
           optional(Ecto.UUID.t()) => {integer(), String.t() | nil}
         }
-  def page_content_state(page_ids) do
+  def page_text_state(page_ids) do
     case castable_ids(page_ids) do
       [] ->
         %{}

@@ -1,9 +1,9 @@
 defmodule Doctrans.Search.RetrievalAlignmentTest do
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.{Chat, Repo}
-  alias Doctrans.Chat.Retrieval
+  alias Doctrans.Chat.{Retrieval, RetrievedContext}
   alias Doctrans.Documents.{Chunk, Page}
+  alias Doctrans.Repo
   alias Doctrans.Search.{Chunker, EmbeddingMocks, Indexer}
 
   import Doctrans.Fixtures
@@ -63,15 +63,17 @@ defmodule Doctrans.Search.RetrievalAlignmentTest do
                &(&1.content_revision == Repo.get!(Page, page.id).content_revision)
              )
 
-      assert Chat.build_context(results) == "[Page 1]\n" <> source
+      assert RetrievedContext.prompt_text(retrieved(results)) == "[Page 1]\n" <> source
 
       # Persisted conversation context predating this fix still has the bad pairing.
       legacy =
         Enum.map(results, &Map.put(&1, :translated_markdown, "Unrelated legacy translation"))
 
-      assert Chat.build_context(Chat.merge_context([], legacy)) == "[Page 1]\n" <> source
+      assert RetrievedContext.prompt_text(retrieved(legacy)) == "[Page 1]\n" <> source
     end
   end
+
+  defp retrieved(items), do: RetrievedContext.add(RetrievedContext.new(), items)
 
   defp passages(words, labels) do
     Enum.map_join(labels, "\n\n", fn label ->

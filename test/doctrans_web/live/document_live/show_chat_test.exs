@@ -3,7 +3,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Chat.Conversations
+  alias Doctrans.Chat.{Conversations, RetrievedContext}
   alias Doctrans.Documents
   alias Doctrans.Documents.Lifecycle
   alias Doctrans.Documents.PageLifecycle
@@ -24,8 +24,8 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
     } do
       question = Conversations.start_question(document.id, "Saved question")
 
-      {:ok, answer} =
-        Conversations.finish(question, "assistant", "Saved answer", [])
+      {:ok, answer, _} =
+        Conversations.finish(question, "assistant", "Saved answer", RetrievedContext.new())
 
       {:ok, first, _} = live(conn, ~p"/documents/#{document.id}")
       first |> element("#toggle-chat") |> render_click()
@@ -57,19 +57,22 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       page = Documents.get_page_by_number(document.id, 1)
 
-      context = [
-        %{
-          page_id: page.id,
-          page_number: 1,
-          chunk_index: 0,
-          content_revision: page.content_revision,
-          similarity: 0.9,
-          original_markdown: "Source from another tab",
-          translated_markdown: nil
-        }
-      ]
+      context =
+        RetrievedContext.add(RetrievedContext.new(), [
+          %{
+            page_id: page.id,
+            page_number: 1,
+            chunk_index: 0,
+            content_revision: page.content_revision,
+            similarity: 0.9,
+            original_markdown: "Source from another tab",
+            translated_markdown: nil
+          }
+        ])
 
-      {:ok, answer} = Conversations.finish(question, "assistant", "Another tab's answer", context)
+      {:ok, answer, _saved} =
+        Conversations.finish(question, "assistant", "Another tab's answer", context)
+
       view |> element(toggle) |> render_click()
       assert has_element?(view, "#chat_messages-#{answer.id}")
       refute has_element?(view, "#chat-interrupted")
@@ -145,17 +148,19 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       socket =
         :sys.get_state(view.pid).socket
-        |> Phoenix.Component.assign(:chat_retrieved_context, [
-          context_chunk(page, "Assets are 10"),
-          context_chunk(other, "Unrelated")
-        ])
+        |> Phoenix.Component.assign(
+          :chat_retrieved_context,
+          retrieved([context_chunk(page, "Assets are 10"), context_chunk(other, "Unrelated")])
+        )
 
       {:ok, corrected} = PageLifecycle.reset(page)
       refute corrected.content_revision == page.content_revision
 
       {:noreply, updated} = Show.handle_info({:page_updated, corrected}, socket)
 
-      assert Enum.map(updated.assigns.chat_retrieved_context, & &1.page_id) == [other.id]
+      assert Enum.map(passages(updated.assigns.chat_retrieved_context), & &1.page_id) == [
+               other.id
+             ]
     end
 
     test "a page translated elsewhere drops that page's untranslated context", %{
@@ -178,10 +183,13 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       socket =
         :sys.get_state(view.pid).socket
-        |> Phoenix.Component.assign(:chat_retrieved_context, [
-          page_context_chunk(untranslated),
-          context_chunk(untranslated, "Aktiva sind 10")
-        ])
+        |> Phoenix.Component.assign(
+          :chat_retrieved_context,
+          retrieved([
+            page_context_chunk(untranslated),
+            context_chunk(untranslated, "Aktiva sind 10")
+          ])
+        )
 
       {:ok, translated} =
         PageLifecycle.complete(untranslated, :translation, %{markdown: "Assets are 10"})
@@ -192,7 +200,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       # The page-level copy is untranslated and gone; chunk context, which never
       # carries a translation, is untouched.
-      assert Enum.map(updated.assigns.chat_retrieved_context, & &1.chunk_index) == [0]
+      assert Enum.map(passages(updated.assigns.chat_retrieved_context), & &1.chunk_index) == [0]
     end
 
     test "a page-level chunk carrying the current translation survives the update", %{
@@ -214,11 +222,14 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       socket =
         :sys.get_state(view.pid).socket
-        |> Phoenix.Component.assign(:chat_retrieved_context, [page_context_chunk(page)])
+        |> Phoenix.Component.assign(
+          :chat_retrieved_context,
+          retrieved([page_context_chunk(page)])
+        )
 
       {:noreply, updated} = Show.handle_info({:page_updated, page}, socket)
 
-      assert Enum.map(updated.assigns.chat_retrieved_context, & &1.page_id) == [page.id]
+      assert Enum.map(passages(updated.assigns.chat_retrieved_context), & &1.page_id) == [page.id]
     end
 
     test "an unrelated page's update leaves the accumulated context alone", %{
@@ -255,11 +266,14 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       socket =
         :sys.get_state(view.pid).socket
-        |> Phoenix.Component.assign(:chat_retrieved_context, [page_context_chunk(kept)])
+        |> Phoenix.Component.assign(
+          :chat_retrieved_context,
+          retrieved([page_context_chunk(kept)])
+        )
 
       {:noreply, updated} = Show.handle_info({:page_updated, other}, socket)
 
-      assert Enum.map(updated.assigns.chat_retrieved_context, & &1.page_id) == [kept.id]
+      assert Enum.map(passages(updated.assigns.chat_retrieved_context), & &1.page_id) == [kept.id]
     end
 
     test "an answer finishing after a page correction keeps neither socket nor saved context", %{
@@ -280,7 +294,9 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
         })
 
       question = Conversations.start_question(document.id, "How much are assets?")
-      context = [context_chunk(page, "Assets are 10"), context_chunk(other, "Unrelated")]
+
+      context =
+        retrieved([context_chunk(page, "Assets are 10"), context_chunk(other, "Unrelated")])
 
       socket =
         :sys.get_state(view.pid).socket
@@ -292,8 +308,13 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
       assert {:ok, answered} = ChatSession.put_response(socket, "Assets are 10", context)
 
-      assert Enum.map(answered.assigns.chat_retrieved_context, & &1.page_id) == [other.id]
-      assert Enum.map(Conversations.load(document.id).context, & &1.page_id) == [other.id]
+      assert Enum.map(passages(answered.assigns.chat_retrieved_context), & &1.page_id) == [
+               other.id
+             ]
+
+      assert Enum.map(passages(Conversations.load(document.id).context), & &1.page_id) == [
+               other.id
+             ]
     end
 
     test "reopening chat during generation preserves the active turn's state", %{
@@ -347,11 +368,11 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
           Lifecycle.requeue(document, run_attrs_fixture())
         end)
 
-      result = {:ok, {token, {:ok, "Stale answer", []}}}
+      result = {:ok, {token, {:ok, "Stale answer", RetrievedContext.new()}}}
       {:noreply, updated} = Show.handle_async(:chat_turn, result, socket)
       refute updated.assigns.chat_loading
       assert updated.assigns.chat_token == nil
-      assert updated.assigns.chat_retrieved_context == []
+      assert updated.assigns.chat_retrieved_context == RetrievedContext.new()
       assert length(Conversations.load(document.id).messages) == 1
     end
 
@@ -542,7 +563,9 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       document: document
     } do
       question = Conversations.start_question(document.id, "What are the balances?")
-      {:ok, answer} = Conversations.finish(question, "assistant", @answer_table, [])
+
+      {:ok, answer, _} =
+        Conversations.finish(question, "assistant", @answer_table, RetrievedContext.new())
 
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
       view |> element("#toggle-chat") |> render_click()
@@ -561,7 +584,9 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       # Same edge-margin contract as the viewer: `.markdown > :first-child` in app.css
       # only matches when nothing wraps the rendered Markdown.
       question = Conversations.start_question(document.id, "What are the balances?")
-      {:ok, answer} = Conversations.finish(question, "assistant", @answer_table, [])
+
+      {:ok, answer, _} =
+        Conversations.finish(question, "assistant", @answer_table, RetrievedContext.new())
 
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
       view |> element("#toggle-chat") |> render_click()
@@ -616,7 +641,9 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       document: document
     } do
       question = Conversations.start_question(document.id, "What are the balances?")
-      {:ok, answer} = Conversations.finish(question, "assistant", @answer_table, [])
+
+      {:ok, answer, _} =
+        Conversations.finish(question, "assistant", @answer_table, RetrievedContext.new())
 
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
       view |> element("#toggle-chat") |> render_click()
@@ -640,7 +667,9 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       """
 
       question = Conversations.start_question(document.id, "What did the invoice say?")
-      {:ok, answer} = Conversations.finish(question, "assistant", unsafe, [])
+
+      {:ok, answer, _} =
+        Conversations.finish(question, "assistant", unsafe, RetrievedContext.new())
 
       {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
       view |> element("#toggle-chat") |> render_click()
@@ -674,6 +703,9 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   # what keeps the task from outliving the test and querying the database with
   # no sandbox owner.
   defp await_chat_turn(view), do: render_async(view, 2_000)
+
+  defp retrieved(passages), do: RetrievedContext.add(RetrievedContext.new(), passages)
+  defp passages(context), do: RetrievedContext.passages(context)
 
   defp context_chunk(page, content) do
     %{

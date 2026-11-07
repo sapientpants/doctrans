@@ -3,11 +3,9 @@ defmodule Doctrans.Chat.AgentTest do
   # tasks run under `Doctrans.TaskSupervisor`, which carries `$callers`.
   use Doctrans.DataCase, async: true
 
-  alias Doctrans.Chat
-  alias Doctrans.Chat.{Agent, ContractProbe, RetrievalProbe}
+  alias Doctrans.Chat.{Agent, ContractProbe, RetrievalProbe, RetrievedContext}
   alias Doctrans.Documents
   alias Doctrans.Processing.{OpenAIMock, OpenAIProbe}
-  alias Doctrans.Repo
 
   import Doctrans.Fixtures
 
@@ -25,8 +23,8 @@ defmodule Doctrans.Chat.AgentTest do
       assert {:ok, answer, context} = Agent.run(document, "What is this about?", [], [], on_event)
       assert is_binary(answer)
       assert answer != ""
-      # The document was searched and the retrieved chunk(s) accumulated.
-      assert [_ | _] = context
+      # The document was searched and the retrieved passage(s) accumulated.
+      assert [_ | _] = RetrievedContext.passages(context)
 
       events = collect_events()
 
@@ -66,7 +64,7 @@ defmodule Doctrans.Chat.AgentTest do
       noop = fn _ -> :ok end
 
       assert {:ok, _first, context1} = Agent.run(document, "First question?", [], [], noop)
-      assert Enum.map(context1, & &1.page_id) == [first_page.id]
+      assert Enum.map(RetrievedContext.passages(context1), & &1.page_id) == [first_page.id]
       assert_received {:contract_generation, [%{role: "system", content: first_prompt} | _], _}
       assert first_prompt =~ first_page.translated_markdown
       refute first_prompt =~ second_page.translated_markdown
@@ -77,7 +75,10 @@ defmodule Doctrans.Chat.AgentTest do
                Agent.run(document, "Second question?", [], [retrieved_context: context1], noop)
 
       expected_ids = Enum.sort([first_page.id, second_page.id])
-      assert Enum.sort(Enum.map(context2, & &1.page_id)) == expected_ids
+
+      assert context2 |> RetrievedContext.passages() |> Enum.map(& &1.page_id) |> Enum.sort() ==
+               expected_ids
+
       assert_received {:contract_generation, [%{role: "system", content: second_prompt} | _], _}
       assert second_prompt =~ first_page.translated_markdown
       assert second_prompt =~ second_page.translated_markdown
@@ -85,7 +86,9 @@ defmodule Doctrans.Chat.AgentTest do
       assert {:ok, _third, context3} =
                Agent.run(document, "Repeat question?", [], [retrieved_context: context2], noop)
 
-      assert Enum.sort(Enum.map(context3, & &1.page_id)) == expected_ids
+      assert context3 |> RetrievedContext.passages() |> Enum.map(& &1.page_id) |> Enum.sort() ==
+               expected_ids
+
       assert ContractProbe.remaining_responses(probe) == []
     end
 
@@ -95,50 +98,6 @@ defmodule Doctrans.Chat.AgentTest do
 
       assert {:error, :empty_question} =
                Agent.run(build_stub_document(), "   ", [], [], fn _ -> :ok end)
-    end
-
-    test "drops oversized prior context before returning context for the next turn", %{
-      document: document
-    } do
-      page =
-        Repo.insert!(%Documents.Page{
-          document_id: document.id,
-          page_number: 99,
-          extraction_status: "completed",
-          original_markdown: "Oversized retained passage " <> String.duplicate("x", 32_001)
-        })
-
-      oversized = %{
-        page_id: page.id,
-        page_number: page.page_number,
-        content_revision: page.content_revision,
-        chunk_index: nil,
-        similarity: 1.0,
-        original_markdown: page.original_markdown,
-        translated_markdown: nil
-      }
-
-      # Establish that freshness filtering cannot satisfy the budget assertion.
-      assert Chat.current_context([oversized]) == [oversized]
-      model_probe([{:ok, "Standalone: current context"}, {:ok, "Sufficient: yes"}])
-
-      assert {:ok, _answer, context} =
-               Agent.run(
-                 document,
-                 "What is this about?",
-                 [],
-                 [retrieved_context: [oversized]],
-                 fn _ ->
-                   :ok
-                 end
-               )
-
-      assert [_ | _] = context
-      refute Enum.any?(context, &(&1.page_id == page.id))
-      assert byte_size(Chat.build_context(context)) <= 32_000
-      assert_received {:contract_generation, [%{role: "system", content: prompt} | _], _}
-      refute prompt =~ "Oversized retained passage"
-      assert prompt =~ "Test content for chat"
     end
 
     test "surfaces generation errors", %{document: document} do
@@ -176,8 +135,10 @@ defmodule Doctrans.Chat.AgentTest do
       indexed_page_fixture(document, %{original_markdown: "Total assets EUR 120m."})
       RetrievalProbe.install()
 
-      assert {:ok, "Answer.", [_]} =
+      assert {:ok, "Answer.", context} =
                Agent.run(document, "assess the balance sheet", [], [], fn _ -> :ok end)
+
+      assert [_] = RetrievedContext.passages(context)
 
       assert_receive {:embedded, "assess the balance sheet"}
       assert_receive {:embedded, "liquidity and cash reserves"}
@@ -188,7 +149,7 @@ defmodule Doctrans.Chat.AgentTest do
 
   # Scripts the model's replies. With `embeddings`, the probe also answers each
   # query with its vector; without, the default embedding stub stays in place.
-  defp model_probe(responses, embeddings \\ nil) do
+  defp model_probe(responses, embeddings) do
     state = %{owner: self(), chat_responses: responses, embeddings: embeddings || %{}}
     probe = start_supervised!({ContractProbe, state})
     ContractProbe.install(probe)

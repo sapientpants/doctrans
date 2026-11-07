@@ -2,7 +2,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
   import Doctrans.Fixtures
-  alias Doctrans.Chat.Conversations
+  alias Doctrans.Chat.{Conversations, RetrievedContext}
   alias Doctrans.Documents
 
   alias Doctrans.Documents.{
@@ -80,15 +80,20 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       Repo.insert!(%Chunk{page_id: c.page.id, chunk_index: 0, content: "Old OCR"})
       question = Conversations.start_question(c.document.id, "Historical question")
 
-      Conversations.finish(question, "assistant", "Historical answer", [
-        %{
-          page_id: c.page.id,
-          page_number: 1,
-          similarity: 1.0,
-          original_markdown: "Old OCR",
-          translated_markdown: "Old translation"
-        }
-      ])
+      Conversations.finish(
+        question,
+        "assistant",
+        "Historical answer",
+        retrieved([
+          %{
+            page_id: c.page.id,
+            page_number: 1,
+            similarity: 1.0,
+            original_markdown: "Old OCR",
+            translated_markdown: "Old translation"
+          }
+        ])
+      )
 
       assert {:ok, run} =
                DocumentReprocessing.reprocess_document(c.document.id,
@@ -103,7 +108,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       refute Repo.exists?(from ch in Chunk, where: ch.page_id == ^c.page.id)
       assert File.read!(c.source) == "original office bytes"
       assert length(Conversations.load(run.id).messages) == 2
-      assert Conversations.load(run.id).context == []
+      assert Conversations.load(run.id).context == RetrievedContext.new()
       [job] = all_enqueued(worker: DocumentExtractionJob)
       assert job.args["run_id"] == run.processing_run_id
       assert :ok = DocumentExtractionJob.perform(job)
@@ -268,35 +273,44 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
 
   test "chat results are fenced by the run that supplied their context", c do
     Oban.Testing.with_testing_mode(:manual, fn ->
-      context = [
-        %{
-          page_id: c.page.id,
-          page_number: 1,
-          similarity: 1.0,
-          original_markdown: "Old OCR",
-          translated_markdown: nil
-        }
-      ]
+      context =
+        retrieved([
+          %{
+            page_id: c.page.id,
+            page_number: 1,
+            similarity: 1.0,
+            original_markdown: "Old OCR",
+            translated_markdown: nil
+          }
+        ])
 
       saved = Conversations.start_question(c.document.id, "Finished before restart")
 
-      assert {:ok, _} =
+      assert {:ok, _, _} =
                Conversations.finish(saved, "assistant", "Old answer", context, c.document)
 
       pending = Conversations.start_question(c.document.id, "Still generating")
       assert {:ok, run} = DocumentReprocessing.reprocess_document(c.document.id)
-      assert Conversations.load(run.id).context == []
+      assert Conversations.load(run.id).context == RetrievedContext.new()
 
       assert {:error, :obsolete_run} =
                Conversations.finish(pending, "assistant", "Late answer", context, c.document)
 
       snapshot = Conversations.load(run.id)
-      assert snapshot.context == []
+      assert snapshot.context == RetrievedContext.new()
       assert length(snapshot.messages) == 3
       refute Repo.get!(Doctrans.Chat.Message, pending.id).completed
 
       current = Conversations.start_question(run.id, "New run question")
-      assert {:ok, _} = Conversations.finish(current, "assistant", "New answer", [], run)
+
+      assert {:ok, _, _} =
+               Conversations.finish(
+                 current,
+                 "assistant",
+                 "New answer",
+                 RetrievedContext.new(),
+                 run
+               )
     end)
   end
 
@@ -311,23 +325,28 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
           image_path: "documents/#{c.document.id}/pages/page_2.png"
         })
 
-      context = [page_context(c.page, "Assets are 10"), page_context(other, "Unrelated")]
+      context =
+        retrieved([page_context(c.page, "Assets are 10"), page_context(other, "Unrelated")])
+
       answered = Conversations.start_question(c.document.id, "How much are assets?")
-      assert {:ok, _} = Conversations.finish(answered, "assistant", "10", context, c.document)
-      assert length(Conversations.load(c.document.id).context) == 2
+      assert {:ok, _, _} = Conversations.finish(answered, "assistant", "10", context, c.document)
+      assert length(passages(Conversations.load(c.document.id).context)) == 2
 
       # An answer grounded in the old page is still generating when the page is corrected.
       in_flight = Conversations.start_question(c.document.id, "And after the correction?")
       assert {:ok, _} = DocumentReprocessing.reprocess_page(c.page.id)
-      assert [%{page_id: kept}] = Conversations.load(c.document.id).context
+      assert [%{page_id: kept}] = passages(Conversations.load(c.document.id).context)
       assert kept == other.id
 
-      assert {:ok, _} =
+      assert {:ok, _, _} =
                Conversations.finish(in_flight, "assistant", "Still 10", context, c.document)
 
-      assert [%{page_id: ^kept}] = Conversations.load(c.document.id).context
+      assert [%{page_id: ^kept}] = passages(Conversations.load(c.document.id).context)
     end)
   end
+
+  defp retrieved(items), do: RetrievedContext.add(RetrievedContext.new(), items)
+  defp passages(context), do: RetrievedContext.passages(context)
 
   defp page_context(page, content) do
     %{
