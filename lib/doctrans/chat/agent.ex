@@ -18,14 +18,15 @@ defmodule Doctrans.Chat.Agent do
     * `{:stage, stage}` — `:understanding | :retrieving | :assessing | :generating`
     * `{:delta, text}`  — a chunk of the streamed answer
 
-  Understanding decomposes the request into several targeted vector-store queries
-  (`Doctrans.Chat.QueryExpander`); the grader (`Doctrans.Chat.Grader`) can then
-  drive up to `@max_refine_rounds` additional search rounds to gather whatever is
-  still missing before generating.
+  Understanding decomposes the request into several targeted queries
+  (`Doctrans.Chat.QueryExpander`), which `Doctrans.Chat.Retrieval` searches the
+  document with; the grader (`Doctrans.Chat.Grader`) can then drive up to
+  `@max_refine_rounds` additional retrieval rounds to gather whatever is still
+  missing before generating.
   """
 
   alias Doctrans.Chat
-  alias Doctrans.Chat.{Grader, QueryExpander}
+  alias Doctrans.Chat.{Grader, QueryExpander, Retrieval}
   alias Doctrans.Deps
   alias Doctrans.Documents.Document
   alias Doctrans.Search
@@ -41,7 +42,7 @@ defmodule Doctrans.Chat.Agent do
   # (on top of the initial planned multi-query search).
   @max_refine_rounds 2
 
-  # Chunks each retrieval round asks the search for. `Chat.merge_context/3`
+  # Chunks each retrieval round asks for. `Chat.merge_context/3`
   # then bounds what accumulates across rounds and turns.
   @context_limit 8
 
@@ -88,9 +89,15 @@ defmodule Doctrans.Chat.Agent do
     # 2. Retrieve (always search the document)
     on_event.({:stage, :retrieving})
 
-    case Chat.retrieve(document.id, standalone_question, queries, search_opts) do
-      {:ok, pages} ->
-        answer(document, pages, standalone_question, chat_history, {search_opts, opts, on_event})
+    case Retrieval.retrieve(document.id, queries, search_opts) do
+      {:ok, passages} ->
+        answer(
+          document,
+          passages,
+          standalone_question,
+          chat_history,
+          {search_opts, opts, on_event}
+        )
 
       {:error, reason} = error ->
         Logger.error("Agent retrieval failed for document #{document.id}: #{inspect(reason)}")
@@ -98,12 +105,18 @@ defmodule Doctrans.Chat.Agent do
     end
   end
 
-  defp answer(document, pages, standalone_question, chat_history, {search_opts, opts, on_event}) do
+  defp answer(
+         document,
+         passages,
+         standalone_question,
+         chat_history,
+         {search_opts, opts, on_event}
+       ) do
     # 3. Merge new chunks into the accumulated context (dedup + cap).
     # The caller's context can predate a single-page reprocess that finished
     # while this socket held it; re-check it against current page revisions.
     prior_context = opts |> Keyword.get(:retrieved_context, []) |> Chat.current_context()
-    merged = Chat.merge_context(prior_context, pages)
+    merged = Chat.merge_context(prior_context, passages)
 
     # 4. Assess the merged context; search once more if it is insufficient
     on_event.({:stage, :assessing})
@@ -140,10 +153,10 @@ defmodule Doctrans.Chat.Agent do
         "Context graded insufficient; searching again with #{length(grade.refined_queries)} refined queries (#{rounds_left} round(s) left)"
       )
 
-      case Chat.retrieve(document.id, standalone_question, grade.refined_queries, search_opts) do
-        {:ok, refined_pages} ->
+      case Retrieval.retrieve(document.id, grade.refined_queries, search_opts) do
+        {:ok, refined_passages} ->
           merged
-          |> Chat.merge_context(refined_pages)
+          |> Chat.merge_context(refined_passages)
           |> then(&refine(document, &1, standalone_question, search_opts, opts, rounds_left - 1))
 
         {:error, reason} ->

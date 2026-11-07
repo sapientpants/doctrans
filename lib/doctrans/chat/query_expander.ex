@@ -12,7 +12,7 @@ defmodule Doctrans.Chat.QueryExpander do
      (assets, equity, liabilities, liquidity, debt, trends), not mere synonyms.
 
   Runs on every turn (including the first). The returned queries are fed to
-  `Doctrans.Chat.MultiSearch`, which searches them in parallel and fuses results
+  `Doctrans.Chat.Retrieval`, which searches them in parallel and fuses results
   via RRF.
   """
 

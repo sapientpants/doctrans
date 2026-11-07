@@ -120,3 +120,13 @@ The pass at boot that re-queues work the previous process left owed.
 **Processing status**:
 The read model that reports a Document's content pipeline and index pipeline separately and, for each action a user
 can take, whether it is offered or why it is withheld.
+
+### Search and chat
+
+**Library search**:
+Finding the Pages across every completed Document that answer a reader's query, ranked by both what the query means
+and how it is worded.
+
+**Retrieval**:
+Finding the passages of one Document that bear on a question, from one or more phrasings of it, so Chat can answer
+from the Document's own text. A passage is a Chunk, or a whole Page when the Document has no Chunks to retrieve.

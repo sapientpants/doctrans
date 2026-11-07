@@ -32,7 +32,7 @@ defmodule Doctrans.Search do
           :content_revision => integer() | nil,
           optional(:chunk_id) => Ecto.UUID.t() | nil,
           optional(:chunk_index) => non_neg_integer(),
-          # Present only on results fused by `Doctrans.Chat.MultiSearch`.
+          # Present only on results fused by `Doctrans.Chat.Retrieval`.
           optional(:rrf_score) => float()
         }
 
@@ -63,6 +63,16 @@ defmodule Doctrans.Search do
   @semantic_similarity_threshold 0.55
 
   @default_limit 20
+
+  @doc """
+  The smoothing constant of Reciprocal Rank Fusion: a passage at rank `r`
+  contributes `1 / (k + r)`, so a higher `k` flattens the difference between
+  neighbouring ranks. Library search fuses with it in SQL and
+  `Doctrans.Chat.Retrieval` in Elixir; one constant keeps a rank worth the same
+  in both.
+  """
+  @spec rrf_k() :: pos_integer()
+  def rrf_k, do: @default_rrf_k
 
   @doc """
   Performs hybrid search across all pages and counts every match, from one
@@ -221,7 +231,7 @@ defmodule Doctrans.Search do
   `{:error, :embedding_unavailable}` when the embedder succeeds without a
   vector: nothing can be ranked against it, and `{:ok, []}` would report a
   search that never ran as "nothing matched" -- the same reading
-  `Doctrans.Chat.MultiSearch` and library search give that result. Any other
+  `Doctrans.Chat.Retrieval` and library search give that result. Any other
   embedder or database error is passed through.
   """
   @spec search_in_document(Ecto.UUID.t(), String.t() | nil, keyword()) ::
