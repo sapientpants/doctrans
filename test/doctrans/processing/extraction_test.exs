@@ -11,9 +11,9 @@ defmodule Doctrans.Processing.ExtractionTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Layout, Lifecycle, PageLifecycle, Topics}
+  alias Doctrans.Documents.{Layout, Lifecycle, PageLifecycle, Source, Topics}
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
-  alias Doctrans.Processing.{Extraction, PageWork, ResumablePdfExtractorStub, Run}
+  alias Doctrans.Processing.{Extraction, PageWork, ResumablePdfExtractorStub}
 
   import Doctrans.Fixtures
 
@@ -74,14 +74,14 @@ defmodule Doctrans.Processing.ExtractionTest do
 
         for page <- updated_doc.pages do
           assert File.regular?(Layout.absolute(page.image_path))
-          assert Path.dirname(Layout.absolute(page.image_path)) == Run.pages_dir(document)
+          assert Path.dirname(Layout.absolute(page.image_path)) == Layout.pages_dir(document)
           assert page.extraction_status == "pending"
         end
 
         assert Enum.sort(Enum.map(processing_jobs(), & &1.args["page_id"])) ==
                  Enum.sort(Enum.map(updated_doc.pages, & &1.id))
 
-        assert File.regular?(Run.source_path(document))
+        assert File.regular?(Source.path(document))
       end)
     end
 
@@ -90,7 +90,7 @@ defmodule Doctrans.Processing.ExtractionTest do
 
       Oban.Testing.with_testing_mode(:manual, fn ->
         document = queued_document()
-        source_path = Run.source_path(document)
+        source_path = Source.path(document)
 
         Process.put(:fail_pdf_page, 2)
 
@@ -245,7 +245,7 @@ defmodule Doctrans.Processing.ExtractionTest do
     document_source_fixture(document)
 
     {:ok, _job} =
-      DocumentExtractionJob.enqueue_document(document.id, Run.source_path(document))
+      DocumentExtractionJob.enqueue_document(document.id, Source.path(document))
 
     queued = Documents.get_document!(document.id)
     assert queued.status == "queued"

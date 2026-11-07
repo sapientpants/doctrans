@@ -28,8 +28,8 @@ defmodule Doctrans.Documents.ProcessingStatus do
   import Doctrans.Documents.Page, only: [failed?: 1, settled?: 1]
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Lifecycle, Page, Progress}
-  alias Doctrans.Processing.{JobStates, Run}
+  alias Doctrans.Documents.{Document, Lifecycle, Page, Progress, Source}
+  alias Doctrans.Processing.JobStates
   alias Doctrans.Repo
 
   @in_flight [:running, :queued, :retrying]
@@ -111,7 +111,7 @@ defmodule Doctrans.Documents.ProcessingStatus do
     indexing = indexing_counts(counts)
     content = content_state(document, activity.content)
     index = index_state(activity.index, indexing)
-    source_available? = Run.source_available?(document)
+    source_available? = Source.available?(document)
 
     %__MODULE__{
       document_id: document.id,

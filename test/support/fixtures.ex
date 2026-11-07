@@ -13,7 +13,7 @@ defmodule Doctrans.Fixtures do
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Layout, Lifecycle, PageLifecycle}
+  alias Doctrans.Documents.{Document, Layout, Lifecycle, PageLifecycle, Source}
   alias Doctrans.Jobs.DocumentExtractionJob
   alias Doctrans.Processing.{OpenAIMock, PageContentStub, Run}
   alias Doctrans.Repo
@@ -295,13 +295,13 @@ defmodule Doctrans.Fixtures do
   @doc """
   Writes a placeholder source file where a processing run looks for the original.
 
-  `Doctrans.Processing.Run.source_path/1` is the only path the extraction job
+  `Doctrans.Documents.Source.path/1` is the only path the extraction job
   reads from once a run exists, so a test that drives extraction has to put a
   file there. Returns that path and removes the document's upload directory when
   the test exits.
   """
   def document_source_fixture(document, contents \\ "%PDF-1.4\n") do
-    path = Run.source_path(document)
+    path = Source.path(document)
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, contents)
     on_exit(fn -> File.rm_rf(Layout.document_dir(document.id)) end)

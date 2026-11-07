@@ -24,6 +24,11 @@ _Avoid_: step, phase (as a name for one of these)
 One processing attempt of a whole Document. A newer Run makes work from an older Run obsolete.
 _Avoid_: generation, revision (as a name for the run itself)
 
+**Source**:
+The retained original of a Document, kept in the Document's own directory under the format it arrived in.
+Every Run starts from it; a Document whose Source is missing cannot be reprocessed.
+_Avoid_: original file, upload (for the file once it is stored)
+
 **Obsolete work**:
 Work planned under a Run, or against a Page's content revision or generation, that the Document or Page no longer
 holds. It is refused when it tries to write, and the attempt counts as done, not failed.

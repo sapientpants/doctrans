@@ -4,7 +4,17 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
   import Doctrans.Fixtures
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Chunk, Layout, Lifecycle, Page, PageLifecycle, ProcessingStatus}
+
+  alias Doctrans.Documents.{
+    Chunk,
+    Layout,
+    Lifecycle,
+    Page,
+    PageLifecycle,
+    ProcessingStatus,
+    Source
+  }
+
   alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob, RunCleanupJob}
 
   alias Doctrans.Processing.{
@@ -25,7 +35,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
 
     directory = Layout.document_dir(document.id)
     File.mkdir_p!(Path.join(directory, "pages"))
-    source = Run.source_path(document)
+    source = Source.path(document)
     File.write!(source, "original office bytes")
     old_image = Path.join(directory, "pages/old.png")
     File.write!(old_image, "obsolete image")
@@ -97,7 +107,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       [job] = all_enqueued(worker: DocumentExtractionJob)
       assert job.args["run_id"] == run.processing_run_id
       assert :ok = DocumentExtractionJob.perform(job)
-      assert File.read!(Path.join(Run.output_dir(run), "original.pdf")) == "original office bytes"
+
+      assert File.read!(Path.join(Layout.output_dir(run), "original.pdf")) ==
+               "original office bytes"
+
       pages = Documents.list_pages(run.id)
       assert length(pages) == 3
 
@@ -164,7 +177,7 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
       assert {:ok, document} =
                Documents.update_document(document, %{original_filename: "renamed.pdf"})
 
-      assert Run.source_path(document) == source
+      assert Source.path(document) == source
 
       # Enqueueing started a run; a reprocess needs it settled, so stop it.
       Repo.delete!(job)
@@ -174,7 +187,10 @@ defmodule Doctrans.Processing.DocumentReprocessingTest do
 
       [job] = all_enqueued(worker: DocumentExtractionJob)
       assert :ok = DocumentExtractionJob.perform(job)
-      assert File.read!(Path.join(Run.output_dir(run), "original.pdf")) == "original office bytes"
+
+      assert File.read!(Path.join(Layout.output_dir(run), "original.pdf")) ==
+               "original office bytes"
+
       assert length(Documents.list_pages(run.id)) == 3
     end)
   end

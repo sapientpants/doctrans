@@ -2,8 +2,8 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
   use DoctransWeb.ConnCase, async: true
   import Doctrans.Fixtures
   alias Doctrans.Documents
-  alias Doctrans.Documents.Layout
-  alias Doctrans.Processing.{OpenAIMock, Run}
+  alias Doctrans.Documents.{Layout, Source}
+  alias Doctrans.Processing.OpenAIMock
 
   setup do
     # The dialog's model list is the mock's answer: the fetch runs in a task the
@@ -14,7 +14,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
     page_fixture(document, %{extraction_status: "completed", translation_status: "completed"})
     directory = Layout.document_dir(document.id)
     File.mkdir_p!(directory)
-    File.write!(Run.source_path(document), "original pdf")
+    File.write!(Source.path(document), "original pdf")
     on_exit(fn -> File.rm_rf(directory) end)
     %{document: document}
   end
@@ -64,7 +64,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessingTest do
     render_async(view)
     view |> element("#reprocess-cancel") |> render_click()
     assert length(Documents.list_pages(document.id)) == 1
-    File.rm!(Run.source_path(document))
+    File.rm!(Source.path(document))
     {:ok, missing, _} = live(conn, ~p"/documents/#{document.id}")
     assert has_element?(missing, "#show-document-reprocess[disabled]")
     refute has_element?(missing, "#original-upload-missing")

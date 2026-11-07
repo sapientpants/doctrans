@@ -6,7 +6,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
 
   The units below this one each hold one end of that claim. `Config.Uploads`
   resolves the root on every call, `Extraction` persists page paths relative
-  to it, `Run.source_path/1` rebuilds the retained original's path from it, and
+  to it, `Source.path/1` rebuilds the retained original's path from it, and
   `Doctrans.StorageRootTest` proves the endpoint serves images from whichever
   root is configured at the time. None of them establishes that a document
   *written* under one absolute root is whole under another -- that no stage on
@@ -34,7 +34,8 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   alias Doctrans.Chat
   alias Doctrans.Chat.Conversations
   alias Doctrans.Documents
-  alias Doctrans.Processing.{DocumentReprocessing, OpenAIProbe, PageContentStub, Run}
+  alias Doctrans.Documents.Source
+  alias Doctrans.Processing.{DocumentReprocessing, OpenAIProbe, PageContentStub}
   alias Doctrans.Search
   alias Doctrans.TestEnv
 
@@ -74,7 +75,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
 
       # The retained original travelled with the backup and is still not an
       # asset: a restore must not widen what the endpoint hands out.
-      assert File.regular?(Run.source_path(document))
+      assert File.regular?(Source.path(document))
       assert get(build_conn(), "/uploads/documents/#{document.id}/original.pdf").status == 404
     end
 
@@ -158,8 +159,8 @@ defmodule Doctrans.Integration.BackupRestoreTest do
       pages: pages,
       restored_root: restored_root
     } do
-      assert Run.source_available?(document)
-      assert String.starts_with?(Run.source_path(document), restored_root <> "/")
+      assert Source.available?(document)
+      assert String.starts_with?(Source.path(document), restored_root <> "/")
 
       # Oban is inline in :test, so this one call drives page rendering and both
       # model stages for every page of the fresh run.
@@ -208,8 +209,8 @@ defmodule Doctrans.Integration.BackupRestoreTest do
       assert Conversations.load(document.id).history != []
 
       # The source the restart would read is what the copy left behind.
-      refute File.exists?(Run.source_path(document))
-      refute Run.source_available?(document)
+      refute File.exists?(Source.path(document))
+      refute Source.available?(document)
 
       assert {:error, :original_upload_missing} =
                DocumentReprocessing.reprocess_document(document.id)

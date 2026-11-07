@@ -28,10 +28,10 @@ defmodule Doctrans.Processing.PageWork do
   while its retry waits. A requested page needs no such step, because the
   reset that preceded it already returned every stage to `pending`.
 
-  Which models the job carries is one rule for every kind, `Run.page_model_args/2`:
-  the models the Page requested, else the Document's, else none, leaving the
-  defaults to the attempt. A reset writes the user's choices on the Page, so a
-  requested page carries them without the caller encoding them again.
+  Which models the job carries is one rule for every kind: the models the
+  Page requested, else the Document's, else none, leaving the defaults to the
+  attempt. A reset writes the user's choices on the Page, so a requested page
+  carries them without the caller encoding them again.
 
   `queue/3` opens no transaction and takes no lock. Extraction queues under the
   Run fence, a Reprocess, a Retry and Recovery under the Document lock, and the job
@@ -147,8 +147,19 @@ defmodule Doctrans.Processing.PageWork do
         "page_number" => page.page_number,
         "generation" => page.processing_generation
       },
-      Run.page_model_args(page, document)
+      model_args(page, document)
     )
+  end
+
+  # The models the page's work is queued with: the page's requested models over
+  # the document's, as string-keyed job arguments, omitting any that is unset.
+  defp model_args(page, document) do
+    [
+      extraction_model: page.requested_extraction_model || document.extraction_model,
+      translation_model: page.requested_translation_model || document.translation_model
+    ]
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
   end
 
   @doc """

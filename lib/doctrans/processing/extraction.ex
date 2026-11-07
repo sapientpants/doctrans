@@ -28,7 +28,7 @@ defmodule Doctrans.Processing.Extraction do
   alias Doctrans.Config.PdfExtraction
   alias Doctrans.Deps
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Formats, Layout, Lifecycle, Topics}
+  alias Doctrans.Documents.{Layout, Lifecycle, Source, Topics}
   alias Doctrans.Processing.{PageWork, Run}
 
   # A run the document has moved on from, or a document that settled while its
@@ -71,10 +71,10 @@ defmodule Doctrans.Processing.Extraction do
     {:error, reason}
   end
 
-  # `Run.source_path/1` is nil for a document whose extension is not a supported
+  # `Source.path/1` is nil for a document whose extension is not a supported
   # source format, which is reported like a source that is not there.
   defp locate_source(document) do
-    path = Run.source_path(document)
+    path = Source.path(document)
 
     if path && File.regular?(path),
       do: {:ok, path},
@@ -82,7 +82,7 @@ defmodule Doctrans.Processing.Extraction do
   end
 
   defp to_pdf(document, source_path) do
-    if Formats.extension(source_path) == ".pdf",
+    if Source.pdf?(document),
       do: {:ok, source_path},
       else: convert(document, source_path)
   end
@@ -92,7 +92,7 @@ defmodule Doctrans.Processing.Extraction do
   # kept for the job's next attempt or for a later reprocess.
   # sobelow_skip ["Traversal.FileModule"]
   defp convert(document, source_path) do
-    output_dir = Run.output_dir(document)
+    output_dir = Layout.output_dir(document)
     File.mkdir_p!(output_dir)
 
     Logger.info("Converting document #{document.id} to PDF")
@@ -105,7 +105,7 @@ defmodule Doctrans.Processing.Extraction do
   defp render_pages(document, pdf_path) do
     Logger.info("Extracting pages from PDF for document #{document.id}")
 
-    pages_dir = Run.pages_dir(document)
+    pages_dir = Layout.pages_dir(document)
     File.mkdir_p!(pages_dir)
 
     # One budget for the whole document, so the per-page deadlines cannot add up

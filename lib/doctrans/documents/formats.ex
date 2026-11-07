@@ -28,4 +28,8 @@ defmodule Doctrans.Documents.Formats do
   @doc "The lowercase, dotted extension of a path, as the other predicates expect it."
   @spec extension(Path.t()) :: String.t()
   def extension(path), do: path |> Path.extname() |> String.downcase()
+
+  @doc "Whether a path is a PDF, which goes to the extractor without conversion."
+  @spec pdf?(Path.t()) :: boolean()
+  def pdf?(path), do: extension(path) == @pdf
 end

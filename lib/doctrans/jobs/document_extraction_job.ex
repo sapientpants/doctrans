@@ -20,7 +20,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   alias Doctrans.Config.PdfExtraction
   alias Doctrans.Documents
-  alias Doctrans.Documents.Lifecycle
+  alias Doctrans.Documents.{Lifecycle, Source}
   alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.{Extraction, Run}
   alias Doctrans.Repo
@@ -58,7 +58,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
     unless Lifecycle.uploading?(document), do: Repo.rollback(:already_processing)
 
     queued =
-      with {:ok, recorded} <- Run.record_source_extension(document, file_path),
+      with {:ok, recorded} <- Source.record_extension(document, file_path),
            {:ok, queued} <- Lifecycle.requeue(recorded, Run.new_attrs()) do
         queued
       else
