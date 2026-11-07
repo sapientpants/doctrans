@@ -90,7 +90,7 @@ defmodule Doctrans.Fixtures do
   defp walk(document, "uploading", _reason), do: document
 
   defp walk(document, "queued", _reason),
-    do: transition(Lifecycle.requeue(document, Run.new_attrs()))
+    do: transition(Lifecycle.requeue(document, run_attrs_fixture()))
 
   defp walk(document, "extracting", _reason),
     do: document |> walk("queued", nil) |> Lifecycle.begin_extraction() |> transition()
@@ -290,6 +290,15 @@ defmodule Doctrans.Fixtures do
 
     document
   end
+
+  @doc """
+  The attributes `Doctrans.Documents.Lifecycle.requeue/2` installs a run from --
+  a fresh run id and the chosen models, defaulted like a run's -- for a test
+  that makes the transition itself rather than starting a run through
+  `Doctrans.Processing.Run`, which would also queue its jobs.
+  """
+  def run_attrs_fixture(choices \\ []),
+    do: Map.put(Run.choices(choices), :processing_run_id, Uniq.UUID.uuid7())
 
   @doc """
   Writes a placeholder source file where a processing run looks for the original.

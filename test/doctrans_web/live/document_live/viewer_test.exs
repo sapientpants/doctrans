@@ -10,7 +10,6 @@ defmodule DoctransWeb.DocumentLive.ViewerTest do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.Lifecycle
-  alias Doctrans.Processing.Run
   alias DoctransWeb.DocumentLive.Viewer
   alias Phoenix.LiveView.Socket
 
@@ -36,7 +35,7 @@ defmodule DoctransWeb.DocumentLive.ViewerTest do
       completed_page_fixture(document)
       socket = mounted(document)
 
-      {:ok, requeued} = Lifecycle.requeue(document, Run.new_attrs())
+      {:ok, requeued} = Lifecycle.requeue(document, run_attrs_fixture())
       assert {:run_replaced, socket} = Viewer.document_updated(socket, requeued)
 
       assert socket.assigns.document.processing_run_id == requeued.processing_run_id
@@ -50,7 +49,7 @@ defmodule DoctransWeb.DocumentLive.ViewerTest do
 
       # The run was replaced and the page count cleared: there is no page 3 to
       # keep, so the viewer is pinned to page 1.
-      {:ok, requeued} = Lifecycle.requeue(document, Run.new_attrs())
+      {:ok, requeued} = Lifecycle.requeue(document, run_attrs_fixture())
       assert {:run_replaced, socket} = Viewer.document_updated(socket, requeued)
       assert socket.assigns.current_page_number == 1
     end

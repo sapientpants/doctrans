@@ -1,16 +1,17 @@
 defmodule Doctrans.Processing.RunTest do
   @moduledoc """
-  `Run.start/2` at its interface: what starting a fresh upload's run writes,
-  queues and announces, and what it refuses.
+  Run at its interface: what starting, replacing and recovering a run writes,
+  queues and announces, and what each refuses.
   """
   use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
 
   import Doctrans.Fixtures
 
+  alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
   alias Doctrans.Documents.Topics
-  alias Doctrans.Jobs.DocumentExtractionJob
+  alias Doctrans.Jobs.{DocumentExtractionJob, Keys, RunCleanupJob}
   alias Doctrans.Processing.Run
 
   # The suite runs Oban `testing: :inline`, which executes each job at insert and
@@ -91,6 +92,100 @@ defmodule Doctrans.Processing.RunTest do
         end
 
         assert all_enqueued(worker: DocumentExtractionJob) == []
+      end)
+    end
+  end
+
+  describe "replace/2" do
+    test "installs a new run under a fresh id with the chosen models" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "completed", total_pages: 2})
+
+        assert {:ok, {:ok, queued}} =
+                 Repo.safe_transaction(fn ->
+                   Run.replace(Run.lock(document.id), extraction_model: "vision-x")
+                 end)
+
+        assert queued.status == "queued"
+        assert queued.processing_run_id != document.processing_run_id
+        assert queued.extraction_model == "vision-x"
+        assert queued.translation_model == OpenAI.translation_model()
+        assert queued.total_pages == nil
+      end)
+    end
+
+    test "announces the requeue and queues extraction and cleanup for the new run" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "completed", total_pages: 2})
+        :ok = Topics.subscribe_document(document.id)
+
+        assert {:ok, {:ok, queued}} =
+                 Repo.safe_transaction(fn -> Run.replace(Run.lock(document.id)) end)
+
+        id = document.id
+        assert_received {:document_updated, %{id: ^id, status: "queued"}}
+
+        args = %{Keys.document_id() => document.id, Keys.run_id() => queued.processing_run_id}
+        assert [%{args: ^args}] = all_enqueued(worker: DocumentExtractionJob)
+        assert [%{args: ^args}] = all_enqueued(worker: RunCleanupJob)
+      end)
+    end
+
+    test "refuses a document whose run is under way and queues nothing" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "processing"})
+
+        assert {:ok, {:error, :already_processing}} =
+                 Repo.safe_transaction(fn -> Run.replace(Run.lock(document.id)) end)
+
+        assert Documents.get_document!(document.id).status == "processing"
+        assert all_enqueued() == []
+      end)
+    end
+
+    test "rolls the caller back when a job already waits for the document" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "error"})
+        {:ok, :queued} = Run.recover(document)
+
+        assert {:error, :already_processing} =
+                 Repo.safe_transaction(fn -> Run.replace(Run.lock(document.id)) end)
+
+        untouched = Documents.get_document!(document.id)
+        assert untouched.status == "error"
+        assert untouched.processing_run_id == document.processing_run_id
+        assert [_waiting] = all_enqueued(worker: DocumentExtractionJob)
+      end)
+    end
+  end
+
+  describe "recover/1" do
+    test "re-queues the run the document holds, marked as recovered" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "queued"})
+
+        assert {:ok, :queued} = Run.recover(document)
+
+        assert [job] = all_enqueued(worker: DocumentExtractionJob)
+        assert job.meta == %{"recovered" => true}
+
+        assert job.args == %{
+                 Keys.document_id() => document.id,
+                 Keys.run_id() => document.processing_run_id
+               }
+
+        assert Documents.get_document!(document.id).processing_run_id ==
+                 document.processing_run_id
+      end)
+    end
+
+    test "leaves a document whose job is already active to that job" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = document_fixture(%{status: "queued"})
+        assert {:ok, :queued} = Run.recover(document)
+
+        assert {:ok, :owned} = Run.recover(document)
+        assert [_only] = all_enqueued(worker: DocumentExtractionJob)
       end)
     end
   end

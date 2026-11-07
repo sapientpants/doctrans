@@ -210,11 +210,13 @@ defmodule Doctrans.Processing.StartupRecovery do
     locked = from(d in Document, where: d.id == ^row.id, lock: "FOR UPDATE") |> Repo.one()
 
     # Re-read under the lock: a document that moved on since it was selected is
-    # not re-queued on the strength of a stale row.
+    # not re-queued on the strength of a stale row. A job already active for
+    # the document is that job's to finish.
     if locked && awaiting_pages?(locked) do
-      Run.args(locked)
-      |> DocumentExtractionJob.new(meta: %{recovered: true})
-      |> Oban.insert!()
+      case Run.recover(locked) do
+        {:ok, _queued_or_owned} -> :ok
+        {:error, reason} -> Repo.rollback(reason)
+      end
     else
       :ok
     end

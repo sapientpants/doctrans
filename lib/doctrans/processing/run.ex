@@ -1,12 +1,13 @@
 defmodule Doctrans.Processing.Run do
   @moduledoc """
-  A fresh upload's run, the models and the job a run runs under, and the fence
-  on a document's run.
+  The starts of a document's run -- a fresh upload's, a reprocess's and a
+  boot's recovery -- the models and the job a run runs under, and the fence on
+  a document's run.
 
-  `start/2` is the use case around a fresh upload's requeue: the lock, the
-  format check and the extraction job on either side of the
-  `Doctrans.Documents.Lifecycle.requeue/2` transition, which alone starts the
-  run. `Doctrans.Jobs.DocumentExtractionJob` is the row it inserts and the
+  A run's extraction job is inserted here and nowhere else: `start/2` starts
+  the run of a fresh upload, `replace/2` the run a reprocess puts in a settled
+  one's place, and `recover/1` re-queues the job of a run a boot found still
+  owed. `Doctrans.Jobs.DocumentExtractionJob` is the row they insert and the
   `perform/1` that hands the document to `Doctrans.Processing.Extraction`, and
   decides nothing about the run itself.
 
@@ -48,7 +49,7 @@ defmodule Doctrans.Processing.Run do
     document
     |> Source.record_extension(source_path)
     |> Repo.or_rollback()
-    |> Lifecycle.requeue(new_attrs())
+    |> Lifecycle.requeue(new_attrs([]))
     |> Repo.or_rollback()
     |> enqueue()
   end
@@ -61,27 +62,65 @@ defmodule Doctrans.Processing.Run do
     }
   end
 
-  @spec new_attrs(keyword()) :: %{
-          extraction_model: String.t(),
-          translation_model: String.t(),
-          processing_run_id: Ecto.UUID.t()
-        }
-  def new_attrs(opts \\ []), do: Map.put(choices(opts), :processing_run_id, Uniq.UUID.uuid7())
+  @doc """
+  Replaces the run a settled document holds with a new one, inside the
+  caller's transaction.
 
-  @spec args(Document.t()) :: %{String.t() => Ecto.UUID.t() | nil}
-  def args(document),
-    do: %{Keys.document_id() => document.id, "run_id" => document.processing_run_id}
+  `document` is the row the caller has locked and found eligible; what the
+  replaced run left behind -- its pages, its chat context -- is the caller's to
+  discard first. The document is requeued through
+  `Doctrans.Documents.Lifecycle.requeue/2` under a new run id and the models
+  chosen in `opts` (the configured defaults for any not chosen), then its
+  extraction job and the cleanup of the replaced run's files are inserted.
+
+  Two refusals share the reason `:already_processing` but not the shape: a
+  document whose run is under way is answered `{:error, :already_processing}`
+  with nothing written, while a job already waiting for the document rolls the
+  caller's transaction back with that reason, so the run and its jobs always
+  commit together. A caller that must undo its own writes on the first kind
+  wraps the call in `Doctrans.Repo.or_rollback/1`, as the reprocess does.
+  """
+  @spec replace(Document.t(), keyword()) :: {:ok, Document.t()} | {:error, Errors.reason()}
+  def replace(%Document{} = document, opts \\ []) do
+    with {:ok, queued} <- Lifecycle.requeue(document, new_attrs(opts)) do
+      _ = enqueue(queued, cleanup: true)
+      {:ok, queued}
+    end
+  end
 
   @doc """
-  Queues the jobs of the run `document` has just been requeued under: its
-  extraction job and, with `cleanup: true`, the removal of the files the run
-  it replaced left behind. Call inside the transaction that made the
-  `Doctrans.Documents.Lifecycle.requeue/2` transition, so the run and its job
-  commit together; a job already waiting for the document rolls that
-  transaction back with `:already_processing`. Returns the extraction job.
+  Re-queues the extraction job of the run `document` already holds, for a boot
+  that found the document still awaiting its pages.
+
+  The job is marked `recovered`. A job already active for the document is left
+  to finish and answered `{:ok, :owned}`; nothing about the run changes either
+  way. The caller holds the document lock and decides what is owed.
   """
-  @spec enqueue(Document.t(), cleanup: boolean()) :: Oban.Job.t()
-  def enqueue(document, opts \\ []) do
+  @spec recover(Document.t()) :: {:ok, :queued | :owned} | {:error, Errors.reason()}
+  def recover(%Document{} = document) do
+    document
+    |> args()
+    |> DocumentExtractionJob.new(meta: %{recovered: true})
+    |> Repo.insert_job()
+    |> case do
+      {:ok, _job} -> {:ok, :queued}
+      {:conflict, _job} -> {:ok, :owned}
+      {:error, _reason} = error -> Errors.result(error)
+    end
+  end
+
+  # A new run: a fresh id and the models it will use.
+  defp new_attrs(opts), do: Map.put(choices(opts), :processing_run_id, Uniq.UUID.uuid7())
+
+  # The argument map `DocumentExtractionJob.perform/1` and `RunCleanupJob.perform/1`
+  # destructure: the document and the run the job acts for.
+  defp args(document),
+    do: %{Keys.document_id() => document.id, Keys.run_id() => document.processing_run_id}
+
+  # Inside the transaction that made the requeue transition, so the run and
+  # its jobs commit together; a job already waiting for the document rolls
+  # that transaction back with `:already_processing`.
+  defp enqueue(document, opts \\ []) do
     args = args(document)
     job = args |> DocumentExtractionJob.new() |> Repo.insert_job!()
 

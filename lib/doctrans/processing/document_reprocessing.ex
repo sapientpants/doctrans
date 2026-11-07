@@ -48,11 +48,7 @@ defmodule Doctrans.Processing.DocumentReprocessing do
     :ok
   end
 
-  defp requeue(document, opts) do
-    document = Repo.or_rollback(Lifecycle.requeue(document, Run.new_attrs(opts)))
-    _ = Run.enqueue(document, cleanup: true)
-    document
-  end
+  defp requeue(document, opts), do: Repo.or_rollback(Run.replace(document, opts))
 
   @spec reprocess_page(Ecto.UUID.t(), keyword()) ::
           {:ok, Documents.Page.t()} | {:error, Doctrans.Errors.reason()}

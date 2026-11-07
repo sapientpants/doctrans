@@ -14,6 +14,7 @@ defmodule Doctrans.Jobs.Keys do
   @document_id "document_id"
   @page_id "page_id"
   @revision "revision"
+  @run_id "run_id"
 
   @doc "Argument key holding the document id in `DocumentExtractionJob` and `RunCleanupJob`."
   @spec document_id() :: String.t()
@@ -26,4 +27,8 @@ defmodule Doctrans.Jobs.Keys do
   @doc "Argument key holding the page's `content_revision` in `EmbeddingJob`."
   @spec revision() :: String.t()
   def revision, do: @revision
+
+  @doc "Argument key holding the run id in `DocumentExtractionJob` and `RunCleanupJob`."
+  @spec run_id() :: String.t()
+  def run_id, do: @run_id
 end
