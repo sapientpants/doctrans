@@ -4,7 +4,7 @@ defmodule Doctrans.Processing.ExtractionTest do
   where the layout keeps it, and the run the document holds.
 
   Documents are started the way production starts them -- through
-  `DocumentExtractionJob.enqueue_document/2`, in manual Oban mode so the job
+  `Run.start/2`, in manual Oban mode so the job
   waits -- so every case but the legacy one runs under a real run id and
   renders into that run's pages directory.
   """
@@ -12,8 +12,8 @@ defmodule Doctrans.Processing.ExtractionTest do
 
   alias Doctrans.Documents
   alias Doctrans.Documents.{Layout, Lifecycle, PageLifecycle, Source, Topics}
-  alias Doctrans.Jobs.{DocumentExtractionJob, LlmProcessingJob}
-  alias Doctrans.Processing.{Extraction, PageWork, ResumablePdfExtractorStub}
+  alias Doctrans.Jobs.LlmProcessingJob
+  alias Doctrans.Processing.{Extraction, PageWork, ResumablePdfExtractorStub, Run}
 
   import Doctrans.Fixtures
 
@@ -245,7 +245,7 @@ defmodule Doctrans.Processing.ExtractionTest do
     document_source_fixture(document)
 
     {:ok, _job} =
-      DocumentExtractionJob.enqueue_document(document.id, Source.path(document))
+      Run.start(document.id, Source.path(document))
 
     queued = Documents.get_document!(document.id)
     assert queued.status == "queued"

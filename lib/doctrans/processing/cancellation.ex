@@ -44,7 +44,7 @@ defmodule Doctrans.Processing.Cancellation do
   # before any job is touched. The transition announces itself once this
   # transaction commits.
   defp cancel_locked(document_id) do
-    document = Run.lock(document_id) || Repo.rollback(:document_not_found)
+    document = Run.lock!(document_id)
 
     cancelled =
       case Lifecycle.cancel(document) do

@@ -18,7 +18,7 @@ defmodule Doctrans.Documents.Intake do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Document, Layout, Lifecycle}
   alias Doctrans.Errors
-  alias Doctrans.Jobs.DocumentExtractionJob
+  alias Doctrans.Processing.Run
   alias Doctrans.Validation
 
   require Logger
@@ -233,7 +233,7 @@ defmodule Doctrans.Documents.Intake do
   end
 
   defp enqueue(document, source_path, original_filename) do
-    case DocumentExtractionJob.enqueue_document(document.id, source_path) do
+    case Run.start(document.id, source_path) do
       {:ok, _job} ->
         :ok
 

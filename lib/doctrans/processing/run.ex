@@ -1,6 +1,14 @@
 defmodule Doctrans.Processing.Run do
   @moduledoc """
-  Model choices, the job of a run, and the fence on a document's run.
+  A fresh upload's run, the models and the job a run runs under, and the fence
+  on a document's run.
+
+  `start/2` is the use case around a fresh upload's requeue: the lock, the
+  format check and the extraction job on either side of the
+  `Doctrans.Documents.Lifecycle.requeue/2` transition, which alone starts the
+  run. `Doctrans.Jobs.DocumentExtractionJob` is the row it inserts and the
+  `perform/1` that hands the document to `Doctrans.Processing.Extraction`, and
+  decides nothing about the run itself.
 
   The fence (`lock/1`, `current?/2`, `with_current/2`, `with_page/2`) lives in
   `Doctrans.Documents.Revision`, which owns the revision columns it compares.
@@ -9,9 +17,41 @@ defmodule Doctrans.Processing.Run do
   and Search contexts name `Revision` directly.
   """
   alias Doctrans.Config.OpenAI
-  alias Doctrans.Documents.{Document, Revision}
+  alias Doctrans.Documents.{Document, Lifecycle, Revision, Source}
+  alias Doctrans.Errors
   alias Doctrans.Jobs.{DocumentExtractionJob, Keys, RunCleanupJob}
   alias Doctrans.Repo
+
+  @doc """
+  Takes a fresh upload through its requeue.
+
+  In one transaction: records the format the stored file was validated under
+  through `Doctrans.Documents.Source`, requeues the document through
+  `Doctrans.Documents.Lifecycle.requeue/2` under a new run id and the
+  configured models, and inserts the extraction job. The transition announces
+  the queued document once that transaction has committed.
+
+  Only a document still `uploading` is taken. One whose run has started -- under
+  way or settled -- is refused with `{:error, :already_processing}`: replacing a
+  settled run also discards its pages and chat context, which is
+  `Doctrans.Processing.DocumentReprocessing`'s to do.
+  """
+  @spec start(Ecto.UUID.t(), String.t()) :: {:ok, Oban.Job.t()} | {:error, Errors.reason()}
+  def start(document_id, source_path) do
+    Repo.safe_transaction(fn -> start_locked(document_id, source_path) end)
+  end
+
+  defp start_locked(document_id, source_path) do
+    document = lock!(document_id)
+    unless Lifecycle.uploading?(document), do: Repo.rollback(:already_processing)
+
+    document
+    |> Source.record_extension(source_path)
+    |> Repo.or_rollback()
+    |> Lifecycle.requeue(new_attrs())
+    |> Repo.or_rollback()
+    |> enqueue()
+  end
 
   @spec choices(keyword()) :: %{extraction_model: String.t(), translation_model: String.t()}
   def choices(opts \\ []) do
@@ -50,6 +90,14 @@ defmodule Doctrans.Processing.Run do
 
     job
   end
+
+  @doc """
+  Locks the document row for the current transaction, or rolls the transaction
+  back with `:document_not_found` when it is gone: the first line of every
+  transaction that works on a document's run.
+  """
+  @spec lock!(Ecto.UUID.t()) :: Document.t()
+  def lock!(document_id), do: lock(document_id) || Repo.rollback(:document_not_found)
 
   defdelegate lock(document_id), to: Revision
   defdelegate current?(document, run_id), to: Revision
