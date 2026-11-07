@@ -17,7 +17,8 @@ defmodule Doctrans.Chat.Retrieval do
   meaning: the document was searched and nothing in it matched.
 
   The similarity floor a passage must clear is calibrated against the
-  embedding model, not chosen per call; `:limit` is the only option.
+  embedding model, not chosen per call; `:limit` is the only option, and any
+  other is rejected.
   """
 
   alias Doctrans.Deps
@@ -25,10 +26,6 @@ defmodule Doctrans.Chat.Retrieval do
   alias Doctrans.Search
 
   require Logger
-
-  # The fusion's smoothing constant. Shared with library search's SQL fusion,
-  # where `Doctrans.Search` documents it.
-  @rrf_k 60
 
   @default_limit 3
 
@@ -39,49 +36,54 @@ defmodule Doctrans.Chat.Retrieval do
   `t:Doctrans.Search.document_result/0`, each carrying the `:rrf_score` it was
   ranked by and the best `:similarity` any phrasing gave it. No queries is
   `{:ok, []}`: nothing was asked, so nothing failed.
+
+  Raises `ArgumentError` for an option other than `:limit`.
   """
   @spec retrieve(Ecto.UUID.t(), [String.t()], keyword()) ::
           {:ok, [Search.document_result()]}
           | {:error, {:retrieval_unavailable, [reason: atom()]}}
-  def retrieve(document_id, queries, opts \\ [])
+  def retrieve(document_id, queries, opts \\ []) when is_list(queries) do
+    limit = opts |> Keyword.validate!(limit: @default_limit) |> Keyword.fetch!(:limit)
 
-  def retrieve(_document_id, [], _opts), do: {:ok, []}
+    retrieve_with_limit(document_id, queries, limit)
+  end
 
-  def retrieve(document_id, queries, opts) when is_list(queries) do
-    limit = Keyword.get(opts, :limit, @default_limit)
+  defp retrieve_with_limit(_document_id, [], _limit), do: {:ok, []}
 
+  defp retrieve_with_limit(document_id, queries, limit) do
     {succeeded, failed} =
       document_id
       |> outcomes(queries, limit)
       |> Enum.split_with(&match?({:ok, _passages}, &1))
 
-    resolve(succeeded, failed, queries, limit)
+    resolve(succeeded, failed, limit)
   end
 
   # The stream is ordered, so the head of the failures is the first query's.
   # The tag alone is carried out: the detail is logged where it arose, and what
   # reaches the reader is a rendered message, not a payload.
-  defp resolve([], [{:error, tag} | _rest] = failed, queries, _limit) do
-    log_summary(queries, [], failed, 0)
+  defp resolve([], [{:error, tag} | _rest] = failed, _limit) do
+    log_summary([], failed, 0)
 
     {:error, {:retrieval_unavailable, [reason: tag]}}
   end
 
-  defp resolve(succeeded, failed, queries, limit) do
+  defp resolve(succeeded, failed, limit) do
     fused =
       succeeded
       |> Enum.map(fn {:ok, passages} -> passages end)
       |> fuse(limit)
 
-    log_summary(queries, succeeded, failed, length(fused))
+    log_summary(succeeded, failed, length(fused))
 
     {:ok, fused}
   end
 
-  defp log_summary(queries, succeeded, failed, returned) do
+  defp log_summary(succeeded, failed, returned) do
     Logger.info(
-      "Retrieval: #{length(queries)} queries, #{length(succeeded)} succeeded, " <>
-        "#{length(failed)} failed, #{returned} results returned"
+      "Retrieval: #{length(succeeded) + length(failed)} queries, " <>
+        "#{length(succeeded)} succeeded, #{length(failed)} failed, " <>
+        "#{returned} results returned"
     )
   end
 
@@ -109,10 +111,6 @@ defmodule Doctrans.Chat.Retrieval do
   #
   # Each query fetches a little past the limit so the fusion has candidates to
   # rank beyond the ones every phrasing agrees on.
-  #
-  # Only a tag leaves a failure: the detail is logged here, and the reason is
-  # rendered to the reader. An exit reason in particular carries the query text
-  # and its vector, and keeps neither.
   defp search_one(document_id, query, limit) do
     result =
       case Deps.embedding().generate(query, []) do
@@ -121,17 +119,18 @@ defmodule Doctrans.Chat.Retrieval do
         {:error, reason} -> {:error, reason}
       end
 
-    with {:error, reason} <- result do
-      Logger.warning("Retrieval query failed: #{inspect(reason, limit: 5, printable_limit: 256)}")
-      {:error, Errors.tag(reason)}
-    end
+    with {:error, reason} <- result, do: failed(reason, Errors.tag(reason))
   catch
-    kind, reason ->
-      Logger.warning(
-        "Retrieval query #{kind}: #{inspect(reason, limit: 5, printable_limit: 256)}"
-      )
+    kind, reason -> failed({kind, reason}, :query_crashed)
+  end
 
-      {:error, :task_exited}
+  # Only a tag leaves a failure: the detail is logged here, and the tag is
+  # rendered to the reader. An exit reason in particular carries the query text
+  # and its vector, and the tag keeps neither.
+  defp failed(detail, tag) do
+    Logger.warning("Retrieval query failed: #{inspect(detail, limit: 5, printable_limit: 256)}")
+
+    {:error, tag}
   end
 
   # Each ranking contributes a reciprocal-rank score per passage; the scores of
@@ -147,12 +146,16 @@ defmodule Doctrans.Chat.Retrieval do
     |> Enum.take(limit)
   end
 
+  # The smoothing constant is library search's, so a rank is worth the same in
+  # both fusions.
   defp score_ranking(passages) do
+    k = Search.rrf_k()
+
     passages
     |> Enum.with_index(1)
     |> Enum.map(fn {passage, rank} ->
       identity = {passage.page_id, Map.get(passage, :chunk_index)}
-      {identity, 1.0 / (@rrf_k + rank), passage}
+      {identity, 1.0 / (k + rank), passage}
     end)
   end
 

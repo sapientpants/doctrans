@@ -90,8 +90,14 @@ defmodule Doctrans.Chat.Agent do
     on_event.({:stage, :retrieving})
 
     case Retrieval.retrieve(document.id, queries, search_opts) do
-      {:ok, pages} ->
-        answer(document, pages, standalone_question, chat_history, {search_opts, opts, on_event})
+      {:ok, passages} ->
+        answer(
+          document,
+          passages,
+          standalone_question,
+          chat_history,
+          {search_opts, opts, on_event}
+        )
 
       {:error, reason} = error ->
         Logger.error("Agent retrieval failed for document #{document.id}: #{inspect(reason)}")
@@ -99,12 +105,18 @@ defmodule Doctrans.Chat.Agent do
     end
   end
 
-  defp answer(document, pages, standalone_question, chat_history, {search_opts, opts, on_event}) do
+  defp answer(
+         document,
+         passages,
+         standalone_question,
+         chat_history,
+         {search_opts, opts, on_event}
+       ) do
     # 3. Merge new chunks into the accumulated context (dedup + cap).
     # The caller's context can predate a single-page reprocess that finished
     # while this socket held it; re-check it against current page revisions.
     prior_context = opts |> Keyword.get(:retrieved_context, []) |> Chat.current_context()
-    merged = Chat.merge_context(prior_context, pages)
+    merged = Chat.merge_context(prior_context, passages)
 
     # 4. Assess the merged context; search once more if it is insufficient
     on_event.({:stage, :assessing})
@@ -142,9 +154,9 @@ defmodule Doctrans.Chat.Agent do
       )
 
       case Retrieval.retrieve(document.id, grade.refined_queries, search_opts) do
-        {:ok, refined_pages} ->
+        {:ok, refined_passages} ->
           merged
-          |> Chat.merge_context(refined_pages)
+          |> Chat.merge_context(refined_passages)
           |> then(&refine(document, &1, standalone_question, search_opts, opts, rounds_left - 1))
 
         {:error, reason} ->

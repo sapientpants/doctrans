@@ -4,7 +4,7 @@ defmodule Doctrans.Chat.AgentTest do
   use Doctrans.DataCase, async: true
 
   alias Doctrans.Chat
-  alias Doctrans.Chat.{Agent, ContractProbe}
+  alias Doctrans.Chat.{Agent, ContractProbe, RetrievalProbe}
   alias Doctrans.Documents
   alias Doctrans.Processing.{OpenAIMock, OpenAIProbe}
   alias Doctrans.Repo
@@ -167,6 +167,22 @@ defmodule Doctrans.Chat.AgentTest do
       assert Keyword.get(expander_opts, :think) == false
       assert Keyword.get(grader_opts, :think) == false
       assert Keyword.get(stream_opts, :think) == true
+    end
+  end
+
+  describe "retrieval rounds" do
+    test "embeds the planned queries and the grader's refined query" do
+      document = document_fixture(%{title: "Annual Report", original_filename: "report.pdf"})
+      indexed_page_fixture(document, %{original_markdown: "Total assets EUR 120m."})
+      RetrievalProbe.install()
+
+      assert {:ok, "Answer.", [_]} =
+               Agent.run(document, "assess the balance sheet", [], [], fn _ -> :ok end)
+
+      assert_receive {:embedded, "assess the balance sheet"}
+      assert_receive {:embedded, "liquidity and cash reserves"}
+      assert_receive {:embedded, "liquidity and cash reserves"}
+      refute_receive {:embedded, _}
     end
   end
 

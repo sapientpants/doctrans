@@ -65,6 +65,16 @@ defmodule Doctrans.Search do
   @default_limit 20
 
   @doc """
+  The smoothing constant of Reciprocal Rank Fusion: a passage at rank `r`
+  contributes `1 / (k + r)`, so a higher `k` flattens the difference between
+  neighbouring ranks. Library search fuses with it in SQL and
+  `Doctrans.Chat.Retrieval` in Elixir; one constant keeps a rank worth the same
+  in both.
+  """
+  @spec rrf_k() :: pos_integer()
+  def rrf_k, do: @default_rrf_k
+
+  @doc """
   Performs hybrid search across all pages and counts every match, from one
   query embedding and one statement.
 
