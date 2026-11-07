@@ -10,9 +10,11 @@ defmodule Doctrans.Search.ExactSearchTest do
   # sort-free plan, and it takes it whenever the query shape allows.
   use Doctrans.DataCase, async: true
 
+  alias Doctrans.Chat.Retrieval
   alias Doctrans.Documents.Chunk
   alias Doctrans.Repo
   alias Doctrans.Search
+  alias Doctrans.Search.EmbeddingMocks
 
   import Doctrans.Fixtures
 
@@ -29,18 +31,24 @@ defmodule Doctrans.Search.ExactSearchTest do
     %{document: document, off_topic: off_topic, target: target}
   end
 
+  # Retrieval runs each query in a task under `Doctrans.TaskSupervisor`, which
+  # carries the test in `$callers`; library search runs in the test itself.
   @doc false
   def forward_query(_event, _measurements, %{query: sql, params: params}, test_pid) do
-    if self() == test_pid, do: send(test_pid, {:repo_query, sql, params})
+    if test_pid in [self() | Process.get(:"$callers", [])] do
+      send(test_pid, {:repo_query, sql, params})
+    end
+
     :ok
   end
 
-  describe "search_by_embedding/3" do
+  describe "Retrieval.retrieve/3" do
     test "the page and chunk queries only reach embeddings through the document",
          %{document: document, target: target} do
+      EmbeddingMocks.vector(target.embedding)
       forbid_sorting()
 
-      assert {:ok, [result]} = Search.search_by_embedding(document.id, target.embedding)
+      assert {:ok, [result]} = Retrieval.retrieve(document.id, ["liabilities"])
       assert result.page_id == target.id
 
       plans = vector_query_plans()
@@ -60,9 +68,10 @@ defmodule Doctrans.Search.ExactSearchTest do
         embedding: target.embedding
       })
 
+      EmbeddingMocks.vector(target.embedding)
       forbid_sorting()
 
-      assert {:ok, [result]} = Search.search_by_embedding(document.id, target.embedding)
+      assert {:ok, [result]} = Retrieval.retrieve(document.id, ["liabilities"])
       assert result.page_id == target.id
       assert Map.has_key?(result, :chunk_id)
 

@@ -32,7 +32,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Chat
-  alias Doctrans.Chat.Conversations
+  alias Doctrans.Chat.{Conversations, Retrieval}
   alias Doctrans.Documents
   alias Doctrans.Documents.Source
   alias Doctrans.Processing.{DocumentReprocessing, OpenAIProbe, PageContentStub}
@@ -123,7 +123,7 @@ defmodule Doctrans.Integration.BackupRestoreTest do
       OpenAIProbe.install()
 
       assert {:ok, [_ | _] = hits} =
-               Search.search_in_document(document.id, @follow_up)
+               Retrieval.retrieve(document.id, [@follow_up])
 
       assert Enum.any?(hits, &(&1.page_number == 3))
 

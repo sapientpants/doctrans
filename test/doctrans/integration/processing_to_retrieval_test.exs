@@ -19,6 +19,7 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
 
   import Doctrans.Fixtures
 
+  alias Doctrans.Chat.Retrieval
   alias Doctrans.Documents.Chunk
   alias Doctrans.Processing.PageContentStub
   alias Doctrans.Search
@@ -127,7 +128,7 @@ defmodule Doctrans.Integration.ProcessingToRetrievalTest do
     end
 
     assert {:ok, results} =
-             Search.search_in_document(document.id, PageContentStub.source_term(1), limit: 50)
+             Retrieval.retrieve(document.id, [PageContentStub.source_term(1)], limit: 50)
 
     assert MapSet.new(results, & &1.chunk_id) == MapSet.new(chunks, & &1.id)
 

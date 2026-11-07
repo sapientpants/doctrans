@@ -1,10 +1,14 @@
 defmodule Doctrans.Search do
   @moduledoc """
-  Hybrid search combining semantic similarity and full-text search.
+  Library search: the Pages across every completed Document that answer a
+  query, ranked by both what the query means and how it is worded.
 
-  Uses PostgreSQL Full-Text Search for lexical matching with proper
-  stemming and ranking, combined with pgvector for semantic similarity.
-  Results are combined using Reciprocal Rank Fusion (RRF).
+  Uses PostgreSQL Full-Text Search for lexical matching with proper stemming
+  and ranking, combined with pgvector for semantic similarity; the two
+  rankings are fused with Reciprocal Rank Fusion (RRF) in one statement,
+  `Doctrans.Search.HybridQuery`. Finding the passages of one Document for a
+  question is `Doctrans.Chat.Retrieval`'s, with its own floor and its own
+  reading of an embedder that answers without a vector.
   """
 
   @type hybrid_result :: %{
@@ -23,21 +27,7 @@ defmodule Doctrans.Search do
           retrieval: :hybrid | :keyword_only
         }
 
-  @type document_result :: %{
-          :page_id => Ecto.UUID.t() | nil,
-          :page_number => pos_integer(),
-          :original_markdown => String.t() | nil,
-          :translated_markdown => String.t() | nil,
-          :similarity => float(),
-          :content_revision => integer() | nil,
-          optional(:chunk_id) => Ecto.UUID.t() | nil,
-          optional(:chunk_index) => non_neg_integer(),
-          # Present only on results fused by `Doctrans.Chat.Retrieval`.
-          optional(:rrf_score) => float()
-        }
-
   alias Doctrans.Deps
-  alias Doctrans.Repo
   alias Doctrans.Search.HybridQuery
 
   require Logger
@@ -183,230 +173,6 @@ defmodule Doctrans.Search do
   end
 
   defp bounded?(value, max), do: is_integer(value) and value >= 0 and value <= max
-
-  # Minimum cosine similarity threshold for chat context
-  # Pages below this threshold are considered irrelevant
-  # Cosine similarity: 0 = unrelated, 1 = identical
-  # 0.30 keeps recall high for abstract/analytical queries (e.g. "assess the
-  # balance sheet") while still filtering clear noise
-  @chat_similarity_threshold 0.30
-
-  @doc """
-  Performs semantic search within a specific document.
-
-  Returns pages from the given document sorted by semantic similarity to the query.
-  This is optimized for RAG use cases where we need to find relevant context
-  from a single document.
-
-  Only pages with similarity above the threshold (#{@chat_similarity_threshold}) are returned
-  to ensure only highly relevant content is used for chat responses.
-
-  ## Options
-
-  - `:limit` - Maximum number of pages to return (default: 3)
-  - `:min_similarity` - Minimum similarity threshold (default: #{@chat_similarity_threshold})
-
-  ## Returns
-
-  `{:ok, results}`, a list of `t:document_result/0` in descending similarity.
-  Results are chunk-first: when the document has embedded chunks, each result
-  is one chunk, its `:original_markdown` is the chunk's text, `:chunk_id` and
-  `:chunk_index` are set, and `:translated_markdown` is always `nil` -- chunks
-  carry no translation. Only when no chunk clears the floor does the search
-  fall back to whole pages, whose results carry the page's text in both fields
-  (`:translated_markdown` `nil` until the page is translated) and no chunk
-  keys. `Doctrans.Chat` reads the fields on that contract: the chunk keys say
-  which text to quote and whether a translated copy may outrank it.
-
-  `{:error, :embedding_unavailable}` when the embedder succeeds without a
-  vector: nothing can be ranked against it, and `{:ok, []}` would report a
-  search that never ran as "nothing matched" -- the same reading
-  `Doctrans.Chat.Retrieval` and library search give that result. Any other
-  embedder or database error is passed through.
-  """
-  @spec search_in_document(Ecto.UUID.t(), String.t() | nil, keyword()) ::
-          {:ok, [document_result()]} | {:error, Doctrans.Errors.reason()}
-  def search_in_document(document_id, query, opts \\ [])
-  def search_in_document(_document_id, "", _opts), do: {:ok, []}
-  def search_in_document(_document_id, nil, _opts), do: {:ok, []}
-
-  def search_in_document(document_id, query, opts) when is_binary(query) do
-    limit = Keyword.get(opts, :limit, 3)
-    min_similarity = Keyword.get(opts, :min_similarity, @chat_similarity_threshold)
-
-    case Deps.embedding().generate(query, []) do
-      {:ok, nil} ->
-        {:error, :embedding_unavailable}
-
-      {:ok, query_embedding} ->
-        search_by_embedding(document_id, query_embedding,
-          limit: limit,
-          min_similarity: min_similarity
-        )
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  @doc """
-  Performs semantic search within a document using a pre-computed embedding vector.
-
-  This is useful when you already have an embedding and want to avoid recomputing it,
-  for example when searching with multiple query variants in parallel.
-
-  ## Options
-
-  - `:limit` - Maximum number of pages to return (default: 3)
-  - `:min_similarity` - Minimum similarity threshold (default: #{@chat_similarity_threshold})
-  """
-  @spec search_by_embedding(Ecto.UUID.t(), Pgvector.t() | nil, keyword()) ::
-          {:ok, [document_result()]} | {:error, Doctrans.Errors.reason()}
-  def search_by_embedding(document_id, query_embedding, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 3)
-    min_similarity = Keyword.get(opts, :min_similarity, @chat_similarity_threshold)
-
-    # Try chunk-level search first, fall back to page-level if no chunks exist
-    case execute_chunk_search(document_id, query_embedding, limit, min_similarity) do
-      {:ok, []} -> execute_page_search(document_id, query_embedding, limit, min_similarity)
-      result -> result
-    end
-  end
-
-  # Retrieval within one document is exact, by construction of the SQL.
-  #
-  # The HNSW indexes on `chunks.embedding` and `pages.embedding` answer
-  # `ORDER BY embedding <=> query` approximately: the scan collects
-  # `hnsw.ef_search` candidates (40 by default) from the whole index and Postgres
-  # applies the WHERE clause to those afterwards (pgvector, "Filtering"). The
-  # candidates are the rows nearest the query across every document, plus the
-  # index entries of rows that have since been deleted or rolled back and not yet
-  # vacuumed, so when enough of them outrank this document's rows the row we want
-  # falls outside the set and the query comes back short -- no error, just a
-  # missing match. Whether the planner takes that path depends on its statistics
-  # at the time, which is why the miss only showed up intermittently (#184).
-  #
-  # A document's own rows are few and reachable through the `document_id` btree,
-  # so these queries collect them, with their distances, in a MATERIALIZED CTE
-  # that has no ORDER BY the approximate index could serve, and rank them
-  # afterwards. The library-wide search in `HybridQuery` ranks its semantic half
-  # the same way, and for the same reason (#218).
-  #
-  # Static heredoc; every value reaches Postgres as a bound parameter ($1..$4) via
-  # `run_document_search/6`, which owns the `Repo.query/2` call and its skip.
-  defp execute_chunk_search(document_id, query_embedding, limit, min_similarity) do
-    sql = """
-    WITH candidates AS MATERIALIZED (
-      SELECT
-        c.id as chunk_id,
-        c.page_id,
-        p.page_number,
-        c.content as original_markdown,
-        c.chunk_index,
-        p.content_revision,
-        c.embedding <=> $1::vector as distance
-      FROM chunks c
-      JOIN pages p ON c.page_id = p.id
-      WHERE p.document_id = $2
-        AND p.extraction_status = 'completed'
-        AND c.embedding IS NOT NULL
-    )
-    SELECT
-      chunk_id,
-      page_id,
-      page_number,
-      original_markdown,
-      NULL::text as translated_markdown,
-      chunk_index,
-      content_revision,
-      1 - distance as similarity
-    FROM candidates
-    WHERE 1 - distance >= $4
-    ORDER BY distance ASC
-    LIMIT $3
-    """
-
-    run_document_search("Chunk", sql, document_id, query_embedding, limit, min_similarity)
-  end
-
-  # Exact for the same reason as `execute_chunk_search/4`; see the note there.
-  #
-  # Static heredoc; $1..$4 are bound parameters, nothing is interpolated into the SQL.
-  defp execute_page_search(document_id, query_embedding, limit, min_similarity) do
-    sql = """
-    WITH candidates AS MATERIALIZED (
-      SELECT
-        p.id as page_id,
-        p.page_number,
-        p.original_markdown,
-        p.translated_markdown,
-        p.content_revision,
-        p.embedding <=> $1::vector as distance
-      FROM pages p
-      WHERE p.document_id = $2
-        AND p.extraction_status = 'completed'
-        AND p.embedding IS NOT NULL
-    )
-    SELECT
-      page_id,
-      page_number,
-      original_markdown,
-      translated_markdown,
-      content_revision,
-      1 - distance as similarity
-    FROM candidates
-    WHERE 1 - distance >= $4
-    ORDER BY distance ASC
-    LIMIT $3
-    """
-
-    run_document_search("Page", sql, document_id, query_embedding, limit, min_similarity)
-  end
-
-  # Both in-document statements bind the same four parameters in the same
-  # order and fail the same way; what differs is the SQL and the row shape,
-  # and the row's own columns say which shape it is.
-  #
-  # `sql` is one of the two static heredocs above, never built from input, and
-  # every value reaches Postgres as a bound parameter. Flagged only because the
-  # statement arrives in a variable.
-  # sobelow_skip ["SQL.Query"]
-  defp run_document_search(label, sql, document_id, query_embedding, limit, min_similarity) do
-    params = [query_embedding, Ecto.UUID.dump!(document_id), limit, min_similarity]
-
-    case Repo.query(sql, params) do
-      {:ok, %{rows: rows, columns: columns}} ->
-        {:ok, Enum.map(rows, &format_document_row(row_to_map(&1, columns)))}
-
-      {:error, error} ->
-        Logger.error(
-          "#{label} search query failed: #{inspect(error, limit: 5, printable_limit: 256)}"
-        )
-
-        {:error, {:database_error, [reason: error]}}
-    end
-  end
-
-  # Only the chunk statement selects `chunk_id` and `chunk_index`; a page row
-  # carries neither key, which is what `t:document_result/0` promises.
-  defp format_document_row(result) do
-    base = %{
-      page_id: uuid_to_string(result["page_id"]),
-      page_number: result["page_number"],
-      original_markdown: result["original_markdown"],
-      translated_markdown: result["translated_markdown"],
-      content_revision: result["content_revision"],
-      similarity: to_float(result["similarity"])
-    }
-
-    case result do
-      %{"chunk_id" => chunk_id, "chunk_index" => chunk_index} ->
-        Map.merge(base, %{chunk_id: uuid_to_string(chunk_id), chunk_index: chunk_index})
-
-      _page_row ->
-        base
-    end
-  end
 
   defp execute_hybrid_search(query, query_embedding, retrieval, query_opts) do
     with {:ok, %{rows: rows, columns: columns}} <-

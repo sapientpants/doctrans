@@ -5,7 +5,6 @@ defmodule Doctrans.SearchTest do
   alias Doctrans.Documents.PageLifecycle
   alias Doctrans.Repo
   alias Doctrans.Search
-  alias Doctrans.Search.EmbeddingMocks
 
   import Doctrans.Fixtures
 
@@ -253,82 +252,6 @@ defmodule Doctrans.SearchTest do
                Enum.sort([keyword_only.id, semantic_only.id])
 
       assert Enum.all?(rest, &(&1.score == 1 / (@default_rrf_k + 2)))
-    end
-  end
-
-  describe "search_in_document/3" do
-    test "returns empty list for empty query" do
-      document = document_fixture(%{status: "completed"})
-      assert {:ok, []} = Search.search_in_document(document.id, "")
-    end
-
-    test "returns empty list for nil query" do
-      document = document_fixture(%{status: "completed"})
-      assert {:ok, []} = Search.search_in_document(document.id, nil)
-    end
-
-    test "reports an embedder that returns no vector as unavailable, not as no matches" do
-      # `{:ok, nil}` is a legal embedding result, and a NULL vector ranks
-      # nothing: searching on it would report "nothing matched" for a page
-      # that is a perfect match of any query that actually ran.
-      document = document_fixture(%{status: "completed"})
-      indexed_page_fixture(document, %{page_number: 1, embedding: fake_embedding()})
-
-      EmbeddingMocks.nil_vector()
-
-      assert {:error, :embedding_unavailable} = Search.search_in_document(document.id, "test")
-    end
-
-    test "limit caps the pages returned" do
-      document = document_fixture(%{status: "completed"})
-
-      for page_number <- 1..3 do
-        indexed_page_fixture(document, %{page_number: page_number, embedding: fake_embedding()})
-      end
-
-      assert {:ok, results} = Search.search_in_document(document.id, "test", limit: 2)
-      assert length(results) == 2
-    end
-
-    test "min_similarity excludes pages the query is only loosely related to" do
-      document = document_fixture(%{status: "completed"})
-      aligned = indexed_page_fixture(document, %{page_number: 1, embedding: fake_embedding()})
-
-      loose =
-        indexed_page_fixture(document, %{page_number: 2, embedding: half_aligned_embedding()})
-
-      # The default floor admits both, most similar first.
-      assert {:ok, results} = Search.search_in_document(document.id, "test")
-      assert Enum.map(results, & &1.page_id) == [aligned.id, loose.id]
-
-      # Raised past the loose page's 0.707, it is the only one left.
-      assert {:ok, [only]} = Search.search_in_document(document.id, "test", min_similarity: 0.9)
-      assert only.page_id == aligned.id
-    end
-
-    test "only searches within specified document" do
-      document = document_fixture(%{status: "completed", title: "Doc One"})
-      other = document_fixture(%{status: "completed", title: "Doc Two"})
-
-      page = indexed_page_fixture(document, %{page_number: 1, embedding: fake_embedding()})
-      _other_page = indexed_page_fixture(other, %{page_number: 1, embedding: fake_embedding()})
-
-      assert {:ok, results} = Search.search_in_document(document.id, "content")
-      assert Enum.map(results, & &1.page_id) == [page.id]
-    end
-
-    test "returns the page text and its similarity to the query" do
-      document = document_fixture(%{status: "completed"})
-      page = indexed_page_fixture(document, %{page_number: 4, embedding: fake_embedding()})
-
-      assert {:ok, [result]} = Search.search_in_document(document.id, "test")
-
-      assert result.page_id == page.id
-      assert result.page_number == 4
-      assert result.original_markdown == page.original_markdown
-      assert result.translated_markdown == page.translated_markdown
-      assert result.content_revision == page.content_revision
-      assert_in_delta result.similarity, 1.0, 1.0e-6
     end
   end
 
