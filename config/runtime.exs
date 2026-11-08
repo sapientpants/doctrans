@@ -94,7 +94,86 @@ if config_env() != :test do
 
   port = String.to_integer(System.get_env("PORT") || "4000")
 
+  # The origins allowed to open the LiveView socket, stated once for every
+  # environment that serves one.
+  #
+  # Phoenix's default, `check_origin: true`, compares the handshake's `Origin`
+  # host against `url[:host]` alone, which is "localhost" in development: a
+  # browser at 127.0.0.1 renders the page once and never connects. Development
+  # used to answer that with `check_origin: false`, which admits *any* Origin.
+  # Nothing else stands in the way of a DNS-rebinding page: once its hostname
+  # resolves to 127.0.0.1 it is same-origin in the browser's eyes, fetches `/`
+  # for a fresh session cookie and CSRF token, and opens the socket from its own
+  # Origin — a socket that can delete every document (#259). Both quickstarts
+  # (`mix phx.server` and `docker compose up`) run the development config, so
+  # this was not confined to a developer's laptop.
+  #
+  # Hence an explicit allowlist: the loopback names a local browser can type,
+  # PHX_HOST when set (the name the browser types to reach a deployment), and
+  # PHX_BIND_IP when it is one specific address, since a browser reaches an
+  # endpoint bound there by typing that address. 0.0.0.0 and :: name no host a
+  # browser can type and add nothing; a deployment reached over a LAN names its
+  # host through PHX_HOST. Phoenix compares only the host when an entry names no
+  # scheme or port, so `http://localhost:4000` and `http://localhost:4321` both
+  # match `//localhost`.
+  #
+  # Not `:conn`: that compares Origin against the request Host, and under
+  # rebinding both read the attacker's name.
+  loopback_origins = ["//localhost", "//127.0.0.1", "//[::1]"]
+
+  # Checked here rather than at the first handshake: Phoenix parses the list
+  # lazily, and a bad entry either raises inside the transport, long after boot
+  # and with the variable's name nowhere in the error, or quietly matches no
+  # browser at all. `URI.parse/1` is lenient about the second kind: "fe80::1"
+  # parses to host "fe80" and "http://doctrans.lan" to host "http", so the value
+  # is accepted only when it is exactly the host parsing gives back — a bare name
+  # or IPv4 literal, or an IPv6 literal in brackets. Lower-cased for the entry,
+  # because browsers send the Origin host in lower case and Phoenix compares it
+  # exactly; the advertised URL below keeps the value as typed.
+  host_origins =
+    case System.get_env("PHX_HOST") do
+      nil ->
+        []
+
+      phx_host ->
+        host = URI.parse("//#{phx_host}").host || ""
+
+        well_formed? =
+          case phx_host do
+            "[" <> _ ->
+              phx_host == "[#{host}]" and
+                match?({:ok, _}, :inet.parse_ipv6strict_address(String.to_charlist(host)))
+
+            _ ->
+              phx_host == host and
+                Regex.match?(~r/\A[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?\z/, host)
+          end
+
+        unless well_formed? do
+          raise "PHX_HOST must be a host name or IP address literal, with an IPv6 literal in " <>
+                  "brackets (such as [fe80::1]) and no scheme, port or path, got: " <>
+                  "#{inspect(phx_host)}. It is the host the browser types to reach this " <>
+                  "deployment; unset it when only the loopback names (localhost, 127.0.0.1, " <>
+                  "[::1]) apply."
+        end
+
+        ["//" <> String.downcase(phx_host)]
+    end
+
+  bind_origins =
+    case bind_ip do
+      unspecified when unspecified in [{0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}] ->
+        []
+
+      ipv6 when tuple_size(ipv6) == 8 ->
+        ["//[#{:inet.ntoa(ipv6)}]"]
+
+      ipv4 ->
+        ["//#{:inet.ntoa(ipv4)}"]
+    end
+
   config :doctrans, DoctransWeb.Endpoint,
+    check_origin: Enum.uniq(loopback_origins ++ host_origins ++ bind_origins),
     http: [
       # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
       # for details about using IPv6 vs IPv4 and loopback vs public addresses.
@@ -138,12 +217,11 @@ if config_env() == :prod do
   # The advertised URL is the address this app reports as its own, and it has to
   # describe what the deployment actually serves.
   #
-  # Its `:host` is load-bearing: Phoenix's socket default is `check_origin: true`,
-  # which compares the websocket handshake's `Origin` *host* against this config
-  # (the scheme and port are not compared — see
-  # `Phoenix.Socket.Transport.origin_allowed?/4`). A wrong host therefore refuses
-  # every LiveView connection, and an all-LiveView app renders once and then goes
-  # dead, which is why PHX_HOST has to be set to whatever the browser types.
+  # Its `:host` no longer gates the socket: the origin allowlist above is
+  # explicit, so `url[:host]` is not what the handshake's `Origin` is compared
+  # against. PHX_HOST still has to be whatever the browser types, because the
+  # same variable feeds that allowlist — a deployment reached by a name it does
+  # not list renders once and then goes dead.
   #
   # The scheme and port are what the app hands out — `Endpoint.url/0`,
   # `url(~p"...")`, the "Access ... at" line logged at boot. Hardcoding https on

@@ -7,8 +7,14 @@ defmodule Doctrans.RuntimeConfigTest do
   # `async: false`: the OS environment it sets is shared by the whole VM.
   use Doctrans.EnvCase, async: false
 
+  import ExUnit.CaptureLog, only: [with_log: 1]
+  import Plug.Conn, only: [put_req_header: 3]
+  import Plug.Test, only: [conn: 2]
+
+  alias Phoenix.Socket.Transport
+
   @env_keys ~w(DOCTRANS_DATA_DIR DATABASE_URL SECRET_KEY_BASE DOCTRANS_ENV_FILE
-               PHX_BIND_IP PHX_SCHEME PORT)
+               PHX_BIND_IP PHX_HOST PHX_SCHEME PORT)
 
   setup do
     previous = Map.new(@env_keys, &{&1, System.get_env(&1)})
@@ -26,7 +32,7 @@ defmodule Doctrans.RuntimeConfigTest do
       "DOCTRANS_ENV_FILE" => Path.join(System.tmp_dir!(), "missing-#{Uniq.UUID.uuid7()}.env")
     })
 
-    Enum.each(~w(DOCTRANS_DATA_DIR PHX_BIND_IP PHX_SCHEME PORT), &System.delete_env/1)
+    Enum.each(~w(DOCTRANS_DATA_DIR PHX_BIND_IP PHX_HOST PHX_SCHEME PORT), &System.delete_env/1)
     :ok
   end
 
@@ -138,6 +144,129 @@ defmodule Doctrans.RuntimeConfigTest do
     System.put_env("PORT", "4321")
 
     assert endpoint(:test, :http) == nil
+    assert endpoint(:test, :check_origin) == nil
+  end
+
+  # Runs the configured allowlist through the check Phoenix applies to a
+  # websocket handshake, so the assertions are about which browsers connect
+  # rather than about the shape of a list. The endpoint only serves as the
+  # cache the transport parses the list into; `:check_origin` is passed as the
+  # transport option, which takes precedence over the endpoint's own setting.
+  defp admits?(origins, origin) do
+    conn = put_req_header(conn(:get, "/live/websocket"), "origin", origin)
+
+    {result, _log} =
+      with_log(fn ->
+        Transport.check_origin(
+          conn,
+          Phoenix.LiveView.Socket,
+          DoctransWeb.Endpoint,
+          [check_origin: origins],
+          & &1
+        )
+      end)
+
+    not result.halted
+  end
+
+  @loopback_origins ~w(//localhost //127.0.0.1 //[::1])
+
+  # Development used to set `check_origin: false` (#259; the comment on the
+  # allowlist in `config/runtime.exs` tells the story). The list is the same in
+  # every environment that serves, so the two quickstarts (`mix phx.server`,
+  # `docker compose up`) are covered along with the release.
+  for env <- [:dev, :prod] do
+    describe "the socket origin allowlist in #{env}" do
+      @env env
+
+      test "names the loopback origins a local browser types, and nothing else" do
+        assert endpoint(@env, :check_origin) == @loopback_origins
+      end
+
+      test "admits a local browser on any port and refuses a foreign origin" do
+        origins = endpoint(@env, :check_origin)
+
+        assert admits?(origins, "http://localhost:4000")
+        assert admits?(origins, "http://127.0.0.1:4321")
+        assert admits?(origins, "http://[::1]:4000")
+        refute admits?(origins, "http://attacker.example:4000")
+        refute admits?(origins, "http://localhost.attacker.example:4000")
+      end
+
+      test "PHX_HOST adds the name the browser types for a deployment" do
+        System.put_env("PHX_HOST", "doctrans.lan")
+
+        origins = endpoint(@env, :check_origin)
+
+        assert "//doctrans.lan" in origins
+        assert admits?(origins, "http://doctrans.lan:4000")
+        refute admits?(origins, "http://attacker.example:4000")
+      end
+
+      # Browsers send the Origin host in lower case and Phoenix compares it
+      # exactly, so the entry is lower-cased however the operator typed it.
+      test "a PHX_HOST typed in mixed case still admits the browser's lower-case origin" do
+        System.put_env("PHX_HOST", "Doctrans.LAN")
+
+        assert admits?(endpoint(@env, :check_origin), "http://doctrans.lan:4000")
+      end
+
+      test "a bracketed IPv6 PHX_HOST is admitted as the browser types it" do
+        System.put_env("PHX_HOST", "[fe80::1]")
+
+        assert admits?(endpoint(@env, :check_origin), "http://[fe80::1]:4000")
+      end
+
+      # `URI.parse/1` reads "fe80::1" as host "fe80" and "http://doctrans.lan"
+      # as host "http": entries no browser's Origin would match, which would
+      # leave the page rendering once and never connecting, with nothing said.
+      for bad <- [
+            "",
+            "fe80::1",
+            "http://doctrans.lan",
+            "doctrans.lan:4000",
+            "doctrans.lan/app",
+            "bad host"
+          ] do
+        test "PHX_HOST #{inspect(bad)} is rejected by name at boot rather than silently matching nothing" do
+          System.put_env("PHX_HOST", unquote(bad))
+
+          assert_raise RuntimeError, ~r/PHX_HOST must be a host name/, fn ->
+            endpoint(@env, :check_origin)
+          end
+        end
+      end
+
+      test "a specific PHX_BIND_IP is an address the browser types, so it is allowed" do
+        System.put_env("PHX_BIND_IP", "192.168.1.5")
+
+        assert admits?(endpoint(@env, :check_origin), "http://192.168.1.5:4000")
+      end
+
+      test "a specific IPv6 PHX_BIND_IP is allowed in bracketed form" do
+        System.put_env("PHX_BIND_IP", "fe80::1")
+
+        assert "//[fe80::1]" in endpoint(@env, :check_origin)
+        assert admits?(endpoint(@env, :check_origin), "http://[fe80::1]:4000")
+      end
+
+      # Binding every interface says nothing about which name the browser
+      # types; that is PHX_HOST's job, so the wildcard adds no origin at all.
+      test "binding every interface adds no origin" do
+        System.put_env("PHX_BIND_IP", "0.0.0.0")
+        assert endpoint(@env, :check_origin) == @loopback_origins
+
+        System.put_env("PHX_BIND_IP", "::")
+        assert endpoint(@env, :check_origin) == @loopback_origins
+      end
+
+      test "is never false, which would admit every origin" do
+        System.put_env("PHX_BIND_IP", "0.0.0.0")
+        System.put_env("PHX_HOST", "doctrans.lan")
+
+        assert is_list(endpoint(@env, :check_origin))
+      end
+    end
   end
 
   # The advertised URL is what the app hands out as its own address, in

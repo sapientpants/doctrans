@@ -25,11 +25,15 @@ config :doctrans, Doctrans.Repo,
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #
+# `check_origin` is deliberately not set here. It used to be `false`, which
+# admits any Origin on the LiveView socket; `config/runtime.exs` now configures
+# the one explicit allowlist for every environment that serves, development
+# included, so a DNS-rebinding page cannot drive the socket (#259).
+#
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
 config :doctrans, DoctransWeb.Endpoint,
-  check_origin: false,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "GYS0LjJXZ97Vk+1tcnCCkwCPuhjrtN19jjj+BykXjcyKpvk6d+jnv3uqJ8bXZ02v",
