@@ -21,6 +21,13 @@ config :doctrans, DoctransWeb.Endpoint,
   live_view: [signing_salt: "P9wT4yH6jN2mV8kD0qL3xR7zB5cF1aG4"],
   server: false
 
+# The hosts `DoctransWeb.Plugs.AllowedHost` answers to. `config/runtime.exs`
+# builds this list for every environment that serves and leaves :test alone, so
+# it is stated here: the loopback names, plus the host `Phoenix.ConnTest` gives
+# every connection it builds, without which no ConnCase test would get past the
+# endpoint's first plug.
+config :doctrans, :allowed_hosts, ["www.example.com", "localhost", "127.0.0.1", "[::1]"]
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 

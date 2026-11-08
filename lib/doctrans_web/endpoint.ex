@@ -20,6 +20,12 @@ defmodule DoctransWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  # The first plug, ahead of static serving, so a request for a host this
+  # deployment does not answer to is refused before `/uploads` or anything else
+  # is served. The socket above is dispatched before any plug, so `/live` relies
+  # on `check_origin` instead; see the plug's moduledoc.
+  plug DoctransWeb.Plugs.AllowedHost
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

@@ -51,6 +51,12 @@ defmodule Doctrans.DevConfigTest do
     refute Keyword.has_key?(endpoint(), :check_origin)
   end
 
+  # The host allowlist is built beside the origin allowlist in
+  # `config/runtime.exs` (#260); `dev.exs` must not quietly override it either.
+  test "does not configure the host allowlist, so the runtime one is the only one" do
+    refute Keyword.has_key?(Keyword.fetch!(read_config(), :doctrans), :allowed_hosts)
+  end
+
   test "DATABASE_HOST still selects the development database host" do
     System.put_env("DATABASE_HOST", "postgres.internal")
 
