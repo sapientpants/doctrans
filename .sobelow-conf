@@ -29,6 +29,24 @@
     # What would invalidate this: Sobelow learning to evaluate the argument, at which
     # point the ignore should be dropped so the check runs for real.
     "Config.CSP",
+    # Config.CSWH is a false positive of the same kind, not a waiver. The LiveView
+    # socket's `check_origin` is an explicit allowlist (`//localhost`, `//127.0.0.1`,
+    # `//[::1]`, plus PHX_HOST and a specific PHX_BIND_IP) built in `config/runtime.exs`
+    # for every environment that serves; it has to live there because PHX_HOST and
+    # PHX_BIND_IP are read at runtime. Sobelow 0.18.1 only trusts a literal list it can
+    # read from `config/{config,prod,runtime}.exs`: a value computed inside the runtime
+    # file's `if config_env() != :test` block is opaque to it, so it reports "Config.CSWH:
+    # Cross-Site Websocket Hijacking - Low Confidence" on every `socket` in
+    # `lib/doctrans_web/endpoint.ex`, and `# sobelow_skip` does not reach a `socket`
+    # declaration. The allowlist itself is pinned by `test/doctrans/runtime_config_test.exs`
+    # (never `false`, loopback-only by default, a foreign Origin refused through
+    # `Phoenix.Socket.Transport.check_origin/5`) and `test/doctrans/dev_config_test.exs`
+    # (dev.exs sets no `check_origin` of its own); those are the gates that would catch
+    # the check being disabled again (#259).
+    #
+    # What would invalidate this: Sobelow learning to evaluate the runtime expression,
+    # at which point the ignore should be dropped so the check runs for real.
+    "Config.CSWH",
     # Config.HTTPS is correct to ignore for a loopback-bound, single-user app: there is
     # no TLS terminator to redirect to. See AGENTS.md on deployment-level exposure.
     "Config.HTTPS"

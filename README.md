@@ -184,10 +184,15 @@ container itself, and the loopback publication outside it is again what limits w
 native `mix phx.server` has no such wrapper around it, so it binds `127.0.0.1` and stays there
 until `PHX_BIND_IP` says otherwise — the database can live on another host without changing that.
 
-Set `PHX_HOST` to whatever the browser types. Phoenix compares the websocket handshake's `Origin`
-host against it, so a deployment reached by a name it does not advertise renders once and then never
-connects. Behind a TLS terminator, also set `PHX_SCHEME=https`, which is what the application
-advertises as its own address rather than what it listens on.
+Set `PHX_HOST` to whatever the browser types. The LiveView socket accepts a websocket handshake only
+from an explicit allowlist of origins, the same in every environment that serves: `localhost`,
+`127.0.0.1` and `[::1]`, plus `PHX_HOST` when set and `PHX_BIND_IP` when it is one specific address.
+A deployment reached by a name that is not on the list renders once and then never connects. The
+list is explicit rather than disabled because an any-origin socket is exactly what a DNS-rebinding
+page needs: once `attacker.example` resolves to `127.0.0.1`, that page is same-origin in the
+browser's eyes, fetches `/` for a session cookie and CSRF token, and could drive the socket to
+delete every document. Behind a TLS terminator, also set `PHX_SCHEME=https`, which is what the
+application advertises as its own address rather than what it listens on.
 
 ## Environment File
 
@@ -432,8 +437,8 @@ than re-detected, since it is what produced the text they already contain.
 | `DATABASE_HOST` | `localhost` | PostgreSQL hostname (dev/test) |
 | `DATABASE_URL` | - | Full database URL (required in production) |
 | `PORT` | `4000` | Phoenix server port (dev/prod; tests use 4002) |
-| `PHX_BIND_IP` | `127.0.0.1` | Interface the endpoint binds to (dev and prod, read by the one listener block in `config/runtime.exs`). Must be an IPv4 or IPv6 address literal; host names are not resolved, and an unparseable or empty value raises at startup naming the variable. Doctrans has no authentication, so it defaults to loopback; set `PHX_BIND_IP=0.0.0.0` to expose it to a trusted LAN at your own risk. No other setting, `DATABASE_HOST` included, changes the binding |
-| `PHX_HOST` | `example.com` | Production host for URL generation (dev uses `localhost`). Must be the host the browser actually uses: Phoenix compares the LiveView socket's `Origin` host against it, so a mismatch renders the page once and then never connects |
+| `PHX_BIND_IP` | `127.0.0.1` | Interface the endpoint binds to (dev and prod, read by the one listener block in `config/runtime.exs`). Must be an IPv4 or IPv6 address literal; host names are not resolved, and an unparseable or empty value raises at startup naming the variable. Doctrans has no authentication, so it defaults to loopback; set `PHX_BIND_IP=0.0.0.0` to expose it to a trusted LAN at your own risk. No other setting, `DATABASE_HOST` included, changes the binding. A specific non-loopback address is also added to the LiveView socket's origin allowlist, since a browser reaches it by typing that address; `0.0.0.0` and `::` add nothing, so name the host through `PHX_HOST` |
+| `PHX_HOST` | unset (`example.com` for production URLs) | The host the browser types to reach this deployment. In every environment that serves, dev included, it is added to the LiveView socket's origin allowlist beside `localhost`, `127.0.0.1` and `[::1]`, so a deployment reached by a name that is not listed renders once and then never connects. In production it is also the host of generated URLs. Must be a host name or IP literal (IPv6 in brackets); an empty or unparseable value raises at startup naming the variable |
 | `PHX_SCHEME` | `http` | Scheme the application advertises in generated URLs (prod only); use `https` behind a TLS terminator, which also advertises port 443 instead of `PORT`. The application itself always serves plain HTTP on `PORT`. Only the host is origin-checked, so this affects the addresses the app hands out, not whether the socket connects |
 | `PHX_SERVER` | unset | Set to `true` to enable the HTTP server when starting a release |
 | `SECRET_KEY_BASE` | - | Secret key for signing (required in production) |

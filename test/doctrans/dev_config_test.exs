@@ -44,6 +44,14 @@ defmodule Doctrans.DevConfigTest do
     refute Keyword.has_key?(endpoint(), :https)
   end
 
+  # `check_origin: false` lived here and admitted any Origin on the LiveView
+  # socket, which is what let a DNS-rebinding page drive it (#259). The
+  # allowlist is configured in `config/runtime.exs` for every environment that
+  # serves; `dev.exs` must not quietly override it with a setting of its own.
+  test "does not configure the socket origin check, so the runtime allowlist is the only one" do
+    refute Keyword.has_key?(endpoint(), :check_origin)
+  end
+
   test "DATABASE_HOST still selects the development database host" do
     System.put_env("DATABASE_HOST", "postgres.internal")
 
