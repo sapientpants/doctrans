@@ -7,15 +7,21 @@ defmodule DoctransWeb.EndpointTest do
   # environment deliberately places outside the application directory: serving
   # from anywhere else is the defect this covers.
 
+  # Writes one page image under the storage root, removed when the test exits,
+  # and returns the URL the upload server serves it at.
+  defp page_image do
+    directory = "documents/#{Uniq.UUID.uuid7()}/pages"
+    path = Path.join(Layout.root(), directory)
+    File.mkdir_p!(path)
+    on_exit(fn -> File.rm_rf!(path) end)
+    File.write!(Path.join(path, "page-01.png"), "page image content")
+
+    "/uploads/#{directory}/page-01.png"
+  end
+
   describe "uploaded page caching" do
     setup do
-      directory = "documents/#{Uniq.UUID.uuid7()}/pages"
-      path = Path.join(Layout.root(), directory)
-      File.mkdir_p!(path)
-      on_exit(fn -> File.rm_rf!(path) end)
-      File.write!(Path.join(path, "page-01.png"), "page image content")
-
-      {:ok, image_url: "/uploads/#{directory}/page-01.png"}
+      {:ok, image_url: page_image()}
     end
 
     test "ordinary and versioned images cannot be stored in caches", %{image_url: url} do
@@ -92,17 +98,13 @@ defmodule DoctransWeb.EndpointTest do
   describe "a request for a host this deployment does not answer to" do
     @tag :capture_log
     test "is refused before the router, the static server and the upload server" do
-      directory = "documents/#{Uniq.UUID.uuid7()}/pages"
-      path = Path.join(Layout.root(), directory)
-      File.mkdir_p!(path)
-      on_exit(fn -> File.rm_rf!(path) end)
-      File.write!(Path.join(path, "page-01.png"), "page image content")
+      image_url = page_image()
 
       for url <- [
             "/",
             "/documents/#{Uniq.UUID.uuid7()}",
             "/documents/#{Uniq.UUID.uuid7()}/export.md",
-            "/uploads/#{directory}/page-01.png",
+            image_url,
             "/robots.txt"
           ] do
         conn = get(%{build_conn() | host: "attacker.example"}, url)

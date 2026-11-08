@@ -281,7 +281,7 @@ defmodule Doctrans.RuntimeConfigTest do
     Doctrans.TestEnv.put_env(:allowed_hosts, hosts)
     conn = %{conn(:get, "/") | host: host}
 
-    {result, _log} = with_log(fn -> AllowedHost.call(conn, []) end)
+    {result, _log} = with_log(fn -> AllowedHost.call(conn, AllowedHost.init([])) end)
 
     not result.halted
   end

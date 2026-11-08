@@ -12,9 +12,13 @@ defmodule DoctransWeb.Plugs.AllowedHostTest do
   # `Doctrans.RuntimeConfigTest`'s concern.
 
   defp run(host) do
-    conn = %{conn(:get, "/") | host: host}
-    {conn, _log} = with_log(fn -> AllowedHost.call(conn, AllowedHost.init([])) end)
+    {conn, _log} = run_with_log(host)
     conn
+  end
+
+  defp run_with_log(host) do
+    conn = %{conn(:get, "/") | host: host}
+    with_log(fn -> AllowedHost.call(conn, AllowedHost.init([])) end)
   end
 
   test "a request for a listed host passes through untouched" do
@@ -51,9 +55,7 @@ defmodule DoctransWeb.Plugs.AllowedHostTest do
   end
 
   test "the refusal names the host in the log, for an operator who mistyped PHX_HOST" do
-    conn = %{conn(:get, "/") | host: "doctrans.lan"}
-
-    {_conn, log} = with_log(fn -> AllowedHost.call(conn, []) end)
+    {_conn, log} = run_with_log("doctrans.lan")
 
     assert log =~ "doctrans.lan"
     assert log =~ "PHX_HOST"

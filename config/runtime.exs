@@ -136,7 +136,7 @@ if config_env() != :test do
   # or IPv4 literal, or an IPv6 literal in brackets. Lower-cased for the entry,
   # because browsers send the Host and Origin in lower case and both checks
   # compare lower-case; the advertised URL below keeps the value as typed.
-  env_hosts =
+  phx_hosts =
     case System.get_env("PHX_HOST") do
       nil ->
         []
@@ -178,7 +178,7 @@ if config_env() != :test do
         ["#{:inet.ntoa(ipv4)}"]
     end
 
-  allowed_hosts = Enum.uniq(loopback_hosts ++ env_hosts ++ bind_hosts)
+  allowed_hosts = Enum.uniq(loopback_hosts ++ phx_hosts ++ bind_hosts)
 
   config :doctrans, :allowed_hosts, allowed_hosts
 

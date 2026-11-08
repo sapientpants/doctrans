@@ -36,6 +36,9 @@ defmodule DoctransWeb.Plugs.AllowedHost do
     if String.downcase(conn.host) in allowed_hosts() do
       conn
     else
+      # One line per refused request. A refused request reaches no other plug,
+      # so this is its only trace, and it is no more than `Phoenix.Logger`
+      # writes for every request that is served.
       Logger.warning(
         "Refused a request for host #{inspect(conn.host)}: not one of the hosts this " <>
           "deployment answers to. Set PHX_HOST to the name the browser types."
@@ -50,9 +53,13 @@ defmodule DoctransWeb.Plugs.AllowedHost do
 
   defp allowed_hosts, do: Application.fetch_env!(:doctrans, :allowed_hosts)
 
+  # Plain English rather than `DoctransWeb.ErrorMessages`: this runs ahead of
+  # `SetLocale`, and the reader is the operator who typed the wrong name, not
+  # the app's UI. The body names the variable to set and not the hosts that
+  # would have been answered, so a rebound page learns nothing from it.
   defp misdirected_message(host) do
     "Misdirected request: this Doctrans deployment does not answer to the host " <>
-      "#{inspect(host)}. Reach it as localhost, 127.0.0.1 or [::1], or set PHX_HOST " <>
+      "#{inspect(host)}. Reach it by a name it is configured for, or set PHX_HOST " <>
       "to the name the browser types."
   end
 end
