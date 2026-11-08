@@ -122,24 +122,42 @@ if config_env() != :test do
   loopback_origins = ["//localhost", "//127.0.0.1", "//[::1]"]
 
   # Checked here rather than at the first handshake: Phoenix parses the list
-  # lazily and an entry without a host raises inside the transport, long after
-  # boot and with the variable's name nowhere in the error.
+  # lazily, and a bad entry either raises inside the transport, long after boot
+  # and with the variable's name nowhere in the error, or quietly matches no
+  # browser at all. `URI.parse/1` is lenient about the second kind: "fe80::1"
+  # parses to host "fe80" and "http://doctrans.lan" to host "http", so the value
+  # is accepted only when it is exactly the host parsing gives back — a bare name
+  # or IPv4 literal, or an IPv6 literal in brackets. Lower-cased for the entry,
+  # because browsers send the Origin host in lower case and Phoenix compares it
+  # exactly; the advertised URL below keeps the value as typed.
   host_origins =
     case System.get_env("PHX_HOST") do
       nil ->
         []
 
       phx_host ->
-        origin = "//#{phx_host}"
+        host = URI.parse("//#{phx_host}").host || ""
 
-        if URI.parse(origin).host in [nil, ""] do
-          raise "PHX_HOST must be a host name or IP address literal (an IPv6 literal in " <>
-                  "brackets, such as [fe80::1]), got: #{inspect(phx_host)}. It is the host " <>
-                  "the browser types to reach this deployment; unset it when only the " <>
-                  "loopback names (localhost, 127.0.0.1, [::1]) apply."
+        well_formed? =
+          case phx_host do
+            "[" <> _ ->
+              phx_host == "[#{host}]" and
+                match?({:ok, _}, :inet.parse_ipv6strict_address(String.to_charlist(host)))
+
+            _ ->
+              phx_host == host and
+                Regex.match?(~r/\A[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?\z/, host)
+          end
+
+        unless well_formed? do
+          raise "PHX_HOST must be a host name or IP address literal, with an IPv6 literal in " <>
+                  "brackets (such as [fe80::1]) and no scheme, port or path, got: " <>
+                  "#{inspect(phx_host)}. It is the host the browser types to reach this " <>
+                  "deployment; unset it when only the loopback names (localhost, 127.0.0.1, " <>
+                  "[::1]) apply."
         end
 
-        [origin]
+        ["//" <> String.downcase(phx_host)]
     end
 
   bind_origins =

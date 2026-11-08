@@ -171,12 +171,10 @@ defmodule Doctrans.RuntimeConfigTest do
 
   @loopback_origins ~w(//localhost //127.0.0.1 //[::1])
 
-  # Development used to set `check_origin: false`, which admits any Origin —
-  # including a DNS-rebinding page that, once its name resolves to 127.0.0.1,
-  # fetches `/` for a session and CSRF token and drives the socket from its own
-  # Origin (#259). The list is explicit, and the same in every environment that
-  # serves, so the two quickstarts (`mix phx.server`, `docker compose up`) are
-  # covered along with the release.
+  # Development used to set `check_origin: false` (#259; the comment on the
+  # allowlist in `config/runtime.exs` tells the story). The list is the same in
+  # every environment that serves, so the two quickstarts (`mix phx.server`,
+  # `docker compose up`) are covered along with the release.
   for env <- [:dev, :prod] do
     describe "the socket origin allowlist in #{env}" do
       @env env
@@ -205,11 +203,37 @@ defmodule Doctrans.RuntimeConfigTest do
         refute admits?(origins, "http://attacker.example:4000")
       end
 
-      test "a PHX_HOST that is not a host is rejected by name at boot" do
-        System.put_env("PHX_HOST", "")
+      # Browsers send the Origin host in lower case and Phoenix compares it
+      # exactly, so the entry is lower-cased however the operator typed it.
+      test "a PHX_HOST typed in mixed case still admits the browser's lower-case origin" do
+        System.put_env("PHX_HOST", "Doctrans.LAN")
 
-        assert_raise RuntimeError, ~r/PHX_HOST must be a host name/, fn ->
-          endpoint(@env, :check_origin)
+        assert admits?(endpoint(@env, :check_origin), "http://doctrans.lan:4000")
+      end
+
+      test "a bracketed IPv6 PHX_HOST is admitted as the browser types it" do
+        System.put_env("PHX_HOST", "[fe80::1]")
+
+        assert admits?(endpoint(@env, :check_origin), "http://[fe80::1]:4000")
+      end
+
+      # `URI.parse/1` reads "fe80::1" as host "fe80" and "http://doctrans.lan"
+      # as host "http": entries no browser's Origin would match, which would
+      # leave the page rendering once and never connecting, with nothing said.
+      for bad <- [
+            "",
+            "fe80::1",
+            "http://doctrans.lan",
+            "doctrans.lan:4000",
+            "doctrans.lan/app",
+            "bad host"
+          ] do
+        test "PHX_HOST #{inspect(bad)} is rejected by name at boot rather than silently matching nothing" do
+          System.put_env("PHX_HOST", unquote(bad))
+
+          assert_raise RuntimeError, ~r/PHX_HOST must be a host name/, fn ->
+            endpoint(@env, :check_origin)
+          end
         end
       end
 
