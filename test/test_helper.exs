@@ -21,7 +21,13 @@ end
 # themselves; drop the whole root once the VM is done with it.
 System.at_exit(fn _status -> File.rm_rf(expected_upload_root) end)
 
-ExUnit.start()
+# Tests tagged `:poppler` drive the real pdfinfo and pdftoppm. On a machine
+# without them they are excluded, and the run's summary says so, rather than
+# wrapped in a check that lets them pass without running.
+poppler_exclusions =
+  if Doctrans.Processing.PdfExtractor.available?(), do: [], else: [:poppler]
+
+ExUnit.start(exclude: poppler_exclusions)
 Ecto.Adapters.SQL.Sandbox.mode(Doctrans.Repo, :manual)
 
 # The external collaborators are Mox mocks, and `config/test.exs` points every

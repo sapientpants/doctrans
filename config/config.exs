@@ -75,8 +75,10 @@ config :doctrans, :uploads, max_file_size: 100_000_000
 #   this at the configured :dpi is rejected before it is rendered. A maximal PDF
 #   media box renders to gigabytes well inside the deadline, so this is the bound
 #   that has to come first. Every page's geometry is checked, as `pdfinfo`
-#   reports it, and a document it reports no geometry for is rejected. The
-#   default admits an E-size (36x48in) drawing at the default :dpi.
+#   reports it, and a document with a page it reports no geometry for is
+#   rejected. Each page is measured again just before it renders, and the
+#   render is pinned to the measured pixel dimensions. The default admits an
+#   E-size (36x48in) drawing at the default :dpi.
 # - max_image_bytes: a rendered page above this is deleted and reported, since
 #   the image is about to be sent to a model; lower :dpi is the usual answer
 #
