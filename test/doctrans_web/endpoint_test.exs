@@ -82,6 +82,44 @@ defmodule DoctransWeb.EndpointTest do
     end
   end
 
+  # The plug is first in the endpoint, ahead of `Plug.Static` and the upload
+  # server, so every GET surface that carries document content without a
+  # socket is covered: the dashboard's dead render, the viewer, the Markdown
+  # export, and the page images (#260). The connection's host is set directly:
+  # `Phoenix.ConnTest` builds every connection for `www.example.com`, which the
+  # test configuration lists, and this is what a DNS-rebinding page's request
+  # looks like once its name resolves to this machine.
+  describe "a request for a host this deployment does not answer to" do
+    @tag :capture_log
+    test "is refused before the router, the static server and the upload server" do
+      directory = "documents/#{Uniq.UUID.uuid7()}/pages"
+      path = Path.join(Layout.root(), directory)
+      File.mkdir_p!(path)
+      on_exit(fn -> File.rm_rf!(path) end)
+      File.write!(Path.join(path, "page-01.png"), "page image content")
+
+      for url <- [
+            "/",
+            "/documents/#{Uniq.UUID.uuid7()}",
+            "/documents/#{Uniq.UUID.uuid7()}/export.md",
+            "/uploads/#{directory}/page-01.png",
+            "/robots.txt"
+          ] do
+        conn = get(%{build_conn() | host: "attacker.example"}, url)
+
+        assert conn.status == 421, "#{url} was served for a foreign host"
+        assert conn.halted
+        refute conn.resp_body =~ "page image content"
+      end
+    end
+
+    test "while the same requests are served for a listed host" do
+      assert get(%{build_conn() | host: "localhost"}, "/robots.txt").status == 200
+      assert get(%{build_conn() | host: "127.0.0.1"}, "/robots.txt").status == 200
+      assert get(%{build_conn() | host: "[::1]"}, "/robots.txt").status == 200
+    end
+  end
+
   test "public static assets retain versioned caching" do
     conn = get(build_conn(), "/robots.txt?vsn=123")
 

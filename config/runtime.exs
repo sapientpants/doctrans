@@ -94,43 +94,49 @@ if config_env() != :test do
 
   port = String.to_integer(System.get_env("PORT") || "4000")
 
-  # The origins allowed to open the LiveView socket, stated once for every
-  # environment that serves one.
+  # The hosts this deployment answers to, stated once for every environment
+  # that serves. The list does two jobs: `DoctransWeb.Plugs.AllowedHost` refuses
+  # any request whose `Host` is not on it, and the LiveView socket's
+  # `check_origin` admits a handshake only from an Origin on it.
   #
-  # Phoenix's default, `check_origin: true`, compares the handshake's `Origin`
-  # host against `url[:host]` alone, which is "localhost" in development: a
-  # browser at 127.0.0.1 renders the page once and never connects. Development
-  # used to answer that with `check_origin: false`, which admits *any* Origin.
-  # Nothing else stands in the way of a DNS-rebinding page: once its hostname
-  # resolves to 127.0.0.1 it is same-origin in the browser's eyes, fetches `/`
-  # for a fresh session cookie and CSRF token, and opens the socket from its own
-  # Origin — a socket that can delete every document (#259). Both quickstarts
-  # (`mix phx.server` and `docker compose up`) run the development config, so
-  # this was not confined to a developer's laptop.
+  # Both guard against the same page. Doctrans has no authentication, so a
+  # DNS-rebinding page is the attacker that matters: once its hostname resolves
+  # to 127.0.0.1 it is same-origin in the browser's eyes. Over plain GETs it
+  # reads `/` for the document list and every `/documents/:id/export.md` (#260);
+  # over a socket opened from its own Origin it can delete every document (#259;
+  # development used to set `check_origin: false`, which admits any Origin).
+  # What that page cannot forge is the name the browser typed: its requests
+  # carry its own hostname as `Host` and `Origin`, so an explicit list of the
+  # names this deployment is reached by refuses both. Both quickstarts (`mix
+  # phx.server` and `docker compose up`) run the development config, so the list
+  # is built here rather than in `prod.exs`.
   #
-  # Hence an explicit allowlist: the loopback names a local browser can type,
-  # PHX_HOST when set (the name the browser types to reach a deployment), and
-  # PHX_BIND_IP when it is one specific address, since a browser reaches an
-  # endpoint bound there by typing that address. 0.0.0.0 and :: name no host a
-  # browser can type and add nothing; a deployment reached over a LAN names its
-  # host through PHX_HOST. Phoenix compares only the host when an entry names no
-  # scheme or port, so `http://localhost:4000` and `http://localhost:4321` both
-  # match `//localhost`.
+  # The list: the loopback names a local browser can type, PHX_HOST when set
+  # (the name the browser types to reach a deployment), and PHX_BIND_IP when it
+  # is one specific address, since a browser reaches an endpoint bound there by
+  # typing that address. 0.0.0.0 and :: name no host a browser can type and add
+  # nothing; a deployment reached over a LAN names its host through PHX_HOST.
+  # Entries are hosts without a port: the plug compares `conn.host`, which Bandit
+  # parses without the port, and Phoenix compares only the host when an origin
+  # entry names no scheme or port, so `http://localhost:4000` and
+  # `http://localhost:4321` both match `//localhost`. An IPv6 literal keeps its
+  # brackets on both sides, which is how Bandit reports it and how a browser
+  # types it.
   #
-  # Not `:conn`: that compares Origin against the request Host, and under
-  # rebinding both read the attacker's name.
-  loopback_origins = ["//localhost", "//127.0.0.1", "//[::1]"]
+  # Not `check_origin: :conn`: that compares Origin against the request Host,
+  # and under rebinding both read the attacker's name.
+  loopback_hosts = ["localhost", "127.0.0.1", "[::1]"]
 
-  # Checked here rather than at the first handshake: Phoenix parses the list
-  # lazily, and a bad entry either raises inside the transport, long after boot
-  # and with the variable's name nowhere in the error, or quietly matches no
-  # browser at all. `URI.parse/1` is lenient about the second kind: "fe80::1"
+  # Checked here rather than at the first request: Phoenix parses the origin
+  # list lazily, and a bad entry either raises inside the transport, long after
+  # boot and with the variable's name nowhere in the error, or quietly matches
+  # no browser at all. `URI.parse/1` is lenient about the second kind: "fe80::1"
   # parses to host "fe80" and "http://doctrans.lan" to host "http", so the value
   # is accepted only when it is exactly the host parsing gives back — a bare name
   # or IPv4 literal, or an IPv6 literal in brackets. Lower-cased for the entry,
-  # because browsers send the Origin host in lower case and Phoenix compares it
-  # exactly; the advertised URL below keeps the value as typed.
-  host_origins =
+  # because browsers send the Host and Origin in lower case and both checks
+  # compare lower-case; the advertised URL below keeps the value as typed.
+  env_hosts =
     case System.get_env("PHX_HOST") do
       nil ->
         []
@@ -157,23 +163,27 @@ if config_env() != :test do
                   "[::1]) apply."
         end
 
-        ["//" <> String.downcase(phx_host)]
+        [String.downcase(phx_host)]
     end
 
-  bind_origins =
+  bind_hosts =
     case bind_ip do
       unspecified when unspecified in [{0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}] ->
         []
 
       ipv6 when tuple_size(ipv6) == 8 ->
-        ["//[#{:inet.ntoa(ipv6)}]"]
+        ["[#{:inet.ntoa(ipv6)}]"]
 
       ipv4 ->
-        ["//#{:inet.ntoa(ipv4)}"]
+        ["#{:inet.ntoa(ipv4)}"]
     end
 
+  allowed_hosts = Enum.uniq(loopback_hosts ++ env_hosts ++ bind_hosts)
+
+  config :doctrans, :allowed_hosts, allowed_hosts
+
   config :doctrans, DoctransWeb.Endpoint,
-    check_origin: Enum.uniq(loopback_origins ++ host_origins ++ bind_origins),
+    check_origin: Enum.map(allowed_hosts, &("//" <> &1)),
     http: [
       # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
       # for details about using IPv6 vs IPv4 and loopback vs public addresses.

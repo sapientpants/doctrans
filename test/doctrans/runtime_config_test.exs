@@ -11,6 +11,7 @@ defmodule Doctrans.RuntimeConfigTest do
   import Plug.Conn, only: [put_req_header: 3]
   import Plug.Test, only: [conn: 2]
 
+  alias DoctransWeb.Plugs.AllowedHost
   alias Phoenix.Socket.Transport
 
   @env_keys ~w(DOCTRANS_DATA_DIR DATABASE_URL SECRET_KEY_BASE DOCTRANS_ENV_FILE
@@ -45,6 +46,8 @@ defmodule Doctrans.RuntimeConfigTest do
 
   defp endpoint(env \\ :prod, key),
     do: get_in(read_config(env), [:doctrans, DoctransWeb.Endpoint, key])
+
+  defp allowed_hosts(env), do: get_in(read_config(env), [:doctrans, :allowed_hosts])
 
   test "an absolute DOCTRANS_DATA_DIR becomes the storage root" do
     System.put_env("DOCTRANS_DATA_DIR", "/srv/doctrans-data/")
@@ -145,6 +148,7 @@ defmodule Doctrans.RuntimeConfigTest do
 
     assert endpoint(:test, :http) == nil
     assert endpoint(:test, :check_origin) == nil
+    assert allowed_hosts(:test) == nil
   end
 
   # Runs the configured allowlist through the check Phoenix applies to a
@@ -265,6 +269,79 @@ defmodule Doctrans.RuntimeConfigTest do
         System.put_env("PHX_HOST", "doctrans.lan")
 
         assert is_list(endpoint(@env, :check_origin))
+      end
+    end
+  end
+
+  # The same names feed `DoctransWeb.Plugs.AllowedHost`, which refuses a plain
+  # GET for any other `Host` (#260; the comment on the list in
+  # `config/runtime.exs` tells the story). The assertions run the configured
+  # list through the plug, so they are about which requests are answered.
+  defp answers?(hosts, host) do
+    Doctrans.TestEnv.put_env(:allowed_hosts, hosts)
+    conn = %{conn(:get, "/") | host: host}
+
+    {result, _log} = with_log(fn -> AllowedHost.call(conn, []) end)
+
+    not result.halted
+  end
+
+  @loopback_hosts ~w(localhost 127.0.0.1 [::1])
+
+  for env <- [:dev, :prod] do
+    describe "the host allowlist in #{env}" do
+      @env env
+
+      test "names the loopback hosts a local browser types, and nothing else" do
+        assert allowed_hosts(@env) == @loopback_hosts
+      end
+
+      test "answers a local browser and refuses a foreign host" do
+        hosts = allowed_hosts(@env)
+
+        for host <- @loopback_hosts, do: assert(answers?(hosts, host))
+        refute answers?(hosts, "attacker.example")
+        refute answers?(hosts, "localhost.attacker.example")
+      end
+
+      test "is the list the socket origin allowlist is built from" do
+        System.put_env("PHX_HOST", "Doctrans.LAN")
+        System.put_env("PHX_BIND_IP", "fe80::1")
+
+        hosts = allowed_hosts(@env)
+
+        assert hosts == ~w(localhost 127.0.0.1 [::1] doctrans.lan [fe80::1])
+        assert endpoint(@env, :check_origin) == Enum.map(hosts, &("//" <> &1))
+      end
+
+      test "PHX_HOST adds the name the browser types for a deployment, in lower case" do
+        System.put_env("PHX_HOST", "Doctrans.LAN")
+
+        hosts = allowed_hosts(@env)
+
+        assert answers?(hosts, "doctrans.lan")
+        refute answers?(hosts, "attacker.example")
+      end
+
+      test "a specific PHX_BIND_IP is an address the browser types, so it is answered" do
+        System.put_env("PHX_BIND_IP", "192.168.1.5")
+
+        assert answers?(allowed_hosts(@env), "192.168.1.5")
+      end
+
+      # Bandit reports an IPv6 request host in brackets, as the browser types it.
+      test "a specific IPv6 PHX_BIND_IP is answered in bracketed form" do
+        System.put_env("PHX_BIND_IP", "fe80::1")
+
+        assert answers?(allowed_hosts(@env), "[fe80::1]")
+      end
+
+      test "binding every interface adds no host" do
+        System.put_env("PHX_BIND_IP", "0.0.0.0")
+        assert allowed_hosts(@env) == @loopback_hosts
+
+        System.put_env("PHX_BIND_IP", "::")
+        assert allowed_hosts(@env) == @loopback_hosts
       end
     end
   end
