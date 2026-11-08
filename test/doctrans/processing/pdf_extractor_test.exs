@@ -44,6 +44,52 @@ defmodule Doctrans.Processing.PdfExtractorTest do
       assert {:error, reason} = PdfExtractor.get_page_count(@missing_pdf)
       assert_missing_pdf_reason(reason, :pdfinfo_failed, "pdfinfo")
     end
+
+    # The fakes in `PdfExtractorBoundsTest` pin down what the extractor does with
+    # pdfinfo's output; this pins down that real pdfinfo output is what those
+    # fakes say it is. A document whose first page is letter-sized, whose second
+    # page is 200 inches square, and whose title spells out a small page size and
+    # a page count of one, is rejected for its second page at the default limits.
+    @tag :tmp_dir
+    test "a crafted PDF is measured by its pages, not by its metadata", %{tmp_dir: tmp_dir} do
+      if PdfExtractor.available?() do
+        pdf = Path.join(tmp_dir, "crafted.pdf")
+        File.write!(pdf, crafted_pdf())
+
+        assert {:error, {:pdf_page_too_large, bindings}} = PdfExtractor.get_page_count(pdf)
+        assert bindings[:page_number] == 2
+      end
+    end
+  end
+
+  # A minimal two-page PDF with an Info dictionary whose title and subject
+  # carry the lines a spoof would want pdfinfo to print ahead of the real ones.
+  defp crafted_pdf do
+    objects = [
+      "<< /Type /Catalog /Pages 2 0 R >>",
+      "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 14400 14400] >>",
+      "<< /Title (spoof\\nPage size: 1 x 1 pts\\nPages: 1) /Subject (Page size: 2 x 2 pts) >>"
+    ]
+
+    {body, offsets} =
+      objects
+      |> Enum.with_index(1)
+      |> Enum.reduce({"%PDF-1.4\n", []}, fn {object, number}, {acc, offsets} ->
+        {acc <> "#{number} 0 obj\n#{object}\nendobj\n", [byte_size(acc) | offsets]}
+      end)
+
+    xref =
+      Enum.map_join(Enum.reverse(offsets), "", fn offset ->
+        String.pad_leading(Integer.to_string(offset), 10, "0") <> " 00000 n \n"
+      end)
+
+    body <>
+      "xref\n0 #{length(objects) + 1}\n0000000000 65535 f \n" <>
+      xref <>
+      "trailer\n<< /Size #{length(objects) + 1} /Root 1 0 R /Info 5 0 R >>\n" <>
+      "startxref\n#{byte_size(body)}\n%%EOF\n"
   end
 
   # With poppler installed the command runs and its own diagnostic comes back

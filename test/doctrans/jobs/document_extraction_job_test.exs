@@ -68,14 +68,19 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       assert names_failure?(reason, :poppler_not_found)
     end
 
-    test "a timeout is still retried" do
+    test "a render timeout is cancelled rather than retried" do
+      # A page that could not be rendered within its deadline cannot be rendered
+      # within it on the next attempt either; retrying only holds the single
+      # extraction slot, and the host's memory, for the same deadline again.
       document = document_fixture()
       document_source_fixture(document)
 
       fail_with(:pdf_command_timeout)
 
-      assert {:error, {:pdf_extraction_failed, [reason: :pdf_command_timeout]}} =
+      assert {:cancel, reason} =
                perform_job(DocumentExtractionJob, %{"document_id" => document.id})
+
+      assert names_failure?(reason, :pdf_command_timeout)
     end
 
     defp names_failure?(reason, tag) when is_atom(reason), do: reason == tag

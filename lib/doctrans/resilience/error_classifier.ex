@@ -25,6 +25,8 @@ defmodule Doctrans.Resilience.ErrorClassifier do
     - File not found
     - Model not found
     - Extraction limits (page count, page size, image size) and missing tools
+    - Poppler timeouts and unparseable `pdfinfo` output: both are properties of
+      the file, so a retry only reruns the same work against the same document
 
   A reason of the shape `{tag, [reason: nested]}` is classified by the nested
   reason, so a wrapper such as `{:pdf_extraction_failed, [reason: nested]}` is
@@ -79,6 +81,16 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   def classify({:pdf_page_too_large, _}), do: :permanent
   def classify({:page_image_too_large, _}), do: :permanent
   def classify({:poppler_not_found, _}), do: :permanent
+  def classify(:invalid_page_count), do: :permanent
+  def classify(:invalid_page_size), do: :permanent
+
+  # A poppler command that ran out its deadline did so on this document, under
+  # a single-slot queue with nothing competing for the renderer. Retrying pins
+  # the host's memory for the same deadline again, up to the attempt limit,
+  # while every other document waits behind it; the user-facing message already
+  # says what to change instead.
+  def classify(:pdf_command_timeout), do: :permanent
+  def classify(:pdfinfo_timeout), do: :permanent
 
   def classify(:timeout), do: :retryable
 

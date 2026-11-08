@@ -190,8 +190,17 @@ defmodule DoctransWeb.ErrorMessagesTest do
         {:pdf_too_many_pages, [pages: 4200, limit: 1000]},
         {:page_image_too_large, [page_number: 3, size: 40_000_000, limit: 20_000_000]},
         {:pdf_page_too_large,
-         [width: 41_666, height: 41_666, pixels: 1_736_055_556, limit: 40_000_000, dpi: 150]},
-        {:poppler_not_found, [command: "pdftoppm"]}
+         [
+           page_number: 7,
+           width: 41_666,
+           height: 41_666,
+           pixels: 1_736_055_556,
+           limit: 40_000_000,
+           dpi: 150
+         ]},
+        {:poppler_not_found, [command: "pdftoppm"]},
+        :invalid_page_count,
+        :invalid_page_size
       ]
 
       assert_specific_messages_everywhere(reasons)

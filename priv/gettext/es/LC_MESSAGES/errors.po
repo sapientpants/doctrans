@@ -94,342 +94,347 @@ msgstr "debe ser mayor o igual que %{number}"
 msgid "must be equal to %{number}"
 msgstr "debe ser igual a %{number}"
 
-#: lib/doctrans_web/error_messages.ex:131
+#: lib/doctrans_web/error_messages.ex:215
 #, elixir-autogen, elixir-format
 msgid "Could not parse page count from pdfinfo output"
 msgstr "No se pudo analizar el número de páginas de la salida de pdfinfo"
 
-#: lib/doctrans_web/error_messages.ex:63
+#: lib/doctrans_web/error_messages.ex:329
 #, elixir-autogen, elixir-format
 msgid "Document not found"
 msgstr "Documento no encontrado"
 
-#: lib/doctrans_web/error_messages.ex:120
+#: lib/doctrans_web/error_messages.ex:204
 #, elixir-autogen, elixir-format
 msgid "PDF extraction failed: %{reason}"
 msgstr "Error en extracción de PDF: %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:91
+#: lib/doctrans_web/error_messages.ex:307
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} extraction failed: %{reason}"
 msgstr "Error en extracción de página %{page_number}: %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:98
+#: lib/doctrans_web/error_messages.ex:314
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} translation failed: %{reason}"
 msgstr "Error en traducción de página %{page_number}: %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:134
+#: lib/doctrans_web/error_messages.ex:221
 #, elixir-autogen, elixir-format
 msgid "pdfinfo failed: %{error}"
 msgstr "Error en pdfinfo: %{error}"
 
-#: lib/doctrans_web/error_messages.ex:199
+#: lib/doctrans_web/error_messages.ex:185
 #, elixir-autogen, elixir-format
 msgid "Conversion completed but PDF file not found"
 msgstr "Conversión completada pero archivo PDF no encontrado"
 
-#: lib/doctrans_web/error_messages.ex:203
+#: lib/doctrans_web/error_messages.ex:189
 #, elixir-autogen, elixir-format
 msgid "Document conversion failed: %{error}"
 msgstr "Error en la conversión del documento: %{error}"
 
-#: lib/doctrans_web/error_messages.ex:213
+#: lib/doctrans_web/error_messages.ex:199
 #, elixir-autogen, elixir-format
 msgid "Document conversion timed out"
 msgstr "Tiempo de espera de conversión del documento agotado"
 
-#: lib/doctrans_web/error_messages.ex:193
+#: lib/doctrans_web/error_messages.ex:179
 #, elixir-autogen, elixir-format
 msgid "LibreOffice is not installed"
 msgstr "LibreOffice no está instalado"
 
-#: lib/doctrans_web/error_messages.ex:128
+#: lib/doctrans_web/error_messages.ex:212
 #, elixir-autogen, elixir-format
 msgid "Page image not found after extraction"
 msgstr "Page image not found after extraction"
 
-#: lib/doctrans_web/error_messages.ex:87
+#: lib/doctrans_web/error_messages.ex:331
 #, elixir-autogen, elixir-format
 msgid "Page not found"
 msgstr "Page not found"
 
-#: lib/doctrans_web/error_messages.ex:196
+#: lib/doctrans_web/error_messages.ex:182
 #, elixir-autogen, elixir-format
 msgid "Source file not found: %{path}"
 msgstr "Archivo de origen no encontrado: %{path}"
 
-#: lib/doctrans_web/error_messages.ex:113
+#: lib/doctrans_web/error_messages.ex:83
 #, elixir-autogen, elixir-format
 msgid "Unsupported file format: %{format}"
 msgstr "Formato de archivo no compatible: %{format}"
 
-#: lib/doctrans_web/error_messages.ex:207
+#: lib/doctrans_web/error_messages.ex:193
 #, elixir-autogen, elixir-format
 msgid "Failed to start LibreOffice: %{error}"
 msgstr "No se pudo iniciar LibreOffice: %{error}"
 
-#: lib/doctrans_web/error_messages.ex:44
+#: lib/doctrans_web/error_messages.ex:69
 #, elixir-autogen, elixir-format
 msgid "Could not read file for validation"
 msgstr "No se pudo leer el archivo para validarlo"
 
-#: lib/doctrans_web/error_messages.ex:40
+#: lib/doctrans_web/error_messages.ex:65
 #, elixir-autogen, elixir-format
 msgid "File content does not match its extension"
 msgstr "El contenido del archivo no coincide con su extensión"
 
-#: lib/doctrans_web/error_messages.ex:42
+#: lib/doctrans_web/error_messages.ex:67
 #, elixir-autogen, elixir-format
 msgid "File is too small to be a valid document"
 msgstr "El archivo es demasiado pequeño para ser un documento válido"
 
-#: lib/doctrans_web/error_messages.ex:47
+#: lib/doctrans_web/error_messages.ex:72
 #, elixir-autogen, elixir-format
 msgid "File path and extension must be strings"
 msgstr "La ruta y la extensión del archivo deben ser cadenas de texto"
 
-#: lib/doctrans_web/error_messages.ex:37
+#: lib/doctrans_web/error_messages.ex:56
 #, elixir-autogen, elixir-format
 msgid "Language code must be a string"
 msgstr "El código de idioma debe ser una cadena de texto"
 
-#: lib/doctrans_web/error_messages.ex:51
+#: lib/doctrans_web/error_messages.ex:91
 #, elixir-autogen, elixir-format
 msgid "Missing required fields: %{fields}"
 msgstr "Faltan campos obligatorios: %{fields}"
 
-#: lib/doctrans_web/error_messages.ex:27
+#: lib/doctrans_web/error_messages.ex:33
 #, elixir-autogen, elixir-format
 msgid "Query too long (max %{max} characters)"
 msgstr "Consulta demasiado larga (máximo %{max} caracteres)"
 
-#: lib/doctrans_web/error_messages.ex:24
+#: lib/doctrans_web/error_messages.ex:30
 #, elixir-autogen, elixir-format
 msgid "Query too short"
 msgstr "Consulta demasiado corta"
 
-#: lib/doctrans_web/error_messages.ex:29
+#: lib/doctrans_web/error_messages.ex:35
 #, elixir-autogen, elixir-format
 msgid "Search query must be a string"
 msgstr "La consulta de búsqueda debe ser una cadena de texto"
 
-#: lib/doctrans_web/error_messages.ex:58
+#: lib/doctrans_web/error_messages.ex:59
 #, elixir-autogen, elixir-format
 msgid "Target language is required and must be a string"
 msgstr "El idioma de destino es obligatorio y debe ser una cadena de texto"
 
-#: lib/doctrans_web/error_messages.ex:53
+#: lib/doctrans_web/error_messages.ex:93
 #, elixir-autogen, elixir-format
 msgid "Title cannot be empty"
 msgstr "El título no puede estar vacío"
 
-#: lib/doctrans_web/error_messages.ex:55
+#: lib/doctrans_web/error_messages.ex:95
 #, elixir-autogen, elixir-format
 msgid "Title is required and must be a string"
 msgstr "El título es obligatorio y debe ser una cadena de texto"
 
-#: lib/doctrans_web/error_messages.ex:33
+#: lib/doctrans_web/error_messages.ex:52
 #, elixir-autogen, elixir-format
 msgid "Unsupported language: %{language}"
 msgstr "Idioma no compatible: %{language}"
 
-#: lib/doctrans_web/error_messages.ex:307
+#: lib/doctrans_web/error_messages.ex:97
 #, elixir-autogen, elixir-format
 msgid "Could not read uploaded file"
 msgstr "No se pudo leer el archivo subido"
 
-#: lib/doctrans_web/error_messages.ex:327
+#: lib/doctrans_web/error_messages.ex:76
 #, elixir-autogen, elixir-format
 msgid "File too large (%{size}MB, max %{max}MB)"
 msgstr "Archivo demasiado grande (%{size}MB, máximo %{max}MB)"
 
-#: lib/doctrans_web/error_messages.ex:211
+#: lib/doctrans_web/error_messages.ex:197
 #, elixir-autogen, elixir-format
 msgid "LibreOffice process terminated unexpectedly"
 msgstr "El proceso de LibreOffice terminó inesperadamente"
 
-#: lib/doctrans_web/error_messages.ex:67
+#: lib/doctrans_web/error_messages.ex:285
 #, elixir-autogen, elixir-format
 msgid "The model did not return complete final text. Use a model with a larger output budget or split the page into smaller sections, then reprocess. The provider must return finish_reason=stop."
 msgstr "El modelo no devolvió un texto final completo. Use un modelo con un límite de salida mayor o divida la página en secciones más pequeñas y vuelva a procesarla. El proveedor debe devolver finish_reason=stop."
 
-#: lib/doctrans_web/error_messages.ex:105
+#: lib/doctrans_web/error_messages.ex:323
 #, elixir-autogen, elixir-format
 msgid "Processing failed on page(s) %{page_numbers}. Reprocess those pages to finish this document."
 msgstr "El procesamiento falló en la(s) página(s) %{page_numbers}. Vuelva a procesar esas páginas para terminar este documento."
 
-#: lib/doctrans_web/error_messages.ex:138
+#: lib/doctrans_web/error_messages.ex:225
 #, elixir-autogen, elixir-format
 msgid "PDF rendering timed out. Lower the extraction resolution or split the document, then try again."
 msgstr "El renderizado del PDF ha superado el tiempo límite. Reduzca la resolución de extracción o divida el documento e inténtelo de nuevo."
 
-#: lib/doctrans_web/error_messages.ex:179
+#: lib/doctrans_web/error_messages.ex:267
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} rendered too large (%{size} bytes, limit %{limit}). Lower the extraction resolution, then reprocess this page."
 msgstr "La página %{page_number} se generó demasiado grande (%{size} bytes, límite %{limit}). Reduzca la resolución de extracción y vuelva a procesar esta página."
 
-#: lib/doctrans_web/error_messages.ex:189
+#: lib/doctrans_web/error_messages.ex:277
 #, elixir-autogen, elixir-format
 msgid "Required PDF tool %{command} is not installed"
 msgstr "La herramienta PDF requerida %{command} no está instalada"
 
-#: lib/doctrans_web/error_messages.ex:159
+#: lib/doctrans_web/error_messages.ex:246
 #, elixir-autogen, elixir-format
 msgid "This PDF has %{pages} pages, above the limit of %{limit}. Split it into smaller documents before uploading."
 msgstr "Este PDF tiene %{pages} páginas, por encima del límite de %{limit}. Divídalo en documentos más pequeños antes de subirlo."
 
-#: lib/doctrans_web/error_messages.ex:152
+#: lib/doctrans_web/error_messages.ex:239
 #, elixir-autogen, elixir-format
 msgid "Extraction ran out of time for this document. Finished pages were kept; reprocess it to continue."
 msgstr "Se agotó el tiempo de extracción de este documento. Las páginas terminadas se conservaron; vuelva a procesarlo para continuar."
 
-#: lib/doctrans_web/error_messages.ex:145
+#: lib/doctrans_web/error_messages.ex:232
 #, elixir-autogen, elixir-format
 msgid "Reading the PDF timed out before extraction started. The file may be damaged."
 msgstr "La lectura del PDF agotó el tiempo de espera antes de iniciar la extracción. Puede que el archivo esté dañado."
 
-#: lib/doctrans_web/error_messages.ex:168
-#, elixir-autogen, elixir-format
-msgid "This PDF's pages are %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."
-msgstr "Las páginas de este PDF miden %{width}x%{height} píxeles a %{dpi} PPP, por encima del límite de %{limit} píxeles. Reduzca la resolución de extracción y vuelva a intentarlo."
-
-#: lib/doctrans_web/error_messages.ex:310
+#: lib/doctrans_web/error_messages.ex:100
 #, elixir-autogen, elixir-format
 msgid "Could not store the uploaded file"
 msgstr "No se pudo guardar el archivo subido"
 
-#: lib/doctrans_web/error_messages.ex:323
+#: lib/doctrans_web/error_messages.ex:113
 #, elixir-autogen, elixir-format
 msgid "The document could not be saved"
 msgstr "No se pudo guardar el documento"
 
-#: lib/doctrans_web/error_messages.ex:313
+#: lib/doctrans_web/error_messages.ex:103
 #, elixir-autogen, elixir-format
 msgid "Could not start processing for this document"
 msgstr "No se pudo iniciar el procesamiento de este documento"
 
-#: lib/doctrans_web/error_messages.ex:117
+#: lib/doctrans_web/error_messages.ex:87
 #, elixir-autogen, elixir-format
 msgid "Only PDF, Word, OpenDocument, and RTF documents are accepted"
 msgstr "Solo se aceptan documentos PDF, Word, OpenDocument y RTF"
 
-#: lib/doctrans_web/error_messages.ex:318
+#: lib/doctrans_web/error_messages.ex:108
 #, elixir-autogen, elixir-format
 msgid "This file could not be uploaded. Please try again."
 msgstr "No se pudo subir este archivo. Inténtalo de nuevo."
 
-#: lib/doctrans_web/error_messages.ex:74
+#: lib/doctrans_web/error_messages.ex:292
 #, elixir-autogen, elixir-format
 msgid "The model server ran out of time and the request was stopped. Check that it is running and responsive, then reprocess this page."
 msgstr "El servidor de modelos se quedó sin tiempo y la solicitud se detuvo. Compruebe que está en funcionamiento y responde, y luego vuelva a procesar esta página."
 
-#: lib/doctrans_web/error_messages.ex:81
+#: lib/doctrans_web/error_messages.ex:299
 #, elixir-autogen, elixir-format
 msgid "The model server's answer went past the %{limit} byte limit and was stopped before it was read. Check the configured model and endpoint, then try again."
 msgstr "La respuesta del servidor de modelos superó el límite de %{limit} bytes y se detuvo antes de leerse. Compruebe el modelo y el endpoint configurados y vuelva a intentarlo."
 
-#: lib/doctrans_web/error_messages.ex:61
+#: lib/doctrans_web/error_messages.ex:62
 #, elixir-autogen, elixir-format
 msgid "Source language is required and must be a string"
 msgstr "El idioma de origen es obligatorio y debe ser una cadena de texto"
 
-#: lib/doctrans_web/error_messages.ex:241
+#: lib/doctrans_web/error_messages.ex:363
 #, elixir-autogen, elixir-format
 msgid "No page of this document is waiting to be retried. Reload the page to see its current state."
 msgstr "Ninguna página de este documento está esperando un reintento. Recarga la página para ver su estado actual."
 
-#: lib/doctrans_web/error_messages.ex:234
+#: lib/doctrans_web/error_messages.ex:356
 #, elixir-autogen, elixir-format
 msgid "This document has already finished processing, so there is nothing left to stop."
 msgstr "Este documento ya ha terminado de procesarse, así que no queda nada que detener."
 
-#: lib/doctrans_web/error_messages.ex:281
+#: lib/doctrans_web/error_messages.ex:152
 #, elixir-autogen, elixir-format
 msgid "The embedding model %{model} is not available on %{destination}. Documents will still translate, but they cannot be searched until it is loaded there or the embedding model names one that server offers."
 msgstr "El modelo de embeddings %{model} no está disponible en %{destination}. Los documentos se seguirán traduciendo, pero no se podrán buscar hasta que se cargue allí o el modelo de embeddings sea uno que ofrezca ese servidor."
 
-#: lib/doctrans_web/error_messages.ex:298
+#: lib/doctrans_web/error_messages.ex:169
 #, elixir-autogen, elixir-format
 msgid "The embedding model %{model} returns %{actual} dimensions, but %{expected} are required. Choose an embedding model with at least %{expected} dimensions; until then documents translate but cannot be searched."
 msgstr "El modelo de embeddings %{model} devuelve %{actual} dimensiones, pero se necesitan %{expected}. Elija un modelo de embeddings con al menos %{expected} dimensiones; hasta entonces los documentos se traducen pero no se pueden buscar."
 
-#: lib/doctrans_web/error_messages.ex:290
+#: lib/doctrans_web/error_messages.ex:161
 #, elixir-autogen, elixir-format
 msgid "The embedding server at %{destination} is not answering. Documents will still translate, but they cannot be searched until it is running."
 msgstr "El servidor de embeddings en %{destination} no responde. Los documentos se seguirán traduciendo, pero no se podrán buscar hasta que esté en funcionamiento."
 
-#: lib/doctrans_web/error_messages.ex:261
+#: lib/doctrans_web/error_messages.ex:132
 #, elixir-autogen, elixir-format
 msgid "The extraction model %{model} is not available on %{destination}. Load it there, or set the extraction model to one that server offers."
 msgstr "El modelo de extracción %{model} no está disponible en %{destination}. Cárguelo allí o establezca como modelo de extracción uno que ofrezca ese servidor."
 
-#: lib/doctrans_web/error_messages.ex:253
+#: lib/doctrans_web/error_messages.ex:124
 #, elixir-autogen, elixir-format
 msgid "The model server at %{destination} is not answering. Start it before uploading, or documents will wait in the queue until it is running."
 msgstr "El servidor de modelos en %{destination} no responde. Inícielo antes de subir los documentos; de lo contrario, esperarán en la cola hasta que esté en funcionamiento."
 
-#: lib/doctrans_web/error_messages.ex:270
+#: lib/doctrans_web/error_messages.ex:141
 #, elixir-autogen, elixir-format
 msgid "The translation model %{model} is not available on %{destination}. Load it there, or set the translation model to one that server offers."
 msgstr "El modelo de traducción %{model} no está disponible en %{destination}. Cárguelo allí o establezca como modelo de traducción uno que ofrezca ese servidor."
 
-#: lib/doctrans_web/error_messages.ex:22
+#: lib/doctrans_web/error_messages.ex:26
 #, elixir-autogen, elixir-format
 msgid "An unexpected error occurred. Please try again."
 msgstr "Se produjo un error inesperado. Por favor, inténtalo de nuevo."
 
-#: lib/doctrans_web/error_messages.ex:352
+#: lib/doctrans_web/error_messages.ex:371
 #, elixir-autogen, elixir-format
 msgid "Could not fetch the list of models from the model server"
 msgstr "No se pudo obtener la lista de modelos del servidor de modelos"
 
-#: lib/doctrans_web/error_messages.ex:347
+#: lib/doctrans_web/error_messages.ex:43
 #, elixir-autogen, elixir-format
 msgid "Document search is temporarily unavailable. Please try again."
 msgstr "La búsqueda en el documento no está disponible temporalmente. Inténtalo de nuevo."
 
-#: lib/doctrans_web/error_messages.ex:349
+#: lib/doctrans_web/error_messages.ex:333
 #, elixir-autogen, elixir-format
 msgid "Failed to delete document"
 msgstr "Error al eliminar documento"
 
-#: lib/doctrans_web/error_messages.ex:306
+#: lib/doctrans_web/error_messages.ex:368
 #, elixir-autogen, elixir-format
 msgid "Invalid model selection"
 msgstr "Selección de modelo no válida"
 
-#: lib/doctrans_web/error_messages.ex:217
+#: lib/doctrans_web/error_messages.ex:339
 #, elixir-autogen, elixir-format
 msgid "Original upload unavailable. Re-upload this document to process it again."
 msgstr "El archivo original no está disponible. Vuelve a subir el documento para procesarlo de nuevo."
 
-#: lib/doctrans_web/error_messages.ex:332
+#: lib/doctrans_web/error_messages.ex:375
 #, elixir-autogen, elixir-format
 msgid "Please enter a question."
 msgstr "Por favor, introduce una pregunta."
 
-#: lib/doctrans_web/error_messages.ex:342
+#: lib/doctrans_web/error_messages.ex:38
 #, elixir-autogen, elixir-format
 msgid "Search is temporarily unavailable. Please try again."
 msgstr "La búsqueda no está disponible temporalmente. Por favor, inténtalo de nuevo."
 
-#: lib/doctrans_web/error_messages.ex:230
+#: lib/doctrans_web/error_messages.ex:352
 #, elixir-autogen, elixir-format
 msgid "The document has changed. Please try again."
 msgstr "El documento ha cambiado. Inténtalo de nuevo."
 
-#: lib/doctrans_web/error_messages.ex:224
+#: lib/doctrans_web/error_messages.ex:346
 #, elixir-autogen, elixir-format
 msgid "This document still has active processing jobs. Please wait for them to finish."
 msgstr "Este documento aún tiene tareas de procesamiento activas. Espera a que terminen."
 
-#: lib/doctrans_web/error_messages.ex:339
+#: lib/doctrans_web/error_messages.ex:385
 #, elixir-autogen, elixir-format
 msgid "The database did not respond. Please try again."
 msgstr "La base de datos no respondió. Por favor, inténtalo de nuevo."
 
-#: lib/doctrans_web/error_messages.ex:125
+#: lib/doctrans_web/error_messages.ex:209
 #, elixir-autogen, elixir-format
 msgid "pdftoppm failed: %{error}"
 msgstr "Error en pdftoppm: %{error}"
+
+#: lib/doctrans_web/error_messages.ex:218
+#, elixir-autogen, elixir-format
+msgid "Could not parse page sizes from pdfinfo output"
+msgstr "No se pudieron analizar los tamaños de página de la salida de pdfinfo"
+
+#: lib/doctrans_web/error_messages.ex:255
+#, elixir-autogen, elixir-format
+msgid "Page %{page_number} of this PDF is %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."
+msgstr "La página %{page_number} de este PDF mide %{width}x%{height} píxeles a %{dpi} PPP, por encima del límite de %{limit} píxeles. Reduzca la resolución de extracción y vuelva a intentarlo."

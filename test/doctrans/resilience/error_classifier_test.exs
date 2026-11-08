@@ -50,13 +50,22 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
       assert ErrorClassifier.classify({:poppler_not_found, [command: "pdftoppm"]}) == :permanent
     end
 
+    test "classifies poppler timeouts and unparseable pdfinfo output as permanent" do
+      # The renderer ran out its deadline on this file under a single-slot
+      # queue; another attempt only pins the host for the same deadline again.
+      assert ErrorClassifier.classify(:pdf_command_timeout) == :permanent
+      assert ErrorClassifier.classify(:pdfinfo_timeout) == :permanent
+      assert ErrorClassifier.classify(:invalid_page_count) == :permanent
+      assert ErrorClassifier.classify(:invalid_page_size) == :permanent
+    end
+
     test "classifies a wrapped reason by the reason it carries" do
       assert ErrorClassifier.classify(
                {:pdf_extraction_failed, [reason: {:pdf_too_many_pages, [pages: 9, limit: 1]}]}
              ) == :permanent
 
       assert ErrorClassifier.classify({:pdf_extraction_failed, [reason: :pdf_command_timeout]}) ==
-               :unknown
+               :permanent
 
       assert ErrorClassifier.classify({:pdf_extraction_failed, [reason: :timeout]}) == :retryable
 

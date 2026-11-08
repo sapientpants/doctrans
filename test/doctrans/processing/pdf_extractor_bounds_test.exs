@@ -202,7 +202,13 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
     end
 
     test "a page count within :max_pages is returned", %{dir: dir, config: config} do
-      counting = fake(dir, "pdfinfo", "#!/bin/sh\necho \"Pages:          12\"\n")
+      counting =
+        fake(dir, "pdfinfo", """
+        #!/bin/sh
+        echo "Pages:           12"
+        echo "Page    1 size:  612 x 792 pts (letter)"
+        """)
+
       put_config(config, pdfinfo_path: counting, max_pages: 1_000)
 
       assert {:ok, 12} = PdfExtractor.get_page_count(source_pdf(dir))
@@ -295,8 +301,9 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
       huge =
         fake(dir, "pdfinfo", """
         #!/bin/sh
-        echo "Pages:          1"
-        echo "Page size:      20000 x 20000 pts"
+        echo "Pages:           1"
+        echo "Page    1 size:  20000 x 20000 pts"
+        echo "Page    1 rot:   0"
         """)
 
       put_config(config, pdfinfo_path: huge, dpi: 150, max_page_pixels: 40_000_000)
@@ -304,17 +311,113 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
       assert {:error, {:pdf_page_too_large, bindings}} =
                PdfExtractor.get_page_count(source_pdf(dir))
 
+      assert bindings[:page_number] == 1
       assert bindings[:limit] == 40_000_000
       assert bindings[:dpi] == 150
       assert bindings[:pixels] > 40_000_000
     end
 
-    test "an ordinary page size passes", %{dir: dir, config: config} do
+    test "every page is asked for, up to the page limit", %{dir: dir, config: config} do
+      # Without a range pdfinfo reports the first page's size only. The range
+      # is what makes the check below cover the whole document, so the fake
+      # records what it was asked for.
+      recorded = Path.join(dir, "pdfinfo.args")
+
+      recording =
+        fake(dir, "pdfinfo", """
+        #!/bin/sh
+        printf '%s\\n' "$@" > "#{recorded}"
+        echo "Pages:           1"
+        echo "Page    1 size:  612 x 792 pts (letter)"
+        """)
+
+      put_config(config, pdfinfo_path: recording, max_pages: 250)
+
+      pdf = source_pdf(dir)
+      assert {:ok, 1} = PdfExtractor.get_page_count(pdf)
+      assert File.read!(recorded) == "-f\n1\n-l\n250\n#{pdf}\n"
+    end
+
+    test "a small first page does not vouch for the pages behind it", %{
+      dir: dir,
+      config: config
+    } do
+      mixed =
+        fake(dir, "pdfinfo", """
+        #!/bin/sh
+        echo "Pages:           3"
+        echo "Page    1 size:  612 x 792 pts (letter)"
+        echo "Page    1 rot:   0"
+        echo "Page    2 size:  612 x 792 pts (letter)"
+        echo "Page    2 rot:   0"
+        echo "Page    3 size:  14400 x 14400 pts"
+        echo "Page    3 rot:   0"
+        """)
+
+      put_config(config, pdfinfo_path: mixed, dpi: 150, max_page_pixels: 40_000_000)
+
+      assert {:error, {:pdf_page_too_large, bindings}} =
+               PdfExtractor.get_page_count(source_pdf(dir))
+
+      assert bindings[:page_number] == 3
+    end
+
+    test "a size line inside the document's metadata is not its geometry", %{
+      dir: dir,
+      config: config
+    } do
+      # pdfinfo prints the Info dictionary before the page lines, with the
+      # metadata's own newlines shown as `?`, so a crafted title can put the
+      # words "Page size:" and "Pages:" on the page ahead of the real lines.
+      spoofed =
+        fake(dir, "pdfinfo", """
+        #!/bin/sh
+        echo "Title:           spoof?Page size: 1 x 1 pts?Pages: 1"
+        echo "Subject:         Page    1 size:  1 x 1 pts"
+        echo "Pages:           2"
+        echo "Page    1 size:  20000 x 20000 pts"
+        echo "Page    1 rot:   0"
+        echo "Page    2 size:  612 x 792 pts (letter)"
+        echo "Page    2 rot:   0"
+        """)
+
+      put_config(config, pdfinfo_path: spoofed, dpi: 150, max_page_pixels: 40_000_000)
+
+      assert {:error, {:pdf_page_too_large, bindings}} =
+               PdfExtractor.get_page_count(source_pdf(dir))
+
+      assert bindings[:page_number] == 1
+    end
+
+    test "a page count inside the document's metadata is not its page count", %{
+      dir: dir,
+      config: config
+    } do
+      spoofed =
+        fake(dir, "pdfinfo", """
+        #!/bin/sh
+        echo "Title:           Pages: 1"
+        echo "Pages:           30"
+        echo "Page    1 size:  612 x 792 pts (letter)"
+        """)
+
+      put_config(config, pdfinfo_path: spoofed, max_pages: 10)
+
+      assert {:error, {:pdf_too_many_pages, [pages: 30, limit: 10]}} =
+               PdfExtractor.get_page_count(source_pdf(dir))
+    end
+
+    test "ordinary page sizes pass", %{dir: dir, config: config} do
       letter =
         fake(dir, "pdfinfo", """
         #!/bin/sh
-        echo "Pages:          3"
-        echo "Page size:      612 x 792 pts (letter)"
+        echo "Pages:           3"
+        echo "Page    1 size:  612 x 792 pts (letter)"
+        echo "Page    1 rot:   0"
+        echo "Page    2 size:  612 x 792 pts (letter)"
+        echo "Page    2 rot:   0"
+        echo "Page    3 size:  595.276 x 841.89 pts (A4)"
+        echo "Page    3 rot:   90"
         """)
 
       put_config(config, pdfinfo_path: letter, dpi: 150, max_page_pixels: 40_000_000)
@@ -322,14 +425,35 @@ defmodule Doctrans.Processing.PdfExtractorBoundsTest do
       assert {:ok, 3} = PdfExtractor.get_page_count(source_pdf(dir))
     end
 
-    test "output without a page size is accepted rather than guessed at", %{
+    test "a build that ignores the range still has its one size line checked", %{
       dir: dir,
       config: config
     } do
+      unnumbered =
+        fake(dir, "pdfinfo", """
+        #!/bin/sh
+        echo "Pages:           1"
+        echo "Page size:       20000 x 20000 pts"
+        """)
+
+      put_config(config, pdfinfo_path: unnumbered, dpi: 150, max_page_pixels: 40_000_000)
+
+      assert {:error, {:pdf_page_too_large, bindings}} =
+               PdfExtractor.get_page_count(source_pdf(dir))
+
+      assert bindings[:page_number] == 1
+    end
+
+    test "output without a page size is rejected rather than rendered on trust", %{
+      dir: dir,
+      config: config
+    } do
+      # The geometry check is the one bound that must hold before the render,
+      # so output that gives it nothing to check cannot be waved through.
       terse = fake(dir, "pdfinfo", "#!/bin/sh\necho \"Pages:          2\"\n")
       put_config(config, pdfinfo_path: terse, max_page_pixels: 1)
 
-      assert {:ok, 2} = PdfExtractor.get_page_count(source_pdf(dir))
+      assert {:error, :invalid_page_size} = PdfExtractor.get_page_count(source_pdf(dir))
     end
   end
 

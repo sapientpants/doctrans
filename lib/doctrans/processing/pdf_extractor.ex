@@ -20,6 +20,9 @@ defmodule Doctrans.Processing.PdfExtractor do
     pixels than that at the configured `:dpi`. This is the bound that has to come
     first: a page with a maximal PDF MediaBox renders to gigabytes of memory and
     disk well inside any sane deadline, so catching it afterwards is too late.
+    `pdfinfo` is asked for every page's geometry, not just the first page's, and
+    a document whose geometry it does not report is rejected rather than rendered
+    on trust.
   - `:max_image_bytes` rejects a rendered page too large to be worth sending to a
     model, and deletes it
   - `:timeout` bounds one render, and a `:deadline` passed by the caller bounds
@@ -74,21 +77,26 @@ defmodule Doctrans.Processing.PdfExtractor do
   @doc """
   Gets the number of pages in a PDF without extracting.
 
-  Documents above the configured `:max_pages`, and documents whose pages would
-  rasterize above `:max_page_pixels`, are rejected here — before any page is
-  rendered. This is the one call that decides how much extraction work follows.
+  Documents above the configured `:max_pages`, and documents any of whose pages
+  would rasterize above `:max_page_pixels`, are rejected here — before any page
+  is rendered. This is the one call that decides how much extraction work
+  follows, so it is the one call a document could lie to: `pdfinfo` is asked for
+  the geometry of every page up to `:max_pages`, and only lines it prints for a
+  page count toward the answer, never a look-alike inside the document's own
+  metadata.
   """
   @impl true
   def get_page_count(pdf_path) do
     with {:ok, executable} <- resolve(:pdfinfo_path, "pdfinfo"),
          {:ok, output} <-
-           run(executable, [pdf_path], PdfExtraction.info_timeout(),
+           run(executable, info_args(pdf_path), PdfExtraction.info_timeout(),
              failure_tag: :pdfinfo_failed,
              timeout_tag: :pdfinfo_timeout
            ),
          {:ok, count} <- parse_page_count(output),
+         {:ok, count} <- check_page_count(count),
          :ok <- check_page_geometry(output) do
-      check_page_count(count)
+      {:ok, count}
     end
   end
 
@@ -107,6 +115,15 @@ defmodule Doctrans.Processing.PdfExtractor do
 
   defp render_args(pdf_path, output_dir) do
     ["-png", "-r", to_string(PdfExtraction.dpi()), pdf_path, Path.join(output_dir, "page")]
+  end
+
+  # Without a page range `pdfinfo` reports the size of the first page only, and
+  # a small first page says nothing about the ones behind it. With one it prints
+  # a `Page N size:` line for every page in the range; asking for up to
+  # `:max_pages` covers every page an accepted document can have, and a document
+  # with more is rejected by its count before its geometry matters.
+  defp info_args(pdf_path) do
+    ["-f", "1", "-l", to_string(PdfExtraction.max_pages()), pdf_path]
   end
 
   # Clamps a command's timeout to the caller's remaining document budget, so
@@ -153,8 +170,12 @@ defmodule Doctrans.Processing.PdfExtractor do
     )
   end
 
+  # Anchored to the start of a line. `pdfinfo` prints the document's Info
+  # dictionary (`Title:`, `Subject:`, `Keywords:`) before `Pages:`, and prints
+  # the metadata's own newlines as `?`, so a title that reads "Pages: 1" sits
+  # mid-line where this cannot match it.
   defp parse_page_count(output) do
-    case Regex.run(~r/Pages:\s*(\d+)/, output) do
+    case Regex.run(~r/^Pages:\s+(\d+)\s*$/m, output) do
       [_, count] -> {:ok, String.to_integer(count)}
       _no_match -> {:error, :invalid_page_count}
     end
@@ -170,18 +191,25 @@ defmodule Doctrans.Processing.PdfExtractor do
     end
   end
 
-  # Rejects geometry that would rasterize past the pixel limit. `pdfinfo` reports
-  # the first page's media box; a document whose pages differ can still slip a
-  # later page through, which is what the post-render byte check is for.
+  # Rejects any page whose geometry would rasterize past the pixel limit. Every
+  # page is checked, in order, and the first one over the limit names itself in
+  # the error. Output that reports no geometry at all is rejected rather than
+  # rendered unchecked: this is the one bound that must hold before the render,
+  # so "nothing to check against" cannot mean "go ahead".
   defp check_page_geometry(output) do
-    case parse_page_size(output) do
-      {:ok, {width_pts, height_pts}} -> check_page_pixels(width_pts, height_pts)
-      # Nothing to check against: some builds omit the line entirely.
-      :error -> :ok
+    with {:ok, sizes} <- parse_page_sizes(output) do
+      Enum.reduce_while(sizes, :ok, &check_page_pixels/2)
     end
   end
 
-  defp check_page_pixels(width_pts, height_pts) do
+  defp check_page_pixels({page_number, width_pts, height_pts}, :ok) do
+    case check_page_pixels(page_number, width_pts, height_pts) do
+      :ok -> {:cont, :ok}
+      {:error, _} = error -> {:halt, error}
+    end
+  end
+
+  defp check_page_pixels(page_number, width_pts, height_pts) do
     dpi = PdfExtraction.dpi()
     limit = PdfExtraction.max_page_pixels()
     width = round(width_pts / @points_per_inch * dpi)
@@ -191,18 +219,41 @@ defmodule Doctrans.Processing.PdfExtractor do
     if pixels > limit do
       {:error,
        {:pdf_page_too_large,
-        [width: width, height: height, pixels: pixels, limit: limit, dpi: dpi]}}
+        [
+          page_number: page_number,
+          width: width,
+          height: height,
+          pixels: pixels,
+          limit: limit,
+          dpi: dpi
+        ]}}
     else
       :ok
     end
   end
 
-  defp parse_page_size(output) do
-    case Regex.run(~r/Page size:\s*([\d.]+)\s*x\s*([\d.]+)\s*pts/, output) do
-      [_, width, height] -> {:ok, {parse_float(width), parse_float(height)}}
-      _no_match -> :error
+  # One `Page N size:` line per page when a range was given, or a single
+  # `Page size:` line from a build that ignores the range; either way the line
+  # starts the line, so metadata that merely contains those words is not read as
+  # geometry. A page the line does not number is taken in order of appearance.
+  defp parse_page_sizes(output) do
+    ~r/^Page(?:\s+(\d+))? size:\s+([\d.]+)\s*x\s*([\d.]+)\s*pts/m
+    |> Regex.scan(output)
+    |> Enum.with_index(1)
+    |> case do
+      [] ->
+        {:error, :invalid_page_size}
+
+      lines ->
+        {:ok,
+         Enum.map(lines, fn {[_line, number, width, height], position} ->
+           {page_number(number, position), parse_float(width), parse_float(height)}
+         end)}
     end
   end
+
+  defp page_number("", position), do: position
+  defp page_number(number, _position), do: String.to_integer(number)
 
   defp parse_float(value) do
     case Float.parse(value) do
