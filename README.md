@@ -132,29 +132,36 @@ development environment, use `docker-compose.runtime.yml` instead — see
 [Runtime deployment](#runtime-deployment).
 
 The development container is hardened for the one thing it does with untrusted input: it runs
-LibreOffice and poppler on whatever document you upload, over a read-write mount of your checkout.
-So it runs as an unprivileged user with every capability dropped and `no-new-privileges` set, it
-keeps the storage root in the `doctrans_data` volume rather than under `priv/static/uploads` on the
-mount, it gets a private tmpfs `/tmp`, and `.git` and `scripts/` are mounted read-only inside it. A
-converter bug triggered by a hostile file therefore starts in a directory the code reloader never
-compiles, and cannot plant a git hook or edit the agent command policy. The trade-off is that the
-source mount stays writable, because the asset watchers build into `priv/static/assets` — so `lib/`
-remains reachable from inside the container, and the native `mix phx.server` path, which runs the
-converters with your own privileges, remains the less contained of the two.
+LibreOffice and poppler on whatever document you upload, with your checkout mounted in. So it runs
+as an unprivileged user with every capability dropped and `no-new-privileges` set, it keeps the
+storage root in the `doctrans_data` volume rather than under `priv/static/uploads`, it gets a private
+tmpfs `/tmp`, and the checkout is mounted **read-only**, with `priv/static` the one writable path
+because the asset watchers build into `priv/static/assets`. A converter bug triggered by a hostile
+file therefore starts in a directory the code reloader never compiles, and cannot write to `lib/`
+(compiled on the next request), `config/` or `mix.exs` (evaluated on the next boot), `.git/hooks`,
+`scripts/command-policy.sh`, the agent hooks in `.claude/` and `.pi/`, or `.env` (which Compose
+reads the container's `user:` from). Dependencies and build output live in anonymous volumes under
+`/opt/doctrans` rather than in `deps/` and `_build/`, since nothing can be mounted inside a read-only
+mount. Two things follow: Mix tasks that write into the project, such as `mix format`, generators or
+the test suite's `tmp_dir` tests, run natively rather than through `docker compose exec`; and the
+native `mix phx.server` path, which runs the converters with your own privileges, remains the less
+contained of the two.
 
 The container user is `1000:1000` by default. On Linux the bind mount carries host ownership, so if
 your account has different ids, pass them when building and running — files the watchers write are
-then yours rather than another user's:
+then yours rather than another user's. The variables are prefixed because `UID` is read-only in bash
+and a bare `UID=...` assignment is silently refused there:
 
 ```bash
-UID=$(id -u) GID=$(id -g) docker compose up --build
+DOCTRANS_UID=$(id -u) DOCTRANS_GID=$(id -g) docker compose up --build
 ```
 
 Docker Desktop on macOS and Windows maps ownership on its own and needs nothing. If you ran the
-stack before it had a non-root user, the anonymous `deps` and `_build` volumes still belong to root
-and Mix cannot write to them; renew them once with `docker compose up --build -V`. Documents you
-uploaded through the earlier stack are still under `priv/static/uploads`, which the container no
-longer reads; copy them into the volume once, with the application stopped:
+stack before this layout, `docker compose up --build` picks up the new paths on its own; the old
+anonymous volumes that shadowed `deps/` and `_build/` are simply left behind, and `docker volume
+prune` reclaims them. Documents you uploaded through the earlier stack are still under
+`priv/static/uploads`, which the container no longer reads; copy them into the volume once, with the
+application stopped:
 
 ```bash
 docker run --rm -v doctrans_data:/data -v "$PWD/priv/static/uploads":/src:ro alpine \
