@@ -214,6 +214,9 @@ defmodule DoctransWeb.ErrorMessages do
   defp lookup(:invalid_page_count),
     do: dgettext("errors", "Could not parse page count from pdfinfo output")
 
+  defp lookup(:invalid_page_size),
+    do: dgettext("errors", "Could not parse page sizes from pdfinfo output")
+
   defp lookup({:pdfinfo_failed, bindings}),
     do: dgettext("errors", "pdfinfo failed: %{error}", error: binding(bindings, :error))
 
@@ -251,7 +254,8 @@ defmodule DoctransWeb.ErrorMessages do
     do:
       dgettext(
         "errors",
-        "This PDF's pages are %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again.",
+        "Page %{page_number} of this PDF is %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again.",
+        page_number: binding(bindings, :page_number),
         width: binding(bindings, :width),
         height: binding(bindings, :height),
         dpi: binding(bindings, :dpi),
