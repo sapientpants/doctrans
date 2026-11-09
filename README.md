@@ -474,13 +474,13 @@ original documents over HTTP.
 **The root must be dedicated to Doctrans.** `Doctrans.Documents.Sweeper` runs a
 minute after boot and every six hours, and it deletes directories under
 `<root>/documents` that no database row owns. Only directories named by a
-document id (a UUID) are ever considered, so a stray folder is skipped and
-logged rather than removed — but do not rely on that alone. Never point
-`DOCTRANS_DATA_DIR` at your home directory (on macOS `documents/` and
-`Documents/` are the same folder), a shared data directory, or any path that
-already has a `documents/` tree of its own. The application refuses to boot
-when a nondefault root's `documents/` directory already contains
-subdirectories that are not document ids.
+document id (a UUID) are ever considered; any other directory there is a
+foreign entry, which is skipped and logged rather than removed — but do not
+rely on that alone. Never point `DOCTRANS_DATA_DIR` at your home directory (on
+macOS `documents/` and `Documents/` are the same folder), a shared data
+directory, or any path that already has a `documents/` tree of its own. The
+application refuses to boot when a nondefault root's `documents/` directory
+already contains foreign directories.
 
 **Moving an existing root.** Nothing is migrated for you: the database keeps
 rows for documents whose files are no longer where the application looks, so
@@ -531,10 +531,11 @@ recoverable kind.
 
 Run `mix verify_restore` after restoring, and also against the live system before taking a backup: it
 reports the storage root it checked, how many documents and pages it examined, every row whose
-retained source or page images are missing, and every entry under `documents/` that no row owns. It
-reports and never repairs, and only the missing direction fails it — an unowned file is what the
-sweeper is for. A backup taken from an installation that is already missing files restores exactly
-that.
+retained source or page images are missing, and every entry under `documents/` that no row owns: an
+orphaned document directory, which the sweeper will reclaim, or a foreign entry, one not named by a
+document id, which it never touches. It reports and never repairs, and only the missing direction fails
+it — an unowned file is what the sweeper is for. A backup taken from an installation that is already
+missing files restores exactly that.
 
 The runtime deployment carries no Mix, so the same check ships in the release as `bin/verify_restore`
 — which is the deployment that needs it most, since its state is in volumes rather than in a

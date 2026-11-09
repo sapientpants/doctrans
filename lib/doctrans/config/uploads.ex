@@ -38,26 +38,14 @@ defmodule Doctrans.Config.Uploads do
   end
 
   @doc """
-  Returns the storage root, raising when it is unsafe to use.
+  Returns the storage root, raising when static serving would expose it.
 
-  Two misconfigurations are refused at startup rather than discovered later:
-
-  - The endpoint serves `priv/static` at `/` for the paths in
-    `DoctransWeb.static_paths/0`, ahead of the page-image allow-list. A storage
-    root placed under one of those directories would hand out retained sources
-    and converted PDFs as ordinary static assets.
-  - `Doctrans.Documents.Sweeper` deletes directories under `<root>/documents`
-    that no database row owns. A root that is not dedicated to Doctrans — a home
-    directory, where `documents/` and `Documents/` are one folder on macOS, or a
-    share that already has a `documents/` tree — would have its own folders
-    swept as orphans. A nondefault root whose `documents/` directory already
-    holds subdirectories that are not named by a document id is therefore
-    rejected before anything can run against it. The default root lives inside
-    the application directory, which nothing else writes to, so it is not
-    checked.
+  The endpoint serves `priv/static` at `/` for the paths in
+  `DoctransWeb.static_paths/0`, ahead of the page-image allow-list. A storage
+  root placed under one of those directories would hand out retained sources and
+  converted PDFs as ordinary static assets, so it is rejected at startup rather
+  than discovered from an exposed document.
   """
-  # The path is the configured storage root; no request value contributes to it.
-  # sobelow_skip ["Traversal.FileModule"]
   @spec validate_root!() :: String.t()
   def validate_root! do
     dir = upload_dir()
@@ -69,18 +57,7 @@ defmodule Doctrans.Config.Uploads do
               "#{Enum.join(static_roots(), " and ")}"
     end
 
-    case foreign_document_dirs(dir) do
-      [] ->
-        dir
-
-      foreign ->
-        raise ArgumentError,
-              "the storage root #{dir} is not dedicated to Doctrans: #{dir}/documents " <>
-                "already contains #{Enum.map_join(foreign, ", ", &inspect/1)}, " <>
-                "which no document owns. The sweeper deletes unowned directories " <>
-                "under documents/, so point DOCTRANS_DATA_DIR at an empty directory " <>
-                "or one only this application writes to."
-    end
+    dir
   end
 
   @doc """
@@ -112,35 +89,19 @@ defmodule Doctrans.Config.Uploads do
     end
   end
 
+  @doc """
+  Whether the storage root is the default inside the application directory.
+
+  A nondefault root is one an operator chose through `DOCTRANS_DATA_DIR`, and
+  so one that may hold data that is not this application's.
+  """
+  @spec default_root?() :: boolean()
+  def default_root?, do: upload_dir() == default_dir()
+
   @spec max_file_size() :: pos_integer()
   def max_file_size, do: Config.fetch!(:uploads, :max_file_size)
 
   defp default_dir, do: Application.app_dir(:doctrans, @default_dir)
-
-  # Subdirectories of `<root>/documents` whose names are not document ids, for
-  # a nondefault root. Loose files (`.DS_Store`) are not listed: the sweeper
-  # removes directories only, so a file never becomes collateral.
-  #
-  # The directory name and the id shape mirror `Doctrans.Documents.Layout`
-  # (`documents_dir/0`, `document_dir_name?/1`), which builds its paths on this
-  # module's root and so cannot be called from here without a dependency cycle.
-  defp foreign_document_dirs(dir) do
-    if dir == default_dir(), do: [], else: foreign_entries(Path.join(dir, "documents"))
-  end
-
-  defp foreign_entries(documents_dir) do
-    case File.ls(documents_dir) do
-      {:ok, entries} ->
-        entries
-        |> Enum.filter(fn name ->
-          not Uniq.UUID.valid?(name) and File.dir?(Path.join(documents_dir, name))
-        end)
-        |> Enum.sort()
-
-      {:error, _reason} ->
-        []
-    end
-  end
 
   defp served_statically?(dir) do
     roots = static_roots()

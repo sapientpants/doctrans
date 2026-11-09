@@ -78,36 +78,6 @@ defmodule Doctrans.StorageRootTest do
     end
   end
 
-  test "a root whose documents/ already holds foreign directories is rejected at startup",
-       %{root: root} do
-    # The shape of a home directory on macOS, where documents/ and Documents/ are
-    # one folder: the sweeper would delete these within a minute of boot.
-    for name <- ["Invoices", "Tax-2024"] do
-      File.mkdir_p!(Path.join([root, "documents", name]))
-    end
-
-    error = assert_raise ArgumentError, &Uploads.validate_root!/0
-    assert error.message =~ "not dedicated to Doctrans"
-    assert error.message =~ ~s("Invoices", "Tax-2024")
-    assert error.message =~ "DOCTRANS_DATA_DIR"
-  end
-
-  test "a root whose documents/ holds only document directories and loose files is accepted",
-       %{root: root} do
-    documents_dir = Path.join(root, "documents")
-    File.mkdir_p!(Path.join(documents_dir, Uniq.UUID.uuid7()))
-    File.mkdir_p!(Path.join(documents_dir, Ecto.UUID.generate()))
-    # Finder leaves this behind; a file is never swept, so it is not a sign of a shared root.
-    File.write!(Path.join(documents_dir, ".DS_Store"), "")
-
-    assert Uploads.validate_root!() == root
-  end
-
-  test "a fresh root with no documents/ directory is accepted", %{root: root} do
-    refute File.exists?(root)
-    assert Uploads.validate_root!() == root
-  end
-
   test "the default root is accepted even though it sits under priv/static" do
     TestEnv.put_env(:uploads, max_file_size: 1)
 

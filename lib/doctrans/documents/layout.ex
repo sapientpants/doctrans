@@ -30,6 +30,9 @@ defmodule Doctrans.Documents.Layout do
   @pages "pages"
   @original "original"
 
+  # The form `to_string/1` gives a `Uniq.UUID`: 32 lowercase hex digits in 8-4-4-4-12 groups.
+  @document_dir_name ~r/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/
+
   @doc "The storage root every other path is built beneath."
   @spec root() :: String.t()
   def root, do: Uploads.upload_dir()
@@ -41,14 +44,17 @@ defmodule Doctrans.Documents.Layout do
   @doc """
   Whether an entry name under `documents_dir/0` has the shape of a document id.
 
-  Document directories are named by their `Uniq.UUID` primary key, so a UUID is
-  the only name this layout ever writes there. Anything else — `.DS_Store`, a
-  folder a person copied in, the contents of a storage root that was not
-  dedicated to Doctrans — is not part of the layout, and cleanup must not treat
-  it as a document that happens to lack a row.
+  Document directories are named by their `Uniq.UUID` primary key as
+  `document_dir/1` writes it: lowercase, hyphenated. That exact form is the only
+  name this layout ever writes there, so the check is as narrow — an uppercase,
+  unhyphenated or `urn:uuid:` spelling is a name some other program chose.
+  Anything else is a foreign entry: `.DS_Store`, a folder a person copied in, the
+  contents of a storage root that was not dedicated to Doctrans. It is not part
+  of the layout, and cleanup must not treat it as a document that happens to lack
+  a row.
   """
   @spec document_dir_name?(String.t()) :: boolean()
-  def document_dir_name?(name) when is_binary(name), do: Uniq.UUID.valid?(name)
+  def document_dir_name?(name) when is_binary(name), do: Regex.match?(@document_dir_name, name)
 
   @doc "The directory of one document: its retained upload and its runs."
   @spec document_dir(Ecto.UUID.t()) :: String.t()

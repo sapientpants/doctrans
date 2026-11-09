@@ -120,12 +120,21 @@ defmodule Doctrans.BackupTest do
       assert report.complete?
     end
 
-    test "does not choke on an entry that is not a document id at all", %{root: root} do
+    test "reports an entry that is not a document id as foreign, not as an orphan", %{
+      root: root
+    } do
+      # The sweeper never touches a foreign entry, so calling it an orphaned
+      # document directory would promise a cleanup that is not coming.
       write_under(root, "documents/README.txt")
+      File.mkdir_p!(Path.join([root, "documents", "Invoices"]))
 
       report = Backup.verify()
 
-      assert report.extra == [{:orphaned_document_dir, [path: "documents/README.txt"]}]
+      assert report.extra == [
+               {:foreign_entry, [path: "documents/Invoices"]},
+               {:foreign_entry, [path: "documents/README.txt"]}
+             ]
+
       assert report.complete?
     end
 
@@ -171,7 +180,7 @@ defmodule Doctrans.BackupTest do
 
       assert Enum.any?(lines, &(&1 =~ "missing: {:source_missing" and &1 =~ document.id))
       assert Enum.any?(lines, &(&1 =~ "missing: {:page_images_missing"))
-      assert Enum.any?(lines, &(&1 =~ "extra: {:orphaned_document_dir"))
+      assert Enum.any?(lines, &(&1 =~ "extra: {:foreign_entry"))
       # Two reasons, one document: the count is of documents, not of findings.
       assert List.last(lines) == "1 document(s) name files that are not under #{root}."
     end

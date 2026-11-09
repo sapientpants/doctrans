@@ -63,6 +63,23 @@ defmodule Doctrans.Documents.LayoutTest do
     assert Layout.relative(Layout.absolute(relative)) == relative
   end
 
+  test "a document directory is named by its id, lowercase and hyphenated" do
+    assert Layout.document_dir_name?(@document_id)
+    assert Layout.document_dir_name?(Uniq.UUID.uuid7())
+    assert Layout.document_dir_name?(Ecto.UUID.generate())
+  end
+
+  test "any other name is a foreign entry, even another spelling of a UUID" do
+    # Only the form `to_string/1` gives an id is ever written, so a spelling the
+    # layout never produces is a name some other program chose.
+    refute Layout.document_dir_name?("Invoices")
+    refute Layout.document_dir_name?(".DS_Store")
+    refute Layout.document_dir_name?(String.upcase(@document_id))
+    refute Layout.document_dir_name?(Uniq.UUID.uuid7(:hex))
+    refute Layout.document_dir_name?(Uniq.UUID.uuid7(:urn))
+    refute Layout.document_dir_name?(@document_id <> "\n")
+  end
+
   test "paths follow the root when it moves at runtime" do
     TestEnv.put_env(:uploads, upload_dir: "/mnt/moved", max_file_size: 1)
 

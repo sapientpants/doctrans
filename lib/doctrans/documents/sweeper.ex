@@ -7,13 +7,15 @@ defmodule Doctrans.Documents.Sweeper do
   - It is older than a configurable threshold (default: 24 hours)
   - There is no document with that ID in the database
 
-  The shape check comes first on purpose. Every entry the layout writes under
-  `documents/` is named by a UUID, so a directory named anything else was not
-  created by this application and is never a candidate: without that gate a
-  storage root shared with other data (a home directory whose `Documents` folder
-  is this one on a case-insensitive filesystem, a NAS share with its own
-  `documents/`) would have every old subfolder deleted as an "orphan" within a
-  minute of boot. Such entries are logged and left alone.
+  The shape check comes first on purpose. Every directory the layout writes
+  under `documents/` is named by a document id, so a directory named anything
+  else is a foreign entry: this application did not create it, and it is never
+  a candidate. Without that gate a storage root shared with other data (a home
+  directory whose `Documents` folder is this one on a case-insensitive
+  filesystem, a NAS share with its own `documents/`) would have every old
+  subfolder deleted as an "orphan" within a minute of boot. A foreign directory
+  is logged and left alone on every sweep, and `validate_root!/0` refuses at
+  boot a root that already holds one.
 
   This handles cases where:
   - Upload was started but never completed
@@ -25,10 +27,57 @@ defmodule Doctrans.Documents.Sweeper do
 
   import Ecto.Query
 
+  alias Doctrans.Config.Uploads
   alias Doctrans.Documents.{Document, Layout}
   alias Doctrans.Repo
 
   @default_grace_period_hours 24
+
+  @doc """
+  Returns the storage root, raising when it is not dedicated to Doctrans.
+
+  A sweep deletes directories under `documents/` that no row owns, so a root
+  that already holds foreign directories — a home directory, where `documents/`
+  and `Documents/` are one folder on macOS, or a share with a `documents/` tree
+  of its own — would have them removed a minute after boot. Such a root is
+  refused from `Doctrans.Application` before the supervision tree starts. The
+  default root lives inside the application directory, which nothing else
+  writes to, so it is not checked.
+  """
+  @spec validate_root!() :: String.t()
+  def validate_root! do
+    root = Layout.root()
+    foreign = if Uploads.default_root?(), do: [], else: foreign_directories()
+
+    case foreign do
+      [] ->
+        root
+
+      names ->
+        raise ArgumentError,
+              "the storage root #{root} is not dedicated to Doctrans: " <>
+                "#{Layout.documents_dir()} already contains " <>
+                "#{Enum.map_join(names, ", ", &inspect/1)}, which no document owns. " <>
+                "The sweeper deletes unowned directories under documents/, so point " <>
+                "DOCTRANS_DATA_DIR at an empty directory or one only this application " <>
+                "writes to."
+    end
+  end
+
+  @doc """
+  The foreign directories under `documents/`: its subdirectories that are not
+  named by a document id, sorted by name.
+
+  Loose files (`.DS_Store`) are not among them. A sweep removes directories
+  only, so a file is never collateral and does not make a root shared.
+  """
+  @spec foreign_directories() :: [String.t()]
+  def foreign_directories do
+    case subdirectories(Layout.documents_dir()) do
+      {:ok, {_document_dirs, foreign}} -> foreign
+      {:error, _reason} -> []
+    end
+  end
 
   @doc """
   Finds document directories that are orphaned (old and no matching DB record).
@@ -44,13 +93,17 @@ defmodule Doctrans.Documents.Sweeper do
     grace_period_hours = Keyword.get(opts, :grace_period_hours, @default_grace_period_hours)
     documents_dir = Layout.documents_dir()
 
-    case File.ls(documents_dir) do
-      {:ok, entries} ->
+    case subdirectories(documents_dir) do
+      {:ok, {document_dirs, foreign}} ->
+        # Reported, so an operator who pointed the storage root at a shared
+        # directory sees what the sweeper is stepping around.
+        Enum.each(foreign, &Logger.warning("Sweeper: skipping foreign directory #{inspect(&1)}"))
+
         valid_ids = get_valid_document_ids()
         cutoff = DateTime.utc_now() |> DateTime.add(-grace_period_hours, :hour)
 
-        entries
-        |> Enum.filter(&orphaned_directory?(&1, valid_ids, documents_dir, cutoff))
+        document_dirs
+        |> Enum.filter(&orphaned?(&1, valid_ids, documents_dir, cutoff))
         |> Enum.map(&Path.join(documents_dir, &1))
 
       {:error, :enoent} ->
@@ -127,20 +180,20 @@ defmodule Doctrans.Documents.Sweeper do
     |> MapSet.new()
   end
 
-  defp orphaned_directory?(name, valid_ids, documents_dir, cutoff) do
-    candidate?(name) && directory?(documents_dir, name) &&
-      orphaned?(name, valid_ids, documents_dir, cutoff)
-  end
+  # The subdirectories of `documents_dir`, sorted and split into those named by
+  # a document id and the foreign ones. Files are dropped here, so they are
+  # neither candidates nor reported.
+  @spec subdirectories(String.t()) ::
+          {:ok, {[String.t()], [String.t()]}} | {:error, File.posix()}
+  defp subdirectories(documents_dir) do
+    with {:ok, entries} <- File.ls(documents_dir) do
+      split =
+        entries
+        |> Enum.filter(&directory?(documents_dir, &1))
+        |> Enum.sort()
+        |> Enum.split_with(&Layout.document_dir_name?/1)
 
-  # Only a UUID-named entry can be a document directory. Anything else is
-  # reported rather than inspected further, so an operator who pointed the
-  # storage root at a shared directory sees what the sweeper is stepping around.
-  defp candidate?(dir_name) do
-    if Layout.document_dir_name?(dir_name) do
-      true
-    else
-      Logger.warning("Sweeper: skipping non-document entry #{inspect(dir_name)}")
-      false
+      {:ok, split}
     end
   end
 

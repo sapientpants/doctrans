@@ -29,6 +29,13 @@ The retained original of a Document, kept in the Document's own directory under 
 Every Run starts from it; a Document whose Source is missing cannot be reprocessed.
 _Avoid_: original file, upload (for the file once it is stored)
 
+**Foreign entry**:
+An entry under the storage root's `documents/` directory whose name is not a document id, so one this
+application never wrote: a folder a person copied in, the contents of a home directory or share the root was
+pointed at, a `.DS_Store`. Never an orphan: the sweeper skips it, the restore check reports it apart, and a
+nondefault root that already holds a foreign directory is refused at boot.
+_Avoid_: stray folder, non-document entry, orphan (for one of these)
+
 **Obsolete work**:
 Work planned under a Run, or against a Page's content revision or generation, that the Document or Page no longer
 holds. It is refused when it tries to write, and the attempt counts as done, not failed.
