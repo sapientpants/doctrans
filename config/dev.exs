@@ -67,9 +67,25 @@ config :doctrans, DoctransWeb.Endpoint,
 # different ports.
 
 # Watch static and templates for browser reloading.
+#
+# `web_console_logger` stays off, and this is the one place the reason is
+# written out (#265). When the flag is on, joining the live-reload channel
+# subscribes the joiner to every log event the server emits, and development
+# logs at `:debug`: every LiveView event with its parameters (the chat message
+# typed, the search query), every SQL statement with its bound page and chunk
+# text, and the raw body of a failed inference request. The channel's socket
+# accepts any join, so the only things between a page in the browser and that
+# stream were the origin allowlist in `config/runtime.exs` and this flag. The
+# development terminal already shows the same log; the browser console does not
+# need a second copy.
+#
+# What a joiner still receives is what the channel itself serves: asset-change
+# pushes, the checkout's path (`File.cwd!/0`) and the `PLUG_EDITOR` value, both
+# of which the click-to-editor shortcuts in `assets/js/app.js` need. The origin
+# allowlist is what gates those, and neither says anything about a document.
 config :doctrans, DoctransWeb.Endpoint,
   live_reload: [
-    web_console_logger: true,
+    web_console_logger: false,
     patterns: [
       ~r"priv/static/(?!uploads/).*(js|css|png|jpeg|jpg|gif|svg)$",
       ~r"priv/gettext/.*(po)$",

@@ -220,6 +220,24 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Parameters Phoenix replaces with "[FILTERED]" before logging them: in the
+# controller's request log and, at `:debug`, in the LiveView logger's line for
+# every event and mount. "message" is the chat message and "q" the search
+# query; both are what the user typed and both can quote the document.
+#
+# Each entry is a substring, not an exact key. Phoenix filters every parameter
+# whose key contains the term, and every string value that contains the term
+# followed by "=" (see `Phoenix.Logger`'s `:filter_parameters` doc). So "q"
+# also covers the dashboard's "request_logger" parameter and any value that
+# carries a "q=" query string; both are accepted over-filtering, pinned in
+# `DoctransWeb.FilterParametersTest`. Phoenix's own default is ["password"],
+# and this list replaces it, so "password" is restated.
+#
+# Configured for every environment, so the production log level is not what
+# keeps the values out. Why the log must not quote the user at all is written
+# once, beside the `live_reload` config in `config/dev.exs` (#265).
+config :phoenix, :filter_parameters, ["password", "message", "q"]
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

@@ -57,6 +57,13 @@ defmodule Doctrans.DevConfigTest do
     refute Keyword.has_key?(Keyword.fetch!(read_config(), :doctrans), :allowed_hosts)
   end
 
+  # The browser console must not get a copy of the development log; the reason
+  # is beside the flag in `config/dev.exs` (#265). Asserted `false` rather than
+  # absent, so the file states the choice.
+  test "does not stream the server log to the browser console" do
+    assert get_in(endpoint(), [:live_reload, :web_console_logger]) == false
+  end
+
   test "DATABASE_HOST still selects the development database host" do
     System.put_env("DATABASE_HOST", "postgres.internal")
 
