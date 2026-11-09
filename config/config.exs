@@ -220,6 +220,15 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Parameters whose values are replaced by "[FILTERED]" wherever Phoenix logs
+# them: the controller's request log and, at `:debug`, the LiveView logger's
+# line for every event and mount. "message" is the chat message and "q" the
+# search entry; both are what the user typed and both can quote the document.
+# Phoenix's own default filters only "password", and this list replaces it, so
+# "password" is restated. Configured for every environment, so the production
+# log level is not what keeps them out (#265).
+config :phoenix, :filter_parameters, ["password", "message", "q"]
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

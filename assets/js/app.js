@@ -29,17 +29,14 @@ liveSocket.connect()
 window.liveSocket = liveSocket
 
 // The lines below enable quality of life phoenix_live_reload
-// development features:
+// development features: click on elements to jump to their definitions in
+// your code editor.
 //
-//     1. stream server logs to the browser console
-//     2. click on elements to jump to their definitions in your code editor
-//
+// Server logs are not streamed to the browser console. The endpoint's
+// `live_reload` config leaves `web_console_logger` off (see `config/dev.exs`),
+// so a call to `reloader.enableServerLogs()` here would have nothing to show.
 if (process.env.NODE_ENV === "development") {
   window.addEventListener("phx:live_reload:attached", ({detail: reloader}) => {
-    // Enable server log streaming to client.
-    // Disable with reloader.disableServerLogs()
-    reloader.enableServerLogs()
-
     // Open configured PLUG_EDITOR at file:line of the clicked element's HEEx component
     //
     //   * click with "c" key pressed to open at caller location

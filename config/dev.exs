@@ -67,9 +67,19 @@ config :doctrans, DoctransWeb.Endpoint,
 # different ports.
 
 # Watch static and templates for browser reloading.
+#
+# `web_console_logger` stays off. When it is on, joining the live-reload channel
+# subscribes the joiner to every log event the server emits, and development
+# logs at `:debug`: every LiveView event with its parameters (the chat message
+# typed, the search entered), every SQL statement with its bound page and chunk
+# text, and the raw body of a failed inference request. The channel's socket
+# accepts any join, so the only things between a page in the browser and that
+# stream were the origin allowlist in `config/runtime.exs` and this flag (#265).
+# The development terminal already shows the same log; the browser console
+# does not need a second copy.
 config :doctrans, DoctransWeb.Endpoint,
   live_reload: [
-    web_console_logger: true,
+    web_console_logger: false,
     patterns: [
       ~r"priv/static/(?!uploads/).*(js|css|png|jpeg|jpg|gif|svg)$",
       ~r"priv/gettext/.*(po)$",
