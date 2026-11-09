@@ -72,13 +72,39 @@ defmodule Doctrans.Documents.SweeperTest do
       refute doc_dir in orphaned
     end
 
+    test "never returns a directory whose name is not a document id, however old", %{
+      documents_dir: documents_dir
+    } do
+      # A storage root shared with other data (a home directory, a NAS share)
+      # has folders under documents/ that no row will ever own. They are not
+      # orphans: this application did not create them.
+      foreign = Path.join(documents_dir, "Invoices")
+      File.mkdir_p!(foreign)
+      File.write!(Path.join(foreign, "2024.pdf"), "tax return")
+      File.touch!(foreign, System.os_time(:second) - 48 * 60 * 60)
+
+      orphan = Path.join(documents_dir, Ecto.UUID.generate())
+      File.mkdir_p!(orphan)
+
+      log =
+        capture_log(fn ->
+          orphaned = Sweeper.find_orphaned_directories(grace_period_hours: 0)
+          refute foreign in orphaned
+          assert orphan in orphaned
+        end)
+
+      assert log =~ ~s(skipping non-document entry "Invoices")
+    end
+
     test "ignores files, only returns directories", %{documents_dir: documents_dir} do
       # Create a file (not a directory)
       file_path = Path.join(documents_dir, "some_file.txt")
       File.write!(file_path, "test")
 
-      orphaned = Sweeper.find_orphaned_directories(grace_period_hours: 0)
-      refute file_path in orphaned
+      capture_log(fn ->
+        orphaned = Sweeper.find_orphaned_directories(grace_period_hours: 0)
+        refute file_path in orphaned
+      end)
     end
 
     test "respects grace_period_hours option", %{documents_dir: documents_dir} do
@@ -149,6 +175,23 @@ defmodule Doctrans.Documents.SweeperTest do
       assert {:ok, count} = Sweeper.sweep(grace_period_hours: 0)
       assert count >= 1
       refute File.exists?(orphan_dir)
+    end
+
+    test "leaves a non-document directory in place and still removes real orphans", %{
+      documents_dir: documents_dir
+    } do
+      foreign = Path.join(documents_dir, "Tax-2024")
+      File.mkdir_p!(foreign)
+      File.write!(Path.join(foreign, "return.pdf"), "tax return")
+      File.touch!(foreign, System.os_time(:second) - 48 * 60 * 60)
+
+      orphan = Path.join(documents_dir, Ecto.UUID.generate())
+      File.mkdir_p!(orphan)
+
+      capture_log(fn -> assert {:ok, 1} = Sweeper.sweep(grace_period_hours: 0) end)
+
+      assert File.exists?(Path.join(foreign, "return.pdf"))
+      refute File.exists?(orphan)
     end
 
     test "does not remove directories with database records", %{documents_dir: documents_dir} do

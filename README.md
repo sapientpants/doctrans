@@ -471,6 +471,17 @@ if it cannot be created or written. It must also sit outside the application's
 `priv/static`, since directories served as static assets would hand out your
 original documents over HTTP.
 
+**The root must be dedicated to Doctrans.** `Doctrans.Documents.Sweeper` runs a
+minute after boot and every six hours, and it deletes directories under
+`<root>/documents` that no database row owns. Only directories named by a
+document id (a UUID) are ever considered, so a stray folder is skipped and
+logged rather than removed — but do not rely on that alone. Never point
+`DOCTRANS_DATA_DIR` at your home directory (on macOS `documents/` and
+`Documents/` are the same folder), a shared data directory, or any path that
+already has a `documents/` tree of its own. The application refuses to boot
+when a nondefault root's `documents/` directory already contains
+subdirectories that are not document ids.
+
 **Moving an existing root.** Nothing is migrated for you: the database keeps
 rows for documents whose files are no longer where the application looks, so
 page images 404 and originals become unreachable. Page paths are stored relative
@@ -595,7 +606,7 @@ into the same major version or a newer one.
 **Restore the database before the restored application's first boot.** Two mechanisms begin deleting
 files shortly after startup, and both treat the database as the authority on what should exist:
 
-- `Doctrans.Documents.Sweeper` deletes every `documents/<uuid>` directory that has no matching row and
+- `Doctrans.Documents.Sweeper` deletes every UUID-named `documents/<uuid>` directory that has no matching row and
   whose modification time is older than the grace period (24 hours by default, configured under
   `config :doctrans, Doctrans.Documents.SweeperWorker` in `config/config.exs`), and `SweeperWorker`
   runs its first sweep one minute after boot. A restored tree keeps its original timestamps — `cp -a`

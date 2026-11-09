@@ -38,6 +38,18 @@ defmodule Doctrans.Documents.Layout do
   @spec documents_dir() :: String.t()
   def documents_dir, do: Path.join(root(), @documents)
 
+  @doc """
+  Whether an entry name under `documents_dir/0` has the shape of a document id.
+
+  Document directories are named by their `Uniq.UUID` primary key, so a UUID is
+  the only name this layout ever writes there. Anything else — `.DS_Store`, a
+  folder a person copied in, the contents of a storage root that was not
+  dedicated to Doctrans — is not part of the layout, and cleanup must not treat
+  it as a document that happens to lack a row.
+  """
+  @spec document_dir_name?(String.t()) :: boolean()
+  def document_dir_name?(name) when is_binary(name), do: Uniq.UUID.valid?(name)
+
   @doc "The directory of one document: its retained upload and its runs."
   @spec document_dir(Ecto.UUID.t()) :: String.t()
   def document_dir(document_id), do: Path.join(documents_dir(), to_string(document_id))
