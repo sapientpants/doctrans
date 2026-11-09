@@ -72,13 +72,57 @@ defmodule Doctrans.Documents.SweeperTest do
       refute doc_dir in orphaned
     end
 
+    test "never returns a foreign directory, however old", %{documents_dir: documents_dir} do
+      # A storage root shared with other data (a home directory, a NAS share)
+      # has folders under documents/ that no row will ever own. They are not
+      # orphans: this application did not create them.
+      foreign = Path.join(documents_dir, "Invoices")
+      File.mkdir_p!(foreign)
+      File.write!(Path.join(foreign, "2024.pdf"), "tax return")
+      File.touch!(foreign, System.os_time(:second) - 48 * 60 * 60)
+
+      orphan = Path.join(documents_dir, Ecto.UUID.generate())
+      File.mkdir_p!(orphan)
+
+      orphaned = capture_sweep(fn -> Sweeper.find_orphaned_directories(grace_period_hours: 0) end)
+
+      refute foreign in orphaned
+      assert orphan in orphaned
+    end
+
+    test "a directory named by a UUID the layout would not write is foreign", %{
+      documents_dir: documents_dir
+    } do
+      # Only the lowercase hyphenated form `to_string/1` gives a document id is
+      # a document directory; another spelling is a name some other program chose.
+      for name <- [String.upcase(Ecto.UUID.generate()), Uniq.UUID.uuid7(:hex)] do
+        File.mkdir_p!(Path.join(documents_dir, name))
+      end
+
+      assert capture_sweep(fn -> Sweeper.find_orphaned_directories(grace_period_hours: 0) end) ==
+               []
+    end
+
+    test "logs each foreign directory it steps around", %{documents_dir: documents_dir} do
+      File.mkdir_p!(Path.join(documents_dir, "Invoices"))
+
+      log = capture_log(fn -> Sweeper.find_orphaned_directories(grace_period_hours: 0) end)
+
+      assert log =~ ~s(skipping foreign directory "Invoices")
+    end
+
     test "ignores files, only returns directories", %{documents_dir: documents_dir} do
-      # Create a file (not a directory)
+      # A file (not a directory) is neither an orphan nor a foreign directory:
+      # a sweep never removes a file, so one is not worth a warning either.
       file_path = Path.join(documents_dir, "some_file.txt")
       File.write!(file_path, "test")
 
-      orphaned = Sweeper.find_orphaned_directories(grace_period_hours: 0)
-      refute file_path in orphaned
+      log =
+        capture_log(fn ->
+          refute file_path in Sweeper.find_orphaned_directories(grace_period_hours: 0)
+        end)
+
+      refute log =~ "skipping"
     end
 
     test "respects grace_period_hours option", %{documents_dir: documents_dir} do
@@ -93,6 +137,39 @@ defmodule Doctrans.Documents.SweeperTest do
       # But with 0 hours, it should be found
       orphaned = Sweeper.find_orphaned_directories(grace_period_hours: 0)
       assert orphan_dir in orphaned
+    end
+  end
+
+  describe "validate_root!/0" do
+    test "a root whose documents/ already holds foreign directories is rejected", %{
+      documents_dir: documents_dir
+    } do
+      # The shape of a home directory on macOS, where documents/ and Documents/ are
+      # one folder: a sweep would delete these within a minute of boot.
+      for name <- ["Invoices", "Tax-2024"] do
+        File.mkdir_p!(Path.join(documents_dir, name))
+      end
+
+      error = assert_raise ArgumentError, &Sweeper.validate_root!/0
+      assert error.message =~ "not dedicated to Doctrans"
+      assert error.message =~ ~s("Invoices", "Tax-2024")
+      assert error.message =~ "DOCTRANS_DATA_DIR"
+    end
+
+    test "a root whose documents/ holds only document directories and loose files is accepted",
+         %{documents_dir: documents_dir} do
+      File.mkdir_p!(Path.join(documents_dir, Uniq.UUID.uuid7()))
+      File.mkdir_p!(Path.join(documents_dir, Ecto.UUID.generate()))
+      # Finder leaves this behind; a file is never swept, so it is not a sign of a shared root.
+      File.write!(Path.join(documents_dir, ".DS_Store"), "")
+
+      assert Sweeper.validate_root!() == Path.dirname(documents_dir)
+    end
+
+    test "a fresh root with no documents/ directory is accepted", %{documents_dir: documents_dir} do
+      File.rm_rf!(Path.dirname(documents_dir))
+
+      assert Sweeper.validate_root!() == Path.dirname(documents_dir)
     end
   end
 
@@ -149,6 +226,23 @@ defmodule Doctrans.Documents.SweeperTest do
       assert {:ok, count} = Sweeper.sweep(grace_period_hours: 0)
       assert count >= 1
       refute File.exists?(orphan_dir)
+    end
+
+    test "leaves a foreign directory in place and still removes real orphans", %{
+      documents_dir: documents_dir
+    } do
+      foreign = Path.join(documents_dir, "Tax-2024")
+      File.mkdir_p!(foreign)
+      File.write!(Path.join(foreign, "return.pdf"), "tax return")
+      File.touch!(foreign, System.os_time(:second) - 48 * 60 * 60)
+
+      orphan = Path.join(documents_dir, Ecto.UUID.generate())
+      File.mkdir_p!(orphan)
+
+      assert capture_sweep(fn -> Sweeper.sweep(grace_period_hours: 0) end) == {:ok, 1}
+
+      assert File.exists?(Path.join(foreign, "return.pdf"))
+      refute File.exists?(orphan)
     end
 
     test "does not remove directories with database records", %{documents_dir: documents_dir} do
@@ -221,4 +315,7 @@ defmodule Doctrans.Documents.SweeperTest do
       assert File.exists?(stuck)
     end
   end
+
+  # Runs a sweeper call for its return value, keeping its log out of the test output.
+  defp capture_sweep(fun), do: fun |> with_log() |> elem(0)
 end

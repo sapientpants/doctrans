@@ -89,6 +89,15 @@ defmodule Doctrans.Config.Uploads do
     end
   end
 
+  @doc """
+  Whether the storage root is the default inside the application directory.
+
+  A nondefault root is one an operator chose through `DOCTRANS_DATA_DIR`, and
+  so one that may hold data that is not this application's.
+  """
+  @spec default_root?() :: boolean()
+  def default_root?, do: upload_dir() == default_dir()
+
   @spec max_file_size() :: pos_integer()
   def max_file_size, do: Config.fetch!(:uploads, :max_file_size)
 

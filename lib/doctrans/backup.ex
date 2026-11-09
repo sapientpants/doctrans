@@ -23,7 +23,9 @@ defmodule Doctrans.Backup do
     weight until someone re-uploads it.
   - `extra` — a file under the root that no row owns. Harmless.
     `Doctrans.Documents.Sweeper` reclaims an orphaned document directory on a
-    later pass, and until then it costs only disk.
+    later pass, and until then it costs only disk. A foreign entry — one not
+    named by a document id, so not written by this application — is reported
+    apart from those, because the sweeper leaves it alone.
 
   So `complete?` tracks `missing` alone: extras never make a restore incomplete.
   That asymmetry is also the argument for an order when taking a backup — **dump
@@ -174,14 +176,20 @@ defmodule Doctrans.Backup do
         # parsed into a UUID or an atom.
         |> Enum.reject(&MapSet.member?(document_ids, &1))
         |> Enum.sort()
-        |> Enum.map(
-          &{:orphaned_document_dir, [path: relative(Path.join(documents_dir, &1), root)]}
-        )
+        |> Enum.map(&extra_reason(&1, documents_dir, root))
 
       # A root with no `documents/` directory has simply never held one; that is
       # consistent with an empty library, not a failure to read the root.
       {:error, _reason} ->
         []
     end
+  end
+
+  # An entry named by a document id is an orphaned document directory, which the
+  # sweeper reclaims. Anything else is a foreign entry the sweeper never touches,
+  # so this report is the only thing that will ever point at it.
+  defp extra_reason(name, documents_dir, root) do
+    code = if Layout.document_dir_name?(name), do: :orphaned_document_dir, else: :foreign_entry
+    {code, [path: relative(Path.join(documents_dir, name), root)]}
   end
 end

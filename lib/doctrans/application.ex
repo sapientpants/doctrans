@@ -6,6 +6,7 @@ defmodule Doctrans.Application do
   use Application
 
   alias Doctrans.Config.Uploads
+  alias Doctrans.Documents.Sweeper
   alias Doctrans.Resilience.CircuitBreaker
 
   @impl true
@@ -14,10 +15,13 @@ defmodule Doctrans.Application do
     CircuitBreaker.install_fuses()
 
     # Writers and the page-image endpoint share one storage root. Reject a root
-    # that static serving would expose, then create it so a fresh data directory
-    # is usable and reported healthy before the first document arrives.
-    # Both return the root; discarded to satisfy the unmatched_return check.
+    # that static serving would expose and one the sweeper would strip of
+    # directories that are not this application's, then create it so a fresh
+    # data directory is usable and reported healthy before the first document
+    # arrives. All three return the root; discarded to satisfy the
+    # unmatched_return check.
     _ = Uploads.validate_root!()
+    _ = Sweeper.validate_root!()
     _ = Uploads.ensure_root!()
 
     children = [
