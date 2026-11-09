@@ -69,6 +69,8 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   # only buys the same oversized body again.
   def classify(:inference_deadline_exceeded), do: :retryable
   def classify({:inference_response_too_large, _}), do: :permanent
+  # The endpoint URL is configuration; no attempt changes it.
+  def classify(:invalid_endpoint_url), do: :permanent
   def classify(:page_not_found), do: :permanent
   def classify(:soffice_not_found), do: :permanent
   def classify(:document_file_not_found), do: :permanent

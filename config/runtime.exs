@@ -24,6 +24,25 @@ if System.get_env("PHX_SERVER") do
 end
 
 # Resolve credentials when the release starts, for both API clients.
+#
+# The host is checked here, once, before either client sees it. Finch refuses a
+# URL without an http(s) scheme or a host by raising an `ArgumentError` whose
+# message quotes the whole URL -- credentials included, since an operator may
+# write `http://user:secret@host`. A value such as `user:secret@llm:8000`, the
+# scheme left off, would otherwise raise on every health probe and every page
+# job, and the secret would land in the log and in `oban_jobs.errors` each time.
+# Refusing at boot names the variable and shows only the redacted value.
+case System.get_env("OPENAI_HOST") do
+  nil ->
+    :ok
+
+  host ->
+    unless Doctrans.Config.Inference.well_formed_url?(host) do
+      raise "OPENAI_HOST must be an http(s) URL with a host, such as " <>
+              "http://localhost:8000, got: #{Doctrans.Config.Inference.redact_url(host)}"
+    end
+end
+
 for config_key <- [:openai, :embedding] do
   for {env_key, option} <- [{"OPENAI_HOST", :base_url}, {"OPENAI_API_KEY", :api_key}],
       value = System.get_env(env_key),

@@ -15,7 +15,7 @@ defmodule Doctrans.RuntimeConfigTest do
   alias Phoenix.Socket.Transport
 
   @env_keys ~w(DOCTRANS_DATA_DIR DATABASE_URL SECRET_KEY_BASE DOCTRANS_ENV_FILE
-               PHX_BIND_IP PHX_HOST PHX_SCHEME PORT)
+               PHX_BIND_IP PHX_HOST PHX_SCHEME PORT OPENAI_HOST)
 
   setup do
     previous = Map.new(@env_keys, &{&1, System.get_env(&1)})
@@ -33,7 +33,11 @@ defmodule Doctrans.RuntimeConfigTest do
       "DOCTRANS_ENV_FILE" => Path.join(System.tmp_dir!(), "missing-#{Uniq.UUID.uuid7()}.env")
     })
 
-    Enum.each(~w(DOCTRANS_DATA_DIR PHX_BIND_IP PHX_HOST PHX_SCHEME PORT), &System.delete_env/1)
+    Enum.each(
+      ~w(DOCTRANS_DATA_DIR PHX_BIND_IP PHX_HOST PHX_SCHEME PORT OPENAI_HOST),
+      &System.delete_env/1
+    )
+
     :ok
   end
 
@@ -48,6 +52,59 @@ defmodule Doctrans.RuntimeConfigTest do
     do: get_in(read_config(env), [:doctrans, DoctransWeb.Endpoint, key])
 
   defp allowed_hosts(env), do: get_in(read_config(env), [:doctrans, :allowed_hosts])
+
+  defp base_url(env, key), do: get_in(read_config(env), [:doctrans, key, :base_url])
+
+  # Finch refuses a URL without an http(s) scheme or a host by raising an
+  # `ArgumentError` that quotes the URL whole, credentials included. Left to
+  # the clients, a scheme-less `user:secret@host:port` would put the secret in
+  # the log on every health probe and in `oban_jobs.errors` on every page job
+  # (#266). Checked at boot for every environment: the variable feeds both
+  # clients in all of them.
+  describe "OPENAI_HOST" do
+    test "an http(s) URL with a host configures both clients" do
+      System.put_env("OPENAI_HOST", "https://user:secret@gateway.internal:8000")
+
+      for env <- [:dev, :test, :prod], key <- [:openai, :embedding] do
+        assert base_url(env, key) == "https://user:secret@gateway.internal:8000"
+      end
+    end
+
+    test "unset, it leaves the configured defaults alone" do
+      assert base_url(:prod, :openai) == nil
+      assert base_url(:prod, :embedding) == nil
+    end
+
+    for bad <- [
+          "user:secret@gateway.internal:8000",
+          "gateway.internal:8000",
+          "http://user:secret@/v1",
+          "ftp://gateway.internal/v1",
+          ""
+        ] do
+      test "#{inspect(bad)} is rejected by name at boot" do
+        System.put_env("OPENAI_HOST", unquote(bad))
+
+        for env <- [:dev, :test, :prod] do
+          assert_raise RuntimeError, ~r/OPENAI_HOST must be an http\(s\) URL with a host/, fn ->
+            base_url(env, :openai)
+          end
+        end
+      end
+    end
+
+    # The message names the value so the operator can see what was read, but a
+    # value that failed the check is exactly the kind whose credentials Finch
+    # would have quoted; the message must not do the same.
+    test "the rejection shows the value with its credentials redacted" do
+      System.put_env("OPENAI_HOST", "user:secret@gateway.internal:8000")
+
+      error = assert_raise(RuntimeError, fn -> base_url(:prod, :openai) end)
+
+      assert error.message =~ "gateway.internal:8000"
+      refute error.message =~ "secret"
+    end
+  end
 
   test "an absolute DOCTRANS_DATA_DIR becomes the storage root" do
     System.put_env("DOCTRANS_DATA_DIR", "/srv/doctrans-data/")

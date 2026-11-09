@@ -34,8 +34,14 @@ defmodule Doctrans.Processing.RequestBounds do
   Tripped bounds surface as `:inference_deadline_exceeded` and
   `{:inference_response_too_large, limit: bytes}`, which
   `Doctrans.Processing.ApiFailure` normalizes like any other client failure.
+
+  One more check runs before any request: a URL without an http(s) scheme or a
+  host is answered with `{:error, :invalid_endpoint_url}` instead of being
+  handed to Req. Finch would raise on it, and its message quotes the URL whole,
+  credentials and all; see `Doctrans.Config.Inference.well_formed_url?/1`.
   """
 
+  alias Doctrans.Config.Inference
   alias Doctrans.Config.OpenAI
 
   @typedoc "One call's remaining budget: a monotonic deadline and a byte cap."
@@ -103,15 +109,19 @@ defmodule Doctrans.Processing.RequestBounds do
     {collect, options} = Keyword.pop(options, :collect, &append/2)
     {mode, options} = Keyword.pop(options, :retry, :transient)
 
-    req
-    |> Req.request(
-      Keyword.merge(options,
-        receive_timeout: bounds.attempt_timeout,
-        retry: retry_fun(bounds, mode),
-        into: into(bounds, collect)
+    if Inference.well_formed_url?(Keyword.get(options, :url)) do
+      req
+      |> Req.request(
+        Keyword.merge(options,
+          receive_timeout: bounds.attempt_timeout,
+          retry: retry_fun(bounds, mode),
+          into: into(bounds, collect)
+        )
       )
-    )
-    |> unwrap(bounds)
+      |> unwrap(bounds)
+    else
+      {:error, :invalid_endpoint_url}
+    end
   end
 
   defp append(data, body), do: body <> data

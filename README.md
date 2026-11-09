@@ -469,7 +469,7 @@ than re-detected, since it is what produced the text they already contain.
 
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
-| `OPENAI_HOST` | `http://localhost:8000` | Shared API base URL, without `/v1` or a trailing slash |
+| `OPENAI_HOST` | `http://localhost:8000` | Shared API base URL, without `/v1` or a trailing slash. Must be an `http` or `https` URL with a host; anything else (a bare `host:port`, say) raises at startup naming the variable, with any credentials in the value redacted |
 | `OPENAI_API_KEY` | unset | Bearer API key for both AI and embedding requests |
 | `DOCTRANS_ENV_FILE` | `.env` | Environment file path, relative to the working directory or absolute |
 | `DOCTRANS_DATA_DIR` | `priv/static/uploads` of the running application | Storage root for originals, converted PDFs, and generated page images. Must be an absolute path; created at startup and must be writable. See [Storage root](#storage-root) |
