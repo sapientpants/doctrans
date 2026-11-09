@@ -49,7 +49,10 @@ command=$(jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
 # commit message or writes it into a script is not a command that runs it, and a
 # guard that cannot tell the difference blocks the documentation of its own rules
 # -- which is exactly how the first version of this hook rejected its own commit.
-# Quoted strings and heredoc bodies are therefore removed before matching.
+# Quoted strings and heredoc bodies are therefore removed before matching. The
+# stripping has to err towards keeping: whatever it wrongly removes is a line no
+# rule will ever see, so a heredoc is only recognised where the shell would
+# recognise one, and a body that is never terminated is treated as command.
 #
 # `[^;&|]*` inside a rule keeps it from matching across a command separator, so
 # `git status && rm file` is not read as `git ... rm`.
@@ -59,31 +62,79 @@ function deny(re, msg) {
   if (verdict == "" && match(cmd, re)) verdict = msg
 }
 
+# The delimiter of a heredoc opened on this line, or "" when the line opens none.
+# Scans the line the way the shell reads it, because a `<<` is only a heredoc
+# opener when the shell would treat it as one: not inside quotes, not after a `#`,
+# and not the first two characters of a `<<<` here-string. A bare regex over the
+# raw line got every one of those wrong, and a false opener was worse than a
+# missed one -- it put the rest of the command inside a body that never closed,
+# where no rule could see it.
+#
+# `q`, `dq` and `quotes` are the globals BEGIN sets below; awk resolves them when
+# the function is called, not where it is written.
+function heredoc_delim(line,    i, n, c, prev, open_quote, rest, word) {
+  n = length(line)
+  open_quote = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(line, i, 1)
+    if (open_quote == q)  { if (c == q) open_quote = ""; continue }
+    if (open_quote == dq) { if (c == "\\") i++; else if (c == dq) open_quote = ""; continue }
+    if (c == "\\") { i++; continue }
+    if (c == q || c == dq) { open_quote = c; continue }
+    prev = (i == 1) ? " " : substr(line, i - 1, 1)
+    if (c == "#" && index(" \t;&|()", prev)) return ""
+    if (c != "<" || substr(line, i + 1, 1) != "<") continue
+    if (substr(line, i + 2, 1) == "<") { i += 2; continue }   # here-string
+    rest = substr(line, i + 2)
+    sub(/^-?[ \t]*/, "", rest)                                 # `<<-` and `<< EOF`
+    if (!match(rest, "^" quotes "?[A-Za-z_][A-Za-z0-9_]*")) return ""
+    word = substr(rest, 1, RLENGTH)
+    gsub(quotes, "", word)
+    return word
+  }
+  return ""
+}
+
+# Whether the text names a client that would run SQL handed to it. Shared by the
+# SQL rule and the heredoc pass so the two lists cannot drift apart.
+function names_db_client(text) {
+  text = tolower(text)
+  return index(text, "psql") || index(text, "dropdb") || index(text, "mysql") || index(text, "docker exec")
+}
+
 BEGIN {
   q  = sprintf("%c", 39)   # '
   dq = sprintf("%c", 34)   # "
-  heredoc = "<<-?[ \t]*[" q dq "]?[A-Za-z_][A-Za-z0-9_]*[" q dq "]?"
+  quotes = "[" q dq "]"
 }
 
-# Drop heredoc bodies; keep the line that opens one, since that line is command.
+# Inside a heredoc. The body is data to the shell, so it stays out of `cmd` -- and
+# out of `raw` too, unless the opening line hands it to a database client:
+# `psql <<SQL` runs the body, so the SQL rule has to see it, while a body written
+# to a file or a commit message is prose whatever it says. The body is also kept
+# aside until the terminator arrives. If it never does, this script cannot tell a
+# heredoc the shell closes at end of input from an opener it misread, and only one
+# of those is safe to skip: END hands the lines back to `cmd` and `raw`.
 delim != "" {
   line = $0
   sub(/^[ \t]+/, "", line)          # <<- allows a tab-indented terminator
-  if (line == delim) delim = ""
+  if (line == delim) { delim = ""; body = ""; next }
+  body = body " " $0
+  if (body_runs_sql) raw = raw " " $0
   next
 }
 {
-  if (match($0, heredoc)) {
-    d = substr($0, RSTART, RLENGTH)
-    sub(/^<<-?[ \t]*/, "", d)
-    gsub("[" q dq "]", "", d)
-    delim = d
-  }
+  delim = heredoc_delim($0)        # the opening line itself is command
+  body_runs_sql = (delim != "" && names_db_client($0))
   cmd = cmd " " $0
-  raw = raw " " $0   # same lines, quotes intact -- SQL is always a quoted argument
+  raw = raw " " $0                 # same lines, quotes intact, for the SQL rule
 }
 
 END {
+  if (delim != "") {                  # an unterminated heredoc hides nothing
+    cmd = cmd body
+    if (!body_runs_sql) raw = raw body
+  }
   gsub(q "[^" q "]*" q, "", cmd)      # single-quoted strings
   gsub(dq "[^" dq "]*" dq, "", cmd)   # double-quoted strings
   gsub(/[ \t]+/, " ", cmd)
@@ -139,12 +190,13 @@ END {
   deny(" docker (volume rm|volume prune|system prune) ", "removing docker volumes destroys the database")
   deny(" dropdb ",                    "dropping the database destroys local data")
 
-  # Destructive SQL reaches the client as a quoted argument, so it is gone from
-  # cmd by now -- match the raw text instead. Requiring a database client in the
-  # same command keeps prose that merely says "drop table" from tripping this.
+  # Destructive SQL reaches the client as a quoted argument or a heredoc body, so
+  # it is gone from cmd by now -- match the raw text instead. Requiring a database
+  # client in the same command keeps prose that merely says "drop table" from
+  # tripping this.
   if (verdict == "" &&
       (index(rawlc, "drop database") || index(rawlc, "drop table") || index(rawlc, "truncate table")) &&
-      (index(rawlc, "psql") || index(rawlc, "dropdb") || index(rawlc, "mysql") || index(rawlc, "docker exec")))
+      names_db_client(raw))
     verdict = "destructive SQL against the database is refused"
 
   # --- Whole-machine ------------------------------------------------------
