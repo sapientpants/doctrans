@@ -49,7 +49,10 @@ command=$(jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
 # commit message or writes it into a script is not a command that runs it, and a
 # guard that cannot tell the difference blocks the documentation of its own rules
 # -- which is exactly how the first version of this hook rejected its own commit.
-# Quoted strings and heredoc bodies are therefore removed before matching.
+# Quoted strings and heredoc bodies are therefore removed before matching. The
+# stripping has to err towards keeping: whatever it wrongly removes is a line no
+# rule will ever see, so a heredoc is only recognised where the shell would
+# recognise one, and a body that is never terminated is treated as command.
 #
 # `[^;&|]*` inside a rule keeps it from matching across a command separator, so
 # `git status && rm file` is not read as `git ... rm`.
@@ -59,31 +62,63 @@ function deny(re, msg) {
   if (verdict == "" && match(cmd, re)) verdict = msg
 }
 
+# The delimiter of a heredoc opened on this line, or "" when the line opens none.
+# Scans the line the way the shell reads it, because a `<<` is only a heredoc
+# opener when the shell would treat it as one: not inside quotes, not after a `#`,
+# and not the first two characters of a `<<<` here-string. A bare regex over the
+# raw line got every one of those wrong, and a false opener was worse than a
+# missed one -- it put the rest of the command inside a body that never closed,
+# where no rule could see it.
+function heredoc_delim(line,    i, n, c, prev, state, rest, d) {
+  n = length(line)
+  state = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(line, i, 1)
+    if (state == q)  { if (c == q) state = ""; continue }
+    if (state == dq) { if (c == "\\") i++; else if (c == dq) state = ""; continue }
+    if (c == "\\") { i++; continue }
+    if (c == q || c == dq) { state = c; continue }
+    prev = (i == 1) ? " " : substr(line, i - 1, 1)
+    if (c == "#" && index(" \t;&|()", prev)) return ""
+    if (c != "<" || substr(line, i + 1, 1) != "<") continue
+    if (substr(line, i + 2, 1) == "<") { i += 2; continue }   # here-string
+    rest = substr(line, i + 2)
+    if (!match(rest, "^-?[ \t]*[" q dq "]?[A-Za-z_][A-Za-z0-9_]*")) return ""
+    d = substr(rest, 1, RLENGTH)
+    sub(/^-?[ \t]*/, "", d)
+    gsub("[" q dq "]", "", d)
+    return d
+  }
+  return ""
+}
+
 BEGIN {
   q  = sprintf("%c", 39)   # '
   dq = sprintf("%c", 34)   # "
-  heredoc = "<<-?[ \t]*[" q dq "]?[A-Za-z_][A-Za-z0-9_]*[" q dq "]?"
 }
 
-# Drop heredoc bodies; keep the line that opens one, since that line is command.
+# Inside a heredoc. The body is data to the shell, so it stays out of `cmd` -- but
+# not out of `raw`: `psql <<SQL` feeds the body to the database, so the SQL rule
+# has to see it. The body is also kept aside until the terminator arrives. If it
+# never does, this script cannot tell a heredoc the shell closes at end of input
+# from an opener it misread, and only one of those is safe to skip: END hands the
+# lines back to `cmd`.
 delim != "" {
   line = $0
   sub(/^[ \t]+/, "", line)          # <<- allows a tab-indented terminator
-  if (line == delim) delim = ""
+  if (line == delim) { delim = ""; body = ""; next }
+  body = body " " $0
+  raw = raw " " $0
   next
 }
 {
-  if (match($0, heredoc)) {
-    d = substr($0, RSTART, RLENGTH)
-    sub(/^<<-?[ \t]*/, "", d)
-    gsub("[" q dq "]", "", d)
-    delim = d
-  }
+  delim = heredoc_delim($0)        # the opening line itself is command
   cmd = cmd " " $0
-  raw = raw " " $0   # same lines, quotes intact -- SQL is always a quoted argument
+  raw = raw " " $0                 # same lines, quotes intact, for the SQL rule
 }
 
 END {
+  if (delim != "") cmd = cmd body     # an unterminated heredoc hides nothing
   gsub(q "[^" q "]*" q, "", cmd)      # single-quoted strings
   gsub(dq "[^" dq "]*" dq, "", cmd)   # double-quoted strings
   gsub(/[ \t]+/, " ", cmd)
@@ -139,9 +174,10 @@ END {
   deny(" docker (volume rm|volume prune|system prune) ", "removing docker volumes destroys the database")
   deny(" dropdb ",                    "dropping the database destroys local data")
 
-  # Destructive SQL reaches the client as a quoted argument, so it is gone from
-  # cmd by now -- match the raw text instead. Requiring a database client in the
-  # same command keeps prose that merely says "drop table" from tripping this.
+  # Destructive SQL reaches the client as a quoted argument or a heredoc body, so
+  # it is gone from cmd by now -- match the raw text instead. Requiring a database
+  # client in the same command keeps prose that merely says "drop table" from
+  # tripping this.
   if (verdict == "" &&
       (index(rawlc, "drop database") || index(rawlc, "drop table") || index(rawlc, "truncate table")) &&
       (index(rawlc, "psql") || index(rawlc, "dropdb") || index(rawlc, "mysql") || index(rawlc, "docker exec")))
