@@ -32,9 +32,9 @@ window.liveSocket = liveSocket
 // development features: click on elements to jump to their definitions in
 // your code editor.
 //
-// Server logs are not streamed to the browser console. The endpoint's
-// `live_reload` config leaves `web_console_logger` off (see `config/dev.exs`),
-// so a call to `reloader.enableServerLogs()` here would have nothing to show.
+// Server logs are not streamed to the browser console: `web_console_logger`
+// is off in `config/dev.exs`, which says why, so `reloader.enableServerLogs()`
+// here would have nothing to show.
 if (process.env.NODE_ENV === "development") {
   window.addEventListener("phx:live_reload:attached", ({detail: reloader}) => {
     // Open configured PLUG_EDITOR at file:line of the clicked element's HEEx component

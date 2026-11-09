@@ -57,10 +57,9 @@ defmodule Doctrans.DevConfigTest do
     refute Keyword.has_key?(Keyword.fetch!(read_config(), :doctrans), :allowed_hosts)
   end
 
-  # Joining the live-reload channel subscribes the joiner to every log event
-  # when this is on, and the channel's socket accepts any join (#265). The
-  # terminal shows the development log; the browser console must not get a
-  # copy. Asserted `false` rather than absent, so the file states the choice.
+  # The browser console must not get a copy of the development log; the reason
+  # is beside the flag in `config/dev.exs` (#265). Asserted `false` rather than
+  # absent, so the file states the choice.
   test "does not stream the server log to the browser console" do
     assert get_in(endpoint(), [:live_reload, :web_console_logger]) == false
   end
