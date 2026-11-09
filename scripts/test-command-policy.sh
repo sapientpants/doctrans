@@ -147,15 +147,18 @@ echo
 echo "layer 2: a heredoc is recognised only where the shell would see one"
 report block "$(shell_policy $'echo <<<x\nrm -rf build')" 'a here-string opens no heredoc'
 report block "$(shell_policy $'echo \'<<EOF\'\nrm -rf build')" 'a single-quoted << opens no heredoc'
-report block "$(shell_policy $'echo "a <<EOF b"\nrm -rf build')" 'a double-quoted << opens no heredoc'
+report block "$(shell_policy $'echo "a <<EOF b"\nsudo rm -rf /')" 'a double-quoted << opens no heredoc'
 report block "$(shell_policy $'# note <<EOF\ngit reset --hard')" 'a << inside a comment opens no heredoc'
 report block "$(shell_policy $'cat <<EOF\nnever closed\nrm -rf build')" 'an unterminated heredoc hides nothing'
+report block "$(shell_policy $'cat <<EOF\nnever closed\npsql -c "DROP TABLE documents"')" 'an unterminated heredoc hides no SQL either'
 report block "$(shell_policy $'cat <<EOF\nrm -rf build\nEOF\nrm -rf build')" 'the command after a heredoc is still inspected'
 report block "$(shell_policy $'psql doctrans_dev <<SQL\nDROP TABLE documents;\nSQL')" 'destructive SQL fed through a heredoc'
 report block "$(shell_policy $'docker exec -i db psql -U doctrans <<-SQL\n\tTRUNCATE TABLE documents;\n\tSQL')" 'destructive SQL fed through a <<- heredoc'
 report allow "$(shell_policy $'cat <<EOF\nrm -rf build\nEOF')" 'heredoc body naming rm -rf'
 report allow "$(shell_policy $'cat <<"EOF" > notes.md\nnever run git reset --hard\nEOF')" 'quoted-delimiter heredoc body naming the rules'
 report allow "$(shell_policy $'psql doctrans_dev <<SQL\nSELECT count(*) FROM documents;\nSQL')" 'harmless SQL fed through a heredoc'
+report allow "$(shell_policy $'cat <<EOF > notes.md\npsql: never drop table by hand\nEOF')" 'heredoc written to a file naming psql and DROP TABLE'
+report allow "$(shell_policy $'git commit -F - <<EOF\nfix(db): psql no longer runs drop table\nEOF')" 'heredoc commit message naming psql and DROP TABLE'
 report allow "$(shell_policy 'grep <<<"rm -rf build" notes.md')" 'here-string holding rm -rf'
 
 echo

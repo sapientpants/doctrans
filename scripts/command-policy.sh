@@ -69,56 +69,72 @@ function deny(re, msg) {
 # raw line got every one of those wrong, and a false opener was worse than a
 # missed one -- it put the rest of the command inside a body that never closed,
 # where no rule could see it.
-function heredoc_delim(line,    i, n, c, prev, state, rest, d) {
+#
+# `q`, `dq` and `quotes` are the globals BEGIN sets below; awk resolves them when
+# the function is called, not where it is written.
+function heredoc_delim(line,    i, n, c, prev, open_quote, rest, word) {
   n = length(line)
-  state = ""
+  open_quote = ""
   for (i = 1; i <= n; i++) {
     c = substr(line, i, 1)
-    if (state == q)  { if (c == q) state = ""; continue }
-    if (state == dq) { if (c == "\\") i++; else if (c == dq) state = ""; continue }
+    if (open_quote == q)  { if (c == q) open_quote = ""; continue }
+    if (open_quote == dq) { if (c == "\\") i++; else if (c == dq) open_quote = ""; continue }
     if (c == "\\") { i++; continue }
-    if (c == q || c == dq) { state = c; continue }
+    if (c == q || c == dq) { open_quote = c; continue }
     prev = (i == 1) ? " " : substr(line, i - 1, 1)
     if (c == "#" && index(" \t;&|()", prev)) return ""
     if (c != "<" || substr(line, i + 1, 1) != "<") continue
     if (substr(line, i + 2, 1) == "<") { i += 2; continue }   # here-string
     rest = substr(line, i + 2)
-    if (!match(rest, "^-?[ \t]*[" q dq "]?[A-Za-z_][A-Za-z0-9_]*")) return ""
-    d = substr(rest, 1, RLENGTH)
-    sub(/^-?[ \t]*/, "", d)
-    gsub("[" q dq "]", "", d)
-    return d
+    sub(/^-?[ \t]*/, "", rest)                                 # `<<-` and `<< EOF`
+    if (!match(rest, "^" quotes "?[A-Za-z_][A-Za-z0-9_]*")) return ""
+    word = substr(rest, 1, RLENGTH)
+    gsub(quotes, "", word)
+    return word
   }
   return ""
+}
+
+# Whether the text names a client that would run SQL handed to it. Shared by the
+# SQL rule and the heredoc pass so the two lists cannot drift apart.
+function names_db_client(text) {
+  text = tolower(text)
+  return index(text, "psql") || index(text, "dropdb") || index(text, "mysql") || index(text, "docker exec")
 }
 
 BEGIN {
   q  = sprintf("%c", 39)   # '
   dq = sprintf("%c", 34)   # "
+  quotes = "[" q dq "]"
 }
 
-# Inside a heredoc. The body is data to the shell, so it stays out of `cmd` -- but
-# not out of `raw`: `psql <<SQL` feeds the body to the database, so the SQL rule
-# has to see it. The body is also kept aside until the terminator arrives. If it
-# never does, this script cannot tell a heredoc the shell closes at end of input
-# from an opener it misread, and only one of those is safe to skip: END hands the
-# lines back to `cmd`.
+# Inside a heredoc. The body is data to the shell, so it stays out of `cmd` -- and
+# out of `raw` too, unless the opening line hands it to a database client:
+# `psql <<SQL` runs the body, so the SQL rule has to see it, while a body written
+# to a file or a commit message is prose whatever it says. The body is also kept
+# aside until the terminator arrives. If it never does, this script cannot tell a
+# heredoc the shell closes at end of input from an opener it misread, and only one
+# of those is safe to skip: END hands the lines back to `cmd` and `raw`.
 delim != "" {
   line = $0
   sub(/^[ \t]+/, "", line)          # <<- allows a tab-indented terminator
   if (line == delim) { delim = ""; body = ""; next }
   body = body " " $0
-  raw = raw " " $0
+  if (body_runs_sql) raw = raw " " $0
   next
 }
 {
   delim = heredoc_delim($0)        # the opening line itself is command
+  body_runs_sql = (delim != "" && names_db_client($0))
   cmd = cmd " " $0
   raw = raw " " $0                 # same lines, quotes intact, for the SQL rule
 }
 
 END {
-  if (delim != "") cmd = cmd body     # an unterminated heredoc hides nothing
+  if (delim != "") {                  # an unterminated heredoc hides nothing
+    cmd = cmd body
+    if (!body_runs_sql) raw = raw body
+  }
   gsub(q "[^" q "]*" q, "", cmd)      # single-quoted strings
   gsub(dq "[^" dq "]*" dq, "", cmd)   # double-quoted strings
   gsub(/[ \t]+/, " ", cmd)
@@ -180,7 +196,7 @@ END {
   # tripping this.
   if (verdict == "" &&
       (index(rawlc, "drop database") || index(rawlc, "drop table") || index(rawlc, "truncate table")) &&
-      (index(rawlc, "psql") || index(rawlc, "dropdb") || index(rawlc, "mysql") || index(rawlc, "docker exec")))
+      names_db_client(raw))
     verdict = "destructive SQL against the database is refused"
 
   # --- Whole-machine ------------------------------------------------------
