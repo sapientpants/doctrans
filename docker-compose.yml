@@ -21,6 +21,21 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+      # The image's user takes these ids (see Dockerfile.dev). Set them --
+      # `DOCTRANS_UID=$(id -u) DOCTRANS_GID=$(id -g) docker compose up` -- on
+      # a Linux host whose account is not 1000:1000, so the files the watchers
+      # write into the bind mount are yours. Docker Desktop maps ownership on
+      # its own. The variables carry a prefix because `UID` is read-only in
+      # bash, where `UID=... docker compose up` is refused and only the gid
+      # would get through.
+      args:
+        UID: ${DOCTRANS_UID:-1000}
+        GID: ${DOCTRANS_GID:-1000}
+    # Stated here as well as in the image, from the same variables, so the
+    # container never runs as root even if the Dockerfile's USER line goes.
+    # Compose also reads these from `.env`, which is why that file sits on the
+    # read-only mount below: nothing the converters touch may rewrite them.
+    user: "${DOCTRANS_UID:-1000}:${DOCTRANS_GID:-1000}"
     environment:
       # config/dev.exs reads only the host; credentials and the database name
       # are fixed there, and DATABASE_URL is a release-only setting.
@@ -33,16 +48,55 @@ services:
       # endpoint would listen on the container's loopback only, where nothing
       # outside the container — the port publication included — can reach it.
       PHX_BIND_IP: "0.0.0.0"
+      # The storage root is the named volume below, not `priv/static/uploads`
+      # on the bind mount: the uploaded document and the converters' `--outdir`
+      # stay off the checkout, so a LibreOffice or poppler bug triggered by a
+      # hostile document does not start out inside a tree the code reloader
+      # compiles and `git checkout` runs hooks from. The image owns this path.
+      DOCTRANS_DATA_DIR: /var/lib/doctrans
+      # Dependencies and build output are kept out of the checkout as well, in
+      # the anonymous volumes below, because a mount point cannot be created
+      # inside the read-only source mount. The image sets the same two paths
+      # and is what seeds the volumes with their ownership.
+      MIX_DEPS_PATH: /opt/doctrans/deps
+      MIX_BUILD_ROOT: /opt/doctrans/_build
     # Bind to loopback only: Doctrans is a local, single-user app with no
     # authentication, so it is not exposed to the LAN by default.
     ports:
       - "127.0.0.1:4000:4000"
     volumes:
-      # Mount source code for hot reload
-      - .:/app
-      # Prevent overwriting dependencies
-      - /app/deps
-      - /app/_build
+      # The source tree is mounted for hot reload, read-only: this container
+      # runs converters on hostile input, and a write into the checkout is a
+      # step towards execution -- `lib/` is compiled on the next request,
+      # `config/` and `mix.exs` are evaluated on the next boot, `.git/hooks`
+      # run on the developer's next checkout, `scripts/` holds the command
+      # policy every agent runs, `.claude/` and `.pi/` hold agent hooks, and
+      # `.env` is what Compose interpolates `user:` from. Nothing the server
+      # needs writes there, so none of it is writable.
+      - .:/app:ro
+      # The one exception: the esbuild and tailwind watchers build into
+      # `priv/static/assets`. The parent is tracked, so it exists on every
+      # checkout and Docker never has to create it (root-owned) on the host.
+      - ./priv/static:/app/priv/static
+      # Dependencies and build output; see MIX_DEPS_PATH and MIX_BUILD_ROOT.
+      - /opt/doctrans/deps
+      - /opt/doctrans/_build
+      # Documents, page images and converted PDFs; see DOCTRANS_DATA_DIR above.
+      - data:/var/lib/doctrans
+    # Converters get a private, memory-backed /tmp rather than the container's
+    # writable layer. `exec` lifts Docker's default `noexec` on it: the
+    # standalone Tailwind binary unpacks a native library into /tmp and maps
+    # it executable, and fails with ERR_DLOPEN_FAILED otherwise. It gives a
+    # converter nothing it did not have, since its home directory and the
+    # storage root are executable mounts anyway.
+    tmpfs:
+      - /tmp:exec
+    # Nothing here needs a capability or a setuid step: the app, Mix, the
+    # watchers and the converters all run as the unprivileged user above.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       db:
         condition: service_healthy
@@ -54,3 +108,6 @@ services:
 
 volumes:
   pgdata:
+  # Resolves to `doctrans_data` under Compose's project prefix -- distinct from
+  # the runtime stack's `doctrans_runtime_data`.
+  data:

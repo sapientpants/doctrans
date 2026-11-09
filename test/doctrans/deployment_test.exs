@@ -12,6 +12,12 @@ defmodule Doctrans.DeploymentTest do
   --build` deletes them), a port published beyond loopback in an app that has no
   authentication, or the migration step disappearing from the startup command.
 
+  The development stack has its own guarded posture (#264): it runs the
+  converters on uploaded documents with the checkout bind-mounted in, so it
+  must not do so as root, must keep the storage root off that mount, and must
+  mount the checkout read-only, since a write into it is a step towards
+  execution on the next request, boot, checkout or agent session.
+
   The assertions are deliberately semantic and few, so ordinary edits to either
   file — reordering, comments, whitespace — do not break them.
   """
@@ -25,7 +31,8 @@ defmodule Doctrans.DeploymentTest do
     %{
       runtime_compose: compose!("docker-compose.runtime.yml"),
       development_compose: compose!("docker-compose.yml"),
-      dockerfile: read("Dockerfile")
+      dockerfile: read("Dockerfile"),
+      dev_dockerfile: read("Dockerfile.dev")
     }
   end
 
@@ -60,6 +67,14 @@ defmodule Doctrans.DeploymentTest do
     {output, status} = compose(path)
     assert status == 0, "Compose could not parse #{path}: #{output}"
     Jason.decode!(output)
+  end
+
+  # Whether the service has a mount matching every given field of Compose's
+  # resolved volume model (`type`, `source`, `target`, `read_only`).
+  defp mount?(service, fields) do
+    Enum.any?(service["volumes"] || [], fn volume ->
+      Enum.all?(fields, fn {key, value} -> volume[Atom.to_string(key)] == value end)
+    end)
   end
 
   defp assert_loopback_ports!(compose) do
@@ -101,15 +116,13 @@ defmodule Doctrans.DeploymentTest do
       app = compose["services"]["app"]
       assert app["environment"]["DOCTRANS_DATA_DIR"] == @data_dir
 
-      assert Enum.any?(app["volumes"], fn volume ->
-               volume["type"] == "volume" and volume["source"] == "doctrans_runtime_data" and
-                 volume["target"] == @data_dir
-             end)
+      assert mount?(app, type: "volume", source: "doctrans_runtime_data", target: @data_dir)
 
-      assert Enum.any?(compose["services"]["db"]["volumes"], fn volume ->
-               volume["type"] == "volume" and volume["source"] == "doctrans_runtime_pgdata" and
-                 volume["target"] == "/var/lib/postgresql"
-             end)
+      assert mount?(compose["services"]["db"],
+               type: "volume",
+               source: "doctrans_runtime_pgdata",
+               target: "/var/lib/postgresql"
+             )
     end
 
     test "names a project and volumes that cannot collide with the development stack",
@@ -181,10 +194,7 @@ defmodule Doctrans.DeploymentTest do
       app = compose["services"]["app"]
       assert app["build"]["dockerfile"] == "Dockerfile.dev"
 
-      assert Enum.any?(app["volumes"], fn volume ->
-               volume["type"] == "bind" and volume["source"] == @root and
-                 volume["target"] == "/app"
-             end)
+      assert mount?(app, type: "bind", source: @root, target: "/app")
     end
 
     test "does not claim to be a deployment", %{compose: compose} do
@@ -205,6 +215,80 @@ defmodule Doctrans.DeploymentTest do
       # Both services, and no bare `"4000:4000"`: the container binding above
       # only stays safe while the publication is what limits reachability.
       assert length(assert_loopback_ports!(compose)) == 2
+    end
+
+    test "keeps the storage root off the checkout, in a named volume", %{compose: compose} do
+      # Converters are handed the storage root as their `--outdir`; on the bind
+      # mount that would be a tree the code reloader compiles from.
+      app = compose["services"]["app"]
+      assert app["environment"]["DOCTRANS_DATA_DIR"] == @data_dir
+      assert mount?(app, type: "volume", target: @data_dir)
+
+      # No bind mount, at any depth, may contain the storage root.
+      refute Enum.any?(app["volumes"], fn volume ->
+               volume["type"] == "bind" and String.starts_with?(@data_dir, volume["target"])
+             end)
+    end
+
+    test "mounts the checkout read-only, except where the watchers build", %{compose: compose} do
+      # A write into the checkout is a step towards execution: `lib/` on the
+      # next request, `config/` and `mix.exs` on the next boot, `.git/hooks` on
+      # the next checkout, `scripts/`, `.claude/` and `.pi/` in the next agent
+      # session, and `.env` in the next `compose up`, which reads `user:` from
+      # it. Only `priv/static`, where esbuild and tailwind write, is exempt.
+      app = compose["services"]["app"]
+      assert mount?(app, type: "bind", target: "/app", read_only: true)
+
+      writable_binds =
+        for %{"type" => "bind", "target" => target} = volume <- app["volumes"],
+            volume["read_only"] != true,
+            do: target
+
+      assert writable_binds == ["/app/priv/static"]
+    end
+
+    test "keeps dependencies and build output off the checkout", %{compose: compose} do
+      # A mount point cannot be created inside a read-only mount, so `deps/`
+      # and `_build/` can no longer be shadowed in place. Mix is pointed at
+      # volumes outside `/app` instead; lose either half and the stack cannot
+      # compile.
+      app = compose["services"]["app"]
+
+      for key <- ~w(MIX_DEPS_PATH MIX_BUILD_ROOT) do
+        path = app["environment"][key]
+        refute String.starts_with?(path, "/app/"), "#{key} is on the checkout: #{path}"
+        assert mount?(app, type: "volume", target: path), "#{key} (#{path}) is not a volume"
+      end
+    end
+
+    test "runs as an unprivileged user whose ids the image shares", %{dev_dockerfile: dockerfile} do
+      # Interpolated, unlike the fixture: `user:` is built from
+      # `${DOCTRANS_UID:-1000}` and the resolved ids are what matter. Whatever
+      # the environment supplies, neither may be root's.
+      {output, 0} = compose("docker-compose.yml", true)
+      app = Jason.decode!(output)["services"]["app"]
+
+      assert [uid, gid] = String.split(app["user"], ":")
+      assert uid =~ ~r/^[1-9]\d*$/, "uid is #{uid}"
+      assert gid =~ ~r/^[1-9]\d*$/, "gid is #{gid}"
+
+      # The image's own user takes the same ids, or the home directory, Hex and
+      # the seeded dependency and build volumes belong to someone else.
+      assert app["build"]["args"] == %{"UID" => uid, "GID" => gid}
+      assert dockerfile =~ ~r/^USER dev/m
+    end
+
+    test "drops every capability and forbids gaining privileges", %{compose: compose} do
+      app = compose["services"]["app"]
+      assert app["cap_drop"] == ["ALL"]
+      assert "no-new-privileges:true" in app["security_opt"]
+    end
+
+    test "gives the converters a private tmpfs /tmp", %{compose: compose} do
+      # Compose keeps mount options on the entry (`/tmp:exec`), so match the
+      # path alone.
+      tmpfs = compose["services"]["app"]["tmpfs"] || []
+      assert Enum.any?(tmpfs, &(hd(String.split(&1, ":")) == "/tmp")), inspect(tmpfs)
     end
   end
 

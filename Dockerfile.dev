@@ -21,6 +21,46 @@ RUN apt-get update && apt-get install -y \
 # No Node.js, as in the release Dockerfile: `:esbuild` and `:tailwind` fetch
 # standalone binaries and the project has no `assets/package.json`.
 
+# Run as a non-root user, like the release image: this container shells out to
+# LibreOffice and poppler on whatever document is uploaded, with the checkout
+# bind-mounted in. The ids are build arguments because the bind mount carries
+# host ownership on Linux: a container user whose uid and gid match the
+# developer's can write `priv/static/assets` for the watchers and leaves no
+# foreign-owned files behind in the working tree. `docker-compose.yml` passes
+# them from `DOCTRANS_UID`/`DOCTRANS_GID` in the environment, defaulting to
+# 1000. The group is reused when the gid already names one in the base image
+# (a gid of 20 is `dialout` on Debian), since the user only needs to belong to
+# it -- which is why ownership below is stated as `dev:${GID}`, never `dev:dev`.
+ARG UID=1000
+ARG GID=1000
+RUN if ! getent group "${GID}" >/dev/null; then groupadd --gid "${GID}" dev; fi \
+    && useradd --uid "${UID}" --gid "${GID}" --create-home --shell /bin/bash dev
+
+# The storage root lives outside the checkout (see DOCTRANS_DATA_DIR below), so
+# a converter working on a hostile document is handed an `--outdir` that is not
+# the source tree. It must exist and be owned by the user *in the image*: Docker
+# seeds a freshly created named volume from the directory it is mounted over,
+# ownership included, which is the only thing that lets a non-root process write
+# to `doctrans_data` on first `compose up`.
+#
+# Dependencies and build output live under /opt/doctrans, outside the checkout,
+# because the checkout is mounted read-only at runtime: a mount point cannot be
+# created inside a read-only mount, so `deps/` and `_build/` can no longer be
+# shadowed in place, and Mix is pointed elsewhere instead. Both directories are
+# prepared here, owned by the user that compiles into them, so the anonymous
+# volumes `docker-compose.yml` mounts over them are seeded likewise.
+RUN mkdir -p /app /opt/doctrans /var/lib/doctrans \
+    && chown dev:"${GID}" /app /opt/doctrans /var/lib/doctrans
+ENV DOCTRANS_DATA_DIR=/var/lib/doctrans \
+    MIX_DEPS_PATH=/opt/doctrans/deps \
+    MIX_BUILD_ROOT=/opt/doctrans/_build
+
+# The entrypoint is installed while still root; everything from `USER` on runs
+# as `dev`, including Hex and rebar, which land in that user's home.
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/
+
+USER dev
+
 # Set up working directory
 WORKDIR /app
 
@@ -32,7 +72,7 @@ RUN mix local.hex --force && \
 ENV MIX_ENV=dev
 
 # Copy mix files first for better caching
-COPY mix.exs mix.lock ./
+COPY --chown=dev:${GID} mix.exs mix.lock ./
 
 # Install dependencies. `--check-locked` makes the build fail when `mix.exs` and
 # `mix.lock` disagree rather than silently resolving a different version than the
@@ -41,17 +81,13 @@ COPY mix.exs mix.lock ./
 RUN mix deps.get --check-locked
 
 # Copy config files
-COPY config config
+COPY --chown=dev:${GID} config config
 
 # Copy the rest of the application
-COPY . .
+COPY --chown=dev:${GID} . .
 
 # Compile the project
 RUN mix compile
-
-# Copy and set up entrypoint
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Expose the Phoenix port
 EXPOSE 4000

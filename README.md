@@ -131,15 +131,51 @@ in development mode with source files mounted for hot reload; for a deployment r
 development environment, use `docker-compose.runtime.yml` instead — see
 [Runtime deployment](#runtime-deployment).
 
+The development container is hardened for the one thing it does with untrusted input: it runs
+LibreOffice and poppler on whatever document you upload, with your checkout mounted in. So it runs
+as an unprivileged user with every capability dropped and `no-new-privileges` set, it keeps the
+storage root in the `doctrans_data` volume rather than under `priv/static/uploads`, it gets a private
+tmpfs `/tmp`, and the checkout is mounted **read-only**, with `priv/static` the one writable path
+because the asset watchers build into `priv/static/assets`. A converter bug triggered by a hostile
+file therefore starts in a directory the code reloader never compiles, and cannot write to `lib/`
+(compiled on the next request), `config/` or `mix.exs` (evaluated on the next boot), `.git/hooks`,
+`scripts/command-policy.sh`, the agent hooks in `.claude/` and `.pi/`, or `.env` (which Compose
+reads the container's `user:` from). Dependencies and build output live in anonymous volumes under
+`/opt/doctrans` rather than in `deps/` and `_build/`, since nothing can be mounted inside a read-only
+mount. Two things follow: Mix tasks that write into the project, such as `mix format`, generators or
+the test suite's `tmp_dir` tests, run natively rather than through `docker compose exec`; and the
+native `mix phx.server` path, which runs the converters with your own privileges, remains the less
+contained of the two.
+
+The container user is `1000:1000` by default. On Linux the bind mount carries host ownership, so if
+your account has different ids, pass them when building and running — files the watchers write are
+then yours rather than another user's. The variables are prefixed because `UID` is read-only in bash
+and a bare `UID=...` assignment is silently refused there:
+
+```bash
+DOCTRANS_UID=$(id -u) DOCTRANS_GID=$(id -g) docker compose up --build
+```
+
+Docker Desktop on macOS and Windows maps ownership on its own and needs nothing. If you ran the
+stack before this layout, `docker compose up --build` picks up the new paths on its own; the old
+anonymous volumes that shadowed `deps/` and `_build/` are simply left behind, and `docker volume
+prune` reclaims them. Documents you uploaded through the earlier stack are still under
+`priv/static/uploads`, which the container no longer reads; copy them into the volume once, with the
+application stopped:
+
+```bash
+docker run --rm -v doctrans_data:/data -v "$PWD/priv/static/uploads":/src:ro alpine \
+  cp -a /src/. /data/
+```
+
 ## Runtime deployment
 
 There are two Compose files and they are not interchangeable.
 
 `docker-compose.yml` with `Dockerfile.dev` is **development**. It bind-mounts your working tree, runs
-the Mix development server with hot reload, and keeps what it writes inside the repository — the
-storage root under `priv/static/uploads`, the database in a Compose volume. That is convenient and it
-is disposable: data that lives inside the build output is discarded by a version bump, a
-`mix release --overwrite`, or a rebuilt image.
+the Mix development server with hot reload, and keeps its state in two Compose volumes — the storage
+root in `doctrans_data`, the database in `doctrans_pgdata`. It runs as a non-root user too, but the
+code it executes is whatever is on disk in your checkout, and it is meant to be disposable.
 
 `docker-compose.runtime.yml` with `Dockerfile` is the **optional runtime deployment**. It builds a
 compiled `mix release` in a multi-stage build on a digest-pinned Debian base image, runs it as a
@@ -546,12 +582,14 @@ docker compose -f docker-compose.runtime.yml exec app /app/bin/verify_restore
 ```
 
 **Development Compose.** PostgreSQL runs in a container and the host needs no client tools of its own
-— the `pgvector/pgvector:pg18` image ships `pg_dump` 18.1. The storage root sits in the working tree,
-because the source mount puts it there.
+— the `pgvector/pgvector:pg18` image ships `pg_dump` 18.1. The storage root is the `doctrans_data`
+volume, not a directory in the working tree, so it is copied out of the volume the same way as the
+runtime deployment's below:
 
 ```bash
 docker compose exec -T db pg_dump -U postgres -Fc doctrans_dev > doctrans.dump
-tar -czf doctrans-data.tar.gz -C priv/static uploads
+docker run --rm -v doctrans_data:/data -v "$PWD":/backup alpine \
+  tar -czf /backup/doctrans-data.tar.gz -C /data .
 ```
 
 Restoring is the same two steps with the application stopped, into a freshly created database:
@@ -561,15 +599,17 @@ docker compose stop app
 docker compose exec -T db dropdb -U postgres --if-exists doctrans_dev
 docker compose exec -T db createdb -U postgres doctrans_dev
 docker compose exec -T db pg_restore -U postgres -d doctrans_dev < doctrans.dump
-tar -xzf doctrans-data.tar.gz -C priv/static
+docker run --rm -v doctrans_data:/data -v "$PWD":/backup alpine \
+  tar -xzf /backup/doctrans-data.tar.gz -C /data
 docker compose start app
 ```
 
 **Runtime deployment.** It keeps its state in the `doctrans_prod` database and in two volumes named
 explicitly rather than derived from the project — `doctrans_runtime_data` for the storage root and
 `doctrans_runtime_pgdata` for the database — so that the name you back up is the name `docker volume
-ls` prints, and so the development stack's `doctrans_pgdata` cannot be mistaken for either. The
-storage root is a volume rather than a host directory, so it has to be copied out of the volume:
+ls` prints, and so the development stack's `doctrans_pgdata` and `doctrans_data` cannot be mistaken
+for either. The storage root is a volume rather than a host directory, so it has to be copied out of
+the volume:
 
 ```bash
 docker compose -f docker-compose.runtime.yml exec -T db pg_dump -U postgres -Fc doctrans_prod > doctrans.dump
