@@ -21,6 +21,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
+      # The image's user takes these ids (see Dockerfile.dev). Export UID and
+      # GID -- `UID=$(id -u) GID=$(id -g) docker compose up` -- on a Linux host
+      # whose account is not 1000:1000, so the files the watchers write into
+      # the bind mount are yours. Docker Desktop maps ownership on its own.
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    # Stated here as well as in the image, from the same variables, so the
+    # container never runs as root even if the Dockerfile's USER line goes.
+    user: "${UID:-1000}:${GID:-1000}"
     environment:
       # config/dev.exs reads only the host; credentials and the database name
       # are fixed there, and DATABASE_URL is a release-only setting.
@@ -33,6 +43,12 @@ services:
       # endpoint would listen on the container's loopback only, where nothing
       # outside the container — the port publication included — can reach it.
       PHX_BIND_IP: "0.0.0.0"
+      # The storage root is the named volume below, not `priv/static/uploads`
+      # on the bind mount: the uploaded document and the converters' `--outdir`
+      # stay off the checkout, so a LibreOffice or poppler bug triggered by a
+      # hostile document does not start out inside a tree the code reloader
+      # compiles and `git checkout` runs hooks from. The image owns this path.
+      DOCTRANS_DATA_DIR: /var/lib/doctrans
     # Bind to loopback only: Doctrans is a local, single-user app with no
     # authentication, so it is not exposed to the LAN by default.
     ports:
@@ -43,6 +59,24 @@ services:
       # Prevent overwriting dependencies
       - /app/deps
       - /app/_build
+      # Shadow the two trees that turn a write into execution on the *host*:
+      # `.git/hooks` run on the developer's next checkout, and `scripts/` holds
+      # the command policy every agent runs. Nothing in the container writes
+      # to either, so they are mounted read-only over the source mount.
+      - ./.git:/app/.git:ro
+      - ./scripts:/app/scripts:ro
+      # Documents, page images and converted PDFs; see DOCTRANS_DATA_DIR above.
+      - data:/var/lib/doctrans
+    # Converters get a private, memory-backed /tmp rather than the container's
+    # writable layer.
+    tmpfs:
+      - /tmp
+    # Nothing here needs a capability or a setuid step: the app, Mix, the
+    # watchers and the converters all run as the unprivileged user above.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       db:
         condition: service_healthy
@@ -54,3 +88,6 @@ services:
 
 volumes:
   pgdata:
+  # Resolves to `doctrans_data` under Compose's project prefix -- distinct from
+  # the runtime stack's `doctrans_runtime_data`.
+  data:
