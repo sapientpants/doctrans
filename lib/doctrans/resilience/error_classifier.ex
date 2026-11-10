@@ -65,10 +65,11 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   def classify(:document_not_found), do: :permanent
   def classify(:incomplete_output), do: :permanent
   # A hung endpoint is exactly what the circuit breaker is for, so the total
-  # deadline counts as a timeout; a flood is a broken endpoint, and replaying it
-  # only buys the same oversized body again.
+  # deadline counts as a timeout; a flood, of bytes or of frames, is a broken
+  # endpoint, and replaying it only buys the same oversized body again.
   def classify(:inference_deadline_exceeded), do: :retryable
   def classify({:inference_response_too_large, _}), do: :permanent
+  def classify({:inference_response_too_fragmented, _}), do: :permanent
   # The endpoint URL is configuration; no attempt changes it.
   def classify(:invalid_endpoint_url), do: :permanent
   def classify(:page_not_found), do: :permanent

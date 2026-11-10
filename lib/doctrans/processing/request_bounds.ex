@@ -33,7 +33,10 @@ defmodule Doctrans.Processing.RequestBounds do
 
   Tripped bounds surface as `:inference_deadline_exceeded` and
   `{:inference_response_too_large, limit: bytes}`, which
-  `Doctrans.Processing.ApiFailure` normalizes like any other client failure.
+  `Doctrans.Processing.ApiFailure` normalizes like any other client failure. A
+  caller that parses the body as it streams can trip a bound of its own the same
+  way: its `:collect` reducer answers `{:halt, reason}` and the stream ends on
+  that chunk, exactly as it does on the byte cap.
 
   One more check runs before any request: a URL without an http(s) scheme or a
   host is answered with `{:error, :invalid_endpoint_url}` instead of being
@@ -93,11 +96,15 @@ defmodule Doctrans.Processing.RequestBounds do
   @doc """
   Runs a bounded POST.
 
-  Takes the usual Req options, plus `:collect` -- a `(binary(), term() -> term())`
-  reducer folding each chunk into the response body, for a caller that parses as
-  it streams. It defaults to plain accumulation, which is what a non-streaming
-  call wants.
+  Takes the usual Req options, plus `:collect` -- a reducer folding each chunk
+  into the response body, for a caller that parses as it streams. It is called
+  as `collect.(chunk, body)` and answers `{:cont, body}` to go on, or
+  `{:halt, reason}` to end the stream there and have the call return
+  `{:error, reason}`. It defaults to plain accumulation, which is what a
+  non-streaming call wants.
   """
+  @type collect :: (binary(), term() -> {:cont, term()} | {:halt, term()})
+
   @spec post(Req.Request.t(), t(), keyword()) :: {:ok, Req.Response.t()} | {:error, term()}
   def post(req, bounds, options), do: request(req, bounds, [{:method, :post} | options])
 
@@ -124,7 +131,7 @@ defmodule Doctrans.Processing.RequestBounds do
     end
   end
 
-  defp append(data, body), do: body <> data
+  defp append(data, body), do: {:cont, body <> data}
 
   # The size check runs before the chunk is folded in, so an oversized body is
   # refused rather than buffered and then measured.
@@ -140,11 +147,19 @@ defmodule Doctrans.Processing.RequestBounds do
           halt(req, resp, :inference_deadline_exceeded)
 
         true ->
-          resp = %{resp | body: collect.(data, resp.body)}
-          {:cont, {req, Req.Response.put_private(resp, @bytes_key, bytes)}}
+          fold(req, resp, collect.(data, resp.body), bytes)
       end
     end
   end
+
+  # The reducer's answer: the body it folded the chunk into, or a bound of its
+  # own that tripped, which halts the stream the way this module's own do.
+  defp fold(req, resp, {:cont, body}, bytes) do
+    resp = %{resp | body: body}
+    {:cont, {req, Req.Response.put_private(resp, @bytes_key, bytes)}}
+  end
+
+  defp fold(req, resp, {:halt, reason}, _bytes), do: halt(req, resp, reason)
 
   defp halt(req, resp, reason), do: {:halt, {req, %{resp | body: {@exceeded, reason}}}}
 

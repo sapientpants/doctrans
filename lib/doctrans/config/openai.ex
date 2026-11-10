@@ -2,9 +2,10 @@ defmodule Doctrans.Config.OpenAI do
   @moduledoc """
   Typed runtime settings for the OpenAI-compatible API.
 
-  The request bounds (`timeout/0`, `deadline/0`, `max_response_bytes/0`) have
-  their defaults here and nowhere else; `config/config.exs` explains what each
-  one is for and sets a key only to override it.
+  The request bounds (`timeout/0`, `deadline/0`, `max_response_bytes/0`,
+  `max_response_frames/0`) have their defaults here and nowhere else;
+  `config/config.exs` explains what each one is for and sets a key only to
+  override it.
   """
 
   alias Doctrans.Config
@@ -49,4 +50,15 @@ defmodule Doctrans.Config.OpenAI do
   """
   @spec max_response_bytes() :: pos_integer()
   def max_response_bytes, do: Config.get(:openai, :max_response_bytes) || 8_000_000
+
+  @doc """
+  Most content frames accepted in one streamed answer; defaults to 20,000.
+
+  A model emits at most one frame per token, and the chat answer is capped at
+  8,192 tokens, so an honest stream stays well under this. The bound exists
+  because the byte cap alone admits over a hundred thousand one-character
+  frames, each of which the chat panel has to take delivery of.
+  """
+  @spec max_response_frames() :: pos_integer()
+  def max_response_frames, do: Config.get(:openai, :max_response_frames) || 20_000
 end

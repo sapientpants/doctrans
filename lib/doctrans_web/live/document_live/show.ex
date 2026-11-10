@@ -237,8 +237,13 @@ defmodule DoctransWeb.DocumentLive.Show do
     {:noreply, Viewer.refresh_pending(socket)}
   end
 
-  # Streaming events from the chat turn in flight
+  # Streaming events from the chat turn in flight, and the timer that renders
+  # the deltas it has buffered
   def handle_info({:chat_event, _token, _event} = message, socket) do
+    ChatSession.handle_info(message, socket)
+  end
+
+  def handle_info({:chat_flush, _token} = message, socket) do
     ChatSession.handle_info(message, socket)
   end
 end

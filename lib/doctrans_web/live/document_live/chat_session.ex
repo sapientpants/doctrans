@@ -18,6 +18,17 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   superseded. A token that no longer matches is a turn that was interrupted,
   whatever it says. `reset_transient/1` clears the token with the rest of the
   turn state, so once a turn has landed nothing it sent can match either.
+
+  Deltas are not rendered one by one. The template runs Markdown and the
+  sanitizer over the whole answer so far and ships the result as one dynamic,
+  so a render costs the size of the answer, and a model server sends a frame
+  per token -- or, if it is broken or hostile, per character. Each delta is
+  pushed onto `:chat_pending_content` instead, and the first delta after a flush
+  schedules the next `{:chat_flush, token}` message `@flush_interval`
+  milliseconds out; that flush folds the buffer into `:chat_streaming_content`,
+  which is the assign the template reads. A buffer that is not empty therefore
+  always has a flush on its way, and a flush is never scheduled twice. The
+  token on the message is what drops a flush that outlives its turn.
   """
 
   use Gettext, backend: DoctransWeb.Gettext
@@ -44,6 +55,11 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   # The `start_async/3` name of the turn task.
   @turn :chat_turn
 
+  # Milliseconds between two renders of the answer in flight. Long enough that
+  # a token-per-frame stream coalesces to a handful of frames per render, short
+  # enough that the reader sees the text arrive as it is generated.
+  @flush_interval 50
+
   @doc """
   Assigns the initial chat state for a freshly mounted document.
   """
@@ -58,6 +74,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
     |> assign(:chat_last_question, nil)
     |> assign(:chat_stage, nil)
     |> assign(:chat_streaming_content, "")
+    |> assign(:chat_pending_content, [])
     |> assign(:chat_retrieved_context, conversation.context)
     |> assign(:chat_interrupted, conversation.interrupted?)
     |> assign(:chat_question, nil)
@@ -113,6 +130,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
     |> assign(:chat_loading, true)
     |> assign(:chat_stage, :understanding)
     |> assign(:chat_streaming_content, "")
+    |> assign(:chat_pending_content, [])
     |> assign(:chat_token, token)
     |> assign(:chat_last_question, question)
     |> start_async(
@@ -134,8 +152,8 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   end
 
   @doc """
-  Applies a streaming event from the turn in flight; one from any other turn is
-  dropped.
+  Applies a streaming event from the turn in flight, or the flush that renders
+  its buffered deltas; either from any other turn is dropped.
   """
   def handle_info({:chat_event, token, event}, socket) do
     if token == socket.assigns.chat_token,
@@ -143,10 +161,38 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
       else: {:noreply, socket}
   end
 
+  def handle_info({:chat_flush, token}, socket) do
+    if token == socket.assigns.chat_token,
+      do: {:noreply, flush_pending(socket)},
+      else: {:noreply, socket}
+  end
+
   defp apply_event(socket, {:stage, stage}), do: assign(socket, :chat_stage, stage)
 
-  defp apply_event(socket, {:delta, text}),
-    do: assign(socket, :chat_streaming_content, socket.assigns.chat_streaming_content <> text)
+  # The buffer is kept in reverse, so a delta is a cons and the flush one
+  # reverse. A flush is scheduled when the buffer was empty and nothing else:
+  # a non-empty buffer already has one coming.
+  defp apply_event(socket, {:delta, text}) do
+    case socket.assigns.chat_pending_content do
+      [] ->
+        Process.send_after(self(), {:chat_flush, socket.assigns.chat_token}, @flush_interval)
+        assign(socket, :chat_pending_content, [text])
+
+      pending ->
+        assign(socket, :chat_pending_content, [text | pending])
+    end
+  end
+
+  defp flush_pending(socket) do
+    pending = socket.assigns.chat_pending_content
+
+    content =
+      IO.iodata_to_binary([socket.assigns.chat_streaming_content | Enum.reverse(pending)])
+
+    socket
+    |> assign(:chat_streaming_content, content)
+    |> assign(:chat_pending_content, [])
+  end
 
   @doc """
   Lands the turn task's result.
@@ -390,5 +436,6 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
     |> assign(:chat_last_question, nil)
     |> assign(:chat_stage, nil)
     |> assign(:chat_streaming_content, "")
+    |> assign(:chat_pending_content, [])
   end
 end

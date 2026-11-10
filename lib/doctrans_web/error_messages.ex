@@ -314,6 +314,14 @@ defmodule DoctransWeb.ErrorMessages do
         limit: binding(bindings, :limit)
       )
 
+  defp lookup({:inference_response_too_fragmented, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "The model server's answer arrived in more than %{limit} pieces and was stopped before it was read. Check the configured model and endpoint, then try again.",
+        limit: binding(bindings, :limit)
+      )
+
   defp lookup(:invalid_endpoint_url),
     do:
       dgettext(
