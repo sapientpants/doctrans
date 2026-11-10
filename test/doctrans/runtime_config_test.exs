@@ -58,7 +58,7 @@ defmodule Doctrans.RuntimeConfigTest do
   # Finch refuses a URL without an http(s) scheme or a host by raising an
   # `ArgumentError` that quotes the URL whole, credentials included. Left to
   # the clients, a scheme-less `user:secret@host:port` would put the secret in
-  # the log on every health probe and in `oban_jobs.errors` on every page job
+  # the log on every health probe and in `oban_jobs.errors` on every Attempt
   # (#266). Checked at boot for every environment: the variable feeds both
   # clients in all of them.
   describe "OPENAI_HOST" do

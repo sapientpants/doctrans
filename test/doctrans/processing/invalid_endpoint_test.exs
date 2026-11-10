@@ -35,7 +35,7 @@ defmodule Doctrans.Processing.InvalidEndpointTest do
 
   defp configure(key, base_url), do: TestEnv.merge_env(key, base_url: base_url)
 
-  defp quiet(fun) do
+  defp without_leaking_secret(fun) do
     {result, log} = with_log(fun)
     refute log =~ @secret, "the credential reached the log: #{log}"
     result
@@ -49,13 +49,13 @@ defmodule Doctrans.Processing.InvalidEndpointTest do
       end
 
       test "fails a completion as an ordinary error, without raising" do
-        assert quiet(fn -> OpenAI.chat([%{role: "user", content: "hi"}]) end) ==
+        assert without_leaking_secret(fn -> OpenAI.chat([%{role: "user", content: "hi"}]) end) ==
                  {:error, :invalid_endpoint_url}
       end
 
       test "fails a stream before any delta" do
         result =
-          quiet(fn ->
+          without_leaking_secret(fn ->
             OpenAI.chat_stream([%{role: "user", content: "hi"}], &send(self(), {:delta, &1}))
           end)
 
@@ -64,7 +64,7 @@ defmodule Doctrans.Processing.InvalidEndpointTest do
       end
 
       test "fails the model list the health probe and the reprocess modal ask for" do
-        assert quiet(&OpenAI.list_models/0) == {:error, :invalid_endpoint_url}
+        assert without_leaking_secret(&OpenAI.list_models/0) == {:error, :invalid_endpoint_url}
       end
     end
   end
@@ -73,7 +73,7 @@ defmodule Doctrans.Processing.InvalidEndpointTest do
     test "fails an embedding as an ordinary error, without raising" do
       configure(:embedding, @scheme_less)
 
-      assert quiet(fn -> Embedding.generate("some chunk text") end) ==
+      assert without_leaking_secret(fn -> Embedding.generate("some chunk text") end) ==
                {:error, :invalid_endpoint_url}
     end
 
@@ -83,7 +83,7 @@ defmodule Doctrans.Processing.InvalidEndpointTest do
       configure(:openai, @scheme_less)
       configure(:embedding, nil)
 
-      assert quiet(fn -> Embedding.generate("some chunk text") end) ==
+      assert without_leaking_secret(fn -> Embedding.generate("some chunk text") end) ==
                {:error, :invalid_endpoint_url}
     end
   end

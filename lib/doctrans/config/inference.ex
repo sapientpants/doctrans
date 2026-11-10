@@ -181,14 +181,7 @@ defmodule Doctrans.Config.Inference do
   """
   @spec well_formed_url?(term()) :: boolean()
   def well_formed_url?(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{scheme: scheme, host: host}
-      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
-        true
-
-      _ ->
-        false
-    end
+    URI.parse(url).scheme in ["http", "https"] and host(url) != nil
   end
 
   def well_formed_url?(_url), do: false

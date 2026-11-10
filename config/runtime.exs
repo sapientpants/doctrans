@@ -29,17 +29,18 @@ end
 # URL without an http(s) scheme or a host by raising an `ArgumentError` whose
 # message quotes the whole URL -- credentials included, since an operator may
 # write `http://user:secret@host`. A value such as `user:secret@llm:8000`, the
-# scheme left off, would otherwise raise on every health probe and every page
-# job, and the secret would land in the log and in `oban_jobs.errors` each time.
+# scheme left off, would otherwise raise on every health probe and on every
+# Attempt at a Page, and the secret would land in the log and in
+# `oban_jobs.errors` each time.
 # Refusing at boot names the variable and shows only the redacted value.
 case System.get_env("OPENAI_HOST") do
   nil ->
     :ok
 
-  host ->
-    unless Doctrans.Config.Inference.well_formed_url?(host) do
+  url ->
+    unless Doctrans.Config.Inference.well_formed_url?(url) do
       raise "OPENAI_HOST must be an http(s) URL with a host, such as " <>
-              "http://localhost:8000, got: #{Doctrans.Config.Inference.redact_url(host)}"
+              "http://localhost:8000, got: #{Doctrans.Config.Inference.redact_url(url)}"
     end
 end
 
