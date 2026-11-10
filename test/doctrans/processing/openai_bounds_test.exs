@@ -129,9 +129,9 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
 
   describe "frame ceiling" do
     test "a stream in more frames than the ceiling is refused at the frame past it" do
-      # Frames of one character each, offered without pause and well inside the
-      # byte cap: a few thousand of them are under 200 KB. Only the frame count
-      # ends this.
+      # Frames of one character each, offered without pause. The first chunk
+      # alone carries over a thousand of them and sits under the byte cap, so
+      # only the frame count ends this, and it ends it there.
       start_endpoint(&fragment/2)
 
       {elapsed, result} = call(&stream/0)
@@ -260,16 +260,19 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
     flood_chunks(socket, parent, @flood_chunks, :binary.copy("x", @flood_chunk_bytes))
   end
 
-  # The same flood, as one-character content frames: @flood_chunks chunks of a
-  # hundred frames each, so the offer is thousands of frames against a ceiling
-  # of @max_frames, and `assert_offered_but_not_read/0` reads the same way.
+  # The same flood, as one-character content frames. Each chunk is the same
+  # size as a flood chunk, so the offer is hundreds of thousands of frames
+  # against a ceiling of @max_frames, and `assert_offered_but_not_read/0`
+  # reads the same way: what fits in the socket buffers is a handful of
+  # chunks whatever they hold, so the chunks have to be as large.
   defp fragment(socket, parent) do
     :gen_tcp.send(socket, headers("text/event-stream"))
 
     frame =
       "data: " <> Jason.encode!(%{"choices" => [%{"delta" => %{"content" => "x"}}]}) <> "\n\n"
 
-    flood_chunks(socket, parent, @flood_chunks, :binary.copy(frame, 100))
+    payload = :binary.copy(frame, div(@flood_chunk_bytes, byte_size(frame)))
+    flood_chunks(socket, parent, @flood_chunks, payload)
   end
 
   defp flood_chunks(_socket, _parent, 0, _payload), do: :ok

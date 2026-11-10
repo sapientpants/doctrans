@@ -162,25 +162,24 @@ defmodule Doctrans.Processing.OpenAI do
   # the byte cap does.
   defp collect_sse(collector) do
     fn data, body ->
-      state = if is_map(body), do: body, else: collector
-
-      case SSECollector.feed(state, data) do
+      case SSECollector.feed(collector_state(body, collector), data) do
         {:ok, state} -> {:cont, state}
         {:error, reason} -> {:halt, reason}
       end
     end
   end
 
-  # `body` holds the collector state once any chunk arrived; it is still the
-  # default "" (not a map) if the stream had no data frames.
   defp collected_content(body, collector) do
-    state = if is_map(body), do: body, else: collector
-
-    with {:ok, content} <- SSECollector.finish(state) do
+    with {:ok, content} <- SSECollector.finish(collector_state(body, collector)) do
       content = content |> String.trim() |> strip_code_fences()
       if content == "", do: {:error, :empty_response}, else: {:ok, content}
     end
   end
+
+  # `body` holds the collector state once any chunk arrived; it is still the
+  # default "" if the stream had no data frames.
+  defp collector_state(%SSECollector{} = state, _collector), do: state
+  defp collector_state(_body, collector), do: collector
 
   @impl true
   @spec translate(String.t(), String.t(), String.t(), keyword()) ::

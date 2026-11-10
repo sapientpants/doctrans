@@ -4,8 +4,8 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
 
   Owns the chat half of `DoctransWeb.DocumentLive.Show`: every `chat_*` assign,
   the turn task, and the messages that task sends back. `Show` forwards the
-  `{:chat_event, _, _}` messages to `handle_info/2` and the `:chat_turn` result
-  to `handle_async/3`, and hands `document_changed/2` and `page_changed/3` what
+  `{:chat_event, _, _}` and `{:chat_flush, _}` messages to `handle_info/2` and
+  the `:chat_turn` result to `handle_async/3`, and hands `document_changed/2` and `page_changed/3` what
   `DoctransWeb.DocumentLive.Viewer` answered about a broadcast; nothing else
   writes these assigns. Kept out of the LiveView module so that `Show` handles
   requests and does not reach into the chat state itself.
@@ -156,16 +156,16 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   its buffered deltas; either from any other turn is dropped.
   """
   def handle_info({:chat_event, token, event}, socket) do
-    if token == socket.assigns.chat_token,
-      do: {:noreply, apply_event(socket, event)},
-      else: {:noreply, socket}
+    {:noreply, if(current_turn?(socket, token), do: apply_event(socket, event), else: socket)}
   end
 
   def handle_info({:chat_flush, token}, socket) do
-    if token == socket.assigns.chat_token,
-      do: {:noreply, flush_pending(socket)},
-      else: {:noreply, socket}
+    {:noreply, if(current_turn?(socket, token), do: flush_pending(socket), else: socket)}
   end
+
+  # Whether a token belongs to the turn in flight. A landed turn's token is
+  # `nil`, which no message ever carries.
+  defp current_turn?(socket, token), do: token == socket.assigns.chat_token
 
   defp apply_event(socket, {:stage, stage}), do: assign(socket, :chat_stage, stage)
 
@@ -204,9 +204,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   failure the catalog cannot name.
   """
   def handle_async(@turn, {:ok, {token, result}}, socket) do
-    if token == socket.assigns.chat_token,
-      do: {:noreply, land(socket, result)},
-      else: {:noreply, socket}
+    {:noreply, if(current_turn?(socket, token), do: land(socket, result), else: socket)}
   end
 
   def handle_async(@turn, {:exit, _reason}, %{assigns: %{chat_token: nil}} = socket) do

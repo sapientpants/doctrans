@@ -25,13 +25,16 @@ defmodule Doctrans.Processing.SSECollector do
   Collector state: the delta callback, the trailing partial line, deltas in
   reverse order, and the frames emitted so far against the ceiling.
   """
-  @type t :: %{
+  @type t :: %__MODULE__{
           on_delta: (String.t() -> any()),
           buffer: String.t(),
           content: [String.t()],
           frames: non_neg_integer(),
           max_frames: pos_integer()
         }
+
+  @enforce_keys [:on_delta, :max_frames]
+  defstruct on_delta: nil, buffer: "", content: [], frames: 0, max_frames: nil
 
   @typedoc "The one failure the collector produces: more content frames than the ceiling."
   @type error :: {:inference_response_too_fragmented, [limit: pos_integer()]}
@@ -46,11 +49,8 @@ defmodule Doctrans.Processing.SSECollector do
   """
   @spec new((String.t() -> any()), keyword()) :: t()
   def new(on_delta, opts \\ []) do
-    %{
+    %__MODULE__{
       on_delta: on_delta,
-      buffer: "",
-      content: [],
-      frames: 0,
       max_frames: Keyword.get(opts, :max_response_frames) || OpenAI.max_response_frames()
     }
   end
@@ -63,12 +63,10 @@ defmodule Doctrans.Processing.SSECollector do
   dropped with the rest of the chunk, and there is no state to feed further.
   """
   @spec feed(t(), binary()) :: {:ok, t()} | {:error, error()}
-  def feed(state, chunk) when is_binary(chunk) do
+  def feed(%__MODULE__{} = state, chunk) when is_binary(chunk) do
     parts = :binary.split(state.buffer <> chunk, "\n", [:global])
 
-    state
-    |> Map.put(:buffer, List.last(parts))
-    |> emit_lines(Enum.drop(parts, -1))
+    emit_lines(%{state | buffer: List.last(parts)}, Enum.drop(parts, -1))
   end
 
   @doc """
@@ -78,7 +76,7 @@ defmodule Doctrans.Processing.SSECollector do
   still trip after the last `feed/2` passed.
   """
   @spec finish(t()) :: {:ok, String.t()} | {:error, error()}
-  def finish(state) do
+  def finish(%__MODULE__{} = state) do
     with {:ok, state} <- emit_line(state.buffer, state) do
       {:ok, state.content |> Enum.reverse() |> :erlang.iolist_to_binary()}
     end
@@ -119,7 +117,7 @@ defmodule Doctrans.Processing.SSECollector do
 
   # The check runs before the callback, so the frame past the ceiling is
   # neither emitted nor kept.
-  defp emit_content(_content, %{frames: frames, max_frames: max_frames})
+  defp emit_content(_content, %__MODULE__{frames: frames, max_frames: max_frames})
        when frames >= max_frames,
        do: {:error, {:inference_response_too_fragmented, limit: max_frames}}
 

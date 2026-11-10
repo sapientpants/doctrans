@@ -72,8 +72,14 @@ defmodule Doctrans.Processing.SSECollectorTest do
     end
 
     test "the default ceiling is the configured one" do
+      limit = OpenAI.max_response_frames()
       collector = SSECollector.new(fn _ -> :ok end)
-      assert collector.max_frames == OpenAI.max_response_frames()
+      within = String.duplicate(content_frame("a"), limit)
+
+      {:ok, collector} = SSECollector.feed(collector, within)
+
+      assert SSECollector.feed(collector, content_frame("b")) ==
+               {:error, {:inference_response_too_fragmented, limit: limit}}
     end
   end
 

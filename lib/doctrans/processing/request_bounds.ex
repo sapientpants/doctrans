@@ -93,18 +93,21 @@ defmodule Doctrans.Processing.RequestBounds do
   def remaining(%__MODULE__{deadline: deadline}),
     do: deadline - System.monotonic_time(:millisecond)
 
-  @doc """
-  Runs a bounded POST.
-
-  Takes the usual Req options, plus `:collect` -- a reducer folding each chunk
+  @typedoc """
+  The `:collect` option of `post/3` and `get/3`: a reducer folding each chunk
   into the response body, for a caller that parses as it streams. It is called
   as `collect.(chunk, body)` and answers `{:cont, body}` to go on, or
   `{:halt, reason}` to end the stream there and have the call return
-  `{:error, reason}`. It defaults to plain accumulation, which is what a
-  non-streaming call wants.
+  `{:error, reason}`.
   """
   @type collect :: (binary(), term() -> {:cont, term()} | {:halt, term()})
 
+  @doc """
+  Runs a bounded POST.
+
+  Takes the usual Req options, plus `:collect`, a `t:collect/0` reducer. It
+  defaults to plain accumulation, which is what a non-streaming call wants.
+  """
   @spec post(Req.Request.t(), t(), keyword()) :: {:ok, Req.Response.t()} | {:error, term()}
   def post(req, bounds, options), do: request(req, bounds, [{:method, :post} | options])
 
