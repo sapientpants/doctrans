@@ -99,7 +99,7 @@ msgstr "må være lik %{number}"
 msgid "Could not parse page count from pdfinfo output"
 msgstr "Kunne ikke lese sideantall fra pdfinfo-utdata"
 
-#: lib/doctrans_web/error_messages.ex:329
+#: lib/doctrans_web/error_messages.ex:336
 #, elixir-autogen, elixir-format
 msgid "Document not found"
 msgstr "Dokument ikke funnet"
@@ -109,12 +109,12 @@ msgstr "Dokument ikke funnet"
 msgid "PDF extraction failed: %{reason}"
 msgstr "PDF-uttrekk feilet: %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:307
+#: lib/doctrans_web/error_messages.ex:314
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} extraction failed: %{reason}"
 msgstr "Uttrekk av side %{page_number} feilet: %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:314
+#: lib/doctrans_web/error_messages.ex:321
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} translation failed: %{reason}"
 msgstr "Oversettelse av side %{page_number} feilet: %{reason}"
@@ -149,7 +149,7 @@ msgstr "LibreOffice er ikke installert"
 msgid "Page image not found after extraction"
 msgstr "Page image not found after extraction"
 
-#: lib/doctrans_web/error_messages.ex:331
+#: lib/doctrans_web/error_messages.ex:338
 #, elixir-autogen, elixir-format
 msgid "Page not found"
 msgstr "Page not found"
@@ -254,7 +254,7 @@ msgstr "LibreOffice-prosessen avsluttet uventet"
 msgid "The model did not return complete final text. Use a model with a larger output budget or split the page into smaller sections, then reprocess. The provider must return finish_reason=stop."
 msgstr "Modellen returnerte ikke en fullstendig endelig tekst. Bruk en modell med en høyere grense for utdata, eller del siden i mindre avsnitt og behandle den på nytt. Leverandøren må returnere finish_reason=stop."
 
-#: lib/doctrans_web/error_messages.ex:323
+#: lib/doctrans_web/error_messages.ex:330
 #, elixir-autogen, elixir-format
 msgid "Processing failed on page(s) %{page_numbers}. Reprocess those pages to finish this document."
 msgstr "Behandlingen mislyktes på side(r) %{page_numbers}. Behandle disse sidene på nytt for å fullføre dokumentet."
@@ -329,12 +329,12 @@ msgstr "Svaret fra modellserveren overskred grensen på %{limit} byte og ble sto
 msgid "Source language is required and must be a string"
 msgstr "Kildespråket er påkrevd og må være en tekststreng"
 
-#: lib/doctrans_web/error_messages.ex:363
+#: lib/doctrans_web/error_messages.ex:370
 #, elixir-autogen, elixir-format
 msgid "No page of this document is waiting to be retried. Reload the page to see its current state."
 msgstr "Ingen side i dette dokumentet venter på et nytt forsøk. Last inn siden på nytt for å se gjeldende status."
 
-#: lib/doctrans_web/error_messages.ex:356
+#: lib/doctrans_web/error_messages.ex:363
 #, elixir-autogen, elixir-format
 msgid "This document has already finished processing, so there is nothing left to stop."
 msgstr "Dette dokumentet er allerede ferdig behandlet, så det er ingenting igjen å stoppe."
@@ -374,7 +374,7 @@ msgstr "Oversettelsesmodellen %{model} er ikke tilgjengelig på %{destination}. 
 msgid "An unexpected error occurred. Please try again."
 msgstr "Det oppstod en uventet feil. Vennligst prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:371
+#: lib/doctrans_web/error_messages.ex:378
 #, elixir-autogen, elixir-format
 msgid "Could not fetch the list of models from the model server"
 msgstr "Kunne ikke hente listen over modeller fra modellserveren"
@@ -384,22 +384,22 @@ msgstr "Kunne ikke hente listen over modeller fra modellserveren"
 msgid "Document search is temporarily unavailable. Please try again."
 msgstr "Dokumentsøk er midlertidig utilgjengelig. Prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:333
+#: lib/doctrans_web/error_messages.ex:340
 #, elixir-autogen, elixir-format
 msgid "Failed to delete document"
 msgstr "Kunne ikke slette dokument"
 
-#: lib/doctrans_web/error_messages.ex:368
+#: lib/doctrans_web/error_messages.ex:375
 #, elixir-autogen, elixir-format
 msgid "Invalid model selection"
 msgstr "Ugyldig modellvalg"
 
-#: lib/doctrans_web/error_messages.ex:339
+#: lib/doctrans_web/error_messages.ex:346
 #, elixir-autogen, elixir-format
 msgid "Original upload unavailable. Re-upload this document to process it again."
 msgstr "Den opprinnelige filen er ikke tilgjengelig. Last opp dokumentet på nytt for å behandle det igjen."
 
-#: lib/doctrans_web/error_messages.ex:375
+#: lib/doctrans_web/error_messages.ex:382
 #, elixir-autogen, elixir-format
 msgid "Please enter a question."
 msgstr "Vennligst skriv inn et spørsmål."
@@ -409,17 +409,17 @@ msgstr "Vennligst skriv inn et spørsmål."
 msgid "Search is temporarily unavailable. Please try again."
 msgstr "Søk er midlertidig utilgjengelig. Vennligst prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:352
+#: lib/doctrans_web/error_messages.ex:359
 #, elixir-autogen, elixir-format
 msgid "The document has changed. Please try again."
 msgstr "Dokumentet er endret. Prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:346
+#: lib/doctrans_web/error_messages.ex:353
 #, elixir-autogen, elixir-format
 msgid "This document still has active processing jobs. Please wait for them to finish."
 msgstr "Dette dokumentet har fortsatt aktive behandlingsoppgaver. Vent til de er ferdige."
 
-#: lib/doctrans_web/error_messages.ex:385
+#: lib/doctrans_web/error_messages.ex:392
 #, elixir-autogen, elixir-format
 msgid "The database did not respond. Please try again."
 msgstr "Databasen svarte ikke. Vennligst prøv igjen."
@@ -438,3 +438,8 @@ msgstr "Kunne ikke lese sidestørrelser fra pdfinfo-utdata"
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} of this PDF is %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."
 msgstr "Side %{page_number} i denne PDF-en er %{width}x%{height} piksler ved %{dpi} DPI, over grensen på %{limit} piksler. Senk uttrekksoppløsningen og prøv igjen."
+
+#: lib/doctrans_web/error_messages.ex:307
+#, elixir-autogen, elixir-format
+msgid "The model server address is not a valid URL. Set OPENAI_HOST to an http or https URL with a host, such as http://localhost:8000, then restart."
+msgstr "Adressen til modellserveren er ikke en gyldig URL. Sett OPENAI_HOST til en http- eller https-URL med en vert, for eksempel http://localhost:8000, og start deretter på nytt."

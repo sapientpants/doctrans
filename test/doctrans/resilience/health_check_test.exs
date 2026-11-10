@@ -110,11 +110,19 @@ defmodule Doctrans.Resilience.HealthCheckTest do
     end
 
     test "normalizes a raised failure instead of crashing the caller" do
-      # A base URL without a scheme makes Req raise while building the request.
-      TestEnv.merge_env(:openai, base_url: "localhost:9999", api_key: nil)
+      Mox.stub(OpenAIMock, :list_models, fn -> raise ArgumentError, "client bug" end)
 
       assert {:error, {:operation_failed, [reason: %ArgumentError{}]}} =
                HealthCheck.check_openai()
+    end
+
+    # Finch would raise on this URL with the whole value in its message, and the
+    # worker logs the probe's reason every minute (#266). The client refuses the
+    # URL first, so the probe reports a plain reason with nothing to redact.
+    test "reports a base URL without a scheme as a misconfiguration, not a crash" do
+      TestEnv.merge_env(:openai, base_url: "user:secret@localhost:9999", api_key: nil)
+
+      assert HealthCheck.check_openai() == {:error, :invalid_endpoint_url}
     end
 
     test "rejects the call without reaching the API when the circuit is blown", %{bypass: bypass} do

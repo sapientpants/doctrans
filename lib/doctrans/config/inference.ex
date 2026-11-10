@@ -165,6 +165,27 @@ defmodule Doctrans.Config.Inference do
     if String.downcase(host, :ascii) in @local_hosts, do: :local, else: :remote
   end
 
+  @doc """
+  Whether a URL has what Finch needs to send a request to it: an `http` or
+  `https` scheme and a non-empty host.
+
+  This is the check Finch makes itself, restated so it can run *before* the
+  request. Finch refuses a URL that fails it by raising an `ArgumentError`
+  whose message quotes the whole URL -- credentials included -- and nothing
+  between the client and the log redacts an exception message. The scheme-less
+  `"user:secret@llm:8000"` and the host-less `"http://user:secret@/v1"` are the
+  two shapes this exists for; both read back their secret in Finch's message.
+  `config/runtime.exs` applies it to `OPENAI_HOST` at boot, and
+  `Doctrans.Processing.RequestBounds` applies it to every URL it is handed, so
+  a base URL configured any other way fails as an ordinary error instead.
+  """
+  @spec well_formed_url?(term()) :: boolean()
+  def well_formed_url?(url) when is_binary(url) do
+    URI.parse(url).scheme in ["http", "https"] and host(url) != nil
+  end
+
+  def well_formed_url?(_url), do: false
+
   # Everything up to and including the `@` that closes the userinfo, with an
   # optional `scheme://` kept in front of it. Anchored and non-greedy about the
   # authority (`[^/?#@]*` cannot cross into the path), so an `@` in a path —

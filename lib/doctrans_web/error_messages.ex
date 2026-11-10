@@ -302,6 +302,13 @@ defmodule DoctransWeb.ErrorMessages do
         limit: binding(bindings, :limit)
       )
 
+  defp lookup(:invalid_endpoint_url),
+    do:
+      dgettext(
+        "errors",
+        "The model server address is not a valid URL. Set OPENAI_HOST to an http or https URL with a host, such as http://localhost:8000, then restart."
+      )
+
   defp lookup({:page_extraction_failed, bindings}),
     do:
       dgettext("errors", "Page %{page_number} extraction failed: %{reason}",
