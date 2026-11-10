@@ -209,6 +209,15 @@ defmodule DoctransWeb.ErrorMessagesTest do
       assert_specific_messages_everywhere(reasons)
     end
 
+    test "inference bounds have specific messages with resolved bindings in every locale" do
+      assert_specific_messages_everywhere([
+        :inference_deadline_exceeded,
+        {:inference_response_too_large, [limit: 8_000_000]},
+        {:inference_response_too_fragmented, [limit: 20_000]},
+        :invalid_endpoint_url
+      ])
+    end
+
     test "retrieval outages have specific messages with resolved bindings in every locale" do
       # Both spellings: `Doctrans.Chat.Retrieval.retrieve/3` returns the tagged tuple, and
       # the bare atom is what the tuple clause delegates to. Without a clause of

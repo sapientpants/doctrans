@@ -2,7 +2,7 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
   @moduledoc """
   Tests the bounds around the inference client: a total deadline that
   covers Req's retries, and a response size cap, on the non-streaming completion
-  path and on the streaming one.
+  path and on the streaming one; and the frame ceiling on the streaming path.
 
   The misbehaving endpoints are raw TCP servers rather than Bypass, because each
   of them deliberately outlives the call it is answering -- it stalls, drips, or
@@ -27,6 +27,7 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
   # large enough that a connect and a JSON round trip do not trip it.
   @deadline 300
   @max_bytes 100_000
+  @max_frames 50
   # The wall clock a bounded call must finish inside: five times the deadline, so
   # the assertion catches an unbounded call rather than a slow machine.
   @bounded_ms 1_500
@@ -126,15 +127,40 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
     end
   end
 
+  describe "frame ceiling" do
+    test "a stream in more frames than the ceiling is refused at the frame past it" do
+      # Frames of one character each, offered without pause. The first chunk
+      # alone carries over a thousand of them and sits under the byte cap, so
+      # only the frame count ends this, and it ends it there.
+      start_endpoint(&fragment/2)
+
+      {elapsed, result} = call(&stream/0)
+
+      assert result == {:error, {:inference_response_too_fragmented, [limit: @max_frames]}}
+      assert elapsed < @bounded_ms
+      # Every frame under the ceiling was delivered as it arrived, and not one
+      # more: the halt is on the frame past the ceiling, not after the body.
+      assert drain_deltas(0) == @max_frames
+      assert_offered_but_not_read()
+    end
+  end
+
   describe "error reporting" do
-    test "both bounds are classified and carry an actionable message" do
+    test "every bound is classified and carries an actionable message" do
       assert ErrorClassifier.classify(:inference_deadline_exceeded) == :retryable
       assert ErrorClassifier.classify({:inference_response_too_large, limit: 1}) == :permanent
+
+      assert ErrorClassifier.classify({:inference_response_too_fragmented, limit: 1}) ==
+               :permanent
 
       assert ErrorMessages.message(:inference_deadline_exceeded) =~ "reprocess"
 
       message = ErrorMessages.message({:inference_response_too_large, limit: @max_bytes})
       assert message =~ to_string(@max_bytes)
+      assert message =~ "try again"
+
+      message = ErrorMessages.message({:inference_response_too_fragmented, limit: @max_frames})
+      assert message =~ to_string(@max_frames)
       assert message =~ "try again"
     end
   end
@@ -159,7 +185,8 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
       # that.
       timeout: 60_000,
       deadline: @deadline,
-      max_response_bytes: @max_bytes
+      max_response_bytes: @max_bytes,
+      max_response_frames: @max_frames
     )
   end
 
@@ -233,6 +260,21 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
     flood_chunks(socket, parent, @flood_chunks, :binary.copy("x", @flood_chunk_bytes))
   end
 
+  # The same flood, as one-character content frames. Each chunk is the same
+  # size as a flood chunk, so the offer is hundreds of thousands of frames
+  # against a ceiling of @max_frames, and `assert_offered_but_not_read/0`
+  # reads the same way: what fits in the socket buffers is a handful of
+  # chunks whatever they hold, so the chunks have to be as large.
+  defp fragment(socket, parent) do
+    :gen_tcp.send(socket, headers("text/event-stream"))
+
+    frame =
+      "data: " <> Jason.encode!(%{"choices" => [%{"delta" => %{"content" => "x"}}]}) <> "\n\n"
+
+    payload = :binary.copy(frame, div(@flood_chunk_bytes, byte_size(frame)))
+    flood_chunks(socket, parent, @flood_chunks, payload)
+  end
+
   defp flood_chunks(_socket, _parent, 0, _payload), do: :ok
 
   defp flood_chunks(socket, parent, remaining, payload) do
@@ -256,6 +298,14 @@ defmodule Doctrans.Processing.OpenAIBoundsTest do
   defp drain_chunks_sent(count) do
     receive do
       :chunk_sent -> drain_chunks_sent(count + 1)
+    after
+      0 -> count
+    end
+  end
+
+  defp drain_deltas(count) do
+    receive do
+      {:delta, _} -> drain_deltas(count + 1)
     after
       0 -> count
     end

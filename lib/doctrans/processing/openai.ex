@@ -90,6 +90,9 @@ defmodule Doctrans.Processing.OpenAI do
   defp bounds(opts),
     do: RequestBounds.new(Keyword.take(opts, [:timeout, :deadline, :max_response_bytes]))
 
+  defp collector(on_delta, opts),
+    do: SSECollector.new(on_delta, Keyword.take(opts, [:max_response_frames]))
+
   # The fuse is asked, never melted, here: `ApiFailure` classifies each failure
   # and melts for the ones that count.
   defp post_chat_completion(request_body, opts) do
@@ -137,7 +140,7 @@ defmodule Doctrans.Processing.OpenAI do
   end
 
   defp do_chat_stream(messages, on_delta, opts) do
-    collector = SSECollector.new(on_delta)
+    collector = collector(on_delta, opts)
 
     build_base_req()
     |> RequestBounds.post(bounds(opts),
@@ -154,28 +157,29 @@ defmodule Doctrans.Processing.OpenAI do
 
   # Each raw chunk is fed into the SSE collector (kept in resp.body), which
   # parses complete `data:` frames and invokes on_delta/1 as soon as content
-  # arrives. `RequestBounds` counts the bytes and watches the clock around it.
+  # arrives. `RequestBounds` counts the bytes and watches the clock around it;
+  # the collector counts the frames, and its ceiling halts the stream the way
+  # the byte cap does.
   defp collect_sse(collector) do
     fn data, body ->
-      if is_map(body),
-        do: SSECollector.feed(body, data),
-        else: SSECollector.feed(collector, data)
+      case SSECollector.feed(collector_state(body, collector), data) do
+        {:ok, state} -> {:cont, state}
+        {:error, reason} -> {:halt, reason}
+      end
+    end
+  end
+
+  defp collected_content(body, collector) do
+    with {:ok, content} <- SSECollector.finish(collector_state(body, collector)) do
+      content = content |> String.trim() |> strip_code_fences()
+      if content == "", do: {:error, :empty_response}, else: {:ok, content}
     end
   end
 
   # `body` holds the collector state once any chunk arrived; it is still the
-  # default "" (not a map) if the stream had no data frames.
-  defp collected_content(body, collector) do
-    state = if is_map(body), do: body, else: collector
-
-    content =
-      state
-      |> SSECollector.finish()
-      |> String.trim()
-      |> strip_code_fences()
-
-    if content == "", do: {:error, :empty_response}, else: {:ok, content}
-  end
+  # default "" if the stream had no data frames.
+  defp collector_state(%SSECollector{} = state, _collector), do: state
+  defp collector_state(_body, collector), do: collector
 
   @impl true
   @spec translate(String.t(), String.t(), String.t(), keyword()) ::

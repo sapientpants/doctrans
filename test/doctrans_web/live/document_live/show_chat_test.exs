@@ -7,6 +7,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.Lifecycle
   alias Doctrans.Documents.PageLifecycle
+  alias Doctrans.ProcessProbe
   alias Doctrans.Repo
   alias DoctransWeb.DocumentLive.ChatComponents
   alias DoctransWeb.DocumentLive.ChatSession
@@ -413,6 +414,114 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
                Show.handle_async(:chat_turn, {:exit, :killed}, interrupted)
 
       assert Enum.map(Conversations.load(document.id).messages, & &1.role) == ["user"]
+    end
+  end
+
+  describe "streaming deltas" do
+    setup %{conn: conn} do
+      document = completed_document_with_embedding_fixture()
+      {:ok, view, _} = live(conn, ~p"/documents/#{document.id}")
+      question = Conversations.start_question(document.id, "Streamed question")
+      token = make_ref()
+
+      socket =
+        :sys.get_state(view.pid).socket
+        |> Phoenix.Component.assign(
+          chat_loading: true,
+          chat_question: question,
+          chat_token: token,
+          chat_last_question: question.content
+        )
+
+      %{socket: socket, token: token}
+    end
+
+    # Driven as a socket in the test process, so the flush timer the session
+    # schedules lands in this mailbox and the test decides when it fires.
+    test "deltas are buffered and rendered together when the flush fires", %{
+      socket: socket,
+      token: token
+    } do
+      {:noreply, socket} = Show.handle_info({:chat_event, token, {:delta, "Hello"}}, socket)
+      {:noreply, socket} = Show.handle_info({:chat_event, token, {:delta, ", world"}}, socket)
+
+      # Nothing on screen yet: what the template reads is untouched until the flush.
+      assert socket.assigns.chat_streaming_content == ""
+
+      # One flush for both deltas, not one per delta.
+      assert_receive {:chat_flush, ^token}
+      refute_received {:chat_flush, _}
+
+      {:noreply, socket} = Show.handle_info({:chat_flush, token}, socket)
+      assert socket.assigns.chat_streaming_content == "Hello, world"
+      assert socket.assigns.chat_pending_content == []
+
+      # The next delta after a flush schedules the next one.
+      {:noreply, socket} = Show.handle_info({:chat_event, token, {:delta, "!"}}, socket)
+      assert_receive {:chat_flush, ^token}
+
+      {:noreply, socket} = Show.handle_info({:chat_flush, token}, socket)
+      assert socket.assigns.chat_streaming_content == "Hello, world!"
+    end
+
+    test "a flush that outlives its turn is dropped", %{socket: socket, token: token} do
+      {:noreply, socket} = Show.handle_info({:chat_event, token, {:delta, "Partial"}}, socket)
+      assert_receive {:chat_flush, ^token}
+
+      interrupted = ChatSession.interrupt(socket)
+      assert interrupted.assigns.chat_pending_content == []
+
+      assert {:noreply, ^interrupted} = Show.handle_info({:chat_flush, token}, interrupted)
+      assert interrupted.assigns.chat_streaming_content == ""
+    end
+
+    test "a delta from another turn is dropped before it is buffered", %{socket: socket} do
+      stale = make_ref()
+
+      assert {:noreply, ^socket} =
+               Show.handle_info({:chat_event, stale, {:delta, "Stale"}}, socket)
+
+      refute_received {:chat_flush, _}
+    end
+
+    test "the streamed answer reaches the page while the turn is still running", %{
+      conn: conn
+    } do
+      # The real path end to end: the LiveView schedules its own flush, so a
+      # delta is on screen within the interval, with the turn held open behind
+      # it. This is what coalescing must not break.
+      document = completed_document_with_embedding_fixture()
+      test_pid = self()
+
+      Mox.stub(Doctrans.Processing.OpenAIMock, :chat_stream, fn _messages, on_delta, _opts ->
+        on_delta.("Streamed ")
+        on_delta.("answer")
+        send(test_pid, {:streaming, self()})
+
+        receive do
+          :finish -> {:ok, "Streamed answer"}
+        after
+          5_000 -> {:ok, "Streamed answer"}
+        end
+      end)
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+      view |> form("#chat-form", %{message: "Stream it"}) |> render_submit()
+
+      assert_receive {:streaming, turn}
+
+      # The flush is on the LiveView's own timer, which the test cannot fire.
+      ProcessProbe.eventually(
+        fn -> has_element?(view, "#chat-streaming", "Streamed answer") end,
+        "the streamed answer to be rendered"
+      )
+
+      send(turn, :finish)
+      await_chat_turn(view)
+
+      refute has_element?(view, "#chat-streaming")
+      assert has_element?(view, "#chat-messages", "Streamed answer")
     end
   end
 

@@ -99,7 +99,7 @@ msgstr "deve ser igual a %{number}"
 msgid "Could not parse page count from pdfinfo output"
 msgstr "Não foi possível analisar o número de páginas da saída do pdfinfo"
 
-#: lib/doctrans_web/error_messages.ex:348
+#: lib/doctrans_web/error_messages.ex:356
 #, elixir-autogen, elixir-format
 msgid "Document not found"
 msgstr "Documento não encontrado"
@@ -109,12 +109,12 @@ msgstr "Documento não encontrado"
 msgid "PDF extraction failed: %{reason}"
 msgstr "Falha na extração do PDF: %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:326
+#: lib/doctrans_web/error_messages.ex:334
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} extraction failed: %{reason}"
 msgstr "Falha na extração da página %{page_number}: %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:333
+#: lib/doctrans_web/error_messages.ex:341
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} translation failed: %{reason}"
 msgstr "Falha na tradução da página %{page_number}: %{reason}"
@@ -149,7 +149,7 @@ msgstr "LibreOffice não está instalado"
 msgid "Page image not found after extraction"
 msgstr "Page image not found after extraction"
 
-#: lib/doctrans_web/error_messages.ex:350
+#: lib/doctrans_web/error_messages.ex:358
 #, elixir-autogen, elixir-format
 msgid "Page not found"
 msgstr "Page not found"
@@ -254,7 +254,7 @@ msgstr "O processo do LibreOffice terminou inesperadamente"
 msgid "The model did not return complete final text. Use a model with a larger output budget or split the page into smaller sections, then reprocess. The provider must return finish_reason=stop."
 msgstr "O modelo não devolveu um texto final completo. Utilize um modelo com um limite de saída maior ou divida a página em secções mais pequenas e volte a processá-la. O fornecedor deve devolver finish_reason=stop."
 
-#: lib/doctrans_web/error_messages.ex:342
+#: lib/doctrans_web/error_messages.ex:350
 #, elixir-autogen, elixir-format
 msgid "Processing failed on page(s) %{page_numbers}. Reprocess those pages to finish this document."
 msgstr "O processamento falhou na(s) página(s) %{page_numbers}. Volte a processar essas páginas para concluir este documento."
@@ -329,12 +329,12 @@ msgstr "A resposta do servidor de modelos ultrapassou o limite de %{limit} bytes
 msgid "Source language is required and must be a string"
 msgstr "O idioma de origem é obrigatório e deve ser uma cadeia de caracteres"
 
-#: lib/doctrans_web/error_messages.ex:382
+#: lib/doctrans_web/error_messages.ex:390
 #, elixir-autogen, elixir-format
 msgid "No page of this document is waiting to be retried. Reload the page to see its current state."
 msgstr "Nenhuma página deste documento está à espera de nova tentativa. Recarregue a página para ver o estado atual."
 
-#: lib/doctrans_web/error_messages.ex:375
+#: lib/doctrans_web/error_messages.ex:383
 #, elixir-autogen, elixir-format
 msgid "This document has already finished processing, so there is nothing left to stop."
 msgstr "Este documento já terminou o processamento, por isso não há nada para parar."
@@ -374,7 +374,7 @@ msgstr "O modelo de tradução %{model} não está disponível em %{destination}
 msgid "An unexpected error occurred. Please try again."
 msgstr "Ocorreu um erro inesperado. Por favor, tente novamente."
 
-#: lib/doctrans_web/error_messages.ex:390
+#: lib/doctrans_web/error_messages.ex:398
 #, elixir-autogen, elixir-format
 msgid "Could not fetch the list of models from the model server"
 msgstr "Não foi possível obter a lista de modelos do servidor de modelos"
@@ -384,22 +384,22 @@ msgstr "Não foi possível obter a lista de modelos do servidor de modelos"
 msgid "Document search is temporarily unavailable. Please try again."
 msgstr "A pesquisa no documento está temporariamente indisponível. Tente novamente."
 
-#: lib/doctrans_web/error_messages.ex:352
+#: lib/doctrans_web/error_messages.ex:360
 #, elixir-autogen, elixir-format
 msgid "Failed to delete document"
 msgstr "Falha ao eliminar documento"
 
-#: lib/doctrans_web/error_messages.ex:387
+#: lib/doctrans_web/error_messages.ex:395
 #, elixir-autogen, elixir-format
 msgid "Invalid model selection"
 msgstr "Seleção de modelo inválida"
 
-#: lib/doctrans_web/error_messages.ex:358
+#: lib/doctrans_web/error_messages.ex:366
 #, elixir-autogen, elixir-format
 msgid "Original upload unavailable. Re-upload this document to process it again."
 msgstr "O ficheiro original não está disponível. Carregue novamente o documento para voltar a processá-lo."
 
-#: lib/doctrans_web/error_messages.ex:394
+#: lib/doctrans_web/error_messages.ex:402
 #, elixir-autogen, elixir-format
 msgid "Please enter a question."
 msgstr "Por favor, insira uma pergunta."
@@ -409,17 +409,17 @@ msgstr "Por favor, insira uma pergunta."
 msgid "Search is temporarily unavailable. Please try again."
 msgstr "A pesquisa está temporariamente indisponível. Por favor, tente novamente."
 
-#: lib/doctrans_web/error_messages.ex:371
+#: lib/doctrans_web/error_messages.ex:379
 #, elixir-autogen, elixir-format
 msgid "The document has changed. Please try again."
 msgstr "O documento foi alterado. Tente novamente."
 
-#: lib/doctrans_web/error_messages.ex:365
+#: lib/doctrans_web/error_messages.ex:373
 #, elixir-autogen, elixir-format
 msgid "This document still has active processing jobs. Please wait for them to finish."
 msgstr "Este documento ainda tem tarefas de processamento ativas. Aguarde até que terminem."
 
-#: lib/doctrans_web/error_messages.ex:404
+#: lib/doctrans_web/error_messages.ex:412
 #, elixir-autogen, elixir-format
 msgid "The database did not respond. Please try again."
 msgstr "A base de dados não respondeu. Por favor, tente novamente."
@@ -439,7 +439,7 @@ msgstr "Não foi possível analisar os tamanhos das páginas da saída do pdfinf
 msgid "Page %{page_number} of this PDF is %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."
 msgstr "A página %{page_number} deste PDF tem %{width}x%{height} pixels a %{dpi} DPI, acima do limite de %{limit} pixels. Reduza a resolução de extração e tente novamente."
 
-#: lib/doctrans_web/error_messages.ex:319
+#: lib/doctrans_web/error_messages.ex:327
 #, elixir-autogen, elixir-format
 msgid "The model server address is not a valid URL. Set OPENAI_HOST to an http or https URL with a host, such as http://localhost:8000, then restart."
 msgstr "O endereço do servidor de modelos não é um URL válido. Defina OPENAI_HOST como um URL http ou https com um host, como http://localhost:8000, e depois reinicie."
@@ -448,3 +448,8 @@ msgstr "O endereço do servidor de modelos não é um URL válido. Defina OPENAI
 #, elixir-autogen, elixir-format
 msgid "Question too long (max %{max} characters)"
 msgstr "Pergunta demasiado longa (máximo de %{max} caracteres)"
+
+#: lib/doctrans_web/error_messages.ex:319
+#, elixir-autogen, elixir-format
+msgid "The model server's answer arrived in more than %{limit} pieces and was stopped before it was read. Check the configured model and endpoint, then try again."
+msgstr "A resposta do servidor de modelos chegou em mais de %{limit} fragmentos e foi interrompida antes de ser lida. Verifique o modelo e o endpoint configurados e tente novamente."

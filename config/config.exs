@@ -18,10 +18,10 @@ config :doctrans, Doctrans.Repo, types: Doctrans.PostgrexTypes
 # OPENAI_HOST / OPENAI_API_KEY env vars allow overriding (e.g., Docker:
 # http://host.docker.internal:8000). Defaults match the local OMLX server.
 #
-# Three optional keys keep a misbehaving endpoint from holding a page (see
-# `Doctrans.Processing.RequestBounds`). Each has its default in
-# `Doctrans.Config.OpenAI`, stated there and nowhere else; set a key here only
-# to override it:
+# Four optional keys keep a misbehaving endpoint from holding a page or a chat
+# (see `Doctrans.Processing.RequestBounds` and `Doctrans.Processing.SSECollector`).
+# Each has its default in `Doctrans.Config.OpenAI`, stated there and nowhere
+# else; set a key here only to override it:
 # - timeout: milliseconds one receive may take. A server that keeps sending
 #   resets it, so on its own it bounds silence, not the request.
 # - deadline: milliseconds the whole call may take, retries included. A silent,
@@ -29,6 +29,10 @@ config :doctrans, Doctrans.Repo, types: Doctrans.PostgrexTypes
 #   holding it for a timeout per attempt.
 # - max_response_bytes: how much response body is accepted before the stream is
 #   cut off. A completion capped at a few thousand tokens is far below this.
+# - max_response_frames: how many content frames one streamed chat answer may
+#   carry before it is cut off. A model sends at most one per token; a server
+#   sending one per character would otherwise fit a flood of them under the
+#   byte cap, each of which the chat panel has to take delivery of.
 config :doctrans, :openai,
   base_url: "http://localhost:8000",
   api_key: nil,

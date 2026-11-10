@@ -404,6 +404,7 @@ config :doctrans, :openai,
   #   timeout: one receive; a server that keeps sending resets it
   #   deadline: the whole call, retries included
   #   max_response_bytes: largest response body accepted
+  #   max_response_frames: most content frames in one streamed chat answer
 
 # Embedding settings
 config :doctrans, :embedding,
@@ -442,7 +443,10 @@ config :doctrans, :defaults, []
 endpoint that drips a byte at a time resets it forever, and each retry pays it again. `:deadline`
 is the wall clock for the whole call, retries included, and `:max_response_bytes` is refused at
 the chunk that crosses it rather than after the body is buffered. A page that hits either bound
-fails with a message naming the endpoint, and the finished pages around it are kept.
+fails with a message naming the endpoint, and the finished pages around it are kept. A streamed
+chat answer is additionally refused at the frame that crosses `:max_response_frames`: a model
+sends at most one frame per token, so only a broken or hostile server reaches that bound, and
+the panel renders the frames it has at most once every 50 ms rather than once per frame.
 
 Each document carries its own source and target language, so uploads in different languages
 process correctly alongside each other.
