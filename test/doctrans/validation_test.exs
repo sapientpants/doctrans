@@ -262,38 +262,49 @@ defmodule Doctrans.ValidationTest do
                Validation.validate_chat_question("  What is this about?  ")
     end
 
-    test "accepts a question of exactly the bound" do
-      max = Validation.max_chat_question_bytes()
-      question = String.duplicate("a", max)
-      assert {:ok, ^question} = Validation.validate_chat_question(question)
+    test "accepts a question of exactly the character bound, in any script" do
+      max = Validation.max_chat_question_chars()
+
+      for char <- ["a", "é", "日", "😀"] do
+        question = String.duplicate(char, max)
+        assert {:ok, ^question} = Validation.validate_chat_question(question)
+      end
     end
 
-    test "refuses a blank question and a non-string alike" do
+    test "refuses a blank question" do
       assert {:error, :empty_question} = Validation.validate_chat_question("")
       assert {:error, :empty_question} = Validation.validate_chat_question("   \n ")
-      assert {:error, :empty_question} = Validation.validate_chat_question(nil)
-      assert {:error, :empty_question} = Validation.validate_chat_question(%{"x" => 1})
     end
 
-    test "refuses a question one byte over the bound, with the bound in the reason" do
-      max = Validation.max_chat_question_bytes()
+    test "refuses anything but a string" do
+      assert {:error, :invalid_question} = Validation.validate_chat_question(nil)
+      assert {:error, :invalid_question} = Validation.validate_chat_question(%{"x" => 1})
+    end
+
+    test "refuses a question one character over the bound, with the bound in the reason" do
+      max = Validation.max_chat_question_chars()
 
       assert {:error, {:question_too_long, [max: ^max]}} =
                Validation.validate_chat_question(String.duplicate("a", max + 1))
     end
 
     # A grapheme can carry any number of combining marks, so `String.length/1`
-    # would call an arbitrarily large question one character long.
-    test "counts bytes, so combining marks cannot hide the size" do
-      max = Validation.max_chat_question_bytes()
-      question = "e" <> String.duplicate("\u0301", max)
+    # would call an arbitrarily large question one character long. The byte
+    # bound refuses it, with the character bound in the reason: that is the
+    # number the reader is told, and the only one the form can run into.
+    test "counts bytes too, so combining marks cannot hide the size" do
+      chars = Validation.max_chat_question_chars()
+      bytes = Validation.max_chat_question_bytes()
+      question = "e" <> String.duplicate("\u0301", div(bytes, 2))
       assert String.length(question) == 1
+      assert byte_size(question) > bytes
 
-      assert {:error, {:question_too_long, _}} = Validation.validate_chat_question(question)
+      assert {:error, {:question_too_long, [max: ^chars]}} =
+               Validation.validate_chat_question(question)
     end
 
     test "surrounding whitespace does not count against the bound" do
-      max = Validation.max_chat_question_bytes()
+      max = Validation.max_chat_question_chars()
       padded = String.duplicate(" ", 100) <> String.duplicate("a", max) <> "\n"
       assert {:ok, _} = Validation.validate_chat_question(padded)
     end

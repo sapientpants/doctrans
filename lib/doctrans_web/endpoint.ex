@@ -22,6 +22,14 @@ defmodule DoctransWeb.Endpoint do
   # for the per-field bounds (`Doctrans.Validation.validate_chat_question/1`,
   # `validate_search_query/1`), not a substitute for them -- the long-poll
   # transport has no such knob, and only the field bounds hold there.
+  #
+  # It has to be set here, per socket: the WebSocket adapter gives every
+  # upgrade a `max_frame_size` of its own (10 MB unless the socket says
+  # otherwise), and Bandit lets the upgrade's options override the server's.
+  # The matching bound on a message split across continuation frames,
+  # `max_fragmented_message_size`, is not a per-socket option at all, so it
+  # lives in the server's `websocket_options` in `config/config.exs`; the two
+  # are one bound in two places because that is where each is honoured.
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options], max_frame_size: 1_000_000],
     longpoll: [connect_info: [session: @session_options]]

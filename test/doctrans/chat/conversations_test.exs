@@ -107,21 +107,52 @@ defmodule Doctrans.Chat.ConversationsTest do
     assert Conversations.load(document.id).messages == []
   end
 
-  test "an answer over the content ceiling fails the write and leaves the question open", %{
+  test "an answer over the content ceiling is refused and leaves the question open", %{
     document: document
   } do
     question = Conversations.start_question(document.id, "Short question")
     oversized = String.duplicate("a", Message.max_content_bytes() + 1)
 
-    assert {:error, %Ecto.Changeset{errors: [content: _]}} =
+    assert {:error, {:validation_failed, [changeset: %Ecto.Changeset{errors: [content: _]}]}} =
              Conversations.finish(question, "assistant", oversized, RetrievedContext.new())
 
     assert %{messages: [%Message{role: "user", completed: false}], interrupted?: true} =
              Conversations.load(document.id)
+  end
 
-    # The error message that replaces the answer is short, and is saved.
+  # `finish/5` is what the chat panel calls. The refusal happens one
+  # transaction down, inside the revision fence's, and would surface as the
+  # fence's own `{:error, :rollback}` unless carried out deliberately.
+  test "a refused answer keeps its reason through the revision fence", %{document: document} do
+    question = Conversations.start_question(document.id, "Short question")
+    oversized = String.duplicate("a", Message.max_content_bytes() + 1)
+
+    assert {:error, {:validation_failed, [changeset: %Ecto.Changeset{}]}} =
+             Conversations.finish(
+               question,
+               "assistant",
+               oversized,
+               RetrievedContext.new(),
+               document
+             )
+
+    assert %{messages: [%Message{role: "user", completed: false}]} =
+             Conversations.load(document.id)
+  end
+
+  test "a question whose answer was refused can still be answered with an error", %{
+    document: document
+  } do
+    question = Conversations.start_question(document.id, "Short question")
+    oversized = String.duplicate("a", Message.max_content_bytes() + 1)
+
+    {:error, _} = Conversations.finish(question, "assistant", oversized, RetrievedContext.new())
+
     assert {:ok, %Message{role: "error"}, _} =
              Conversations.finish(question, "error", "Sorry", RetrievedContext.new())
+
+    assert %{messages: [%Message{role: "user"}, %Message{role: "error"}], interrupted?: false} =
+             Conversations.load(document.id)
   end
 
   test "legacy unlinked messages remain visible without guessed pairings", %{document: document} do

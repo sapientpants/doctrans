@@ -11,11 +11,13 @@ defmodule Doctrans.Chat.MessageTest do
     )
   end
 
-  test "a question within the bound is valid" do
+  test "a question within the byte bound is valid" do
     bound = String.duplicate("é", div(Validation.max_chat_question_bytes(), 2))
     assert Message.changeset(message(content: bound)).valid?
   end
 
+  # The row knows nothing of characters: the byte bound is what it holds a
+  # question to, so a writer that skipped the panel's validation is bounded too.
   test "a question is held to the question bound, counted in bytes" do
     over = String.duplicate("é", div(Validation.max_chat_question_bytes(), 2) + 1)
     changeset = Message.changeset(message(content: over))

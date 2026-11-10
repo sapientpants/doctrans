@@ -3,7 +3,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Chat.{Conversations, RetrievedContext}
+  alias Doctrans.Chat.{Conversations, Message, RetrievedContext}
   alias Doctrans.Documents
   alias Doctrans.Documents.Lifecycle
   alias Doctrans.Documents.PageLifecycle
@@ -497,6 +497,36 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
                Conversations.load(document.id)
     end
 
+    # An answer only a misbehaving model server produces: the row refuses it,
+    # and the turn lands as an apology rather than crashing the view or
+    # leaving the question open.
+    test "an answer over the content ceiling is refused and apologised for", %{
+      conn: conn,
+      document: document
+    } do
+      oversized = String.duplicate("a", Message.max_content_bytes() + 1)
+
+      Mox.stub(Doctrans.Processing.OpenAIMock, :chat_stream, fn _messages, on_delta, _opts ->
+        on_delta.(oversized)
+        {:ok, oversized}
+      end)
+
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+      view |> form("#chat-form", %{message: "What is this document about?"}) |> render_submit()
+      await_chat_turn(view)
+
+      apology = "Sorry, I encountered an error. Please try again."
+
+      assert %{
+               messages: [%{role: "user", completed: false}, %{role: "error", content: ^apology}],
+               interrupted?: false
+             } = Conversations.load(document.id)
+
+      refute has_element?(view, "#chat-streaming")
+      assert has_element?(view, "#chat-input")
+    end
+
     test "a failed turn with a message of its own is not apologised for", %{
       conn: conn,
       document: document
@@ -540,10 +570,10 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
       view |> element("#toggle-chat") |> render_click()
 
-      oversized = String.duplicate("a", Doctrans.Validation.max_chat_question_bytes() + 1)
+      oversized = String.duplicate("a", Doctrans.Validation.max_chat_question_chars() + 1)
       view |> form("#chat-form", %{message: oversized}) |> render_submit()
 
-      assert has_element?(view, "#flash-error", "Question too long")
+      assert has_element?(view, "#flash-error")
       assert has_element?(view, "#chat-input")
       assert_no_chat_turn(view, document)
     end
@@ -552,7 +582,7 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
       view |> element("#toggle-chat") |> render_click()
 
-      question = String.duplicate("a", Doctrans.Validation.max_chat_question_bytes())
+      question = String.duplicate("a", Doctrans.Validation.max_chat_question_chars())
       view |> form("#chat-form", %{message: question}) |> render_submit()
       await_chat_turn(view)
 

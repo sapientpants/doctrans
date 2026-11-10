@@ -176,9 +176,18 @@ config :doctrans, Oban,
   ]
 
 # Configures the endpoint
+#
+# `websocket_options` are Bandit's, for every socket the server upgrades. The
+# bound on a message split across continuation frames pairs with the
+# `max_frame_size` on the `/live` socket in `DoctransWeb.Endpoint`, which has
+# to be set per socket (#267); without this one, a peer could still deliver
+# Bandit's default 8 MB to the event decoder one small frame at a time. The
+# per-environment `http:` lists below and in `config/runtime.exs` are merged
+# into this one, so the option holds wherever the server runs.
 config :doctrans, DoctransWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
+  http: [websocket_options: [max_fragmented_message_size: 1_000_000]],
   render_errors: [
     formats: [html: DoctransWeb.ErrorHTML, json: DoctransWeb.ErrorJSON],
     layout: false

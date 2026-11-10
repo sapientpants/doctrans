@@ -45,28 +45,26 @@ defmodule Doctrans.Validation do
   - `{:error, reason}` if invalid
   """
   @spec validate_search_query(term()) :: {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
-  def validate_search_query(query) when is_binary(query) do
-    trimmed = String.trim(query)
-
-    cond do
-      String.length(trimmed) < 1 ->
-        {:error, :query_too_short}
-
-      String.length(trimmed) > 500 ->
-        {:error, {:query_too_long, [max: 500]}}
-
-      true ->
-        {:ok, String.slice(trimmed, 0, 500)}
-    end
-  end
+  def validate_search_query(query) when is_binary(query),
+    do: bounded_text(query, [graphemes: 500], :query_too_short, :query_too_long)
 
   def validate_search_query(_), do: {:error, :invalid_query}
 
-  @max_chat_question_bytes 4_000
+  @max_chat_question_chars 4_000
+  @max_chat_question_bytes 4 * @max_chat_question_chars
+
+  @doc """
+  The most characters a chat question may hold once trimmed: the bound the
+  reader is told of, and the `maxlength` of the chat input.
+  """
+  @spec max_chat_question_chars() :: pos_integer()
+  def max_chat_question_chars, do: @max_chat_question_chars
 
   @doc """
   The most bytes a chat question may hold once trimmed.
 
+  Four per character, which is the most UTF-8 spends on one code point, so a
+  question within `max_chat_question_chars/0` in any script is within this.
   Shared with `Doctrans.Chat.Message.changeset/1`, so the bound the panel
   applies and the bound the row enforces are the same number.
   """
@@ -76,34 +74,57 @@ defmodule Doctrans.Validation do
   @doc """
   Validates a chat question.
 
-  Counted in bytes, not graphemes: a grapheme cluster can carry any number of
-  combining marks, so a character count bounds nothing. The question is saved
-  before the model is called, kept for the life of the conversation and sent
-  whole to the embedding and completion endpoints, so the bound is on what is
-  stored and sent, not on what the reader typed.
+  Bounded twice. In characters, because that is what the reader typed and what
+  the chat input and the error message count. And in bytes, because a grapheme
+  cluster can carry any number of combining marks, so a character count alone
+  bounds nothing: the question is saved before the model is called, kept for
+  the life of the conversation and sent whole to the embedding and completion
+  endpoints, so what is stored and sent needs a bound of its own. Ordinary
+  text never meets the byte bound before the character bound.
 
   ## Returns
   - `{:ok, trimmed_question}` if valid
-  - `{:error, :empty_question}` for a blank question or anything but a string
-  - `{:error, {:question_too_long, max: bytes}}` for one over the bound
+  - `{:error, :empty_question}` for a blank question
+  - `{:error, :invalid_question}` for anything but a string
+  - `{:error, {:question_too_long, max: characters}}` for one over either bound
   """
   @spec validate_chat_question(term()) :: {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
   def validate_chat_question(question) when is_binary(question) do
-    trimmed = String.trim(question)
+    bounded_text(
+      question,
+      [bytes: @max_chat_question_bytes, graphemes: @max_chat_question_chars],
+      :empty_question,
+      :question_too_long
+    )
+  end
+
+  def validate_chat_question(_), do: {:error, :invalid_question}
+
+  # The shape every bounded text field shares: trimmed, refused as
+  # `blank_reason` when nothing is left, refused as `{too_long_code, max: n}`
+  # when any bound is exceeded, otherwise handed back trimmed. The bounds are
+  # checked in the order given, so a cheap byte count can go ahead of a
+  # grapheme walk; the `max` reported is the character bound, which is the one
+  # the reader is told of.
+  @spec bounded_text(String.t(), [{:bytes | :graphemes, pos_integer()}], atom(), atom()) ::
+          {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
+  defp bounded_text(text, bounds, blank_reason, too_long_code) do
+    trimmed = String.trim(text)
 
     cond do
       trimmed == "" ->
-        {:error, :empty_question}
+        {:error, blank_reason}
 
-      byte_size(trimmed) > @max_chat_question_bytes ->
-        {:error, {:question_too_long, [max: @max_chat_question_bytes]}}
+      Enum.any?(bounds, fn {unit, max} -> measure(trimmed, unit) > max end) ->
+        {:error, {too_long_code, [max: Keyword.fetch!(bounds, :graphemes)]}}
 
       true ->
         {:ok, trimmed}
     end
   end
 
-  def validate_chat_question(_), do: {:error, :empty_question}
+  defp measure(text, :bytes), do: byte_size(text)
+  defp measure(text, :graphemes), do: String.length(text)
 
   @doc """
   Validates language code.

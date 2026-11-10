@@ -44,9 +44,9 @@ defmodule DoctransWeb.ErrorMessages do
 
   # --- Chat (`Doctrans.Validation.validate_chat_question/1`) -------------------
   #
-  # The bound is in bytes; the message says characters because that is what the
-  # reader counts, and every character is at least one byte, so a question
-  # within the stated length in ASCII is within the bound.
+  # `max` is the character bound, the one the chat input enforces as its
+  # `maxlength`. The question's byte bound is only ever met by a question the
+  # form could not have sent, and is reported with the same words.
 
   defp lookup({:question_too_long, bindings}),
     do:
