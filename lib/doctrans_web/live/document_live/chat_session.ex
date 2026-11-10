@@ -25,10 +25,18 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   import Phoenix.Component, only: [assign: 3]
 
   import Phoenix.LiveView,
-    only: [cancel_async: 3, start_async: 4, stream: 3, stream: 4, stream_insert: 3]
+    only: [
+      cancel_async: 3,
+      put_flash: 3,
+      start_async: 4,
+      stream: 3,
+      stream: 4,
+      stream_insert: 3
+    ]
 
   alias Doctrans.Chat
   alias Doctrans.Chat.{Conversations, RetrievedContext}
+  alias Doctrans.Validation
   alias DoctransWeb.ErrorMessages
 
   require Logger
@@ -70,17 +78,23 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   @doc """
   Starts a chat turn, unless the question is blank or a turn is already running.
 
+  A question over `Doctrans.Validation.max_chat_question_chars/0`, or over
+  its byte bound, is refused with a flash and never reaches the database or
+  the model: the question is saved before generation, so the bound has to
+  hold here, ahead of `Conversations.start_question/2`. A blank question is
+  ignored without comment, as it always was, and so is one that is not a
+  string: the form never sends one, so there is no reader to tell.
+
   Runs the agentic pipeline off-process. Stage and token events are sent back to
   the LiveView as `{:chat_event, token, event}` messages; the task's result
   carries the final answer and the Retrieved context for the next turn.
   """
   def ask(socket, message) do
-    question = String.trim(message || "")
-
-    if question == "" or socket.assigns.chat_loading do
-      socket
-    else
-      start_turn(socket, question)
+    case Validation.validate_chat_question(message) do
+      {:ok, _question} when socket.assigns.chat_loading -> socket
+      {:ok, question} -> start_turn(socket, question)
+      {:error, reason} when reason in [:empty_question, :invalid_question] -> socket
+      {:error, reason} -> put_flash(socket, :error, ErrorMessages.message(reason))
     end
   end
 
@@ -285,7 +299,7 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   notice describes, so that is what the panel shows.
   """
   def put_failure(socket, reason) do
-    case put_error(socket, ErrorMessages.message(reason, apology())) do
+    case put_error(socket, failure_message(reason)) do
       {:ok, socket} ->
         socket
 
@@ -294,6 +308,13 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
         socket |> reset_transient() |> assign(:chat_interrupted, true)
     end
   end
+
+  # An answer the row refused -- one over `Doctrans.Chat.Message.max_content_bytes/0`,
+  # which only a misbehaving model server produces -- is apologised for in the
+  # chat's own voice: the catalog's entry for a refused write speaks of a
+  # document that could not be saved, and this is not one.
+  defp failure_message({:validation_failed, _bindings}), do: apology()
+  defp failure_message(reason), do: ErrorMessages.message(reason, apology())
 
   defp apology, do: gettext("Sorry, I encountered an error. Please try again.")
 

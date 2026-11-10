@@ -16,6 +16,7 @@ defmodule Doctrans.Chat.Conversations do
   alias Doctrans.Chat
   alias Doctrans.Chat.{Message, RetrievedContext, Session}
   alias Doctrans.Documents.Revision
+  alias Doctrans.Errors
   alias Doctrans.Repo
 
   @spec load(Ecto.UUID.t()) :: %{
@@ -34,6 +35,15 @@ defmodule Doctrans.Chat.Conversations do
     end
   end
 
+  @doc """
+  Saves a question and opens the session it belongs to.
+
+  The question is expected to have passed
+  `Doctrans.Validation.validate_chat_question/1`, which is where an oversized
+  one is refused with a reason. One that reaches here regardless is refused by
+  `Message.changeset/1` too, and that raises: it is a caller that skipped the
+  validation, not a condition the reader can act on.
+  """
   @spec start_question(Ecto.UUID.t(), String.t()) :: Message.t()
   def start_question(document_id, content) do
     {:ok, message} =
@@ -47,7 +57,9 @@ defmodule Doctrans.Chat.Conversations do
         session = lock_session(document_id)
 
         message =
-          Repo.insert!(%Message{chat_session_id: session.id, role: "user", content: content})
+          %Message{chat_session_id: session.id, role: "user", content: content}
+          |> Message.changeset()
+          |> Repo.insert!()
 
         rotate(session.id)
         message
@@ -73,7 +85,14 @@ defmodule Doctrans.Chat.Conversations do
         ) :: {:ok, Message.t(), RetrievedContext.t()} | {:error, term()}
   def finish(question, role, content, context, document) do
     Revision.with_current(document, fn _current ->
-      finish(question, role, content, context)
+      # The inner write has already rolled back by the time it returns its
+      # reason, which leaves the fence's transaction marked failed. Left to
+      # finish on its own it would report `{:error, :rollback}`; rolling back
+      # again with the reason is what carries the reason out to the caller.
+      case finish(question, role, content, context) do
+        {:ok, _message, _context} = saved -> saved
+        {:error, reason} -> Repo.rollback(reason)
+      end
     end)
   end
 
@@ -108,17 +127,29 @@ defmodule Doctrans.Chat.Conversations do
     end
   end
 
+  # An answer the changeset refuses -- one over `Message.max_content_bytes/0` --
+  # rolls the transaction back, so the question stays open, and comes back as
+  # `{:error, {:validation_failed, changeset: changeset}}`, the shape every
+  # context write gives a refused changeset. Unlike a question, an answer is
+  # not validated before it gets here: it is whatever the model server sent,
+  # so this is a result for the caller to land, not an invariant.
   defp record_answer(session, question, role, content, context) do
     _ = Repo.update!(Ecto.Changeset.change(question, completed: role == "assistant"))
 
     message =
-      Repo.insert!(%Message{
+      %Message{
         chat_session_id: session.id,
         question_id: question.id,
         role: role,
         content: content,
         completed: role == "assistant"
-      })
+      }
+      |> Message.changeset()
+      |> Repo.insert()
+      |> case do
+        {:ok, message} -> message
+        {:error, changeset} -> Repo.rollback(Errors.normalize(changeset))
+      end
 
     if role == "assistant", do: save_context(session, context)
 
