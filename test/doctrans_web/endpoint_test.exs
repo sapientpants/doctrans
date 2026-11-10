@@ -47,6 +47,13 @@ defmodule DoctransWeb.EndpointTest do
     end
   end
 
+  # The field bounds are the control; the frame bound is what stops an
+  # oversized event being parsed at all over the WebSocket transport (#267).
+  test "the LiveView socket bounds the size of one WebSocket frame" do
+    assert [{"/live", Phoenix.LiveView.Socket, opts}] = DoctransWeb.Endpoint.__sockets__()
+    assert opts[:websocket][:max_frame_size] == 1_000_000
+  end
+
   test "only generated images are served from legacy and run directories" do
     directory = "documents/#{Uniq.UUID.uuid7()}"
     run = "runs/#{Uniq.UUID.uuid7()}"

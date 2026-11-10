@@ -485,18 +485,18 @@ msgstr "Ich finde relevante Inhalte und antworte darauf basierend."
 msgid "Private document translation powered by local AI"
 msgstr "Private Dokumentenübersetzung mit lokaler KI"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:216
 #: lib/doctrans_web/live/document_live/chat_components.ex:217
+#: lib/doctrans_web/live/document_live/chat_components.ex:218
 #, elixir-autogen, elixir-format
 msgid "Send message"
 msgstr "Nachricht senden"
 
-#: lib/doctrans_web/live/document_live/chat_session.ex:298
+#: lib/doctrans_web/live/document_live/chat_session.ex:311
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Entschuldigung, es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:256
+#: lib/doctrans_web/live/document_live/chat_components.ex:257
 #, elixir-autogen, elixir-format
 msgid "Thinking..."
 msgstr "Denke nach..."
@@ -511,22 +511,22 @@ msgstr "Laden Sie ein Dokument hoch, um zu beginnen. Die gesamte Verarbeitung er
 msgid "Your documents never leave your device"
 msgstr "Ihre Dokumente verlassen nie Ihr Gerät"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:254
+#: lib/doctrans_web/live/document_live/chat_components.ex:255
 #, elixir-autogen, elixir-format
 msgid "Checking the sources..."
 msgstr "Quellen werden überprüft..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:253
+#: lib/doctrans_web/live/document_live/chat_components.ex:254
 #, elixir-autogen, elixir-format
 msgid "Searching the document..."
 msgstr "Dokument wird durchsucht..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:252
+#: lib/doctrans_web/live/document_live/chat_components.ex:253
 #, elixir-autogen, elixir-format
 msgid "Understanding your question..."
 msgstr "Ihre Frage wird verarbeitet..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:255
+#: lib/doctrans_web/live/document_live/chat_components.ex:256
 #, elixir-autogen, elixir-format
 msgid "Writing the answer..."
 msgstr "Antwort wird verfasst..."

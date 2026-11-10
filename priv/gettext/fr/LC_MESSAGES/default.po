@@ -485,18 +485,18 @@ msgstr "Je trouverai le contenu pertinent et répondrai en me basant dessus."
 msgid "Private document translation powered by local AI"
 msgstr "Traduction privée de documents propulsée par une IA locale"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:216
 #: lib/doctrans_web/live/document_live/chat_components.ex:217
+#: lib/doctrans_web/live/document_live/chat_components.ex:218
 #, elixir-autogen, elixir-format
 msgid "Send message"
 msgstr "Envoyer le message"
 
-#: lib/doctrans_web/live/document_live/chat_session.ex:298
+#: lib/doctrans_web/live/document_live/chat_session.ex:311
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Désolé, une erreur s'est produite. Veuillez réessayer."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:256
+#: lib/doctrans_web/live/document_live/chat_components.ex:257
 #, elixir-autogen, elixir-format
 msgid "Thinking..."
 msgstr "Réflexion en cours..."
@@ -511,22 +511,22 @@ msgstr "Téléchargez un document pour commencer. Tout le traitement se fait loc
 msgid "Your documents never leave your device"
 msgstr "Vos documents ne quittent jamais votre appareil"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:254
+#: lib/doctrans_web/live/document_live/chat_components.ex:255
 #, elixir-autogen, elixir-format
 msgid "Checking the sources..."
 msgstr "Vérification des sources..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:253
+#: lib/doctrans_web/live/document_live/chat_components.ex:254
 #, elixir-autogen, elixir-format
 msgid "Searching the document..."
 msgstr "Recherche dans le document..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:252
+#: lib/doctrans_web/live/document_live/chat_components.ex:253
 #, elixir-autogen, elixir-format
 msgid "Understanding your question..."
 msgstr "Compréhension de votre question..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:255
+#: lib/doctrans_web/live/document_live/chat_components.ex:256
 #, elixir-autogen, elixir-format
 msgid "Writing the answer..."
 msgstr "Rédaction de la réponse..."

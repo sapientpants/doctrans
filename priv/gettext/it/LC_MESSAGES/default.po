@@ -478,18 +478,18 @@ msgstr "Troverò contenuti pertinenti e risponderò in base ad essi."
 msgid "Private document translation powered by local AI"
 msgstr "Traduzione privata di documenti basata su IA locale"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:216
 #: lib/doctrans_web/live/document_live/chat_components.ex:217
+#: lib/doctrans_web/live/document_live/chat_components.ex:218
 #, elixir-autogen, elixir-format
 msgid "Send message"
 msgstr "Invia messaggio"
 
-#: lib/doctrans_web/live/document_live/chat_session.ex:298
+#: lib/doctrans_web/live/document_live/chat_session.ex:311
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Mi dispiace, si è verificato un errore. Per favore riprova."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:256
+#: lib/doctrans_web/live/document_live/chat_components.ex:257
 #, elixir-autogen, elixir-format
 msgid "Thinking..."
 msgstr "Sto pensando..."
@@ -504,22 +504,22 @@ msgstr "Carica un documento per iniziare. Tutta l'elaborazione avviene localment
 msgid "Your documents never leave your device"
 msgstr "I tuoi documenti non lasciano mai il tuo dispositivo"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:254
+#: lib/doctrans_web/live/document_live/chat_components.ex:255
 #, elixir-autogen, elixir-format
 msgid "Checking the sources..."
 msgstr "Verifica delle fonti..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:253
+#: lib/doctrans_web/live/document_live/chat_components.ex:254
 #, elixir-autogen, elixir-format
 msgid "Searching the document..."
 msgstr "Ricerca nel documento..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:252
+#: lib/doctrans_web/live/document_live/chat_components.ex:253
 #, elixir-autogen, elixir-format
 msgid "Understanding your question..."
 msgstr "Comprensione della domanda..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:255
+#: lib/doctrans_web/live/document_live/chat_components.ex:256
 #, elixir-autogen, elixir-format
 msgid "Writing the answer..."
 msgstr "Scrittura della risposta..."

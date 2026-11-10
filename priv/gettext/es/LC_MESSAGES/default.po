@@ -478,18 +478,18 @@ msgstr "Encontraré contenido relevante y responderé basándome en él."
 msgid "Private document translation powered by local AI"
 msgstr "Traducción privada de documentos impulsada por IA local"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:216
 #: lib/doctrans_web/live/document_live/chat_components.ex:217
+#: lib/doctrans_web/live/document_live/chat_components.ex:218
 #, elixir-autogen, elixir-format
 msgid "Send message"
 msgstr "Enviar mensaje"
 
-#: lib/doctrans_web/live/document_live/chat_session.ex:298
+#: lib/doctrans_web/live/document_live/chat_session.ex:311
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Lo siento, se produjo un error. Por favor, inténtalo de nuevo."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:256
+#: lib/doctrans_web/live/document_live/chat_components.ex:257
 #, elixir-autogen, elixir-format
 msgid "Thinking..."
 msgstr "Pensando..."
@@ -504,22 +504,22 @@ msgstr "Sube un documento para comenzar. Todo el procesamiento se realiza localm
 msgid "Your documents never leave your device"
 msgstr "Tus documentos nunca salen de tu dispositivo"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:254
+#: lib/doctrans_web/live/document_live/chat_components.ex:255
 #, elixir-autogen, elixir-format
 msgid "Checking the sources..."
 msgstr "Verificando las fuentes..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:253
+#: lib/doctrans_web/live/document_live/chat_components.ex:254
 #, elixir-autogen, elixir-format
 msgid "Searching the document..."
 msgstr "Buscando en el documento..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:252
+#: lib/doctrans_web/live/document_live/chat_components.ex:253
 #, elixir-autogen, elixir-format
 msgid "Understanding your question..."
 msgstr "Entendiendo su pregunta..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:255
+#: lib/doctrans_web/live/document_live/chat_components.ex:256
 #, elixir-autogen, elixir-format
 msgid "Writing the answer..."
 msgstr "Escribiendo la respuesta..."

@@ -62,6 +62,49 @@ defmodule Doctrans.Validation do
 
   def validate_search_query(_), do: {:error, :invalid_query}
 
+  @max_chat_question_bytes 4_000
+
+  @doc """
+  The most bytes a chat question may hold once trimmed.
+
+  Shared with `Doctrans.Chat.Message.changeset/1`, so the bound the panel
+  applies and the bound the row enforces are the same number.
+  """
+  @spec max_chat_question_bytes() :: pos_integer()
+  def max_chat_question_bytes, do: @max_chat_question_bytes
+
+  @doc """
+  Validates a chat question.
+
+  Counted in bytes, not graphemes: a grapheme cluster can carry any number of
+  combining marks, so a character count bounds nothing. The question is saved
+  before the model is called, kept for the life of the conversation and sent
+  whole to the embedding and completion endpoints, so the bound is on what is
+  stored and sent, not on what the reader typed.
+
+  ## Returns
+  - `{:ok, trimmed_question}` if valid
+  - `{:error, :empty_question}` for a blank question or anything but a string
+  - `{:error, {:question_too_long, max: bytes}}` for one over the bound
+  """
+  @spec validate_chat_question(term()) :: {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
+  def validate_chat_question(question) when is_binary(question) do
+    trimmed = String.trim(question)
+
+    cond do
+      trimmed == "" ->
+        {:error, :empty_question}
+
+      byte_size(trimmed) > @max_chat_question_bytes ->
+        {:error, {:question_too_long, [max: @max_chat_question_bytes]}}
+
+      true ->
+        {:ok, trimmed}
+    end
+  end
+
+  def validate_chat_question(_), do: {:error, :empty_question}
+
   @doc """
   Validates language code.
 

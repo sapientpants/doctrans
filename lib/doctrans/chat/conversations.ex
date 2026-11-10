@@ -47,7 +47,9 @@ defmodule Doctrans.Chat.Conversations do
         session = lock_session(document_id)
 
         message =
-          Repo.insert!(%Message{chat_session_id: session.id, role: "user", content: content})
+          %Message{chat_session_id: session.id, role: "user", content: content}
+          |> Message.changeset()
+          |> Repo.insert!()
 
         rotate(session.id)
         message
@@ -108,17 +110,27 @@ defmodule Doctrans.Chat.Conversations do
     end
   end
 
+  # An answer the changeset refuses -- one over `Message.max_content_bytes/0` --
+  # rolls the transaction back, so the question stays open and the caller gets
+  # `{:error, changeset}` in the same shape as any other failed write; nothing
+  # here raises into the LiveView.
   defp record_answer(session, question, role, content, context) do
     _ = Repo.update!(Ecto.Changeset.change(question, completed: role == "assistant"))
 
     message =
-      Repo.insert!(%Message{
+      %Message{
         chat_session_id: session.id,
         question_id: question.id,
         role: role,
         content: content,
         completed: role == "assistant"
-      })
+      }
+      |> Message.changeset()
+      |> Repo.insert()
+      |> case do
+        {:ok, message} -> message
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
 
     if role == "assistant", do: save_context(session, context)
 

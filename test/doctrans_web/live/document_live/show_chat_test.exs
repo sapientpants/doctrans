@@ -531,6 +531,37 @@ defmodule DoctransWeb.DocumentLive.ShowChatTest do
       assert_no_chat_turn(view, document)
     end
 
+    # Reproduces #267: the question is saved before the model is called, so a
+    # question of any size was a row of any size, pulled into every later mount.
+    test "an oversized question is refused with a flash and starts no turn", %{
+      conn: conn,
+      document: document
+    } do
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      oversized = String.duplicate("a", Doctrans.Validation.max_chat_question_bytes() + 1)
+      view |> form("#chat-form", %{message: oversized}) |> render_submit()
+
+      assert has_element?(view, "#flash-error", "Question too long")
+      assert has_element?(view, "#chat-input")
+      assert_no_chat_turn(view, document)
+    end
+
+    test "a question at the bound is accepted", %{conn: conn, document: document} do
+      {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+      view |> element("#toggle-chat") |> render_click()
+
+      question = String.duplicate("a", Doctrans.Validation.max_chat_question_bytes())
+      view |> form("#chat-form", %{message: question}) |> render_submit()
+      await_chat_turn(view)
+
+      refute has_element?(view, "#flash-error")
+
+      assert [%{role: "user", content: ^question}, %{role: "assistant"}] =
+               Conversations.load(document.id).messages
+    end
+
     test "whitespace-only message is not submitted", %{conn: conn, document: document} do
       {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
 

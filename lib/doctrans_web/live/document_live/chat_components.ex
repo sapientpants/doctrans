@@ -206,6 +206,7 @@ defmodule DoctransWeb.DocumentLive.ChatComponents do
             class="input input-bordered input-sm flex-1 text-sm"
             disabled={@chat_loading}
             autocomplete="off"
+            maxlength={Doctrans.Validation.max_chat_question_bytes()}
             id="chat-input"
             phx-hook="ChatInput"
           />

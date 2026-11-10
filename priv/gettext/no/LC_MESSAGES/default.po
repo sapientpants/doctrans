@@ -478,18 +478,18 @@ msgstr "Jeg finner relevant innhold og svarer basert på det."
 msgid "Private document translation powered by local AI"
 msgstr "Privat dokumentoversettelse drevet av lokal AI"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:216
 #: lib/doctrans_web/live/document_live/chat_components.ex:217
+#: lib/doctrans_web/live/document_live/chat_components.ex:218
 #, elixir-autogen, elixir-format
 msgid "Send message"
 msgstr "Send melding"
 
-#: lib/doctrans_web/live/document_live/chat_session.ex:298
+#: lib/doctrans_web/live/document_live/chat_session.ex:311
 #, elixir-autogen, elixir-format
 msgid "Sorry, I encountered an error. Please try again."
 msgstr "Beklager, det oppstod en feil. Vennligst prøv igjen."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:256
+#: lib/doctrans_web/live/document_live/chat_components.ex:257
 #, elixir-autogen, elixir-format
 msgid "Thinking..."
 msgstr "Tenker..."
@@ -504,22 +504,22 @@ msgstr "Last opp et dokument for å komme i gang. All behandling skjer lokalt p�
 msgid "Your documents never leave your device"
 msgstr "Dokumentene dine forlater aldri enheten din"
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:254
+#: lib/doctrans_web/live/document_live/chat_components.ex:255
 #, elixir-autogen, elixir-format
 msgid "Checking the sources..."
 msgstr "Sjekker kildene..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:253
+#: lib/doctrans_web/live/document_live/chat_components.ex:254
 #, elixir-autogen, elixir-format
 msgid "Searching the document..."
 msgstr "Søker i dokumentet..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:252
+#: lib/doctrans_web/live/document_live/chat_components.ex:253
 #, elixir-autogen, elixir-format
 msgid "Understanding your question..."
 msgstr "Forstår spørsmålet ditt..."
 
-#: lib/doctrans_web/live/document_live/chat_components.ex:255
+#: lib/doctrans_web/live/document_live/chat_components.ex:256
 #, elixir-autogen, elixir-format
 msgid "Writing the answer..."
 msgstr "Skriver svaret..."

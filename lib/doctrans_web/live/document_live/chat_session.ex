@@ -25,10 +25,18 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   import Phoenix.Component, only: [assign: 3]
 
   import Phoenix.LiveView,
-    only: [cancel_async: 3, start_async: 4, stream: 3, stream: 4, stream_insert: 3]
+    only: [
+      cancel_async: 3,
+      put_flash: 3,
+      start_async: 4,
+      stream: 3,
+      stream: 4,
+      stream_insert: 3
+    ]
 
   alias Doctrans.Chat
   alias Doctrans.Chat.{Conversations, RetrievedContext}
+  alias Doctrans.Validation
   alias DoctransWeb.ErrorMessages
 
   require Logger
@@ -70,17 +78,22 @@ defmodule DoctransWeb.DocumentLive.ChatSession do
   @doc """
   Starts a chat turn, unless the question is blank or a turn is already running.
 
+  A question over `Doctrans.Validation.max_chat_question_bytes/0` is refused
+  with a flash and never reaches the database or the model: the question is
+  saved before generation, so the bound has to hold here, ahead of
+  `Conversations.start_question/2`. A blank question is ignored without
+  comment, as it always was.
+
   Runs the agentic pipeline off-process. Stage and token events are sent back to
   the LiveView as `{:chat_event, token, event}` messages; the task's result
   carries the final answer and the Retrieved context for the next turn.
   """
   def ask(socket, message) do
-    question = String.trim(message || "")
-
-    if question == "" or socket.assigns.chat_loading do
-      socket
-    else
-      start_turn(socket, question)
+    case Validation.validate_chat_question(message) do
+      {:ok, _question} when socket.assigns.chat_loading -> socket
+      {:ok, question} -> start_turn(socket, question)
+      {:error, :empty_question} -> socket
+      {:error, reason} -> put_flash(socket, :error, ErrorMessages.message(reason))
     end
   end
 

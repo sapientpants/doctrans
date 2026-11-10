@@ -103,6 +103,9 @@ defmodule DoctransWeb.ErrorMessagesTest do
         assert {:error, "Suchanfrage muss eine Zeichenkette sein"} =
                  translated(Validation.validate_search_query(nil))
 
+        assert {:error, "Frage zu lang (maximal 4000 Zeichen)"} =
+                 translated(Validation.validate_chat_question(String.duplicate("a", 4_001)))
+
         assert {:error, "Nicht unterstützte Sprache: xx"} =
                  translated(Validation.validate_language("xx"))
 

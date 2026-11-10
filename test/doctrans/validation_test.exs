@@ -256,6 +256,49 @@ defmodule Doctrans.ValidationTest do
     end
   end
 
+  describe "validate_chat_question/1" do
+    test "trims and accepts a question within the bound" do
+      assert {:ok, "What is this about?"} =
+               Validation.validate_chat_question("  What is this about?  ")
+    end
+
+    test "accepts a question of exactly the bound" do
+      max = Validation.max_chat_question_bytes()
+      question = String.duplicate("a", max)
+      assert {:ok, ^question} = Validation.validate_chat_question(question)
+    end
+
+    test "refuses a blank question and a non-string alike" do
+      assert {:error, :empty_question} = Validation.validate_chat_question("")
+      assert {:error, :empty_question} = Validation.validate_chat_question("   \n ")
+      assert {:error, :empty_question} = Validation.validate_chat_question(nil)
+      assert {:error, :empty_question} = Validation.validate_chat_question(%{"x" => 1})
+    end
+
+    test "refuses a question one byte over the bound, with the bound in the reason" do
+      max = Validation.max_chat_question_bytes()
+
+      assert {:error, {:question_too_long, [max: ^max]}} =
+               Validation.validate_chat_question(String.duplicate("a", max + 1))
+    end
+
+    # A grapheme can carry any number of combining marks, so `String.length/1`
+    # would call an arbitrarily large question one character long.
+    test "counts bytes, so combining marks cannot hide the size" do
+      max = Validation.max_chat_question_bytes()
+      question = "e" <> String.duplicate("\u0301", max)
+      assert String.length(question) == 1
+
+      assert {:error, {:question_too_long, _}} = Validation.validate_chat_question(question)
+    end
+
+    test "surrounding whitespace does not count against the bound" do
+      max = Validation.max_chat_question_bytes()
+      padded = String.duplicate(" ", 100) <> String.duplicate("a", max) <> "\n"
+      assert {:ok, _} = Validation.validate_chat_question(padded)
+    end
+  end
+
   describe "validate_file_content/2" do
     setup do
       dir =

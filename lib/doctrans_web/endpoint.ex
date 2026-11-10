@@ -16,8 +16,14 @@ defmodule DoctransWeb.Endpoint do
     http_only: true
   ]
 
+  # `max_frame_size` caps what one WebSocket frame may carry, an eighth of
+  # Bandit's default. Nothing legitimate on this socket comes close: LiveView
+  # events are small, and an upload travels in 64 kB chunks. It is a backstop
+  # for the per-field bounds (`Doctrans.Validation.validate_chat_question/1`,
+  # `validate_search_query/1`), not a substitute for them -- the long-poll
+  # transport has no such knob, and only the field bounds hold there.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
+    websocket: [connect_info: [session: @session_options], max_frame_size: 1_000_000],
     longpoll: [connect_info: [session: @session_options]]
 
   # The first plug, ahead of static serving, so a request for a host this

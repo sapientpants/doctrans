@@ -95,6 +95,35 @@ defmodule Doctrans.Chat.ConversationsTest do
     assert saved.history == []
   end
 
+  # The panel refuses an oversized question first; this is the row refusing it
+  # too, so no other writer can store one.
+  test "a question over the bound is refused at the row", %{document: document} do
+    oversized = String.duplicate("a", Doctrans.Validation.max_chat_question_bytes() + 1)
+
+    assert_raise Ecto.InvalidChangesetError, fn ->
+      Conversations.start_question(document.id, oversized)
+    end
+
+    assert Conversations.load(document.id).messages == []
+  end
+
+  test "an answer over the content ceiling fails the write and leaves the question open", %{
+    document: document
+  } do
+    question = Conversations.start_question(document.id, "Short question")
+    oversized = String.duplicate("a", Message.max_content_bytes() + 1)
+
+    assert {:error, %Ecto.Changeset{errors: [content: _]}} =
+             Conversations.finish(question, "assistant", oversized, RetrievedContext.new())
+
+    assert %{messages: [%Message{role: "user", completed: false}], interrupted?: true} =
+             Conversations.load(document.id)
+
+    # The error message that replaces the answer is short, and is saved.
+    assert {:ok, %Message{role: "error"}, _} =
+             Conversations.finish(question, "error", "Sorry", RetrievedContext.new())
+  end
+
   test "legacy unlinked messages remain visible without guessed pairings", %{document: document} do
     question = Conversations.start_question(document.id, "Legacy question")
     Repo.update!(Ecto.Changeset.change(question, completed: true))

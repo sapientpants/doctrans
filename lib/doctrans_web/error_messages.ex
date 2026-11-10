@@ -42,6 +42,18 @@ defmodule DoctransWeb.ErrorMessages do
   defp lookup(:retrieval_unavailable),
     do: dgettext("errors", "Document search is temporarily unavailable. Please try again.")
 
+  # --- Chat (`Doctrans.Validation.validate_chat_question/1`) -------------------
+  #
+  # The bound is in bytes; the message says characters because that is what the
+  # reader counts, and every character is at least one byte, so a question
+  # within the stated length in ASCII is within the bound.
+
+  defp lookup({:question_too_long, bindings}),
+    do:
+      dgettext("errors", "Question too long (max %{max} characters)",
+        max: binding(bindings, :max)
+      )
+
   # --- Upload intake (`Doctrans.Validation`, `Doctrans.Documents.Intake`) -----
   #
   # The languages, the file and the title of one submission, reported next to
