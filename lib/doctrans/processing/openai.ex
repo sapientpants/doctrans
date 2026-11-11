@@ -264,8 +264,12 @@ defmodule Doctrans.Processing.OpenAI do
     |> ApiFailure.resolve(:openai_api, &parse_list_models_response/1, melt: false)
   end
 
+  # Only entries with a string `id` are models: a server that answers with
+  # `{"object": "model"}`, `{"id": null}` or a bare `null` element is answering
+  # off-spec, and those entries are dropped here rather than handed on as
+  # non-binary "names" that `String.downcase/1` in a consumer would crash on.
   defp parse_list_models_response(%{"data" => models}) when is_list(models) do
-    {:ok, Enum.map(models, & &1["id"])}
+    {:ok, for(%{"id" => id} when is_binary(id) <- models, do: id)}
   end
 
   defp parse_list_models_response(_body), do: {:error, :invalid_api_response}
