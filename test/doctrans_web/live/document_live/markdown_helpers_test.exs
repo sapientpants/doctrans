@@ -3,6 +3,9 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
 
   alias DoctransWeb.DocumentLive.MarkdownHelpers
 
+  # The `rel` the scrubber puts on a link that leaves the app.
+  @external_rel "noreferrer nofollow"
+
   # Shape of a table an OCR pass produces from an invoice-like page: a header
   # row, a delimiter row carrying per-column alignment, and numeric body rows.
   @ocr_table """
@@ -122,14 +125,18 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       assert count(document, "td[onload]") == 0
     end
 
+    # Links and images are held to a stricter policy than basic_html (see the
+    # describe block below), so the samples here keep to same-origin targets,
+    # which are the ones that must still come out byte-for-byte identical.
     test "allows nothing beyond basic_html apart from table cell alignment" do
       samples = [
         ~S|<b>b</b><blockquote>q</blockquote><br><code>c</code><del>d</del><em>e</em>|,
         ~S|<h1>1</h1><h2>2</h2><h3>3</h3><h4>4</h4><h5>5</h5><h6>6</h6><hr><i>i</i>|,
         ~S|<li>l</li><ol>o</ol><p>p</p><pre>pre</pre><span>s</span><strong>x</strong>|,
         ~S|<table><thead><tr><th>h</th></tr></thead><tbody><tr><td>t</td></tr></tbody></table>|,
-        ~S|<u>u</u><ul>ul</ul><a name="n" title="t" href="mailto:a@b.c">a</a>|,
-        ~S|<img src="https://example.com/y.png" width="1" height="2" title="t" alt="a">|,
+        ~S|<u>u</u><ul>ul</ul><a name="n" title="t" href="/documents/1#top">a</a>|,
+        ~S|<a href="javascript:alert(1)" onclick="x" target="_blank" rel="opener">j</a>|,
+        ~S|<img src="/y.png" width="1" height="2" title="t" alt="a" onerror="x">|,
         ~S|<p onclick="x" class="y" style="color: red" align="right">p</p>|,
         ~S|<div>d</div><video src="v">inner</video><form><input name="n"></form>|,
         ~S|<td colspan="2" rowspan="3" class="c" width="4" title="t">x</td>|,
@@ -192,6 +199,112 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
     test "sanitizes dangerous html" do
       html = MarkdownHelpers.render_markdown("<script>alert('x')</script>")
       refute html =~ "<script"
+    end
+  end
+
+  # Where a link may point is decided by the scrubber after basic_html has run,
+  # so it is asserted on the HTML surface where the policy lives. A target with
+  # a scheme is marked as leaving the app; a same-origin target is untouched; a
+  # scheme-relative target loses its href, since it is the one way to another
+  # origin that carries no scheme for basic_html to check.
+  describe "sanitize_html/1 link and image targets" do
+    test "marks a link that leaves the app and strips the referrer" do
+      for href <- ["https://example.com/a?b=1&c=2", "http://example.com", "mailto:a@b.c"] do
+        document =
+          ~s|<a href="#{href}" title="t">x</a>| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert count(document, "a[data-external][rel='#{@external_rel}'][href='#{href}']") == 1,
+               "not marked external: #{href}"
+
+        assert LazyHTML.attribute(LazyHTML.query(document, "a"), "title") == ["t"]
+      end
+    end
+
+    test "leaves a same-origin link exactly as it was" do
+      for href <- ["/documents/1", "#section", "", "page-2", "?q=1"] do
+        document = ~s|<a href="#{href}">x</a>| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert count(document, "a[href='#{href}']") == 1, "href changed: #{inspect(href)}"
+
+        assert count(document, "a[data-external], a[rel]") == 0,
+               "marked external: #{inspect(href)}"
+      end
+    end
+
+    test "drops a scheme-relative link target, in every spelling the browser accepts" do
+      for href <- ["//evil.test/x", "//", ~S|\\evil.test/x|, ~S|/\evil.test/x|, ~S|\/evil.test/x|] do
+        document = ~s|<a href="#{href}">x</a>| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert texts(document, "a") == ["x"], "anchor went missing: #{inspect(href)}"
+        assert count(document, "a[href]") == 0, "target survived: #{inspect(href)}"
+        assert count(document, "a[data-external]") == 0
+      end
+    end
+
+    # The browser strips leading and trailing controls and spaces and removes
+    # every tab and newline before it parses a URL, so each of these lands on
+    # `//evil.test` even though none of them starts with two slashes as written.
+    test "drops a scheme-relative link target hidden behind whitespace or a control character" do
+      for href <- [
+            " //evil.test/x",
+            "\t//evil.test/x",
+            "\n//evil.test/x",
+            "/\t/evil.test/x",
+            "\x01//evil.test/x"
+          ] do
+        document = ~s|<a href="#{href}">x</a>| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert texts(document, "a") == ["x"], "anchor went missing: #{inspect(href)}"
+        assert count(document, "a[href]") == 0, "target survived: #{inspect(href)}"
+      end
+    end
+
+    test "leaves a same-origin link alone when only its whitespace is unusual" do
+      # An interior space is not removed by the browser, so `/ /x` is a path.
+      for href <- ["\t/documents/1", " #section", "/ /x"] do
+        document = ~s|<a href="#{href}">x</a>| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert LazyHTML.attribute(LazyHTML.query(document, "a"), "href") == [href],
+               "href changed: #{inspect(href)}"
+
+        assert count(document, "a[data-external], a[rel]") == 0,
+               "marked external: #{inspect(href)}"
+      end
+    end
+
+    test "cannot be forged by the content: the marker and rel are stripped on the way in" do
+      html = ~S|<a href="/documents/1" rel="opener" data-external="">x</a>|
+
+      document = html |> MarkdownHelpers.sanitize_html() |> document()
+
+      assert count(document, "a[href='/documents/1']") == 1
+      assert count(document, "a[data-external], a[rel]") == 0
+    end
+
+    test "drops a remote or scheme-relative image source, keeping the image and its alt" do
+      sources = [
+        "https://example.com/i.png",
+        "http://example.com/i.png",
+        "//example.com/i.png",
+        " //example.com/i.png",
+        "/\t/example.com/i.png"
+      ]
+
+      for src <- sources do
+        document = ~s|<img src="#{src}" alt="a">| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert count(document, "img") == 1, "image went missing: #{inspect(src)}"
+        assert count(document, "img[src]") == 0, "source survived: #{inspect(src)}"
+        assert LazyHTML.attribute(LazyHTML.query(document, "img"), "alt") == ["a"]
+      end
+    end
+
+    test "keeps a same-origin image source exactly as it was" do
+      for src <- ["/figures/1.png", "figure.png", ""] do
+        document = ~s|<img src="#{src}" alt="a">| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert count(document, "img[src='#{src}']") == 1, "source changed: #{inspect(src)}"
+      end
     end
   end
 
@@ -282,7 +395,7 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       markdown = """
       [https](https://example.com/a?b=1#c), [mail](mailto:a@b.c),
       [relative](/documents/1), [anchor](#section) and
-      ![figure](https://example.com/figure.png)
+      ![figure](figures/1.png)
       """
 
       document = markdown |> MarkdownHelpers.render_markdown() |> document()
@@ -294,8 +407,37 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
                "#section"
              ]
 
-      assert LazyHTML.attribute(LazyHTML.query(document, "img"), "src") ==
-               ["https://example.com/figure.png"]
+      assert LazyHTML.attribute(LazyHTML.query(document, "img"), "src") == ["figures/1.png"]
+    end
+
+    test "marks the links that leave the app and not the ones that stay" do
+      markdown = """
+      [https](https://example.com/a?b=1#c), [mail](mailto:a@b.c),
+      [relative](/documents/1) and [anchor](#section)
+      """
+
+      document = markdown |> MarkdownHelpers.render_markdown() |> document()
+
+      assert texts(document, "a[data-external][rel='#{@external_rel}']") == ["https", "mail"]
+      assert texts(document, "a:not([data-external]):not([rel])") == ["relative", "anchor"]
+    end
+
+    # A scheme-relative link carries no scheme for safe mode to blank, and a
+    # remote image carries one it accepts, so both reach the scrubber intact;
+    # what happens next is the scrubber's policy, not safe mode's.
+    test "drops a scheme-relative link target" do
+      document = "[open](//evil.test/x)" |> MarkdownHelpers.render_markdown() |> document()
+
+      assert texts(document, "a") == ["open"]
+      assert count(document, "a[href]") == 0
+    end
+
+    test "drops a remote image source" do
+      document =
+        "![beacon](https://evil.test/i.png)" |> MarkdownHelpers.render_markdown() |> document()
+
+      assert count(document, "img") == 1
+      assert count(document, "img[src]") == 0
     end
 
     test "blanks the same destinations through the hardbreaks chat path" do
@@ -309,6 +451,16 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       assert count(document, "a[href='']") == 1
       assert count(document, "img[src='']") == 1
       assert count(document, "br") == 1
+    end
+
+    test "marks an external link through the hardbreaks chat path too" do
+      markdown = "[source](https://example.com/report)\n[local](/documents/1)"
+
+      document =
+        markdown |> MarkdownHelpers.render_markdown(hardbreaks: true) |> document()
+
+      assert texts(document, "a[data-external][rel='#{@external_rel}']") == ["source"]
+      assert texts(document, "a:not([data-external])") == ["local"]
     end
   end
 

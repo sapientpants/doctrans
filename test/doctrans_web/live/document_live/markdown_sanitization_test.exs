@@ -58,6 +58,8 @@ defmodule DoctransWeb.DocumentLive.MarkdownSanitizationTest do
   <javascript:alert(1)>
 
   [Safe link](https://example.com/report)
+  [Protocol-relative link](//evil.test/x)
+  [Local link](/documents/1)
 
   [ref]: javascript:alert(1)
   [imgref]: data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
@@ -69,6 +71,9 @@ defmodule DoctransWeb.DocumentLive.MarkdownSanitizationTest do
                 "[onclick], [onerror], [onload], [onmouseover], [srcdoc], [style]"
 
   @dangerous_schemes ~w(javascript: data: vbscript:)
+
+  # The `rel` the scrubber puts on a link that leaves the app.
+  @external_rel "noreferrer nofollow"
 
   describe "translated page content" do
     test "neutralises a payload stored in translated_markdown", %{conn: conn} do
@@ -143,14 +148,28 @@ defmodule DoctransWeb.DocumentLive.MarkdownSanitizationTest do
     refute Enum.empty?(srcs), "no image rendered: the payload's images went missing entirely"
     refute Enum.any?(hrefs, &dangerous_scheme?/1)
     refute Enum.any?(srcs, &dangerous_scheme?/1)
+
+    # A scheme-relative target has no scheme for safe mode to blank and would
+    # resolve to another origin; the scrubber drops the href, keeping the text.
+    assert LazyHTML.text(LazyHTML.query(content, "a:not([href])")) == "Protocol-relative link"
   end
 
   # Benign Markdown still renders: headings, emphasis, and a safe link keep
-  # their elements and their targets.
+  # their elements and their targets. The external link is also *marked* as
+  # one on the page, with the referrer stripped, and the local one is not.
   defp assert_benign_content_survives(content) do
     assert LazyHTML.text(LazyHTML.query(content, "h1")) == "Quarterly Report"
     assert LazyHTML.text(LazyHTML.query(content, "strong")) == "totals"
-    assert "https://example.com/report" in targets(content, "a", "href")
+
+    assert LazyHTML.text(
+             LazyHTML.query(
+               content,
+               "a[data-external][rel='#{@external_rel}'][href='https://example.com/report']"
+             )
+           ) == "Safe link"
+
+    assert LazyHTML.text(LazyHTML.query(content, "a[href='/documents/1']:not([data-external])")) ==
+             "Local link"
   end
 
   # The one artifact only the scrubber removes. See the moduledoc: without this,
