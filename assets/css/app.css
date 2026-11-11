@@ -329,6 +329,32 @@
   text-decoration-thickness: 2px;
 }
 
+/* A link that leaves the app. `MarkdownScrubber` marks every target that
+   carries a scheme (`https:`, `http:`, `mailto:`) with `data-external`; the
+   content cannot forge the attribute, because the scrubber strips it on the
+   way in. The cue has to live here: the scrubber allows neither `class` nor a
+   wrapper element, so a trailing glyph on the anchor itself is the only place
+   for it. The glyph is heroicons' 16px `arrow-up-right` as a `currentColor`
+   mask, so it takes the link colour and hover state; the `/` alternative text
+   is what a screen reader announces in place of the empty string. */
+.markdown a[data-external]::after {
+  content: "" / "(external link)";
+  display: inline-block;
+  inline-size: 0.7em;
+  block-size: 0.7em;
+  margin-inline-start: 0.15em;
+  vertical-align: 0.05em;
+  background-color: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M4.22 11.78a.75.75 0 0 1 0-1.06L9.44 5.5H5.75a.75.75 0 0 1 0-1.5h5.5a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0V6.56l-5.22 5.22a.75.75 0 0 1-1.06 0Z' clip-rule='evenodd'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.markdown a[data-external]:hover::after {
+  opacity: 1;
+}
+
 .markdown img {
   max-width: 100%;
   height: auto;

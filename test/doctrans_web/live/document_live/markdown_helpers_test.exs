@@ -122,14 +122,18 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       assert count(document, "td[onload]") == 0
     end
 
+    # Links and images are held to a stricter policy than basic_html (see the
+    # describe block below), so the samples here keep to same-origin targets,
+    # which are the ones that must still come out byte-for-byte identical.
     test "allows nothing beyond basic_html apart from table cell alignment" do
       samples = [
         ~S|<b>b</b><blockquote>q</blockquote><br><code>c</code><del>d</del><em>e</em>|,
         ~S|<h1>1</h1><h2>2</h2><h3>3</h3><h4>4</h4><h5>5</h5><h6>6</h6><hr><i>i</i>|,
         ~S|<li>l</li><ol>o</ol><p>p</p><pre>pre</pre><span>s</span><strong>x</strong>|,
         ~S|<table><thead><tr><th>h</th></tr></thead><tbody><tr><td>t</td></tr></tbody></table>|,
-        ~S|<u>u</u><ul>ul</ul><a name="n" title="t" href="mailto:a@b.c">a</a>|,
-        ~S|<img src="https://example.com/y.png" width="1" height="2" title="t" alt="a">|,
+        ~S|<u>u</u><ul>ul</ul><a name="n" title="t" href="/documents/1#top">a</a>|,
+        ~S|<a href="javascript:alert(1)" onclick="x" target="_blank" rel="opener">j</a>|,
+        ~S|<img src="/y.png" width="1" height="2" title="t" alt="a" onerror="x">|,
         ~S|<p onclick="x" class="y" style="color: red" align="right">p</p>|,
         ~S|<div>d</div><video src="v">inner</video><form><input name="n"></form>|,
         ~S|<td colspan="2" rowspan="3" class="c" width="4" title="t">x</td>|,
@@ -192,6 +196,73 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
     test "sanitizes dangerous html" do
       html = MarkdownHelpers.render_markdown("<script>alert('x')</script>")
       refute html =~ "<script"
+    end
+  end
+
+  # Where a link may point is decided by the scrubber after basic_html has run,
+  # so it is asserted on the HTML surface where the policy lives. A target with
+  # a scheme is marked as leaving the app; a same-origin target is untouched; a
+  # scheme-relative target loses its href, since it is the one way to another
+  # origin that carries no scheme for basic_html to check.
+  describe "sanitize_html/1 link and image targets" do
+    @external_rel "noreferrer nofollow"
+
+    test "marks a link that leaves the app and strips the referrer" do
+      for href <- ["https://example.com/a?b=1&c=2", "http://example.com", "mailto:a@b.c"] do
+        document =
+          ~s|<a href="#{href}" title="t">x</a>| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert count(document, "a[data-external][rel='#{@external_rel}'][href='#{href}']") == 1,
+               "not marked external: #{href}"
+
+        assert LazyHTML.attribute(LazyHTML.query(document, "a"), "title") == ["t"]
+      end
+    end
+
+    test "leaves a same-origin link exactly as it was" do
+      for href <- ["/documents/1", "#section", "", "page-2", "?q=1"] do
+        document = ~s|<a href="#{href}">x</a>| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert count(document, "a[href='#{href}']") == 1, "href changed: #{inspect(href)}"
+
+        assert count(document, "a[data-external], a[rel]") == 0,
+               "marked external: #{inspect(href)}"
+      end
+    end
+
+    test "drops a scheme-relative link target, in every spelling the browser accepts" do
+      for href <- ["//evil.test/x", "//", ~S|\\evil.test/x|, ~S|/\evil.test/x|, ~S|\/evil.test/x|] do
+        document = ~s|<a href="#{href}">x</a>| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert texts(document, "a") == ["x"], "anchor went missing: #{inspect(href)}"
+        assert count(document, "a[href]") == 0, "target survived: #{inspect(href)}"
+        assert count(document, "a[data-external]") == 0
+      end
+    end
+
+    test "cannot be forged by the content: the marker and rel are stripped on the way in" do
+      html = ~S|<a href="/documents/1" rel="opener" data-external="">x</a>|
+
+      document = html |> MarkdownHelpers.sanitize_html() |> document()
+
+      assert count(document, "a[href='/documents/1']") == 1
+      assert count(document, "a[data-external], a[rel]") == 0
+    end
+
+    test "keeps only a same-origin image source" do
+      for src <- ["https://example.com/i.png", "http://example.com/i.png", "//example.com/i.png"] do
+        document = ~s|<img src="#{src}" alt="a">| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert count(document, "img") == 1, "image went missing: #{src}"
+        assert count(document, "img[src]") == 0, "source survived: #{src}"
+        assert LazyHTML.attribute(LazyHTML.query(document, "img"), "alt") == ["a"]
+      end
+
+      for src <- ["/figures/1.png", "figure.png", ""] do
+        document = ~s|<img src="#{src}" alt="a">| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert count(document, "img[src='#{src}']") == 1, "source changed: #{inspect(src)}"
+      end
     end
   end
 
@@ -278,11 +349,11 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       assert count(document, "[onmouseover]") == 0
     end
 
-    test "keeps the link and image targets a document legitimately uses" do
+    test "keeps the link targets a document legitimately uses, marking the ones that leave" do
       markdown = """
       [https](https://example.com/a?b=1#c), [mail](mailto:a@b.c),
       [relative](/documents/1), [anchor](#section) and
-      ![figure](https://example.com/figure.png)
+      ![figure](figures/1.png)
       """
 
       document = markdown |> MarkdownHelpers.render_markdown() |> document()
@@ -294,8 +365,21 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
                "#section"
              ]
 
-      assert LazyHTML.attribute(LazyHTML.query(document, "img"), "src") ==
-               ["https://example.com/figure.png"]
+      assert texts(document, "a[data-external][rel='noreferrer nofollow']") == ["https", "mail"]
+      assert LazyHTML.attribute(LazyHTML.query(document, "img"), "src") == ["figures/1.png"]
+    end
+
+    test "drops a remote image source and a scheme-relative link target" do
+      # Neither carries a scheme, or carries one MDEx objects to, so both reach
+      # the scrubber intact; this is the scrubber's policy, not safe mode's.
+      markdown = "[open](//evil.test/x) ![beacon](https://evil.test/i.png)"
+
+      document = markdown |> MarkdownHelpers.render_markdown() |> document()
+
+      assert texts(document, "a") == ["open"]
+      assert count(document, "a[href]") == 0
+      assert count(document, "img") == 1
+      assert count(document, "img[src]") == 0
     end
 
     test "blanks the same destinations through the hardbreaks chat path" do
@@ -309,6 +393,16 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       assert count(document, "a[href='']") == 1
       assert count(document, "img[src='']") == 1
       assert count(document, "br") == 1
+    end
+
+    test "marks an external link through the hardbreaks chat path too" do
+      markdown = "[source](https://example.com/report)\n[local](/documents/1)"
+
+      document =
+        markdown |> MarkdownHelpers.render_markdown(hardbreaks: true) |> document()
+
+      assert texts(document, "a[data-external][rel='noreferrer nofollow']") == ["source"]
+      assert texts(document, "a:not([data-external])") == ["local"]
     end
   end
 
