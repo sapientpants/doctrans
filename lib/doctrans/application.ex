@@ -7,6 +7,7 @@ defmodule Doctrans.Application do
 
   alias Doctrans.Config.Uploads
   alias Doctrans.Documents.Sweeper
+  alias Doctrans.Processing.ExtractionCrashHandler
   alias Doctrans.Resilience.CircuitBreaker
 
   @impl true
@@ -23,6 +24,9 @@ defmodule Doctrans.Application do
     _ = Uploads.validate_root!()
     _ = Sweeper.validate_root!()
     _ = Uploads.ensure_root!()
+
+    # Before Oban starts, so no extraction job can end unobserved.
+    :ok = ExtractionCrashHandler.attach()
 
     children = [
       DoctransWeb.Telemetry,

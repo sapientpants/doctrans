@@ -95,6 +95,11 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   def classify(:pdf_command_timeout), do: :permanent
   def classify(:pdfinfo_timeout), do: :permanent
 
+  # The document's whole budget ran out with pages still to render. Unlike a
+  # command that hung, the pages that did render are kept and a retry resumes
+  # from them, so another attempt makes progress; the attempt limit bounds it.
+  def classify(:pdf_extraction_deadline_exceeded), do: :retryable
+
   def classify(:timeout), do: :retryable
 
   # HTTP status codes

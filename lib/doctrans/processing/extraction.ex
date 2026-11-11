@@ -15,7 +15,7 @@ defmodule Doctrans.Processing.Extraction do
   source, a conversion or a render failure -- and `begin_processing/1` with
   `settle/1` once every page is rendered and queued.
   `Doctrans.Jobs.DocumentExtractionJob` is the adapter between Oban and
-  `run/1`: it decides whether the job still names the document's current run,
+  `run/2`: it decides whether the job still names the document's current run,
   and what Oban does with a failure.
 
   Cancellation is not a concern here: `Doctrans.Processing.Cancellation`
@@ -45,18 +45,29 @@ defmodule Doctrans.Processing.Extraction do
   written. Answers `{:error, reason}` after recording the failure on the
   document through `Lifecycle.fail/2`; `reason` is what
   `Doctrans.Resilience.ErrorClassifier` classifies and the web tier renders.
+
+  `:deadline` is the monotonic millisecond at which the document's render
+  budget -- `Doctrans.Config.PdfExtraction.job_timeout/0` -- runs out. The job
+  passes the one it armed as it began, so the budget counts the conversion and
+  the page count as well as the renders; a call without one starts the budget
+  now.
   """
-  @spec run(Documents.Document.t()) :: :ok | {:error, Doctrans.Errors.reason()}
-  def run(%Documents.Document{} = document) do
+  @spec run(Documents.Document.t(), deadline: integer()) ::
+          :ok | {:error, Doctrans.Errors.reason()}
+  def run(%Documents.Document{} = document, opts \\ []) do
+    deadline = Keyword.get_lazy(opts, :deadline, &budget_from_now/0)
+
     result =
       with {:ok, source_path} <- locate_source(document),
            {:ok, document} <- Lifecycle.begin_extraction(document),
            {:ok, pdf_path} <- to_pdf(document, source_path) do
-        render_pages(document, pdf_path)
+        render_pages(document, pdf_path, deadline)
       end
 
     conclude(document, result)
   end
+
+  defp budget_from_now, do: System.monotonic_time(:millisecond) + PdfExtraction.job_timeout()
 
   defp conclude(_document, :ok), do: :ok
 
@@ -102,17 +113,16 @@ defmodule Doctrans.Processing.Extraction do
   # The pages directory is built from persisted document and run UUIDs with a
   # fixed suffix.
   # sobelow_skip ["Traversal.FileModule"]
-  defp render_pages(document, pdf_path) do
+  defp render_pages(document, pdf_path, deadline) do
     Logger.info("Extracting pages from PDF for document #{document.id}")
 
     pages_dir = Layout.pages_dir(document)
     File.mkdir_p!(pages_dir)
 
     # One budget for the whole document, so the per-page deadlines cannot add up
-    # past the job that contains them: without it a long document reaches Oban's
-    # timeout instead of failing cleanly with its finished pages preserved.
-    deadline = System.monotonic_time(:millisecond) + PdfExtraction.job_timeout()
-
+    # past the job that contains them: a long document fails cleanly here, with
+    # its finished pages preserved, inside the wider guard Oban holds over the
+    # job -- which would kill the job process without recording anything.
     with {:ok, page_count} <- Deps.pdf_extractor().get_page_count(pdf_path),
          {:ok, document} <- Documents.set_total_pages(document, page_count),
          :ok <- render_progressively(document, pdf_path, pages_dir, page_count, deadline) do

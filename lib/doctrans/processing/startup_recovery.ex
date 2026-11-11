@@ -5,6 +5,12 @@ defmodule Doctrans.Processing.StartupRecovery do
 
   The final phase queues nothing: it reconciles documents whose pages all
   settled while the document row never learned of it.
+
+  The first phase re-queues a document still awaiting its pages once: a run
+  whose extraction job was already re-queued by an earlier boot and discarded
+  again is failed instead, with the job's last error as its diagnostic, so a
+  document that cannot be extracted does not occupy the extraction slot anew on
+  every boot.
   """
 
   require Logger
@@ -54,11 +60,9 @@ defmodule Doctrans.Processing.StartupRecovery do
       )
       |> fetch_batch(after_id)
 
-    Repo.transact(fn ->
-      Enum.each(rows, &recover_document/1)
-      {:ok, :queued}
-    end)
-    |> unwrap!()
+    # A safe transaction, like the page phase: a document given up on below
+    # announces its failure once this batch commits.
+    Repo.safe_transaction(fn -> Enum.each(rows, &recover_document/1) end) |> unwrap!()
 
     next_cursor(rows, :documents, {:pages, nil})
   end
@@ -213,14 +217,69 @@ defmodule Doctrans.Processing.StartupRecovery do
     # not re-queued on the strength of a stale row. A job already active for
     # the document is that job's to finish.
     if locked && awaiting_pages?(locked) do
-      case Run.recover(locked) do
-        {:ok, _queued_or_owned} -> :ok
-        {:error, reason} -> Repo.rollback(reason)
+      case latest_extraction_job(locked) do
+        %Oban.Job{state: "discarded", meta: %{"recovered" => true}} = job ->
+          give_up(locked, job)
+
+        _none_or_fresh ->
+          requeue(locked)
       end
     else
       :ok
     end
   end
+
+  defp requeue(document) do
+    case Run.recover(document) do
+      {:ok, _queued_or_owned} -> :ok
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  # A recovered job that exhausted its attempts as well has had the fair new
+  # attempt a restart offers. Its failures never reached the document --
+  # `Extraction` records the failures it returns, but a job Oban killed or that
+  # crashed ends without that write, and `ExtractionCrashHandler` cannot make
+  # it for a node that died with the job -- so the document is failed here,
+  # under the lock, with the job's last error as the diagnostic. Re-queueing it
+  # again would hold the single extraction slot for the whole attempt limit on
+  # every boot, for a run that has now failed that way twice.
+  defp give_up(document, job) do
+    Logger.warning(
+      "Startup recovery is giving up on document #{document.id}: " <>
+        "its recovered extraction job #{job.id} was discarded after #{job.attempt} attempts"
+    )
+
+    case Lifecycle.fail(document, {:extraction_attempts_exhausted, exhausted_bindings(job)}) do
+      {:ok, _failed} -> :ok
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  # Oban stores each attempt's error as the formatted exception, stack trace
+  # included; the first line names it.
+  defp exhausted_bindings(job) do
+    case List.last(job.errors) do
+      %{"error" => error} when is_binary(error) ->
+        [attempts: job.attempt, error: error |> String.split("\n", parts: 2) |> hd()]
+
+      _none ->
+        [attempts: job.attempt]
+    end
+  end
+
+  # The document's most recent extraction job in any state. A reprocess inserts
+  # a newer job for its run, so the job of a run the document has moved on from
+  # is never the latest.
+  defp latest_extraction_job(document) do
+    document.id
+    |> JobQuery.document_jobs_query(worker: DocumentExtractionJob, states: all_job_states())
+    |> order_by([j], desc: j.id)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  defp all_job_states, do: Enum.map(Oban.Job.states(), &Atom.to_string/1)
 
   # `EmbeddingJob` is keyed on the page *and* its revision, so unlike a page-keyed
   # job an active one does not necessarily own the page's current work: a job

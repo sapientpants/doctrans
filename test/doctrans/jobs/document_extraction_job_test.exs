@@ -4,10 +4,11 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
   use Doctrans.DataCase, async: false
   use Oban.Testing, repo: Doctrans.Repo
 
+  alias Doctrans.Config.{DocumentConversion, PdfExtraction}
   alias Doctrans.Documents
   alias Doctrans.Documents.{Layout, Topics}
   alias Doctrans.Jobs.DocumentExtractionJob
-  alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock}
+  alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock, PdfExtractorStub}
   alias Doctrans.TestEnv
 
   import Doctrans.Fixtures
@@ -21,7 +22,6 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       timeout = DocumentExtractionJob.timeout(job)
       assert is_integer(timeout)
       assert timeout > 0
-      assert timeout != :infinity
 
       original = Application.get_env(:doctrans, :pdf_extraction, [])
 
@@ -30,7 +30,67 @@ defmodule Doctrans.Jobs.DocumentExtractionJobTest do
       assert is_integer(DocumentExtractionJob.timeout(job))
 
       TestEnv.put_env(:pdf_extraction, Keyword.put(original, :job_timeout, 5_000))
-      assert DocumentExtractionJob.timeout(job) == 5_000
+      assert DocumentExtractionJob.timeout(job) > 5_000
+    end
+
+    test "is an outer guard strictly wider than the budget and the steps outside it" do
+      # Oban arms its timer before `perform/1` and kills the job process when it
+      # fires, with no verdict written for the document. The in-process budget
+      # does not clamp the LibreOffice conversion or the page count, so the
+      # guard has to outlast all three for the budget to be the deadline that
+      # fires.
+      job = %Oban.Job{args: %{}}
+
+      budget = PdfExtraction.job_timeout()
+      unclamped = DocumentConversion.timeout() + PdfExtraction.info_timeout()
+
+      assert DocumentExtractionJob.timeout(job) > budget + unclamped
+    end
+  end
+
+  describe "the render budget" do
+    test "is armed as the job begins and handed to every page render" do
+      document = document_fixture()
+      document_source_fixture(document)
+      owner = self()
+
+      Mox.stub(PdfExtractorMock, :extract_page, fn pdf_path, output_dir, page_number, opts ->
+        send(owner, {:deadline, page_number, Keyword.fetch!(opts, :deadline)})
+        PdfExtractorStub.extract_page(pdf_path, output_dir, page_number, opts)
+      end)
+
+      started_at = System.monotonic_time(:millisecond)
+      assert :ok = perform_job(DocumentExtractionJob, %{"document_id" => document.id})
+      finished_at = System.monotonic_time(:millisecond)
+
+      # One deadline for the whole document, counted from the start of the job
+      # rather than from the first render: the same instant reaches every page.
+      assert_received {:deadline, 1, deadline}
+      assert_received {:deadline, 2, ^deadline}
+      assert_received {:deadline, 3, ^deadline}
+      assert deadline >= started_at + PdfExtraction.job_timeout()
+      assert deadline <= finished_at + PdfExtraction.job_timeout()
+    end
+
+    test "running out fails the document cleanly and leaves the retry to Oban" do
+      document = document_fixture()
+      document_source_fixture(document)
+      Topics.subscribe_document(document.id)
+
+      Mox.stub(PdfExtractorMock, :extract_page, fn _pdf_path, _output_dir, _page_number, _opts ->
+        {:error, :pdf_extraction_deadline_exceeded}
+      end)
+
+      # Retryable, not cancelled: the pages that did render are kept, so the
+      # next attempt resumes from them rather than spending the budget again on
+      # the same pages.
+      assert {:error, {:pdf_extraction_failed, [reason: :pdf_extraction_deadline_exceeded]}} =
+               perform_job(DocumentExtractionJob, %{"document_id" => document.id})
+
+      saved = Documents.get_document!(document.id)
+      assert saved.status == "error"
+      assert saved.error_message =~ "pdf_extraction_deadline_exceeded"
+      assert_received {:document_updated, %{status: "error"}}
     end
   end
 

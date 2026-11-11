@@ -4,7 +4,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   `Doctrans.Processing.Run.start/2` inserts this job as it starts a fresh
   upload's run; performing hands the document to
-  `Doctrans.Processing.Extraction.run/1`, which does the work and makes the
+  `Doctrans.Processing.Extraction.run/2`, which does the work and makes the
   document's transitions. What is decided here is only what Oban needs to
   know: whether the job still names the document's current run, and whether
   a failure is worth another attempt.
@@ -19,7 +19,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
       states: [:available, :scheduled, :executing, :retryable, :suspended]
     ]
 
-  alias Doctrans.Config.PdfExtraction
+  alias Doctrans.Config.{DocumentConversion, PdfExtraction}
   alias Doctrans.Documents
   alias Doctrans.Jobs.Keys
   alias Doctrans.Processing.{Extraction, Run}
@@ -27,21 +27,37 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   @document_id_key Keys.document_id()
 
-  # Oban waits forever by default. Extraction bounds each poppler run separately,
-  # but a document is many runs, so the job carries its own ceiling — the same one
-  # the extractor clamps each page render against. Pages already rendered stay on
-  # disk and their records stay in the database, so the retry this produces
-  # resumes the document instead of restarting it.
+  # Oban waits forever by default, so the job carries a ceiling -- but the
+  # ceiling is an outer guard, not the budget. The budget is
+  # `PdfExtraction.job_timeout/0`: `perform/1` arms it as it begins and
+  # `Extraction` clamps every page render against it, so a document that runs
+  # out fails cleanly with its finished pages preserved, and the retry resumes
+  # rather than restarts. Oban arms this timer before `perform/1` and kills the
+  # job process when it fires, which no `Lifecycle` transition survives; the
+  # guard is therefore strictly wider than the budget plus the two steps the
+  # budget does not clamp -- the LibreOffice conversion and the page count run
+  # to their own ceilings -- so that the budget is the deadline that fires.
+  # `Doctrans.Processing.ExtractionCrashHandler` covers the guard if it ever does.
+  @guard_margin :timer.minutes(1)
+
   @impl true
-  def timeout(_job), do: PdfExtraction.job_timeout()
+  def timeout(_job) do
+    PdfExtraction.job_timeout() + DocumentConversion.timeout() + PdfExtraction.info_timeout() +
+      @guard_margin
+  end
 
   # A document row that is gone stays gone, so the job is cancelled rather than
   # spent on retries that find the same absence.
   @impl true
   def perform(%Oban.Job{args: %{@document_id_key => document_id} = args}) do
+    # The budget starts here, before the source is located and converted,
+    # rather than when the first page renders: counted from any later point it
+    # would outlast the guard above.
+    deadline = System.monotonic_time(:millisecond) + PdfExtraction.job_timeout()
+
     case Documents.get_document(document_id) do
       nil -> {:cancel, :document_not_found}
-      document -> document |> perform_current(args) |> cancel_permanent()
+      document -> document |> perform_current(args, deadline) |> cancel_permanent()
     end
   end
 
@@ -58,9 +74,9 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
   # A run the document has moved on from is not this job's to act on, and is
   # dropped as a success; `Extraction` makes the same call for a run replaced
   # or settled while it was under way.
-  defp perform_current(document, args) do
+  defp perform_current(document, args, deadline) do
     if Run.current?(document, Map.get(args, Keys.run_id())),
-      do: Extraction.run(document),
+      do: Extraction.run(document, deadline: deadline),
       else: :ok
   end
 end

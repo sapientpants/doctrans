@@ -70,6 +70,89 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
     end)
   end
 
+  # The job of a run re-queued by an earlier boot, discarded again. Oban keeps
+  # each attempt's error as the formatted exception, stack trace and all.
+  defp discarded_recovered_job(document, error) do
+    %{"document_id" => document.id, "run_id" => document.processing_run_id}
+    |> DocumentExtractionJob.new(meta: %{recovered: true})
+    |> Oban.insert!()
+    |> Ecto.Changeset.change(
+      state: "discarded",
+      attempt: 3,
+      errors: [%{"attempt" => 3, "at" => DateTime.utc_now(), "error" => error}]
+    )
+    |> Repo.update!()
+  end
+
+  test "fails a document whose recovered extraction job was discarded again" do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      document = document_fixture(%{status: "extracting"})
+      Topics.subscribe_document(document.id)
+
+      discarded =
+        discarded_recovered_job(
+          document,
+          "** (Oban.TimeoutError) Doctrans.Jobs.DocumentExtractionJob timed out after 3900000ms\n" <>
+            "    (oban 2.24.2) lib/oban/queues/executor.ex:132: Oban.Queues.Executor.start_timeout/1"
+        )
+
+      assert {:pages, nil} = StartupRecovery.run_batch()
+
+      # No new job: the run has now been given its attempts twice over, so the
+      # document is failed where the killed job could not fail it, with the
+      # job's last error named on the row and the failure announced.
+      assert Repo.aggregate(Oban.Job, :count) == 1
+      assert Repo.get!(Oban.Job, discarded.id).state == "discarded"
+
+      saved = Documents.get_document!(document.id)
+      assert saved.status == "error"
+      assert saved.error_message =~ "extraction_attempts_exhausted"
+      assert saved.error_message =~ "timed out after 3900000ms"
+      refute saved.error_message =~ "executor.ex"
+      assert_received {:document_updated, %{status: "error"}}
+    end)
+  end
+
+  test "re-queues once a document whose extraction job was discarded before any recovery" do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      document = document_fixture(%{status: "extracting"})
+
+      %{"document_id" => document.id, "run_id" => document.processing_run_id}
+      |> DocumentExtractionJob.new()
+      |> Oban.insert!()
+      |> Ecto.Changeset.change(state: "discarded", attempt: 3)
+      |> Repo.update!()
+
+      assert {:pages, nil} = StartupRecovery.run_batch()
+
+      # A restart is a fair new attempt for a job that was never recovered; the
+      # job it queues is marked, so the next boot can tell it apart.
+      assert [recovered] = Repo.all(from j in Oban.Job, where: j.state == "available")
+      assert recovered.args["document_id"] == document.id
+      assert recovered.meta["recovered"] == true
+      assert Documents.get_document!(document.id).status == "extracting"
+    end)
+  end
+
+  test "judges a document by its latest extraction job, not an older run's" do
+    Oban.Testing.with_testing_mode(:manual, fn ->
+      document = document_fixture(%{status: "extracting"})
+      _older = discarded_recovered_job(document, "** (RuntimeError) older run")
+
+      # The run's current job, discarded without ever being recovered.
+      %{"document_id" => document.id, "run_id" => document.processing_run_id}
+      |> DocumentExtractionJob.new()
+      |> Oban.insert!()
+      |> Ecto.Changeset.change(state: "discarded", attempt: 3)
+      |> Repo.update!()
+
+      assert {:pages, nil} = StartupRecovery.run_batch()
+
+      assert [_recovered] = Repo.all(from j in Oban.Job, where: j.state == "available")
+      assert Documents.get_document!(document.id).status == "extracting"
+    end)
+  end
+
   test "does not recover pages after the document stops processing" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_with_pages_fixture(%{status: "processing"}, 51)
