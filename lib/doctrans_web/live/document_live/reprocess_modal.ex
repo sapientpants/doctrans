@@ -236,10 +236,15 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
 
   defp available_selection(model, models), do: if(model in models, do: model, else: "")
 
-  defp embedding_model?(model) do
+  # This runs in the LiveView process, so anything but a string must be
+  # rejected rather than downcased: a crash here takes the whole document
+  # viewer down, not just the modal.
+  defp embedding_model?(model) when is_binary(model) do
     model == Config.get(:embedding, :model) ||
       String.contains?(String.downcase(model), "embed")
   end
+
+  defp embedding_model?(_model), do: true
 
   # The form is the one record of the selection. A selection kept beside it as
   # scalar assigns had to be re-synced by every writer, and the one that forgot

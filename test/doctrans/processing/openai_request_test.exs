@@ -785,6 +785,27 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert {:error, :invalid_api_response} = OpenAI.list_models()
     end
 
+    # An off-spec server (#269) may list entries without a string `id`. Those are
+    # dropped at the trust boundary so the `[String.t()]` spec holds for every
+    # consumer, including the one that downcases each name in a LiveView.
+    test "drops entries without a string id", %{bypass: bypass} do
+      Bypass.expect(bypass, "GET", "/v1/models", fn conn ->
+        json(conn, 200, %{
+          "data" => [
+            %{"id" => "model-a"},
+            %{"object" => "model"},
+            %{"id" => nil},
+            %{"id" => 123},
+            nil,
+            "model-b",
+            %{"id" => "model-c"}
+          ]
+        })
+      end)
+
+      assert {:ok, ["model-a", "model-c"]} = OpenAI.list_models()
+    end
+
     test "reports a malformed 200 without counting it against the fuse", %{bypass: bypass} do
       FuseProbe.watch_failures()
 

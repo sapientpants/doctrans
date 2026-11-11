@@ -125,6 +125,26 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     end
   end
 
+  # The real client drops non-string ids before they get here, but the filter
+  # runs in the LiveView process, so it must tolerate them too (#269): a
+  # `FunctionClauseError` in `String.downcase/1` would remount the whole viewer.
+  test "non-string entries in the model list are dropped, not crashed on", %{conn: conn} do
+    stub_models(["vision", nil, 123, %{"id" => "nope"}, "translation"])
+
+    document = document_fixture(%{total_pages: 1, status: "completed"})
+    completed_page_fixture(document)
+    {:ok, view, _html} = live(conn, ~p"/documents/#{document.id}")
+
+    view |> element("#show-reprocess") |> render_click()
+    render_async(view)
+
+    assert Process.alive?(view.pid)
+    assert has_element?(view, "#reprocess-modal")
+    assert has_element?(view, "#extraction-model-select option[value='vision']")
+    assert has_element?(view, "#translation-model-select option[value='translation']")
+    refute has_element?(view, "#extraction-model-select option[value='123']")
+  end
+
   test "model fetch failure leaves an error and disables submission", %{conn: conn} do
     Mox.stub(OpenAIMock, :list_models, fn -> {:error, {:http_error, [status: 401]}} end)
 
