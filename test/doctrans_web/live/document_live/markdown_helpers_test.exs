@@ -3,6 +3,9 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
 
   alias DoctransWeb.DocumentLive.MarkdownHelpers
 
+  # The `rel` the scrubber puts on a link that leaves the app.
+  @external_rel "noreferrer nofollow"
+
   # Shape of a table an OCR pass produces from an invoice-like page: a header
   # row, a delimiter row carrying per-column alignment, and numeric body rows.
   @ocr_table """
@@ -205,8 +208,6 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
   # scheme-relative target loses its href, since it is the one way to another
   # origin that carries no scheme for basic_html to check.
   describe "sanitize_html/1 link and image targets" do
-    @external_rel "noreferrer nofollow"
-
     test "marks a link that leaves the app and strips the referrer" do
       for href <- ["https://example.com/a?b=1&c=2", "http://example.com", "mailto:a@b.c"] do
         document =
@@ -240,6 +241,37 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       end
     end
 
+    # The browser strips leading and trailing controls and spaces and removes
+    # every tab and newline before it parses a URL, so each of these lands on
+    # `//evil.test` even though none of them starts with two slashes as written.
+    test "drops a scheme-relative link target hidden behind whitespace or a control character" do
+      for href <- [
+            " //evil.test/x",
+            "\t//evil.test/x",
+            "\n//evil.test/x",
+            "/\t/evil.test/x",
+            "\x01//evil.test/x"
+          ] do
+        document = ~s|<a href="#{href}">x</a>| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert texts(document, "a") == ["x"], "anchor went missing: #{inspect(href)}"
+        assert count(document, "a[href]") == 0, "target survived: #{inspect(href)}"
+      end
+    end
+
+    test "leaves a same-origin link alone when only its whitespace is unusual" do
+      # An interior space is not removed by the browser, so `/ /x` is a path.
+      for href <- ["\t/documents/1", " #section", "/ /x"] do
+        document = ~s|<a href="#{href}">x</a>| |> MarkdownHelpers.sanitize_html() |> document()
+
+        assert LazyHTML.attribute(LazyHTML.query(document, "a"), "href") == [href],
+               "href changed: #{inspect(href)}"
+
+        assert count(document, "a[data-external], a[rel]") == 0,
+               "marked external: #{inspect(href)}"
+      end
+    end
+
     test "cannot be forged by the content: the marker and rel are stripped on the way in" do
       html = ~S|<a href="/documents/1" rel="opener" data-external="">x</a>|
 
@@ -249,15 +281,25 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       assert count(document, "a[data-external], a[rel]") == 0
     end
 
-    test "keeps only a same-origin image source" do
-      for src <- ["https://example.com/i.png", "http://example.com/i.png", "//example.com/i.png"] do
+    test "drops a remote or scheme-relative image source, keeping the image and its alt" do
+      sources = [
+        "https://example.com/i.png",
+        "http://example.com/i.png",
+        "//example.com/i.png",
+        " //example.com/i.png",
+        "/\t/example.com/i.png"
+      ]
+
+      for src <- sources do
         document = ~s|<img src="#{src}" alt="a">| |> MarkdownHelpers.sanitize_html() |> document()
 
-        assert count(document, "img") == 1, "image went missing: #{src}"
-        assert count(document, "img[src]") == 0, "source survived: #{src}"
+        assert count(document, "img") == 1, "image went missing: #{inspect(src)}"
+        assert count(document, "img[src]") == 0, "source survived: #{inspect(src)}"
         assert LazyHTML.attribute(LazyHTML.query(document, "img"), "alt") == ["a"]
       end
+    end
 
+    test "keeps a same-origin image source exactly as it was" do
       for src <- ["/figures/1.png", "figure.png", ""] do
         document = ~s|<img src="#{src}" alt="a">| |> MarkdownHelpers.sanitize_html() |> document()
 
@@ -349,7 +391,7 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       assert count(document, "[onmouseover]") == 0
     end
 
-    test "keeps the link targets a document legitimately uses, marking the ones that leave" do
+    test "keeps the link and image targets a document legitimately uses" do
       markdown = """
       [https](https://example.com/a?b=1#c), [mail](mailto:a@b.c),
       [relative](/documents/1), [anchor](#section) and
@@ -365,19 +407,35 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
                "#section"
              ]
 
-      assert texts(document, "a[data-external][rel='noreferrer nofollow']") == ["https", "mail"]
       assert LazyHTML.attribute(LazyHTML.query(document, "img"), "src") == ["figures/1.png"]
     end
 
-    test "drops a remote image source and a scheme-relative link target" do
-      # Neither carries a scheme, or carries one MDEx objects to, so both reach
-      # the scrubber intact; this is the scrubber's policy, not safe mode's.
-      markdown = "[open](//evil.test/x) ![beacon](https://evil.test/i.png)"
+    test "marks the links that leave the app and not the ones that stay" do
+      markdown = """
+      [https](https://example.com/a?b=1#c), [mail](mailto:a@b.c),
+      [relative](/documents/1) and [anchor](#section)
+      """
 
       document = markdown |> MarkdownHelpers.render_markdown() |> document()
 
+      assert texts(document, "a[data-external][rel='#{@external_rel}']") == ["https", "mail"]
+      assert texts(document, "a:not([data-external]):not([rel])") == ["relative", "anchor"]
+    end
+
+    # A scheme-relative link carries no scheme for safe mode to blank, and a
+    # remote image carries one it accepts, so both reach the scrubber intact;
+    # what happens next is the scrubber's policy, not safe mode's.
+    test "drops a scheme-relative link target" do
+      document = "[open](//evil.test/x)" |> MarkdownHelpers.render_markdown() |> document()
+
       assert texts(document, "a") == ["open"]
       assert count(document, "a[href]") == 0
+    end
+
+    test "drops a remote image source" do
+      document =
+        "![beacon](https://evil.test/i.png)" |> MarkdownHelpers.render_markdown() |> document()
+
       assert count(document, "img") == 1
       assert count(document, "img[src]") == 0
     end
@@ -401,7 +459,7 @@ defmodule DoctransWeb.DocumentLive.MarkdownHelpersTest do
       document =
         markdown |> MarkdownHelpers.render_markdown(hardbreaks: true) |> document()
 
-      assert texts(document, "a[data-external][rel='noreferrer nofollow']") == ["source"]
+      assert texts(document, "a[data-external][rel='#{@external_rel}']") == ["source"]
       assert texts(document, "a:not([data-external])") == ["local"]
     end
   end

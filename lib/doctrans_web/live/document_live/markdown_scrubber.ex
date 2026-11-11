@@ -49,7 +49,9 @@ defmodule DoctransWeb.DocumentLive.MarkdownScrubber do
       `noopener`) and a `data-external` marker that `assets/css/app.css` turns
       into a visible cue. Those two attributes cannot be supplied by the content
       itself: `BasicHTML` strips them on the way in, so their presence means this
-      module put them there.
+      module put them there. `mailto:` counts: it hands the user to their mail
+      client with an address the content chose, which is as much a departure as
+      a web page is, so it is marked like one.
     * A target with neither scheme nor host is same-origin — a page, an anchor,
       or the `""` that MDEx leaves behind when it blanks a dangerous scheme — and
       is left exactly as it was.
@@ -60,6 +62,13 @@ defmodule DoctransWeb.DocumentLive.MarkdownScrubber do
       already does with a disallowed scheme. Browsers accept a backslash for
       either slash in a URL that resolves against an `http(s)` base, so `\\host`
       and `/\host` are treated the same way.
+
+  A target is classified the way the browser will read it, not the way it was
+  written: the URL standard strips leading and trailing C0 controls and spaces
+  and removes every tab and newline before parsing, so ` //evil.test` and
+  `/<tab>/evil.test` are scheme-relative to the browser and are treated so here.
+  The attribute itself is left as written; only the decision uses the cleaned
+  form.
 
   ## Images
 
@@ -90,7 +99,7 @@ defmodule DoctransWeb.DocumentLive.MarkdownScrubber do
 
   def scrub_attribute("img", {"src", value}) do
     with {"src", src} <- BasicHTML.scrub_attribute("img", {"src", value}),
-         :same_origin <- target(src) do
+         :same_origin <- target_kind(src) do
       {"src", src}
     else
       _ -> nil
@@ -113,7 +122,7 @@ defmodule DoctransWeb.DocumentLive.MarkdownScrubber do
         attributes
 
       {"href", href} ->
-        case target(href) do
+        case target_kind(href) do
           :same_origin ->
             attributes
 
@@ -130,7 +139,9 @@ defmodule DoctransWeb.DocumentLive.MarkdownScrubber do
   # `URI.parse/1` never raises; a target it cannot make sense of still has no
   # scheme and no host, which is the same-origin case, and the browser would
   # resolve it against the page either way.
-  defp target(target) do
+  defp target_kind(target) do
+    target = as_the_browser_reads_it(target)
+
     cond do
       scheme_relative?(target) ->
         :scheme_relative
@@ -141,6 +152,17 @@ defmodule DoctransWeb.DocumentLive.MarkdownScrubber do
       true ->
         :external
     end
+  end
+
+  # The URL standard's first two steps: strip leading and trailing C0 controls
+  # and spaces, then remove every ASCII tab and newline. `BasicHTML` has already
+  # applied its scheme check to the written form, so nothing with a disallowed
+  # scheme reaches here under a whitespace disguise; this only keeps the
+  # scheme-relative and same-origin decisions from being fooled by one.
+  defp as_the_browser_reads_it(target) do
+    target
+    |> String.replace(~r/\A[\x00-\x20]+|[\x00-\x20]+\z/, "")
+    |> String.replace(~r/[\t\n\r]/, "")
   end
 
   # Two leading slashes, either of which may be a backslash: the URL standard's
