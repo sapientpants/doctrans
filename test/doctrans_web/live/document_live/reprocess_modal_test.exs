@@ -142,7 +142,16 @@ defmodule DoctransWeb.DocumentLive.ReprocessModalTest do
     assert has_element?(view, "#reprocess-modal")
     assert has_element?(view, "#extraction-model-select option[value='vision']")
     assert has_element?(view, "#translation-model-select option[value='translation']")
-    refute has_element?(view, "#extraction-model-select option[value='123']")
+
+    # The placeholder plus the two string models: nothing else got through.
+    options =
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#extraction-model-select option")
+      |> LazyHTML.attribute("value")
+
+    assert options == ["", "translation", "vision"]
   end
 
   test "model fetch failure leaves an error and disables submission", %{conn: conn} do

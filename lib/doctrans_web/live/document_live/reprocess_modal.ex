@@ -197,7 +197,7 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
   end
 
   defp apply_models_result(socket, {:ok, models}),
-    do: assign_models(socket, Enum.reject(models, &embedding_model?/1), nil)
+    do: assign_models(socket, selectable_models(models), nil)
 
   # The ordinary failure -- a refused connection, a non-2xx -- lands here rather
   # than in the `{:exit, _}` clause, so this is the path that needs to say what
@@ -236,15 +236,18 @@ defmodule DoctransWeb.DocumentLive.ReprocessModal do
 
   defp available_selection(model, models), do: if(model in models, do: model, else: "")
 
-  # This runs in the LiveView process, so anything but a string must be
-  # rejected rather than downcased: a crash here takes the whole document
-  # viewer down, not just the modal.
-  defp embedding_model?(model) when is_binary(model) do
+  # This runs in the LiveView process, so a non-string entry is dropped here
+  # rather than downcased: a crash here takes the whole document viewer down,
+  # not just the modal. The guard sits on the comprehension, not on the
+  # predicate, so `embedding_model?/1` never has to lie about what `nil` is.
+  defp selectable_models(models) do
+    for model when is_binary(model) <- models, not embedding_model?(model), do: model
+  end
+
+  defp embedding_model?(model) do
     model == Config.get(:embedding, :model) ||
       String.contains?(String.downcase(model), "embed")
   end
-
-  defp embedding_model?(_model), do: true
 
   # The form is the one record of the selection. A selection kept beside it as
   # scalar assigns had to be re-synced by every writer, and the one that forgot
