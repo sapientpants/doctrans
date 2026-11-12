@@ -54,8 +54,14 @@ command=$(jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
 # rule will ever see, so a heredoc is only recognised where the shell would
 # recognise one, and a body that is never terminated is treated as command.
 #
-# `[^;&|]*` inside a rule keeps it from matching across a command separator, so
-# `git status && rm file` is not read as `git ... rm`.
+# Every rule matches ` word `, so the text is normalised until each token the
+# shell would see has a space on both sides: a separator glued to a word
+# (`true;git reset --hard`, `$(rm -rf build)`), a path on the command (`/bin/rm`,
+# `./rm`) and an alias-defeating backslash (`\rm`) are all boundaries to the
+# shell and were none to the rules. Separators are kept, spaced, so `[^;&|]*`
+# inside a rule still stops at one and `git status && rm file` is not read as
+# `git ... rm`. A quoted payload handed to a shell (`bash -c "..."`) is a command,
+# not data, and is unwrapped before the quoted strings are stripped.
 # ---------------------------------------------------------------------------
 read -r -d '' POLICY <<'AWK' || true
 function deny(re, msg) {
@@ -102,6 +108,86 @@ function names_db_client(text) {
   return index(text, "psql") || index(text, "dropdb") || index(text, "mysql") || index(text, "docker exec")
 }
 
+# Removes `len` characters of `text` starting at `start`.
+function cut(text, start, len) {
+  return substr(text, 1, start - 1) substr(text, start + len)
+}
+
+# Drops the directory from a word that names a command: `/bin/rm`, `./rm`,
+# `bin/git`, `~/bin/rm` and `$HOME/bin/git` are all `rm` or `git` to the shell.
+# An option such as `--git-dir=/x/rm` is not a command and is left alone.
+function strip_path(word) {
+  if (word !~ /^-/ && match(word, /\/[A-Za-z][^\/]*$/)) return substr(word, RSTART + 1)
+  return word
+}
+
+# A quoted string is data to the command it is handed to -- except when that
+# command is a shell. `bash -c "rm -rf build"` and `eval "git reset --hard"` run
+# the string, so its quotes come off and the text stays visible to the rules
+# instead of being stripped with every other quoted string. The whole argument
+# word is unwrapped, so `-lc`, `-cx`, `-c --`, `$'...'` and pieces glued together
+# (`"r""m -rf build"`, `rm" -rf build"`) all come out as the shell would run them.
+# A quote of the other kind inside the payload is then stripped like any other,
+# which keeps less than the shell runs but only in the safe direction.
+#
+# Not covered: a payload held in a variable (`sh -c "$X"`), one fed on stdin
+# (`echo ... | bash`), a shell option that takes a value before `-c`
+# (`-o pipefail`), and interpreters other than sh/bash/zsh/dash/ksh and eval.
+function unwrap_shell_payloads(text,    re, pos, i, c, j) {
+  re = "(^|[ \t;&|(`{])([^ \t]*/)?((ba|z|da|k)?sh([ \t]+-[^ \t]*)*[ \t]+-[A-Za-z]*c[A-Za-z]*([ \t]+-[^ \t]*)*|eval)[ \t]+"
+  pos = 1
+  while (match(substr(text, pos), re)) {
+    i = pos + RSTART + RLENGTH - 1               # first character of the payload word
+    while (i <= length(text)) {
+      c = substr(text, i, 1)
+      if (c == "$" && (substr(text, i + 1, 1) == q || substr(text, i + 1, 1) == dq)) {
+        text = cut(text, i, 1)                    # `$'...'` quotes like `'...'`
+        c = substr(text, i, 1)
+      }
+      if (c == q || c == dq) {
+        j = index(substr(text, i + 1), c)         # distance to the closing quote
+        if (j == 0) return text                   # never closed: the strip leaves it too
+        text = cut(text, i + j, 1)
+        text = cut(text, i, 1)
+        i += j - 1
+      } else if (c == " " || c == "\t") break
+      else if (c == "\\") i += 2
+      else i++
+    }
+    pos = i
+  }
+  return text
+}
+
+# Gives every token a space on each side, which is what the rules match on (see
+# the note above the policy). Runs after the quoted strings are gone, so a `;` or
+# `(` inside a commit message is not read as a separator. A command's directory
+# comes off only where the shell resolves a command: at the start, after a
+# separator, after a `VAR=value` prefix, and through a word that runs its
+# arguments (`sudo /bin/rm`, `find -exec /bin/rm`) -- an argument that merely
+# ends in a rule word (`cat /tmp/rmdir`) stays a path.
+function normalise_tokens(text,    tok, n, i, w, out, expect, strip_all) {
+  while (match(text, /\\[A-Za-z0-9_\/]/))          # `\rm` is `rm` to the shell
+    text = cut(text, RSTART, 1)
+  gsub(/[;&|(){}`]+/, " & ", text)                 # `;git` -> ` ; git`, `$(rm` -> `$ ( rm`
+  n = split(text, tok, /[ \t]+/)
+  out = ""; expect = 1; strip_all = 0
+  for (i = 1; i <= n; i++) {
+    w = tok[i]
+    if (w == "") continue
+    if (w ~ /^[;&|(){}`]+$/) { expect = 1; strip_all = 0 }
+    else if (w ~ /^-(exec|execdir|ok|okdir)$/) strip_all = 1
+    else if (expect && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) ;        # `X=1 /bin/rm`: the command is next
+    else if (expect) {
+      w = strip_path(w); expect = 0
+      strip_all = (w ~ /^(sudo|doas|command|builtin|exec|env|xargs|nohup|nice|time|timeout)$/)
+    }
+    else if (strip_all) w = strip_path(w)
+    out = out " " w
+  }
+  return out " "
+}
+
 BEGIN {
   q  = sprintf("%c", 39)   # '
   dq = sprintf("%c", 34)   # "
@@ -135,10 +221,10 @@ END {
     cmd = cmd body
     if (!body_runs_sql) raw = raw body
   }
+  cmd = unwrap_shell_payloads(cmd)
   gsub(q "[^" q "]*" q, "", cmd)      # single-quoted strings
   gsub(dq "[^" dq "]*" dq, "", cmd)   # double-quoted strings
-  gsub(/[ \t]+/, " ", cmd)
-  cmd = " " cmd " "                   # pad so every token has a space on each side
+  cmd = normalise_tokens(cmd)
   rawlc = tolower(raw)
 
   # --- Verification bypass ------------------------------------------------
