@@ -16,7 +16,10 @@ defmodule Doctrans.DeploymentTest do
   converters on uploaded documents with the checkout bind-mounted in, so it
   must not do so as root, must keep the storage root off that mount, and must
   mount the checkout read-only, since a write into it is a step towards
-  execution on the next request, boot, checkout or agent session.
+  execution on the next request, boot, checkout or agent session. Its image
+  is built from the whole checkout, so `.dockerignore` must keep every local
+  env file out of the build context (#273): the encrypted `.env.gpg` was once
+  baked into a layer because only the plaintext names were listed.
 
   The assertions are deliberately semantic and few, so ordinary edits to either
   file — reordering, comments, whitespace — do not break them.
@@ -32,7 +35,8 @@ defmodule Doctrans.DeploymentTest do
       runtime_compose: compose!("docker-compose.runtime.yml"),
       development_compose: compose!("docker-compose.yml"),
       dockerfile: read("Dockerfile"),
-      dev_dockerfile: read("Dockerfile.dev")
+      dev_dockerfile: read("Dockerfile.dev"),
+      dockerignore: read(".dockerignore")
     }
   end
 
@@ -75,6 +79,46 @@ defmodule Doctrans.DeploymentTest do
     Enum.any?(service["volumes"] || [], fn volume ->
       Enum.all?(fields, fn {key, value} -> volume[Atom.to_string(key)] == value end)
     end)
+  end
+
+  # Whether `.dockerignore` keeps a path out of the build context, following
+  # Docker's rules: patterns match against the whole path, `*` and `?` stop at
+  # a separator, `**` crosses them, and the last matching pattern decides,
+  # with a leading `!` meaning "included after all".
+  defp dockerignored?(dockerignore, path) do
+    dockerignore
+    |> String.split("\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
+    |> Enum.reduce(false, fn pattern, ignored? ->
+      {negated?, pattern} =
+        case pattern do
+          "!" <> rest -> {true, rest}
+          rest -> {false, rest}
+        end
+
+      pattern = String.trim_trailing(pattern, "/")
+
+      if Regex.match?(dockerignore_regex(pattern), path), do: not negated?, else: ignored?
+    end)
+  end
+
+  defp dockerignore_regex(pattern) do
+    source =
+      pattern
+      |> String.split("**")
+      |> Enum.map_join(".*", fn segment ->
+        segment
+        |> String.split(~r/[*?]/, include_captures: true)
+        |> Enum.map_join(fn
+          "*" -> "[^/]*"
+          "?" -> "[^/]"
+          literal -> Regex.escape(literal)
+        end)
+      end)
+
+    # A pattern that names a directory ignores everything beneath it too.
+    Regex.compile!("^(?:" <> source <> ")(?:/.*)?$")
   end
 
   defp assert_loopback_ports!(compose) do
@@ -276,6 +320,29 @@ defmodule Doctrans.DeploymentTest do
       # the seeded dependency and build volumes belong to someone else.
       assert app["build"]["args"] == %{"UID" => uid, "GID" => gid}
       assert dockerfile =~ ~r/^USER dev/m
+    end
+
+    test "keeps every local env file out of the image, except the template", %{
+      dockerignore: dockerignore
+    } do
+      # `Dockerfile.dev` copies the whole checkout (#273). A developer's
+      # `.env`, the Compose-only `.env.local`, the encrypted `.env.gpg` and any
+      # future variant would otherwise land in a layer that `docker save` or
+      # a stray push carries out of the machine.
+      for secret <- [".env", ".env.local", ".env.gpg", ".env.production", ".env.backup"] do
+        assert dockerignored?(dockerignore, secret), "#{secret} reaches the build context"
+      end
+
+      # The template holds no secret and is what the README tells a newcomer
+      # to copy, so it stays.
+      refute dockerignored?(dockerignore, ".env.example")
+      assert File.exists?(Path.join(@root, ".env.example"))
+
+      # The matcher is only trusted because it agrees with Docker on the other
+      # rules in the file.
+      assert dockerignored?(dockerignore, "deps/phoenix/mix.exs")
+      assert dockerignored?(dockerignore, "README.md")
+      refute dockerignored?(dockerignore, "lib/doctrans/application.ex")
     end
 
     test "drops every capability and forbids gaining privileges", %{compose: compose} do
