@@ -39,9 +39,10 @@ docker-compose*.yml
 # Documentation
 *.md
 
-# Local env files
-.env
-.env.local
+# Local env files: every variant may carry a secret (`.env.gpg` holds the
+# encrypted one), and the only safe one is the checked-in template.
+.env*
+!.env.example
 
 # Dialyzer
 priv/plts/
