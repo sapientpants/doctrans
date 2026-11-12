@@ -13,14 +13,17 @@ defmodule Mix.Tasks.Tailwind.Verify do
 
   The digests live in `config/tailwind-<version>.sha256sums`, next to the
   version pin in `config/config.exs`. The file is the release's
-  `sha256sums.txt` verbatim, so bumping the version means adding the new
-  release's file and the old one can be deleted:
+  `sha256sums.txt`, so bumping the version means adding the new release's
+  file and the old one can be deleted:
 
       curl -fsSLO https://github.com/tailwindlabs/tailwindcss/releases/download/v<version>/sha256sums.txt
       mv sha256sums.txt config/tailwind-<version>.sha256sums
 
-  A version without a digest file fails this task rather than passing with
-  nothing to compare against.
+  The parser reads what `sha256sum` writes, in plain or binary (`*name`)
+  mode, with or without a `./` prefix, so a file produced by hand from a
+  release's assets is read the same way as the published one. A version
+  without a digest file fails this task rather than passing with nothing to
+  compare against.
 
   On a mismatch the binary is **deleted** before the task fails, so the
   next `mix assets.setup` fetches it again instead of running whatever was
@@ -34,8 +37,18 @@ defmodule Mix.Tasks.Tailwind.Verify do
   ## Usage
 
       mix tailwind.verify
+      mix tailwind.verify --install
 
-  `mix assets.setup` runs it right after `tailwind.install --if-missing`.
+  Without options the task only checks, and a missing binary is a failure.
+
+  With `--install` it stands in for `tailwind.install --if-missing`: a
+  binary already on disk is hashed first and kept when it matches, deleted
+  when it does not, and only when there is none is `mix tailwind.install`
+  run and its download hashed in turn. The order matters: `tailwind.install`
+  decides whether the binary is current by *running* it (`tailwindcss
+  --help`), with or without `--if-missing`, so a stale `_build` or a
+  restored cache has to be checked before that task gets to it. This is
+  what `mix assets.setup` runs.
   """
 
   use Mix.Task
@@ -45,7 +58,9 @@ defmodule Mix.Tasks.Tailwind.Verify do
   @chunk_bytes 1_048_576
 
   @impl true
-  def run(_args) do
+  def run(args) do
+    {opts, []} = OptionParser.parse!(args, strict: [install: :boolean])
+
     # Only `loadpaths`, as `tailwind.install` does without `--runtime-config`:
     # the version and target come from `config/config.exs`, which Mix has
     # loaded by now, and `app.config` would evaluate `config/runtime.exs`,
@@ -57,20 +72,34 @@ defmodule Mix.Tasks.Tailwind.Verify do
         "tailwind.verify: skipped, :tailwind :path names a binary this project did not download"
       )
     else
-      version = Tailwind.configured_version()
-      bin_path = Tailwind.bin_path(version)
-
-      case verify(bin_path, Tailwind.configured_target(), sums_path(version)) do
-        :ok ->
-          Mix.shell().info(
-            "tailwind.verify: #{Path.basename(bin_path)} matches the pinned digest for v#{version}"
-          )
-
-        {:error, message} ->
-          Mix.raise(message)
-      end
+      check_configured(Tailwind.configured_version(), opts[:install] == true)
     end
   end
+
+  defp check_configured(version, install?) do
+    bin_path = Tailwind.bin_path(version)
+    target = Tailwind.configured_target()
+    sums_path = sums_path(version)
+
+    result =
+      if install?,
+        do: verify_or_install(bin_path, target, sums_path, &install_tailwind/0),
+        else: verify(bin_path, target, sums_path)
+
+    case result do
+      :ok ->
+        Mix.shell().info(
+          "tailwind.verify: #{Path.basename(bin_path)} matches the pinned digest for v#{version}"
+        )
+
+      {:error, message} ->
+        Mix.raise(message)
+    end
+  end
+
+  # `rerun` rather than `run`, so the download still happens when an earlier
+  # task in the same `mix` invocation has already run `tailwind.install`.
+  defp install_tailwind, do: Mix.Task.rerun("tailwind.install")
 
   @doc """
   The digest file for `version`: `config/tailwind-<version>.sha256sums`.
@@ -92,9 +121,44 @@ defmodule Mix.Tasks.Tailwind.Verify do
   def verify(bin_path, target, sums_path) do
     with {:ok, expected} <- expected_digest(sums_path, target),
          {:ok, actual} <- actual_digest(bin_path) do
-      if actual == expected, do: :ok, else: reject(bin_path, target, expected, actual)
+      compare(bin_path, target, expected, actual, :on_disk)
     end
   end
+
+  @doc """
+  Like `verify/3`, but when there is no binary at `bin_path` it calls
+  `install` to put one there and verifies that instead.
+
+  A binary that is already on disk is hashed before `install` is called,
+  never after, so nothing unverified is handed to a step that would run it.
+  The pinned digest has to be readable before anything is downloaded: with
+  no digest to compare against, there is no point fetching a binary.
+  """
+  @spec verify_or_install(Path.t(), String.t(), Path.t(), (-> any())) ::
+          :ok | {:error, String.t()}
+  def verify_or_install(bin_path, target, sums_path, install) when is_function(install, 0) do
+    with {:ok, expected} <- expected_digest(sums_path, target),
+         {:ok, actual, origin} <- present_or_installed(bin_path, install) do
+      compare(bin_path, target, expected, actual, origin)
+    end
+  end
+
+  defp present_or_installed(bin_path, install) do
+    origin =
+      if File.regular?(bin_path) do
+        :on_disk
+      else
+        install.()
+        :downloaded
+      end
+
+    with {:ok, actual} <- actual_digest(bin_path), do: {:ok, actual, origin}
+  end
+
+  defp compare(_bin_path, _target, expected, expected, _origin), do: :ok
+
+  defp compare(bin_path, target, expected, actual, origin),
+    do: reject(bin_path, target, expected, actual, origin)
 
   defp expected_digest(sums_path, target) do
     asset = "tailwindcss-#{target}"
@@ -155,10 +219,10 @@ defmodule Mix.Tasks.Tailwind.Verify do
   # would run it regardless, since that task only checks the file exists.
   # The path is the installer's own under `_build`, never input.
   # sobelow_skip ["Traversal.FileModule"]
-  defp reject(bin_path, target, expected, actual) do
+  defp reject(bin_path, target, expected, actual, origin) do
     removal =
       case File.rm(bin_path) do
-        :ok -> "It has been deleted; run `mix assets.setup` to fetch it again."
+        :ok -> "It has been deleted."
         {:error, reason} -> "It could not be deleted (#{:file.format_error(reason)}): remove it."
       end
 
@@ -169,9 +233,19 @@ defmodule Mix.Tasks.Tailwind.Verify do
          expected #{expected}
          got      #{actual}
 
-     #{removal}
-     A binary that fails again after a fresh download no longer matches the published
-     release, which is worth investigating before the digest is changed.
+     #{removal} #{advice(origin)}
      """}
+  end
+
+  defp advice(:on_disk) do
+    "Run `mix assets.setup` to fetch it again. A binary that fails again after a " <>
+      "fresh download no longer matches the published release, which is worth " <>
+      "investigating before the digest is changed."
+  end
+
+  defp advice(:downloaded) do
+    "This was a fresh download, so the published asset no longer matches the pinned " <>
+      "digest: compare the file under config/ with the release's sha256sums.txt and " <>
+      "find out which one changed before re-pinning."
   end
 end

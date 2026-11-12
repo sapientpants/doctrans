@@ -59,8 +59,8 @@ COPY rel rel
 # No Node.js is installed on purpose: `:esbuild` and `:tailwind` fetch standalone
 # binaries and the project has no `assets/package.json`, so npm never runs.
 # `_build` is not in the context, so the Tailwind binary is downloaded on every
-# build; `assets.setup` checks it against the digest pinned under `config/`
-# before anything is built with it (#274).
+# build; `assets.setup` hashes the download against the digest pinned under
+# `config/` before anything runs it (#274).
 RUN mix compile \
     && mix assets.setup \
     && mix assets.deploy

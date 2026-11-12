@@ -148,14 +148,13 @@ defmodule Doctrans.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test --warnings-as-errors"],
-      # `tailwind.verify` hashes the binary the install step put in place against
-      # the digest pinned in `config/tailwind-<version>.sha256sums` (#274); the
-      # esbuild installer verifies its own download.
-      "assets.setup": [
-        "tailwind.install --if-missing",
-        "tailwind.verify",
-        "esbuild.install --if-missing"
-      ],
+      # `tailwind.verify --install` stands in for `tailwind.install --if-missing`:
+      # it hashes whatever binary is on disk against the digest pinned in
+      # `config/tailwind-<version>.sha256sums` before anything runs it, and only
+      # downloads when there is none (#274). The esbuild installer verifies its
+      # own download. This lives in the alias rather than the pre-commit gate
+      # because the Dockerfile and a CI cache hit have to pass through it too.
+      "assets.setup": ["tailwind.verify --install", "esbuild.install --if-missing"],
       "assets.build": ["compile", "tailwind doctrans", "esbuild doctrans"],
       "assets.deploy": [
         "tailwind doctrans --minify",

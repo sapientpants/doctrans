@@ -183,13 +183,16 @@ jobs:
       # commit SHA. esbuild comes from registry.npmjs.org with its npm signature verified
       # against pinned public keys and a sha512 integrity check over the tarball. Tailwind
       # is a plain GitHub release download over verify_peer TLS with no checksum of its
-      # own, so `assets.setup` follows the install with `mix tailwind.verify`, which hashes
-      # the binary against the digest pinned in `config/tailwind-<version>.sha256sums` and
-      # deletes it on a mismatch (#274). That runs on a cache hit too, so a restored binary
-      # is held to the same digest as a fresh download; the digest file is part of the
-      # cache key above, so re-pinning moves the key rather than trusting an entry saved
-      # under the old one. A mismatch fails the job on every run until the entry ages out,
-      # and that is the intended outcome for a toolchain that no longer matches its release.
+      # own, so `assets.setup` installs it through `mix tailwind.verify --install`, which
+      # hashes the binary against the digest pinned in `config/tailwind-<version>.sha256sums`
+      # and deletes it on a mismatch (#274). A binary restored from this cache, or from the
+      # `_build` in the dependencies cache above, is hashed before `tailwind.install` gets
+      # to it, because that task runs the binary to read its version; only when nothing is
+      # on disk is a download made, and the download is hashed in turn. The digest file is
+      # part of the cache key, so re-pinning moves the key rather than trusting an entry
+      # saved under the old one. A mismatch fails the job on every run until the entry ages
+      # out, and that is the intended outcome for a toolchain that no longer matches its
+      # release.
       - name: Install asset toolchain
         run: mix assets.setup
 
