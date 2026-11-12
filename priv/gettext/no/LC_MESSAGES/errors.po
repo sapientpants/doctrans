@@ -99,7 +99,7 @@ msgstr "må være lik %{number}"
 msgid "Could not parse page count from pdfinfo output"
 msgstr "Kunne ikke lese sideantall fra pdfinfo-utdata"
 
-#: lib/doctrans_web/error_messages.ex:356
+#: lib/doctrans_web/error_messages.ex:377
 #, elixir-autogen, elixir-format
 msgid "Document not found"
 msgstr "Dokument ikke funnet"
@@ -109,12 +109,12 @@ msgstr "Dokument ikke funnet"
 msgid "PDF extraction failed: %{reason}"
 msgstr "PDF-uttrekk feilet: %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:334
+#: lib/doctrans_web/error_messages.ex:355
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} extraction failed: %{reason}"
 msgstr "Uttrekk av side %{page_number} feilet: %{reason}"
 
-#: lib/doctrans_web/error_messages.ex:341
+#: lib/doctrans_web/error_messages.ex:362
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} translation failed: %{reason}"
 msgstr "Oversettelse av side %{page_number} feilet: %{reason}"
@@ -149,7 +149,7 @@ msgstr "LibreOffice er ikke installert"
 msgid "Page image not found after extraction"
 msgstr "Page image not found after extraction"
 
-#: lib/doctrans_web/error_messages.ex:358
+#: lib/doctrans_web/error_messages.ex:379
 #, elixir-autogen, elixir-format
 msgid "Page not found"
 msgstr "Page not found"
@@ -249,12 +249,12 @@ msgstr "Filen er for stor (%{size}MB, maks. %{max}MB)"
 msgid "LibreOffice process terminated unexpectedly"
 msgstr "LibreOffice-prosessen avsluttet uventet"
 
-#: lib/doctrans_web/error_messages.ex:297
+#: lib/doctrans_web/error_messages.ex:318
 #, elixir-autogen, elixir-format
 msgid "The model did not return complete final text. Use a model with a larger output budget or split the page into smaller sections, then reprocess. The provider must return finish_reason=stop."
 msgstr "Modellen returnerte ikke en fullstendig endelig tekst. Bruk en modell med en høyere grense for utdata, eller del siden i mindre avsnitt og behandle den på nytt. Leverandøren må returnere finish_reason=stop."
 
-#: lib/doctrans_web/error_messages.ex:350
+#: lib/doctrans_web/error_messages.ex:371
 #, elixir-autogen, elixir-format
 msgid "Processing failed on page(s) %{page_numbers}. Reprocess those pages to finish this document."
 msgstr "Behandlingen mislyktes på side(r) %{page_numbers}. Behandle disse sidene på nytt for å fullføre dokumentet."
@@ -264,17 +264,17 @@ msgstr "Behandlingen mislyktes på side(r) %{page_numbers}. Behandle disse siden
 msgid "PDF rendering timed out. Lower the extraction resolution or split the document, then try again."
 msgstr "Gjengivelsen av PDF-en fikk tidsavbrudd. Reduser ekstraksjonsoppløsningen eller del opp dokumentet, og prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:279
+#: lib/doctrans_web/error_messages.ex:300
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} rendered too large (%{size} bytes, limit %{limit}). Lower the extraction resolution, then reprocess this page."
 msgstr "Side %{page_number} ble gjengitt for stor (%{size} byte, grense %{limit}). Reduser ekstraksjonsoppløsningen, og behandle siden på nytt."
 
-#: lib/doctrans_web/error_messages.ex:289
+#: lib/doctrans_web/error_messages.ex:310
 #, elixir-autogen, elixir-format
 msgid "Required PDF tool %{command} is not installed"
 msgstr "Det nødvendige PDF-verktøyet %{command} er ikke installert"
 
-#: lib/doctrans_web/error_messages.ex:258
+#: lib/doctrans_web/error_messages.ex:279
 #, elixir-autogen, elixir-format
 msgid "This PDF has %{pages} pages, above the limit of %{limit}. Split it into smaller documents before uploading."
 msgstr "Denne PDF-en har %{pages} sider, over grensen på %{limit}. Del den opp i mindre dokumenter før du laster den opp."
@@ -314,12 +314,12 @@ msgstr "Kun PDF-, Word-, OpenDocument- og RTF-dokumenter aksepteres"
 msgid "This file could not be uploaded. Please try again."
 msgstr "Denne filen kunne ikke lastes opp. Prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:304
+#: lib/doctrans_web/error_messages.ex:325
 #, elixir-autogen, elixir-format
 msgid "The model server ran out of time and the request was stopped. Check that it is running and responsive, then reprocess this page."
 msgstr "Modellserveren gikk tom for tid, og forespørselen ble stoppet. Kontroller at den kjører og svarer, og behandle deretter denne siden på nytt."
 
-#: lib/doctrans_web/error_messages.ex:311
+#: lib/doctrans_web/error_messages.ex:332
 #, elixir-autogen, elixir-format
 msgid "The model server's answer went past the %{limit} byte limit and was stopped before it was read. Check the configured model and endpoint, then try again."
 msgstr "Svaret fra modellserveren overskred grensen på %{limit} byte og ble stoppet før det ble lest. Kontroller den konfigurerte modellen og endepunktet, og prøv igjen."
@@ -329,12 +329,12 @@ msgstr "Svaret fra modellserveren overskred grensen på %{limit} byte og ble sto
 msgid "Source language is required and must be a string"
 msgstr "Kildespråket er påkrevd og må være en tekststreng"
 
-#: lib/doctrans_web/error_messages.ex:390
+#: lib/doctrans_web/error_messages.ex:411
 #, elixir-autogen, elixir-format
 msgid "No page of this document is waiting to be retried. Reload the page to see its current state."
 msgstr "Ingen side i dette dokumentet venter på et nytt forsøk. Last inn siden på nytt for å se gjeldende status."
 
-#: lib/doctrans_web/error_messages.ex:383
+#: lib/doctrans_web/error_messages.ex:404
 #, elixir-autogen, elixir-format
 msgid "This document has already finished processing, so there is nothing left to stop."
 msgstr "Dette dokumentet er allerede ferdig behandlet, så det er ingenting igjen å stoppe."
@@ -374,7 +374,7 @@ msgstr "Oversettelsesmodellen %{model} er ikke tilgjengelig på %{destination}. 
 msgid "An unexpected error occurred. Please try again."
 msgstr "Det oppstod en uventet feil. Vennligst prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:398
+#: lib/doctrans_web/error_messages.ex:419
 #, elixir-autogen, elixir-format
 msgid "Could not fetch the list of models from the model server"
 msgstr "Kunne ikke hente listen over modeller fra modellserveren"
@@ -384,22 +384,22 @@ msgstr "Kunne ikke hente listen over modeller fra modellserveren"
 msgid "Document search is temporarily unavailable. Please try again."
 msgstr "Dokumentsøk er midlertidig utilgjengelig. Prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:360
+#: lib/doctrans_web/error_messages.ex:381
 #, elixir-autogen, elixir-format
 msgid "Failed to delete document"
 msgstr "Kunne ikke slette dokument"
 
-#: lib/doctrans_web/error_messages.ex:395
+#: lib/doctrans_web/error_messages.ex:416
 #, elixir-autogen, elixir-format
 msgid "Invalid model selection"
 msgstr "Ugyldig modellvalg"
 
-#: lib/doctrans_web/error_messages.ex:366
+#: lib/doctrans_web/error_messages.ex:387
 #, elixir-autogen, elixir-format
 msgid "Original upload unavailable. Re-upload this document to process it again."
 msgstr "Den opprinnelige filen er ikke tilgjengelig. Last opp dokumentet på nytt for å behandle det igjen."
 
-#: lib/doctrans_web/error_messages.ex:402
+#: lib/doctrans_web/error_messages.ex:423
 #, elixir-autogen, elixir-format
 msgid "Please enter a question."
 msgstr "Vennligst skriv inn et spørsmål."
@@ -409,17 +409,17 @@ msgstr "Vennligst skriv inn et spørsmål."
 msgid "Search is temporarily unavailable. Please try again."
 msgstr "Søk er midlertidig utilgjengelig. Vennligst prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:379
+#: lib/doctrans_web/error_messages.ex:400
 #, elixir-autogen, elixir-format
 msgid "The document has changed. Please try again."
 msgstr "Dokumentet er endret. Prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:373
+#: lib/doctrans_web/error_messages.ex:394
 #, elixir-autogen, elixir-format
 msgid "This document still has active processing jobs. Please wait for them to finish."
 msgstr "Dette dokumentet har fortsatt aktive behandlingsoppgaver. Vent til de er ferdige."
 
-#: lib/doctrans_web/error_messages.ex:412
+#: lib/doctrans_web/error_messages.ex:433
 #, elixir-autogen, elixir-format
 msgid "The database did not respond. Please try again."
 msgstr "Databasen svarte ikke. Vennligst prøv igjen."
@@ -434,12 +434,12 @@ msgstr "pdftoppm feilet: %{error}"
 msgid "Could not parse page sizes from pdfinfo output"
 msgstr "Kunne ikke lese sidestørrelser fra pdfinfo-utdata"
 
-#: lib/doctrans_web/error_messages.ex:267
+#: lib/doctrans_web/error_messages.ex:288
 #, elixir-autogen, elixir-format
 msgid "Page %{page_number} of this PDF is %{width}x%{height} pixels at %{dpi} DPI, above the limit of %{limit} pixels. Lower the extraction resolution, then try again."
 msgstr "Side %{page_number} i denne PDF-en er %{width}x%{height} piksler ved %{dpi} DPI, over grensen på %{limit} piksler. Senk uttrekksoppløsningen og prøv igjen."
 
-#: lib/doctrans_web/error_messages.ex:327
+#: lib/doctrans_web/error_messages.ex:348
 #, elixir-autogen, elixir-format
 msgid "The model server address is not a valid URL. Set OPENAI_HOST to an http or https URL with a host, such as http://localhost:8000, then restart."
 msgstr "Adressen til modellserveren er ikke en gyldig URL. Sett OPENAI_HOST til en http- eller https-URL med en vert, for eksempel http://localhost:8000, og start deretter på nytt."
@@ -449,7 +449,17 @@ msgstr "Adressen til modellserveren er ikke en gyldig URL. Sett OPENAI_HOST til 
 msgid "Question too long (max %{max} characters)"
 msgstr "Spørsmålet er for langt (maks %{max} tegn)"
 
-#: lib/doctrans_web/error_messages.ex:319
+#: lib/doctrans_web/error_messages.ex:340
 #, elixir-autogen, elixir-format
 msgid "The model server's answer arrived in more than %{limit} pieces and was stopped before it was read. Check the configured model and endpoint, then try again."
 msgstr "Svaret fra modellserveren kom i mer enn %{limit} deler og ble stoppet før det ble lest. Kontroller den konfigurerte modellen og endepunktet, og prøv igjen."
+
+#: lib/doctrans_web/error_messages.ex:264
+#, elixir-autogen, elixir-format
+msgid "Extraction stopped unexpectedly before it could finish. Finished pages were kept; reprocess the document to continue."
+msgstr "Uttrekkingen stoppet uventet før den kunne fullføres. Ferdige sider ble beholdt; behandle dokumentet på nytt for å fortsette."
+
+#: lib/doctrans_web/error_messages.ex:271
+#, elixir-autogen, elixir-format
+msgid "Extraction was interrupted on each of its %{attempts} attempts. Finished pages were kept; reprocess the document to continue."
+msgstr "Uttrekkingen ble avbrutt i hvert av sine %{attempts} forsøk. Ferdige sider ble beholdt; behandle dokumentet på nytt for å fortsette."

@@ -59,6 +59,16 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
       assert ErrorClassifier.classify(:invalid_page_size) == :permanent
     end
 
+    test "classifies the document's exhausted render budget as retryable" do
+      # Unlike a command that hung, the pages that did render are kept and the
+      # next attempt resumes from them, so another attempt makes progress.
+      assert ErrorClassifier.classify(:pdf_extraction_deadline_exceeded) == :retryable
+
+      assert ErrorClassifier.classify(
+               {:pdf_extraction_failed, [reason: :pdf_extraction_deadline_exceeded]}
+             ) == :retryable
+    end
+
     test "classifies a wrapped reason by the reason it carries" do
       assert ErrorClassifier.classify(
                {:pdf_extraction_failed, [reason: {:pdf_too_many_pages, [pages: 9, limit: 1]}]}

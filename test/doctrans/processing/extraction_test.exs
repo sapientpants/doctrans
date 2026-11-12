@@ -13,7 +13,8 @@ defmodule Doctrans.Processing.ExtractionTest do
   alias Doctrans.Documents
   alias Doctrans.Documents.{Layout, Lifecycle, PageLifecycle, Source, Topics}
   alias Doctrans.Jobs.LlmProcessingJob
-  alias Doctrans.Processing.{Extraction, PageWork, ResumablePdfExtractorStub, Run}
+  alias Doctrans.Processing.{Extraction, PageWork, PdfExtractorMock, PdfExtractorStub}
+  alias Doctrans.Processing.{ResumablePdfExtractorStub, Run}
 
   import Doctrans.Fixtures
 
@@ -54,6 +55,25 @@ defmodule Doctrans.Processing.ExtractionTest do
         assert Lifecycle.settle_unguarded(document.id) == :completed
         assert Documents.get_document!(document.id).status == "completed"
         assert_received {:document_updated, %{status: "completed"}}
+      end)
+    end
+
+    test "clamps every page render to the deadline the caller armed" do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        document = queued_document()
+        owner = self()
+
+        Mox.stub(PdfExtractorMock, :extract_page, fn pdf_path, output_dir, page_number, opts ->
+          send(owner, {:deadline, page_number, Keyword.fetch!(opts, :deadline)})
+          PdfExtractorStub.extract_page(pdf_path, output_dir, page_number, opts)
+        end)
+
+        deadline = System.monotonic_time(:millisecond) + :timer.minutes(10)
+        assert :ok = Extraction.run(document, deadline: deadline)
+
+        for page_number <- 1..3 do
+          assert_received {:deadline, ^page_number, ^deadline}
+        end
       end)
     end
 

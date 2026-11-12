@@ -209,6 +209,24 @@ defmodule DoctransWeb.ErrorMessagesTest do
       assert_specific_messages_everywhere(reasons)
     end
 
+    test "an extraction run that ended without a verdict has specific messages in every locale" do
+      assert_specific_messages_everywhere([
+        {:extraction_job_crashed, [error: "Doctrans.Jobs.DocumentExtractionJob timed out"]},
+        {:extraction_attempts_exhausted, [attempts: 3, error: "** (RuntimeError) boom"]},
+        {:extraction_attempts_exhausted, [attempts: 3]}
+      ])
+    end
+
+    test "the raw error of a crashed extraction run stays on the row, not in the copy" do
+      Gettext.with_locale(DoctransWeb.Gettext, "en", fn ->
+        refute ErrorMessages.message({:extraction_job_crashed, [error: ":killed"]}) =~ "killed"
+
+        refute ErrorMessages.message(
+                 {:extraction_attempts_exhausted, [attempts: 3, error: "private details"]}
+               ) =~ "private"
+      end)
+    end
+
     test "inference bounds have specific messages with resolved bindings in every locale" do
       assert_specific_messages_everywhere([
         :inference_deadline_exceeded,

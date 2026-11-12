@@ -69,11 +69,14 @@ config :doctrans, :uploads, max_file_size: 100_000_000
 # - timeout: milliseconds one `pdftoppm` render may take before its process
 #   group is killed
 # - info_timeout: the same deadline for the much cheaper `pdfinfo` call
-# - job_timeout: milliseconds the whole extraction job may take. It is also the
-#   budget the extractor clamps each page render against, so per-page deadlines
-#   cannot add up past it. Pages already rendered are kept, so a retry resumes
-#   rather than restarting. `RunCleanupJob` shares this single-slot queue, so
-#   this is also how long cleanup can be kept waiting.
+# - job_timeout: milliseconds the whole extraction may take, counted from the
+#   moment the job begins. It is the budget the extractor clamps each page
+#   render against, so per-page deadlines cannot add up past it, and a document
+#   that runs out fails cleanly. Pages already rendered are kept, so a retry
+#   resumes rather than restarting. Oban's own timeout on the job is wider than
+#   this by the conversion and page-count ceilings plus a margin, so that this
+#   budget is the deadline that fires. `RunCleanupJob` shares this single-slot
+#   queue, so this is also how long cleanup can be kept waiting.
 # - max_pages: documents above this are rejected before any page is rendered
 # - max_page_pixels: a page whose geometry would rasterize to more pixels than
 #   this at the configured :dpi is rejected before it is rendered. A maximal PDF

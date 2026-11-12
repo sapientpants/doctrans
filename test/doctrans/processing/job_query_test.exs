@@ -87,6 +87,20 @@ defmodule Doctrans.Processing.JobQueryTest do
       assert ids(owned) == [cancelled.id]
     end
 
+    test "finds the document's latest job of a worker in any state", ctx do
+      args = %{"document_id" => ctx.document.id}
+      _older = stage(DocumentExtractionJob, args, "discarded")
+      latest = stage(DocumentExtractionJob, args, "cancelled")
+      _cleanup = stage(RunCleanupJob, args, "available")
+      _other = stage(DocumentExtractionJob, %{"document_id" => ctx.other.id}, "available")
+
+      query = JobQuery.latest_document_job_query(ctx.document.id, DocumentExtractionJob)
+      assert ids(query) == [latest.id]
+
+      assert JobQuery.latest_document_job_query(Uniq.UUID.uuid7(), DocumentExtractionJob)
+             |> Repo.one() == nil
+    end
+
     test "correlates with an enclosing query through a dynamic selector", ctx do
       stage(DocumentExtractionJob, %{"document_id" => ctx.other.id})
 
