@@ -22,6 +22,7 @@ defmodule Doctrans.Search.Indexer do
 
   import Ecto.Query
 
+  alias Doctrans.Config.Embedding
   alias Doctrans.Deps
   alias Doctrans.Documents.{Chunk, Page, PageLifecycle, Revision}
   alias Doctrans.Errors
@@ -32,6 +33,18 @@ defmodule Doctrans.Search.Indexer do
   @typedoc "What the caller should do next: nothing, retry, or stop retrying."
   @type outcome :: :ok | {:error, Errors.reason()} | {:cancel, Errors.reason()}
 
+  @typedoc "A monotonic instant, in milliseconds, by which the page's indexing must be done."
+  @type deadline :: integer()
+
+  @doc """
+  The instant a page's indexing budget runs out if it starts now.
+
+  `Doctrans.Config.Embedding.job_timeout/0` from the current monotonic clock,
+  in the form `index_page/3` takes as `:deadline`.
+  """
+  @spec budget_from_now() :: deadline()
+  def budget_from_now, do: System.monotonic_time(:millisecond) + Embedding.job_timeout()
+
   @doc """
   Indexes the page at `revision`: chunks its source text and embeds each chunk.
 
@@ -39,20 +52,29 @@ defmodule Doctrans.Search.Indexer do
   Returns `{:cancel, reason}` when the request no longer applies — the page is
   gone, its extraction is not complete, or a newer revision has superseded the
   requested one.
+
+  ## Options
+
+  - `:deadline` - the monotonic instant (milliseconds) by which the whole page
+    must be indexed; see `budget_from_now/0`. Every embedding call is clamped
+    against it, and once it has passed the next call is not made: the page is
+    failed with `:inference_deadline_exceeded`, a retryable reason, with the
+    chunks already embedded kept for the retry. Without it, each call runs to
+    its own deadline and the page as a whole has no bound.
   """
-  @spec index_page(Ecto.UUID.t(), integer() | nil) :: outcome()
-  def index_page(page_id, revision \\ nil) do
+  @spec index_page(Ecto.UUID.t(), integer() | nil, deadline: deadline()) :: outcome()
+  def index_page(page_id, revision \\ nil, opts \\ []) do
     case Repo.get(Page, page_id) do
       nil ->
         Logger.debug("Indexing requested for deleted page #{page_id}; skipping")
         {:cancel, :page_not_found}
 
       page ->
-        index_current(page, revision)
+        index_current(page, revision, Keyword.get(opts, :deadline))
     end
   end
 
-  defp index_current(page, revision) do
+  defp index_current(page, revision, deadline) do
     cond do
       not is_nil(revision) and not Revision.current?(page, revision: revision) ->
         Logger.debug("Page #{page.id} moved past revision #{revision}; skipping")
@@ -63,14 +85,14 @@ defmodule Doctrans.Search.Indexer do
         {:cancel, :extraction_incomplete}
 
       true ->
-        start_page_embedding(page)
+        start_page_embedding(page, deadline)
     end
   end
 
-  defp start_page_embedding(page) do
+  defp start_page_embedding(page, deadline) do
     case PageLifecycle.begin(page, :embedding) do
       {:error, :obsolete_run} -> stale(page)
-      {:ok, page} -> embed_page_chunks(page)
+      {:ok, page} -> embed_page_chunks(page, deadline)
     end
   end
 
@@ -83,8 +105,8 @@ defmodule Doctrans.Search.Indexer do
   # so it re-enqueues that page on every boot thereafter. Recording the failure
   # keeps the status truthful; re-raising leaves Oban's retry schedule to decide
   # whether the raise was transient.
-  defp embed_page_chunks(page) do
-    chunk_and_embed(page)
+  defp embed_page_chunks(page, deadline) do
+    chunk_and_embed(page, deadline)
   rescue
     error ->
       Logger.error(
@@ -96,14 +118,14 @@ defmodule Doctrans.Search.Indexer do
       reraise error, __STACKTRACE__
   end
 
-  defp chunk_and_embed(page) do
+  defp chunk_and_embed(page, deadline) do
     case Revision.with_page(page, &ensure_chunks/1) do
       {:error, :obsolete_run} ->
         stale(page)
 
       {[], _chunk_data} ->
         Logger.info("No chunks to embed for page #{page.id} (empty content)")
-        finish_page_embedding([], page, 0, 0)
+        finish_page_embedding([], page, 0, 0, deadline)
 
       {chunks, chunk_data} ->
         # Chunks already carrying a vector are left alone, so a retry costs only
@@ -112,9 +134,14 @@ defmodule Doctrans.Search.Indexer do
 
         pending
         |> Enum.map(fn chunk ->
-          embed_chunk(chunk, Chunker.content_for_embedding(chunk_data, chunk.chunk_index), page)
+          embed_chunk(
+            chunk,
+            Chunker.content_for_embedding(chunk_data, chunk.chunk_index),
+            page,
+            deadline
+          )
         end)
-        |> finish_page_embedding(page, length(pending), length(chunks))
+        |> finish_page_embedding(page, length(pending), length(chunks), deadline)
     end
   end
 
@@ -124,13 +151,13 @@ defmodule Doctrans.Search.Indexer do
     {:cancel, :stale_page}
   end
 
-  defp finish_page_embedding(results, page, attempted, total) do
+  defp finish_page_embedding(results, page, attempted, total, deadline) do
     case Enum.flat_map(results, fn
            {:error, reason} -> [reason]
            _ok -> []
          end) do
       [] ->
-        finish_page_level_embedding(page, attempted, total)
+        finish_page_level_embedding(page, attempted, total, deadline)
 
       reasons ->
         Logger.error(
@@ -147,8 +174,8 @@ defmodule Doctrans.Search.Indexer do
   # detail to log past: a page marked "completed" without one would be silently
   # absent from search and would never be picked up again by startup recovery,
   # which keys on the status. Reporting the failure keeps the page recoverable.
-  defp finish_page_level_embedding(page, attempted, total) do
-    case embed(page.original_markdown) do
+  defp finish_page_level_embedding(page, attempted, total, deadline) do
+    case embed(page.original_markdown, deadline) do
       {:ok, embedding} ->
         mark_page_indexed(page, embedding, attempted, total)
 
@@ -245,7 +272,7 @@ defmodule Doctrans.Search.Indexer do
     create_chunks(page_id, chunk_data)
   end
 
-  defp embed_chunk(chunk, embed_content, page) do
+  defp embed_chunk(chunk, embed_content, page, deadline) do
     case fenced_update(Chunk.embedding_changeset(chunk, %{embedding_status: "processing"}), page) do
       {:error, :obsolete_run} ->
         # Either the page moved to a new revision or this chunk row is gone.
@@ -256,12 +283,12 @@ defmodule Doctrans.Search.Indexer do
         {:ok, chunk.id}
 
       {:ok, chunk} ->
-        embed_current_chunk(chunk, embed_content, page)
+        embed_current_chunk(chunk, embed_content, page, deadline)
     end
   end
 
-  defp embed_current_chunk(chunk, embed_content, page) do
-    case embed(embed_content) do
+  defp embed_current_chunk(chunk, embed_content, page, deadline) do
+    case embed(embed_content, deadline) do
       {:ok, embedding} ->
         _ =
           fenced_update(
@@ -281,7 +308,23 @@ defmodule Doctrans.Search.Indexer do
     end
   end
 
-  defp embed(content), do: Deps.embedding().generate(content, [])
+  # Each call gets the smaller of its own deadline and what is left of the
+  # page's budget, so the budget is the bound that fires however many chunks
+  # the page has. A budget already spent is reported before the call is made:
+  # the reason is the one the client itself would give, classified retryable,
+  # so the chunks done so far are kept and the retry resumes from them.
+  defp embed(content, deadline) when deadline == nil or content in [nil, ""],
+    do: Deps.embedding().generate(content, [])
+
+  defp embed(content, deadline) do
+    case deadline - System.monotonic_time(:millisecond) do
+      remaining when remaining <= 0 ->
+        {:error, :inference_deadline_exceeded}
+
+      remaining ->
+        Deps.embedding().generate(content, deadline: min(Embedding.deadline(), remaining))
+    end
+  end
 
   # `Repo.update!` raises `Ecto.StaleEntryError` when the row it targets is gone
   # by the time the UPDATE runs. The fence holds the page, so in practice this

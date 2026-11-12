@@ -4,6 +4,7 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
 
   import Doctrans.Fixtures
 
+  alias Doctrans.Config.Embedding
   alias Doctrans.Documents.{Chunk, Page, PageLifecycle}
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Search.EmbeddingMocks
@@ -73,7 +74,37 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
     end
   end
 
+  describe "timeout/1" do
+    test "is an outer guard strictly wider than the indexing budget" do
+      # Oban arms its timer before `perform/1` and kills the job process when it
+      # fires, with no verdict written for the page. The budget is what fails
+      # the page cleanly, so the guard has to outlast it.
+      timeout = EmbeddingJob.timeout(%Oban.Job{args: %{}})
+
+      assert is_integer(timeout)
+      assert timeout > Embedding.job_timeout()
+    end
+  end
+
   describe "perform/1" do
+    test "arms the indexing budget as it begins and hands it to every embedding call" do
+      EmbeddingMocks.observe()
+      page = extracted_page(multi_chunk_markdown())
+
+      assert :ok = perform_job(EmbeddingJob, EmbeddingJob.page_args(page))
+
+      calls = embedding_call_opts()
+      # Three chunks and the page-level vector, each under the one budget.
+      assert length(calls) == 4
+
+      for opts <- calls do
+        deadline = Keyword.fetch!(opts, :deadline)
+        assert deadline > 0
+        assert deadline <= Embedding.job_timeout()
+        assert deadline <= Embedding.deadline()
+      end
+    end
+
     test "indexes the page it was queued for" do
       page = extracted_page("A page worth indexing")
 
@@ -297,6 +328,18 @@ defmodule Doctrans.Jobs.EmbeddingJobTest do
 
   defp embedding_calls do
     Enum.reverse(collect_embedding_calls([]))
+  end
+
+  defp embedding_call_opts do
+    Enum.reverse(collect_embedding_call_opts([]))
+  end
+
+  defp collect_embedding_call_opts(acc) do
+    receive do
+      {:embedding_call, _text, opts} -> collect_embedding_call_opts([opts | acc])
+    after
+      0 -> acc
+    end
   end
 
   defp collect_embedding_calls(acc) do

@@ -2,12 +2,30 @@ defmodule Doctrans.Jobs.LlmProcessingJobTest do
   use Doctrans.DataCase, async: true
   use Oban.Testing, repo: Doctrans.Repo
 
+  alias Doctrans.Config.OpenAI
   alias Doctrans.Documents
   alias Doctrans.Jobs.LlmProcessingJob
   alias Doctrans.Processing.{OpenAICrashStub, OpenAIMock, StartupRecovery}
   alias Oban.Engines.Basic
 
   import Doctrans.Fixtures
+
+  describe "timeout/1" do
+    test "allows every model call its deadline and receive window, and no more than that" do
+      # An attempt makes at most three calls -- extraction, language detection,
+      # translation -- each bounded at the deadline and returning at the latest
+      # one receive window after it. Oban kills the job when this fires, which
+      # no stage record survives, so the guard has to outlast all three; and it
+      # follows the configured bounds, so raising a deadline cannot leave it
+      # below the calls it covers.
+      timeout = LlmProcessingJob.timeout(%Oban.Job{args: %{}})
+      per_call = OpenAI.deadline() + OpenAI.timeout()
+
+      assert is_integer(timeout)
+      assert timeout > 3 * per_call
+      assert timeout < 4 * per_call
+    end
+  end
 
   describe "perform/1" do
     test "handles non-existent page" do

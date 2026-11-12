@@ -32,4 +32,17 @@ defmodule Doctrans.Config.Embedding do
   @spec max_response_bytes() :: pos_integer()
   def max_response_bytes,
     do: Config.get(:embedding, :max_response_bytes) || OpenAI.max_response_bytes()
+
+  @doc """
+  Milliseconds one page's indexing may take, every chunk included; defaults to
+  thirty minutes.
+
+  A page's chunks are embedded one at a time and each call may run to
+  `deadline/0`, so without this a page of many chunks against a slow endpoint
+  has no bound of its own. `Doctrans.Search.Indexer` clamps every call against
+  it and fails the page cleanly when it runs out; chunks already embedded are
+  kept, so the retry resumes rather than restarts.
+  """
+  @spec job_timeout() :: pos_integer()
+  def job_timeout, do: Config.get(:embedding, :job_timeout) || 1_800_000
 end

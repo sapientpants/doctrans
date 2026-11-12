@@ -35,6 +35,16 @@ defmodule Doctrans.Search.Embedding do
   Returns `{:ok, embedding}` on success or `{:error, reason}` on failure.
   Returns `{:ok, nil}` for nil or empty text.
 
+  ## Options
+
+  - `:model` - the embedding model (default: `Doctrans.Config.Embedding.model/0`)
+  - `:timeout` - milliseconds one receive may take (default:
+    `Doctrans.Config.Embedding.timeout/0`)
+  - `:deadline` - milliseconds the whole call may take, retries included
+    (default: `Doctrans.Config.Embedding.deadline/0`). A caller running under a
+    budget of its own -- the indexer, embedding a page chunk by chunk -- passes
+    what is left of it here, so one call cannot outlive the budget.
+
   The ask lives next to the melt, so every caller -- indexer, search, chat
   retrieval -- is held off a blown `:embedding_api` fuse without wrapping the
   call itself. The fuse is only asked here; `ApiFailure` classifies each
@@ -51,7 +61,6 @@ defmodule Doctrans.Search.Embedding do
 
   defp embed(text, opts) do
     model = Keyword.get(opts, :model) || Embedding.model()
-    timeout = Keyword.get(opts, :timeout) || Embedding.timeout()
     url = api_url("/v1/embeddings")
 
     # The base URL is operator-supplied and may carry credentials, and this line
@@ -61,7 +70,7 @@ defmodule Doctrans.Search.Embedding do
     )
 
     build_base_req()
-    |> RequestBounds.post(bounds(timeout),
+    |> RequestBounds.post(bounds(opts),
       url: url,
       json: %{model: model, input: text},
       # Embedding POSTs are idempotent; replay them on transient failures
@@ -91,10 +100,10 @@ defmodule Doctrans.Search.Embedding do
   # Embeddings read the `:embedding` section, so a search box can be bounded on
   # its own. Only `:timeout` differs by default -- a minute against five, spending
   # the same total budget in shorter attempts until a deadline is set there.
-  defp bounds(timeout) do
+  defp bounds(opts) do
     RequestBounds.new(
-      timeout: timeout,
-      deadline: Embedding.deadline(),
+      timeout: Keyword.get(opts, :timeout) || Embedding.timeout(),
+      deadline: Keyword.get(opts, :deadline) || Embedding.deadline(),
       max_response_bytes: Embedding.max_response_bytes()
     )
   end

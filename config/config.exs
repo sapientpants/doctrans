@@ -145,6 +145,15 @@ config :doctrans, DoctransWeb.Gettext,
 # :max_response_bytes keys in this section. Unset, `Doctrans.Config.Embedding`
 # applies its own shorter per-receive timeout and falls back to the :openai
 # deadline and response bound.
+#
+# A page is indexed chunk by chunk, each chunk one call, so the page as a whole
+# is bounded separately:
+# - job_timeout: milliseconds one page's indexing may take, counted from the
+#   moment its job begins (default in `Doctrans.Config.Embedding`). The indexer
+#   clamps every call against it and fails the page cleanly when it runs out;
+#   chunks already embedded are kept, so a retry resumes rather than restarting.
+#   Oban's own timeout on the job is wider than this by a margin, so that this
+#   budget is the deadline that fires.
 config :doctrans, :embedding,
   base_url: nil,
   api_key: nil,
@@ -171,10 +180,20 @@ config :doctrans, Oban,
     # An orphaned `executing` job — one whose node was killed rather than shut
     # down — blocks both recovery and re-enqueue for the page it holds until it
     # is rescued, so the window should not be much longer than the work itself.
-    # A page's chunks are embedded one at a time against a 60s-per-call timeout
-    # and a dense page yields a handful of chunks, so 15 minutes leaves a wide
-    # margin over a realistic run while cutting the stall from an hour.
-    {Oban.Lifeline, rescue_after: {15, :minutes}}
+    # But the rescue is purely time-based: a job still running past the window
+    # is handed back to the queue as if it were an orphan, can no longer ack,
+    # and burns an attempt — or is discarded on its last — while its work goes
+    # on, and a second run of it may start alongside. So the window has to sit
+    # above the longest run a job may legitimately make, and every job states
+    # that bound as its Oban `timeout/1`, derived from the configured deadlines:
+    # - `DocumentExtractionJob`: the extraction budget (an hour) plus the
+    #   conversion and page-count ceilings and a margin, about 64 minutes
+    # - `LlmProcessingJob`: up to three model calls, each at the 10-minute
+    #   deadline plus a 5-minute receive window, plus a margin, 46 minutes
+    # - `EmbeddingJob`: the indexing budget (30 minutes) plus a margin
+    # `Doctrans.ObanLifelineTest` holds this window above all three with the
+    # shipped bounds; a deployment that raises one of them has to raise this.
+    {Oban.Lifeline, rescue_after: {70, :minutes}}
   ],
   queues: [
     pdf_extraction: 1,
