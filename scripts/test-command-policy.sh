@@ -98,6 +98,30 @@ block|docker volume rm doctrans_pgdata
 block|docker system prune
 block|cd sub && rm -rf .
 block|make build; rm -r dist
+# A separator glued to the next word is still a separator.
+block|true;git reset --hard
+block|cd sub;git clean -fd
+block|x=1;git rebase main
+block|true&&rm -rf build
+block|false||rm -rf build
+block|echo x|rm -rf build
+block|(rm -rf build)
+block|$(rm -rf build)
+block|`rm -rf build`
+block|{ rm -rf build; }
+block|git push -f;echo done
+# A path or a backslash on the command word does not rename it.
+block|/bin/rm -rf build
+block|/usr/bin/git push --force
+block|\rm -rf build
+block|\git reset --hard
+# A quoted payload handed to a shell is a command, not data.
+block|bash -c "rm -rf build"
+block|sh -c 'git push --force'
+block|zsh -lc "cd x;rm -rf y"
+block|/bin/bash -c "git reset --hard"
+block|eval "git reset --hard"
+block|true && bash -c 'rm -rf build'
 allow|git status
 allow|git status --short
 allow|git add --all
@@ -122,6 +146,16 @@ allow|docker compose up -d db
 allow|docker compose down
 allow|rm stale.log
 allow|ls -la
+allow|rm /tmp/stale.log
+allow|ls /usr/local/bin
+allow|cat /etc/hosts | grep local
+allow|find . -name '*.log' -exec rm {} \;
+allow|echo "(rm -rf build)" >> notes.md
+allow|git commit -m "fix(x): bash -c 'rm -rf build' is refused"
+allow|bash -c "mix test"
+allow|bash -c 'echo "rm -rf build is refused"'
+allow|mix test 2>&1 | tail -5
+allow|git log --format=%s%n%b
 CASES
 
 echo

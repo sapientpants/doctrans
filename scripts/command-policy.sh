@@ -54,8 +54,12 @@ command=$(jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
 # rule will ever see, so a heredoc is only recognised where the shell would
 # recognise one, and a body that is never terminated is treated as command.
 #
-# `[^;&|]*` inside a rule keeps it from matching across a command separator, so
-# `git status && rm file` is not read as `git ... rm`.
+# Every rule matches ` word `, so the text is normalised until each token the
+# shell would see has a space on both sides: a separator glued to a word
+# (`true;git reset --hard`, `$(rm -rf build)`), a path on the command (`/bin/rm`)
+# and an alias-defeating backslash (`\rm`) are all boundaries to the shell and
+# were none to the rules. Separators are kept, so `[^;&|]*` inside a rule still
+# stops at one and `git status && rm file` is not read as `git ... rm`.
 # ---------------------------------------------------------------------------
 read -r -d '' POLICY <<'AWK' || true
 function deny(re, msg) {
@@ -102,6 +106,38 @@ function names_db_client(text) {
   return index(text, "psql") || index(text, "dropdb") || index(text, "mysql") || index(text, "docker exec")
 }
 
+# A quoted string is data to the command it is handed to -- except when that
+# command is a shell. `bash -c "rm -rf build"` and `eval "git reset --hard"` run
+# the string, so its quotes come off and the text stays in `cmd` for the rules
+# instead of being stripped with every other quoted string. A quote of the other
+# kind inside the payload is then stripped on its own, which keeps less than the
+# shell runs, but only ever in the safe direction: a rule misses nothing it would
+# have seen, and the worst outcome is a refusal.
+function unwrap_shell_payloads(    re, start, qc, len) {
+  re = "(^|[ \t;&|(`])(/[^ \t]*/)?((ba|z|da|k)?sh[ \t]+-[A-Za-z]*c|eval)[ \t]+" quotes
+  while (match(cmd, re)) {
+    start = RSTART + RLENGTH - 1                  # the opening quote
+    qc = substr(cmd, start, 1)
+    len = index(substr(cmd, start + 1), qc)       # distance to the closing quote
+    if (len == 0) return                          # never closed: the strip leaves it too
+    cmd = substr(cmd, 1, start - 1) substr(cmd, start + 1, len - 1) substr(cmd, start + len + 1)
+  }
+}
+
+# Gives every token a space on each side, which is what the rules match on. Runs
+# after the quoted strings are gone, so a `;` or `(` inside a commit message is
+# not read as a separator. Separators stay in the text, spaced, so `[^;&|]*` in
+# a rule still stops at them.
+function normalise_tokens() {
+  while (match(cmd, /\\[A-Za-z0-9_\/]/))            # `\rm` is `rm` to the shell
+    cmd = substr(cmd, 1, RSTART - 1) substr(cmd, RSTART + 1)
+  gsub(/[;&|(){}`]+/, " & ", cmd)                  # `;git` -> ` ; git`, `$(rm` -> `$ ( rm`
+  gsub(/[ \t]+/, " ", cmd)
+  cmd = " " cmd " "
+  while (match(cmd, / \/[^ ]*\/[A-Za-z]/))          # ` /bin/rm` -> ` rm`
+    cmd = substr(cmd, 1, RSTART) substr(cmd, RSTART + RLENGTH - 1)
+}
+
 BEGIN {
   q  = sprintf("%c", 39)   # '
   dq = sprintf("%c", 34)   # "
@@ -135,10 +171,10 @@ END {
     cmd = cmd body
     if (!body_runs_sql) raw = raw body
   }
+  unwrap_shell_payloads()
   gsub(q "[^" q "]*" q, "", cmd)      # single-quoted strings
   gsub(dq "[^" dq "]*" dq, "", cmd)   # double-quoted strings
-  gsub(/[ \t]+/, " ", cmd)
-  cmd = " " cmd " "                   # pad so every token has a space on each side
+  normalise_tokens()
   rawlc = tolower(raw)
 
   # --- Verification bypass ------------------------------------------------
