@@ -14,7 +14,7 @@ defmodule Doctrans.Fixtures do
 
   alias Doctrans.Chat.RetrievedContext
   alias Doctrans.Documents
-  alias Doctrans.Documents.{Document, Layout, Lifecycle, PageLifecycle, Source}
+  alias Doctrans.Documents.{Chunk, Document, Layout, Lifecycle, PageLifecycle, Source}
   alias Doctrans.Processing.{OpenAIMock, PageContentStub, Run}
   alias Doctrans.Repo
   alias Doctrans.Search.Embedding
@@ -274,6 +274,38 @@ defmodule Doctrans.Fixtures do
         embedding: fake_embedding()
       })
     )
+  end
+
+  @doc """
+  One page whose extraction completed with `text`, in a document of its own:
+  what the indexer is handed. Returns the page.
+
+  The page is "pending" for embedding, and so a fresh unit of indexing work
+  for `Doctrans.Search.Indexer.index_page/3` and `Doctrans.Jobs.EmbeddingJob`.
+  """
+  def extracted_page_fixture(text) do
+    document = document_fixture()
+    page_fixture(document, %{extraction_status: "completed", original_markdown: text})
+  end
+
+  @doc """
+  Page text that chunks into one chunk per marker, each chunk carrying exactly
+  its own marker.
+
+  Three paragraphs of 200 words by default: the 50-word overlap between
+  neighbours is filler, so a marker is a precise handle on one chunk's
+  embedding call -- and all the markers together a handle on the page-level
+  call, the only one that sees the whole text.
+  """
+  def multi_chunk_markdown(markers \\ ~w(ALPHA BETA GAMMA)) do
+    Enum.map_join(markers, "\n\n", fn marker ->
+      marker <> " " <> Enum.map_join(1..200, " ", &"word#{&1}")
+    end)
+  end
+
+  @doc "The page's chunk rows as stored, in chunk order."
+  def page_chunks(page) do
+    page.id |> Chunk.for_page() |> Repo.all() |> Enum.sort_by(& &1.chunk_index)
   end
 
   @doc """

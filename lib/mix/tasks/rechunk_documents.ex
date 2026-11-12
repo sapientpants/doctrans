@@ -51,7 +51,7 @@ defmodule Mix.Tasks.RechunkDocuments do
   # executing the very jobs the loop below queues, then halt without grace the
   # moment `run/1` returns: a job caught mid-run is left `executing` — its page
   # stuck at "processing", its revision blocked from re-enqueue — until
-  # `Oban.Lifeline` rescues it a quarter of an hour later. Startup recovery is
+  # `Oban.Lifeline` rescues it over an hour later. Startup recovery is
   # also a boot-time enqueue, and a job it queues for a not-yet-indexed page would
   # make the rebuild of that page skip as owned. Both are the running server's to
   # do; this process only enqueues.

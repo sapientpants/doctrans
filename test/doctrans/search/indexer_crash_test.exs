@@ -20,17 +20,12 @@ defmodule Doctrans.Search.IndexerCrashTest do
       raise ArgumentError, "embedding blew up"
     end)
 
-    page = extracted_page("A page whose embedding call raises partway through")
+    page = extracted_page_fixture("A page whose embedding call raises partway through")
 
     assert_raise ArgumentError, fn -> Indexer.index_page(page.id) end
 
     # Re-raised, so Oban keeps the retry decision -- but the status may not be
     # left claiming the page is still being worked on.
     assert Repo.get!(Page, page.id).embedding_status == "error"
-  end
-
-  defp extracted_page(text) do
-    document = document_fixture()
-    page_fixture(document, %{extraction_status: "completed", original_markdown: text})
   end
 end

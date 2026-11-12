@@ -33,6 +33,24 @@ defmodule Doctrans.Search.EmbeddingMocks do
   end
 
   @doc """
+  The calls `observe/0` (or `fail_matching/2` with `observe: true`) has reported
+  to this process so far, oldest first, each as `{text, opts}`.
+
+  Drains the reports from the mailbox, so a test that observes two phases --
+  a failed attempt, then the retry -- reads each phase's calls on their own.
+  """
+  @spec calls() :: [{String.t() | nil, keyword()}]
+  def calls, do: collect_calls([])
+
+  defp collect_calls(acc) do
+    receive do
+      {:embedding_call, text, opts} -> collect_calls([{text, opts} | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  @doc """
   Restores the default success, for a test that fails embeddings and then recovers.
   """
   def succeed do

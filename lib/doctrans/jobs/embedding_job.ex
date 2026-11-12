@@ -26,13 +26,30 @@ defmodule Doctrans.Jobs.EmbeddingJob do
       states: [:available, :scheduled, :executing, :retryable, :suspended]
     ]
 
+  alias Doctrans.Config.Embedding
   alias Doctrans.Documents.Page
   alias Doctrans.Errors
-  alias Doctrans.Jobs.{Keys, RetryTelemetry}
+  alias Doctrans.Jobs.{Ceiling, Keys, RetryTelemetry}
   alias Doctrans.Search.Indexer
 
   @page_id_key Keys.page_id()
   @revision_key Keys.revision()
+
+  @doc """
+  Oban's ceiling on one attempt: the page's indexing budget, the receive
+  window the last call may outlive it by, and `Doctrans.Jobs.Ceiling`'s margin.
+
+  The ceiling is an outer guard, not the budget. The budget is
+  `Embedding.job_timeout/0`: `perform/1` arms it as it begins and `Indexer`
+  clamps every embedding call's deadline against it, so a page that runs out
+  fails cleanly with its finished chunks preserved, and the retry resumes
+  rather than restarts. `Doctrans.Processing.RequestBounds` lets a call
+  return one receive window after its deadline, and that window is at most
+  `Embedding.timeout/0`, so the last call may end that long past the budget;
+  the guard allows for it, so that the budget is the deadline that fires.
+  """
+  @impl true
+  def timeout(_job), do: Ceiling.above(Embedding.job_timeout() + Embedding.timeout())
 
   @doc """
   Builds the argument map `perform/1` destructures.
@@ -56,8 +73,12 @@ defmodule Doctrans.Jobs.EmbeddingJob do
 
   @impl true
   def perform(%Oban.Job{args: %{@page_id_key => page_id} = args} = job) do
+    # The budget starts here, before the page is read and chunked: counted from
+    # any later point it would outlast the guard above.
+    deadline = Indexer.budget_from_now()
+
     page_id
-    |> Indexer.index_page(Map.get(args, @revision_key))
+    |> Indexer.index_page(Map.get(args, @revision_key), deadline: deadline)
     |> report_retry(job, page_id)
   end
 

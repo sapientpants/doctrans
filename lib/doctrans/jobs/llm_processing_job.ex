@@ -27,10 +27,33 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
       states: [:available, :scheduled, :executing, :retryable, :suspended]
     ]
 
-  alias Doctrans.Jobs.{Keys, RetryTelemetry}
+  alias Doctrans.Config.OpenAI
+  alias Doctrans.Jobs.{Ceiling, Keys, RetryTelemetry}
   alias Doctrans.Processing.PageWork
 
   @page_id_key Keys.page_id()
+
+  # The most model calls one attempt makes: extraction, the source-language
+  # detection the first translated page of a document owes, and translation.
+  # No attempt sleeps or loops between them, so the attempt is bounded by the
+  # calls alone.
+  @model_calls 3
+
+  @doc """
+  Oban's ceiling on one attempt: every model call at its deadline and receive
+  window, plus `Doctrans.Jobs.Ceiling`'s margin.
+
+  Each call is bounded by `Doctrans.Processing.RequestBounds` at the
+  configured deadline, and returns at the latest one receive window after it
+  -- an endpoint that sends something and then goes silent is only noticed
+  when that window closes -- so the guard allows every call its deadline and
+  its window. Oban's kill is survived by no stage record
+  (`Doctrans.Processing.PageWork.Stages` records only what returns to it), so
+  the per-call deadlines have to be the bounds that fire.
+  """
+  @impl true
+  def timeout(_job),
+    do: Ceiling.above(@model_calls * (OpenAI.deadline() + OpenAI.timeout()))
 
   @impl true
   def perform(%Oban.Job{args: %{@page_id_key => page_id} = args} = job) do

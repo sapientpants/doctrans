@@ -17,7 +17,7 @@ defmodule Doctrans.Search.IndexerFenceTest do
   alias Doctrans.Search.{Chunker, EmbeddingMocks, Indexer}
 
   test "cancels when the revision moves between reading the page and claiming it" do
-    page = extracted_page("Superseded before the status write")
+    page = extracted_page_fixture("Superseded before the status write")
 
     # The read in `index_page/2` has returned; the first fenced write has not run.
     after_query(&(page_select?(&1) and not lock?(&1)), fn -> rewrite(page) end)
@@ -30,7 +30,7 @@ defmodule Doctrans.Search.IndexerFenceTest do
   end
 
   test "cancels when the revision moves between claiming the page and chunking it" do
-    page = extracted_page("Superseded before chunking")
+    page = extracted_page_fixture("Superseded before chunking")
 
     # The status write has committed; the fence around `ensure_chunks/1` has not run.
     after_query(&page_update?/1, fn -> rewrite(page) end)
@@ -39,11 +39,11 @@ defmodule Doctrans.Search.IndexerFenceTest do
 
     # Nothing was written for the revision that went away.
     assert Repo.get!(Page, page.id).embedding == nil
-    assert chunks_of(page) == []
+    assert page_chunks(page) == []
   end
 
   test "rebuilds chunks that no longer match the page's text" do
-    page = extracted_page("The text the chunks should match")
+    page = extracted_page_fixture("The text the chunks should match")
 
     # A chunk row left behind by an older chunking algorithm: same revision, so
     # the fence passes, but the stored content is not what the page now yields.
@@ -60,12 +60,12 @@ defmodule Doctrans.Search.IndexerFenceTest do
     assert :ok = Indexer.index_page(page.id)
 
     assert [%Chunk{content: "The text the chunks should match", embedding_status: "completed"}] =
-             chunks_of(page)
+             page_chunks(page)
   end
 
   test "treats a chunk deleted under a current page as nothing left to write" do
     text = "Chunk removed mid-embedding"
-    page = extracted_page(text)
+    page = extracted_page_fixture(text)
     barrier = EmbeddingMocks.hold(text)
 
     run =
@@ -89,12 +89,12 @@ defmodule Doctrans.Search.IndexerFenceTest do
     # The run reports success for the page it did index, and the deleted chunk
     # was not resurrected.
     assert Repo.get!(Page, page.id).embedding_status == "completed"
-    assert chunks_of(page) == []
+    assert page_chunks(page) == []
   end
 
   test "skips a chunk deleted before its own write without failing the page" do
     markdown = multi_chunk_markdown()
-    page = extracted_page(markdown)
+    page = extracted_page_fixture(markdown)
 
     # Hold the run on the first chunk; the others have not been written yet.
     first = markdown |> Chunker.chunk() |> Chunker.content_for_embedding(0)
@@ -120,23 +120,8 @@ defmodule Doctrans.Search.IndexerFenceTest do
     # The missing chunk is not counted as a failure: the page still completes,
     # and every chunk that survived carries a vector.
     assert Repo.get!(Page, page.id).embedding_status == "completed"
-    assert [%Chunk{chunk_index: 0}, %Chunk{chunk_index: 2}] = chunks_of(page)
-    assert Enum.all?(chunks_of(page), &(&1.embedding_status == "completed"))
-  end
-
-  defp multi_chunk_markdown do
-    Enum.map_join(~w(ALPHA BETA GAMMA), "\n\n", fn marker ->
-      marker <> " " <> Enum.map_join(1..200, " ", &"word#{&1}")
-    end)
-  end
-
-  defp extracted_page(text) do
-    document = document_fixture()
-    page_fixture(document, %{extraction_status: "completed", original_markdown: text})
-  end
-
-  defp chunks_of(page) do
-    Chunk |> where([c], c.page_id == ^page.id) |> order_by([c], c.chunk_index) |> Repo.all()
+    assert [%Chunk{chunk_index: 0}, %Chunk{chunk_index: 2}] = page_chunks(page)
+    assert Enum.all?(page_chunks(page), &(&1.embedding_status == "completed"))
   end
 
   # A bulk update advances `content_revision` through the database trigger, which

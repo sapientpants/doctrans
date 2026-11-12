@@ -13,18 +13,18 @@ defmodule Doctrans.Search.ReindexRebuildTest do
 
   import Doctrans.Fixtures
 
-  alias Doctrans.Documents.{Chunk, Page}
+  alias Doctrans.Documents.Page
   alias Doctrans.Jobs.EmbeddingJob
   alias Doctrans.Search.{Chunker, Indexer, Reindex}
 
   test "clears the page's index under the lock and queues its current revision" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       page = indexed_page()
-      assert [_ | _] = chunks_of(page)
+      assert [_ | _] = page_chunks(page)
 
       assert {:ok, :queued} = Reindex.rebuild_page(page.id)
 
-      assert chunks_of(page) == []
+      assert page_chunks(page) == []
       reloaded = Repo.get!(Page, page.id)
       assert reloaded.embedding == nil
       assert reloaded.embedding_status == "pending"
@@ -38,11 +38,11 @@ defmodule Doctrans.Search.ReindexRebuildTest do
 
   test "the queued run re-embeds every chunk, which indexing alone would have skipped" do
     page = indexed_page()
-    before = chunks_of(page)
+    before = page_chunks(page)
 
     # Indexing alone keeps the vectors it finds: the chunk rows survive as they are.
     assert :ok = Indexer.index_page(page.id)
-    assert Enum.map(chunks_of(page), & &1.id) == Enum.map(before, & &1.id)
+    assert Enum.map(page_chunks(page), & &1.id) == Enum.map(before, & &1.id)
 
     Oban.Testing.with_testing_mode(:manual, fn ->
       assert {:ok, :queued} = Reindex.rebuild_page(page.id)
@@ -50,7 +50,7 @@ defmodule Doctrans.Search.ReindexRebuildTest do
       assert :ok = perform_job(EmbeddingJob, job.args)
     end)
 
-    rebuilt = chunks_of(page)
+    rebuilt = page_chunks(page)
     refute Enum.any?(rebuilt, &(&1.id in Enum.map(before, fn c -> c.id end)))
 
     assert Enum.map(rebuilt, & &1.content) ==
@@ -66,12 +66,12 @@ defmodule Doctrans.Search.ReindexRebuildTest do
   test "leaves a page an active indexing job already owns exactly as it was" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       page = indexed_page()
-      before = chunks_of(page)
+      before = page_chunks(page)
       assert {:ok, _job} = EmbeddingJob.enqueue_page(page)
 
       assert {:skipped, :indexing_in_progress} = Reindex.rebuild_page(page.id)
 
-      assert chunks_of(page) == before
+      assert page_chunks(page) == before
       reloaded = Repo.get!(Page, page.id)
       assert reloaded.embedding_status == "completed"
       assert reloaded.embedding == page.embedding
@@ -110,10 +110,6 @@ defmodule Doctrans.Search.ReindexRebuildTest do
     page = completed_page_fixture(document_fixture())
     assert :ok = Indexer.index_page(page.id)
     Repo.get!(Page, page.id)
-  end
-
-  defp chunks_of(page) do
-    Chunk |> where([c], c.page_id == ^page.id) |> order_by([c], c.chunk_index) |> Repo.all()
   end
 
   defp page_ids_of(document) do

@@ -21,29 +21,30 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
 
   alias Doctrans.Config.{DocumentConversion, PdfExtraction}
   alias Doctrans.Documents
-  alias Doctrans.Jobs.Keys
+  alias Doctrans.Jobs.{Ceiling, Keys}
   alias Doctrans.Processing.{Extraction, Run}
   alias Doctrans.Resilience.ErrorClassifier
 
   @document_id_key Keys.document_id()
 
-  # Oban waits forever by default, so the job carries a ceiling -- but the
-  # ceiling is an outer guard, not the budget. The budget is
-  # `PdfExtraction.job_timeout/0`: `perform/1` arms it as it begins and
-  # `Extraction` clamps every page render against it, so a document that runs
-  # out fails cleanly with its finished pages preserved, and the retry resumes
-  # rather than restarts. Oban arms this timer before `perform/1` and kills the
-  # job process when it fires, which no `Lifecycle` transition survives; the
-  # guard is therefore strictly wider than the budget plus the two steps the
-  # budget does not clamp -- the LibreOffice conversion and the page count run
-  # to their own ceilings -- so that the budget is the deadline that fires.
-  # `Doctrans.Processing.ExtractionCrashHandler` covers the guard if it ever does.
-  @guard_margin :timer.minutes(1)
+  @doc """
+  Oban's ceiling on one attempt: the document's render budget, the two steps
+  the budget does not clamp, and `Doctrans.Jobs.Ceiling`'s margin.
 
+  The ceiling is an outer guard, not the budget. The budget is
+  `PdfExtraction.job_timeout/0`: `perform/1` arms it as it begins and
+  `Extraction` clamps every page render against it, so a document that runs
+  out fails cleanly with its finished pages preserved, and the retry resumes
+  rather than restarts. The LibreOffice conversion and the page count run to
+  their own ceilings instead, so the guard allows for both, so that the budget
+  is the deadline that fires. `Doctrans.Processing.ExtractionCrashHandler`
+  covers the guard if it ever does.
+  """
   @impl true
   def timeout(_job) do
-    PdfExtraction.job_timeout() + DocumentConversion.timeout() + PdfExtraction.info_timeout() +
-      @guard_margin
+    Ceiling.above(
+      PdfExtraction.job_timeout() + DocumentConversion.timeout() + PdfExtraction.info_timeout()
+    )
   end
 
   # A document row that is gone stays gone, so the job is cancelled rather than

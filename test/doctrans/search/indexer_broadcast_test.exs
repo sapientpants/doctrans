@@ -16,7 +16,7 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
   alias Doctrans.Search.{EmbeddingMocks, Indexer}
 
   test "a completed run announces the page it indexed" do
-    page = extracted_page("Indexed and announced")
+    page = extracted_page_fixture("Indexed and announced")
     :ok = Topics.subscribe_document(page.document_id)
 
     assert :ok = Indexer.index_page(page.id)
@@ -26,7 +26,7 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
   end
 
   test "a failed run announces the failure it recorded" do
-    page = extracted_page("Failed and announced")
+    page = extracted_page_fixture("Failed and announced")
     EmbeddingMocks.fail({:http_error, 400})
     :ok = Topics.subscribe_document(page.document_id)
 
@@ -37,7 +37,7 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
   end
 
   test "the run announces its start and its outcome, once each" do
-    page = extracted_page("Announced twice")
+    page = extracted_page_fixture("Announced twice")
     :ok = Topics.subscribe_document(page.document_id)
 
     assert :ok = Indexer.index_page(page.id)
@@ -50,7 +50,7 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
   end
 
   test "a superseded run announces nothing, having written nothing" do
-    page = extracted_page("Superseded before it finished")
+    page = extracted_page_fixture("Superseded before it finished")
     :ok = Topics.subscribe_document(page.document_id)
 
     # A re-extraction advances `content_revision` through the database trigger,
@@ -64,10 +64,5 @@ defmodule Doctrans.Search.IndexerBroadcastTest do
              Indexer.index_page(page.id, page.content_revision)
 
     refute_received {:page_updated, _page}
-  end
-
-  defp extracted_page(text) do
-    document = document_fixture()
-    page_fixture(document, %{extraction_status: "completed", original_markdown: text})
   end
 end
