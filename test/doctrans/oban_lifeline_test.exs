@@ -5,7 +5,7 @@ defmodule Doctrans.ObanLifelineTest do
   The rescue is purely time-based: a job still `executing` past the window is
   handed back to the queue as if its node had died, can no longer ack, and
   burns an attempt -- or is discarded on its last -- while its work goes on,
-  with a second run possibly starting alongside (#272). Every job states its
+  with a second execution possibly starting alongside (#272). Every job states its
   own ceiling as `timeout/1`, derived from the configured deadlines, so the
   window is correct exactly when it sits above all of them.
 
@@ -51,7 +51,7 @@ defmodule Doctrans.ObanLifelineTest do
 
       assert rescue_after > ceiling,
              "#{inspect(worker)} may run for #{ceiling} ms, past the #{rescue_after} ms rescue " <>
-               "window, so a healthy run could be rescued as an orphan"
+               "window, so a healthy execution could be rescued as an orphan"
     end
   end
 

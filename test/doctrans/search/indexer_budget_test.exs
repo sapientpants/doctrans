@@ -12,10 +12,8 @@ defmodule Doctrans.Search.IndexerBudgetTest do
   import Doctrans.Fixtures
 
   alias Doctrans.Config.Embedding
-  alias Doctrans.Documents.{Chunk, Page}
+  alias Doctrans.Documents.Page
   alias Doctrans.Search.{EmbeddingMocks, Indexer}
-
-  @markers ~w(ALPHA BETA GAMMA)
 
   test "budget_from_now/0 is the configured budget counted from now" do
     before = System.monotonic_time(:millisecond)
@@ -28,7 +26,7 @@ defmodule Doctrans.Search.IndexerBudgetTest do
 
   test "every call is clamped to the smaller of its own deadline and the budget left" do
     EmbeddingMocks.observe()
-    page = extracted_page(multi_chunk_markdown())
+    page = extracted_page_fixture(multi_chunk_markdown())
     budget = 1_000
 
     assert :ok =
@@ -36,7 +34,7 @@ defmodule Doctrans.Search.IndexerBudgetTest do
                deadline: System.monotonic_time(:millisecond) + budget
              )
 
-    calls = embedding_calls()
+    calls = EmbeddingMocks.calls()
     # Three chunks and the page-level vector.
     assert length(calls) == 4
 
@@ -48,34 +46,45 @@ defmodule Doctrans.Search.IndexerBudgetTest do
     end
   end
 
-  test "without a budget each call runs to its own deadline" do
+  test "a call without a budget starts one now, as the job would" do
     EmbeddingMocks.observe()
-    page = extracted_page("Unbudgeted text")
+    page = extracted_page_fixture("Unbudgeted text")
 
     assert :ok = Indexer.index_page(page.id)
 
-    for {_text, opts} <- embedding_calls(), do: refute(Keyword.has_key?(opts, :deadline))
+    # No caller indexes a page unbounded: a test, a rebuild, or a job are all
+    # held to the configured budget.
+    for {_text, opts} <- EmbeddingMocks.calls() do
+      deadline = Keyword.fetch!(opts, :deadline)
+      assert deadline > 0
+      assert deadline <= Embedding.job_timeout()
+    end
   end
 
-  test "a spent budget fails the page cleanly before the next call, and the retry resumes" do
+  test "a spent budget fails the page cleanly before the next call" do
     EmbeddingMocks.observe()
-    page = extracted_page(multi_chunk_markdown())
+    page = extracted_page_fixture(multi_chunk_markdown())
 
-    assert {:error, :inference_deadline_exceeded} =
-             Indexer.index_page(page.id, nil, deadline: System.monotonic_time(:millisecond) - 1)
+    assert {:error, :inference_deadline_exceeded} = index_under_spent_budget(page)
 
     # Nothing was asked of the endpoint, and the page reads as failed rather
     # than stuck "processing": the reason is retryable, so Oban's schedule
     # decides when to come back.
-    assert embedding_calls() == []
+    assert EmbeddingMocks.calls() == []
     failed = Repo.get!(Page, page.id)
     assert failed.embedding_status == "error"
     assert failed.embedding == nil
+  end
 
-    # The retry, under a fresh budget, picks the page up and completes it.
+  test "the retry under a fresh budget resumes a page the budget failed" do
+    EmbeddingMocks.observe()
+    page = extracted_page_fixture(multi_chunk_markdown())
+    assert {:error, :inference_deadline_exceeded} = index_under_spent_budget(page)
+
     assert :ok = Indexer.index_page(page.id, nil, deadline: Indexer.budget_from_now())
+
     assert Repo.get!(Page, page.id).embedding_status == "completed"
-    assert Enum.all?(chunks_of(page), &(&1.embedding_status == "completed"))
+    assert Enum.all?(page_chunks(page), &(&1.embedding_status == "completed"))
   end
 
   test "a page with nothing to embed completes under a spent budget" do
@@ -83,35 +92,11 @@ defmodule Doctrans.Search.IndexerBudgetTest do
     document = document_fixture()
     page = page_fixture(document, %{extraction_status: "completed", original_markdown: ""})
 
-    assert :ok =
-             Indexer.index_page(page.id, nil, deadline: System.monotonic_time(:millisecond) - 1)
+    assert :ok = index_under_spent_budget(page)
 
     assert Repo.get!(Page, page.id).embedding_status == "completed"
   end
 
-  defp extracted_page(text) do
-    document = document_fixture()
-    page_fixture(document, %{extraction_status: "completed", original_markdown: text})
-  end
-
-  # Three paragraphs of 200 words chunk into three chunks.
-  defp multi_chunk_markdown do
-    Enum.map_join(@markers, "\n\n", fn marker ->
-      marker <> " " <> Enum.map_join(1..200, " ", &"word#{&1}")
-    end)
-  end
-
-  defp chunks_of(page) do
-    Chunk |> where([c], c.page_id == ^page.id) |> order_by([c], c.chunk_index) |> Repo.all()
-  end
-
-  defp embedding_calls, do: Enum.reverse(collect_embedding_calls([]))
-
-  defp collect_embedding_calls(acc) do
-    receive do
-      {:embedding_call, text, opts} -> collect_embedding_calls([{text, opts} | acc])
-    after
-      0 -> acc
-    end
-  end
+  defp index_under_spent_budget(page),
+    do: Indexer.index_page(page.id, nil, deadline: System.monotonic_time(:millisecond) - 1)
 end

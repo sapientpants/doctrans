@@ -40,7 +40,8 @@ defmodule Doctrans.Search.Indexer do
   The instant a page's indexing budget runs out if it starts now.
 
   `Doctrans.Config.Embedding.job_timeout/0` from the current monotonic clock,
-  in the form `index_page/3` takes as `:deadline`.
+  in the form `index_page/3` takes as `:deadline`: for a caller that arms the
+  budget before the page is read, as `Doctrans.Jobs.EmbeddingJob` does.
   """
   @spec budget_from_now() :: deadline()
   def budget_from_now, do: System.monotonic_time(:millisecond) + Embedding.job_timeout()
@@ -59,18 +60,20 @@ defmodule Doctrans.Search.Indexer do
     must be indexed; see `budget_from_now/0`. Every embedding call is clamped
     against it, and once it has passed the next call is not made: the page is
     failed with `:inference_deadline_exceeded`, a retryable reason, with the
-    chunks already embedded kept for the retry. Without it, each call runs to
-    its own deadline and the page as a whole has no bound.
+    chunks already embedded kept for the retry. A call without one starts the
+    budget now, so no page is ever indexed unbounded.
   """
   @spec index_page(Ecto.UUID.t(), integer() | nil, deadline: deadline()) :: outcome()
   def index_page(page_id, revision \\ nil, opts \\ []) do
+    deadline = Keyword.get_lazy(opts, :deadline, &budget_from_now/0)
+
     case Repo.get(Page, page_id) do
       nil ->
         Logger.debug("Indexing requested for deleted page #{page_id}; skipping")
         {:cancel, :page_not_found}
 
       page ->
-        index_current(page, revision, Keyword.get(opts, :deadline))
+        index_current(page, revision, deadline)
     end
   end
 
@@ -312,8 +315,9 @@ defmodule Doctrans.Search.Indexer do
   # page's budget, so the budget is the bound that fires however many chunks
   # the page has. A budget already spent is reported before the call is made:
   # the reason is the one the client itself would give, classified retryable,
-  # so the chunks done so far are kept and the retry resumes from them.
-  defp embed(content, deadline) when deadline == nil or content in [nil, ""],
+  # so the chunks done so far are kept and the retry resumes from them. Empty
+  # content is answered without a call, so it spends none of the budget.
+  defp embed(content, _deadline) when content in [nil, ""],
     do: Deps.embedding().generate(content, [])
 
   defp embed(content, deadline) do

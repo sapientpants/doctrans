@@ -183,14 +183,16 @@ config :doctrans, Oban,
     # But the rescue is purely time-based: a job still running past the window
     # is handed back to the queue as if it were an orphan, can no longer ack,
     # and burns an attempt — or is discarded on its last — while its work goes
-    # on, and a second run of it may start alongside. So the window has to sit
-    # above the longest run a job may legitimately make, and every job states
-    # that bound as its Oban `timeout/1`, derived from the configured deadlines:
+    # on, and a second execution of it may start alongside. So the window has
+    # to sit above the longest a job may legitimately execute, and every job
+    # states that bound as its Oban `timeout/1`, derived from the configured
+    # deadlines through `Doctrans.Jobs.Ceiling`:
     # - `DocumentExtractionJob`: the extraction budget (an hour) plus the
     #   conversion and page-count ceilings and a margin, about 64 minutes
     # - `LlmProcessingJob`: up to three model calls, each at the 10-minute
     #   deadline plus a 5-minute receive window, plus a margin, 46 minutes
-    # - `EmbeddingJob`: the indexing budget (30 minutes) plus a margin
+    # - `EmbeddingJob`: the indexing budget (30 minutes) plus the one-minute
+    #   receive window its last call may outlive it by, plus a margin
     # `Doctrans.ObanLifelineTest` holds this window above all three with the
     # shipped bounds; a deployment that raises one of them has to raise this.
     {Oban.Lifeline, rescue_after: {70, :minutes}}

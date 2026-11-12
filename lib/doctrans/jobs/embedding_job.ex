@@ -29,33 +29,27 @@ defmodule Doctrans.Jobs.EmbeddingJob do
   alias Doctrans.Config.Embedding
   alias Doctrans.Documents.Page
   alias Doctrans.Errors
-  alias Doctrans.Jobs.{Keys, RetryTelemetry}
+  alias Doctrans.Jobs.{Ceiling, Keys, RetryTelemetry}
   alias Doctrans.Search.Indexer
 
   @page_id_key Keys.page_id()
   @revision_key Keys.revision()
 
-  # Oban waits forever by default, so the job carries a ceiling -- but the
-  # ceiling is an outer guard, not the budget. The budget is
-  # `Embedding.job_timeout/0`: `perform/1` arms it as it begins and `Indexer`
-  # clamps every embedding call against it, so a page that runs out fails
-  # cleanly with its finished chunks preserved, and the retry resumes rather
-  # than restarts. Oban arms this timer before `perform/1` and kills the job
-  # process when it fires, which no `PageLifecycle` transition survives; the
-  # guard is therefore strictly wider than the budget, so that the budget is
-  # the deadline that fires. `Oban.Lifeline`'s rescue window in
-  # `config/config.exs` is wider still, so a job still executing is never
-  # handed back to the queue as an orphan.
-  @guard_margin :timer.minutes(1)
-
   @doc """
-  Oban's ceiling on one attempt: the page's indexing budget plus a margin.
+  Oban's ceiling on one attempt: the page's indexing budget, the receive
+  window the last call may outlive it by, and `Doctrans.Jobs.Ceiling`'s margin.
 
-  Stated as a function of the configured budget so that raising the budget
-  cannot leave the guard below it.
+  The ceiling is an outer guard, not the budget. The budget is
+  `Embedding.job_timeout/0`: `perform/1` arms it as it begins and `Indexer`
+  clamps every embedding call's deadline against it, so a page that runs out
+  fails cleanly with its finished chunks preserved, and the retry resumes
+  rather than restarts. `Doctrans.Processing.RequestBounds` lets a call
+  return one receive window after its deadline, and that window is at most
+  `Embedding.timeout/0`, so the last call may end that long past the budget;
+  the guard allows for it, so that the budget is the deadline that fires.
   """
   @impl true
-  def timeout(_job), do: Embedding.job_timeout() + @guard_margin
+  def timeout(_job), do: Ceiling.above(Embedding.job_timeout() + Embedding.timeout())
 
   @doc """
   Builds the argument map `perform/1` destructures.

@@ -28,7 +28,7 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
     ]
 
   alias Doctrans.Config.OpenAI
-  alias Doctrans.Jobs.{Keys, RetryTelemetry}
+  alias Doctrans.Jobs.{Ceiling, Keys, RetryTelemetry}
   alias Doctrans.Processing.PageWork
 
   @page_id_key Keys.page_id()
@@ -39,29 +39,21 @@ defmodule Doctrans.Jobs.LlmProcessingJob do
   # calls alone.
   @model_calls 3
 
-  # Oban waits forever by default, so the job carries a ceiling. Each call is
-  # bounded by `Doctrans.Processing.RequestBounds` at the configured deadline,
-  # and returns at the latest one receive window after it -- an endpoint that
-  # sends something and then goes silent is only noticed when that window
-  # closes -- so the guard allows every call its deadline and its window, plus
-  # a margin. Oban kills the job process when the guard fires, which no stage
-  # record survives (`Doctrans.Processing.PageWork.Stages` records only what
-  # returns to it), so the guard is set wide enough that the per-call deadlines
-  # are the bounds that fire. `Oban.Lifeline`'s rescue window in
-  # `config/config.exs` is wider still, so a job still executing is never
-  # handed back to the queue as an orphan.
-  @guard_margin :timer.minutes(1)
-
   @doc """
   Oban's ceiling on one attempt: every model call at its deadline and receive
-  window, plus a margin.
+  window, plus `Doctrans.Jobs.Ceiling`'s margin.
 
-  Derived from the configured bounds so that raising a deadline cannot leave
-  the guard below the calls it covers.
+  Each call is bounded by `Doctrans.Processing.RequestBounds` at the
+  configured deadline, and returns at the latest one receive window after it
+  -- an endpoint that sends something and then goes silent is only noticed
+  when that window closes -- so the guard allows every call its deadline and
+  its window. Oban's kill is survived by no stage record
+  (`Doctrans.Processing.PageWork.Stages` records only what returns to it), so
+  the per-call deadlines have to be the bounds that fire.
   """
   @impl true
   def timeout(_job),
-    do: @model_calls * (OpenAI.deadline() + OpenAI.timeout()) + @guard_margin
+    do: Ceiling.above(@model_calls * (OpenAI.deadline() + OpenAI.timeout()))
 
   @impl true
   def perform(%Oban.Job{args: %{@page_id_key => page_id} = args} = job) do
