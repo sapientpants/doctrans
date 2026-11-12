@@ -46,9 +46,11 @@ defmodule Mix.Tasks.Tailwind.Verify do
 
   @impl true
   def run(_args) do
-    # The same preparation `tailwind.install` does: it loads the config the
-    # version and target are read from without starting the application.
-    Mix.Task.run("app.config")
+    # Only `loadpaths`, as `tailwind.install` does without `--runtime-config`:
+    # the version and target come from `config/config.exs`, which Mix has
+    # loaded by now, and `app.config` would evaluate `config/runtime.exs`,
+    # which under MIX_ENV=prod demands DATABASE_URL in a build that has none.
+    Mix.Task.run("loadpaths")
 
     if Application.get_env(:tailwind, :path) do
       Mix.shell().info(
