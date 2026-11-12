@@ -4,9 +4,12 @@
 # markers; nothing outside them is touched.
 #
 # A prefix rule matches leading tokens only, so it cannot see `git push origin
-# --force` (the flag is not in the prefix) or a command behind `zsh -lc`. That is
-# what the second layer is for: the PreToolUse hook running scripts/command-policy.sh,
-# which matches the whole command line. These rules are the cheap, always-on half.
+# --force` (the flag is not in the prefix), `git -C . reset --hard` (a global
+# option before the subcommand), `git p --force` (an alias), every spelling of a
+# flag cluster (`-fu`, `-uf`, ...) or a command behind `zsh -lc`. That is what the
+# second layer is for: the PreToolUse hook running scripts/command-policy.sh, which
+# normalises the git command line and matches the whole of it. These rules are the
+# cheap, always-on half; the common spellings are listed, not every one.
 #
 # `forbidden` wins over a broader `allow` regardless of order, verified with
 # `codex execpolicy check`, so the allow rules already in default.rules -- gh api,
@@ -18,6 +21,9 @@ prefix_rule(pattern=["doctrans-policy-probe"], decision="forbidden", justificati
 # Verification bypass
 prefix_rule(pattern=["git", "commit", "--no-verify"], decision="forbidden", justification="Commit hooks are the quality gate and must not be bypassed.")
 prefix_rule(pattern=["git", "commit", "-n"], decision="forbidden", justification="Commit hooks are the quality gate and must not be bypassed.")
+prefix_rule(pattern=["git", "commit", "-nm"], decision="forbidden", justification="Commit hooks are the quality gate and must not be bypassed.")
+prefix_rule(pattern=["git", "config", "core.hooksPath"], decision="forbidden", justification="Moving the hooks directory disables the quality gate.")
+prefix_rule(pattern=["git", "config", "--global", "core.hooksPath"], decision="forbidden", justification="Moving the hooks directory disables the quality gate.")
 
 # Discards uncommitted work
 prefix_rule(pattern=["git", "reset", "--hard"], decision="forbidden", justification="Hard reset discards uncommitted work.")
@@ -25,6 +31,12 @@ prefix_rule(pattern=["git", "clean"], decision="forbidden", justification="Git c
 prefix_rule(pattern=["git", "restore"], decision="forbidden", justification="Git restore discards working-tree changes.")
 prefix_rule(pattern=["git", "checkout", "--"], decision="forbidden", justification="Checkout can discard working-tree changes.")
 prefix_rule(pattern=["git", "checkout", "."], decision="forbidden", justification="Checkout can discard working-tree changes.")
+prefix_rule(pattern=["git", "checkout", "-f"], decision="forbidden", justification="A forced checkout discards working-tree changes.")
+prefix_rule(pattern=["git", "checkout", "--force"], decision="forbidden", justification="A forced checkout discards working-tree changes.")
+prefix_rule(pattern=["git", "checkout", "-B"], decision="forbidden", justification="Resetting a branch to another start point drops its commits.")
+prefix_rule(pattern=["git", "switch", "-f"], decision="forbidden", justification="A forced switch discards working-tree changes.")
+prefix_rule(pattern=["git", "switch", "--discard-changes"], decision="forbidden", justification="A forced switch discards working-tree changes.")
+prefix_rule(pattern=["git", "switch", "-C"], decision="forbidden", justification="Resetting a branch to another start point drops its commits.")
 prefix_rule(pattern=["git", "stash", "drop"], decision="forbidden", justification="Dropping a stash destroys stashed work.")
 prefix_rule(pattern=["git", "stash", "clear"], decision="forbidden", justification="Clearing the stash destroys stashed work.")
 
@@ -34,8 +46,22 @@ prefix_rule(pattern=["git", "commit", "--amend"], decision="forbidden", justific
 prefix_rule(pattern=["git", "filter-branch"], decision="forbidden", justification="History rewriting is refused.")
 prefix_rule(pattern=["git", "filter-repo"], decision="forbidden", justification="History rewriting is refused.")
 prefix_rule(pattern=["git", "reflog", "expire"], decision="forbidden", justification="Expiring the reflog removes the recovery path for rewritten history.")
-prefix_rule(pattern=["git", "update-ref", "-d"], decision="forbidden", justification="Deleting a ref directly can orphan commits.")
+prefix_rule(pattern=["git", "reflog", "delete"], decision="forbidden", justification="Deleting reflog entries removes the recovery path for rewritten history.")
+prefix_rule(pattern=["git", "prune"], decision="forbidden", justification="Pruning drops unreferenced objects that may be the only copy.")
+prefix_rule(pattern=["git", "gc", "--prune"], decision="forbidden", justification="Pruning drops unreferenced objects that may be the only copy.")
+prefix_rule(pattern=["git", "gc", "--prune=now"], decision="forbidden", justification="Pruning drops unreferenced objects that may be the only copy.")
+prefix_rule(pattern=["git", "update-ref"], decision="forbidden", justification="Moving or deleting a ref directly can orphan commits.")
 prefix_rule(pattern=["git", "branch", "-D"], decision="forbidden", justification="Forced branch deletion can drop unmerged commits.")
+prefix_rule(pattern=["git", "branch", "-fd"], decision="forbidden", justification="Forced branch deletion can drop unmerged commits.")
+prefix_rule(pattern=["git", "branch", "-df"], decision="forbidden", justification="Forced branch deletion can drop unmerged commits.")
+prefix_rule(pattern=["git", "branch", "-f"], decision="forbidden", justification="Force-moving a branch drops the commits it pointed at.")
+prefix_rule(pattern=["git", "branch", "--force"], decision="forbidden", justification="Force-moving or force-deleting a branch drops commits.")
+prefix_rule(pattern=["git", "branch", "-M"], decision="forbidden", justification="A forced rename overwrites the branch it renames onto.")
+prefix_rule(pattern=["git", "branch", "-C"], decision="forbidden", justification="A forced copy overwrites the branch it copies onto.")
+prefix_rule(pattern=["git", "tag", "-d"], decision="forbidden", justification="Deleting a tag removes a published marker.")
+prefix_rule(pattern=["git", "tag", "--delete"], decision="forbidden", justification="Deleting a tag removes a published marker.")
+prefix_rule(pattern=["git", "tag", "-f"], decision="forbidden", justification="Moving a tag removes a published marker.")
+prefix_rule(pattern=["git", "tag", "--force"], decision="forbidden", justification="Moving a tag removes a published marker.")
 
 # Irreversible publishing. Ordinary `git push` and `gh pr merge` are deliberately
 # absent: they are how work ships here. Only the forms nobody can undo are refused.
@@ -44,6 +70,11 @@ prefix_rule(pattern=["git", "push", "-f"], decision="forbidden", justification="
 prefix_rule(pattern=["git", "push", "--force-with-lease"], decision="forbidden", justification="A force push overwrites published history.")
 prefix_rule(pattern=["git", "push", "--mirror"], decision="forbidden", justification="Mirror push overwrites every remote ref.")
 prefix_rule(pattern=["git", "push", "--delete"], decision="forbidden", justification="Deletes a remote branch.")
+prefix_rule(pattern=["git", "push", "-d"], decision="forbidden", justification="Deletes a remote branch.")
+prefix_rule(pattern=["git", "push", "--prune"], decision="forbidden", justification="Deletes every remote branch with no local counterpart.")
+prefix_rule(pattern=["git", "push", "-fu"], decision="forbidden", justification="A force push overwrites published history.")
+prefix_rule(pattern=["git", "push", "-uf"], decision="forbidden", justification="A force push overwrites published history.")
+prefix_rule(pattern=["git", "push", "--force-if-includes"], decision="forbidden", justification="A force push overwrites published history.")
 prefix_rule(pattern=["gh", "release", "delete"], decision="forbidden", justification="Mutating a published release is irreversible.")
 prefix_rule(pattern=["gh", "release", "delete-asset"], decision="forbidden", justification="Mutating a published release is irreversible.")
 prefix_rule(pattern=["gh", "release", "edit"], decision="forbidden", justification="Mutating a published release is irreversible.")
