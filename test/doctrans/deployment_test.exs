@@ -36,7 +36,7 @@ defmodule Doctrans.DeploymentTest do
       development_compose: compose!("docker-compose.yml"),
       dockerfile: read("Dockerfile"),
       dev_dockerfile: read("Dockerfile.dev"),
-      dockerignore: read(".dockerignore")
+      dockerignore: dockerignore!(".dockerignore")
     }
   end
 
@@ -81,44 +81,49 @@ defmodule Doctrans.DeploymentTest do
     end)
   end
 
-  # Whether `.dockerignore` keeps a path out of the build context, following
-  # Docker's rules: patterns match against the whole path, `*` and `?` stop at
-  # a separator, `**` crosses them, and the last matching pattern decides,
-  # with a leading `!` meaning "included after all".
-  defp dockerignored?(dockerignore, path) do
-    dockerignore
+  # The rules of a `.dockerignore`, in order, as `{negated?, regex}` pairs. It
+  # follows the subset of Docker's syntax the file uses: a pattern matches the
+  # whole path from the context root, `*` and `?` stop at a separator, a
+  # pattern that names a directory covers everything beneath it, and a leading
+  # `!` means "included after all". `**` and `[...]` are refused rather than
+  # approximated, so a rule the matcher cannot judge fails loudly here instead
+  # of passing silently.
+  defp dockerignore!(name) do
+    name
+    |> read()
     |> String.split("\n")
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
-    |> Enum.reduce(false, fn pattern, ignored? ->
-      {negated?, pattern} =
-        case pattern do
-          "!" <> rest -> {true, rest}
-          rest -> {false, rest}
-        end
-
-      pattern = String.trim_trailing(pattern, "/")
-
-      if Regex.match?(dockerignore_regex(pattern), path), do: not negated?, else: ignored?
-    end)
+    |> Enum.map(&dockerignore_rule!/1)
   end
 
-  defp dockerignore_regex(pattern) do
+  defp dockerignore_rule!("!" <> pattern), do: {true, dockerignore_regex!(pattern)}
+  defp dockerignore_rule!(pattern), do: {false, dockerignore_regex!(pattern)}
+
+  defp dockerignore_regex!(pattern) do
+    if String.contains?(pattern, ["**", "["]) do
+      raise ArgumentError, "unsupported .dockerignore pattern: #{inspect(pattern)}"
+    end
+
     source =
       pattern
-      |> String.split("**")
-      |> Enum.map_join(".*", fn segment ->
-        segment
-        |> String.split(~r/[*?]/, include_captures: true)
-        |> Enum.map_join(fn
-          "*" -> "[^/]*"
-          "?" -> "[^/]"
-          literal -> Regex.escape(literal)
-        end)
+      |> String.trim_trailing("/")
+      |> String.split(~r/[*?]/, include_captures: true)
+      |> Enum.map_join(fn
+        "*" -> "[^/]*"
+        "?" -> "[^/]"
+        literal -> Regex.escape(literal)
       end)
 
-    # A pattern that names a directory ignores everything beneath it too.
     Regex.compile!("^(?:" <> source <> ")(?:/.*)?$")
+  end
+
+  # Whether the rules keep a path out of the build context: the last matching
+  # rule decides.
+  defp dockerignored?(rules, path) do
+    Enum.reduce(rules, false, fn {negated?, regex}, ignored? ->
+      if Regex.match?(regex, path), do: not negated?, else: ignored?
+    end)
   end
 
   defp assert_loopback_ports!(compose) do
@@ -322,27 +327,21 @@ defmodule Doctrans.DeploymentTest do
       assert dockerfile =~ ~r/^USER dev/m
     end
 
-    test "keeps every local env file out of the image, except the template", %{
-      dockerignore: dockerignore
-    } do
+    test "keeps every local env file out of the image", %{dockerignore: rules} do
       # `Dockerfile.dev` copies the whole checkout (#273). A developer's
       # `.env`, the Compose-only `.env.local`, the encrypted `.env.gpg` and any
       # future variant would otherwise land in a layer that `docker save` or
       # a stray push carries out of the machine.
       for secret <- [".env", ".env.local", ".env.gpg", ".env.production", ".env.backup"] do
-        assert dockerignored?(dockerignore, secret), "#{secret} reaches the build context"
+        assert dockerignored?(rules, secret), "#{secret} reaches the build context"
       end
+    end
 
+    test "copies the env template in", %{dockerignore: rules} do
       # The template holds no secret and is what the README tells a newcomer
-      # to copy, so it stays.
-      refute dockerignored?(dockerignore, ".env.example")
+      # to copy, so it stays, and it has to exist for that advice to work.
+      refute dockerignored?(rules, ".env.example")
       assert File.exists?(Path.join(@root, ".env.example"))
-
-      # The matcher is only trusted because it agrees with Docker on the other
-      # rules in the file.
-      assert dockerignored?(dockerignore, "deps/phoenix/mix.exs")
-      assert dockerignored?(dockerignore, "README.md")
-      refute dockerignored?(dockerignore, "lib/doctrans/application.ex")
     end
 
     test "drops every capability and forbids gaining privileges", %{compose: compose} do
@@ -357,6 +356,24 @@ defmodule Doctrans.DeploymentTest do
       tmpfs = compose["services"]["app"]["tmpfs"] || []
       assert Enum.any?(tmpfs, &(hd(String.split(&1, ":")) == "/tmp")), inspect(tmpfs)
     end
+  end
+
+  test "the ignore matcher agrees with Docker on the rules the file already uses", %{
+    dockerignore: rules
+  } do
+    # The env-file assertions are only as good as the matcher, so it is held
+    # to rules whose effect is known: a directory excludes its contents, a
+    # root glob does not reach into subdirectories, and an unlisted source
+    # file is copied.
+    assert dockerignored?(rules, "deps/phoenix/mix.exs")
+    assert dockerignored?(rules, "README.md")
+    refute dockerignored?(rules, "docs/CONTRIBUTING.md")
+    refute dockerignored?(rules, "lib/doctrans/application.ex")
+  end
+
+  test "the ignore matcher refuses syntax it does not model" do
+    assert_raise ArgumentError, ~r/unsupported/, fn -> dockerignore_rule!("**/.env") end
+    assert_raise ArgumentError, ~r/unsupported/, fn -> dockerignore_rule!("*.[ch]") end
   end
 
   @tag :tmp_dir
