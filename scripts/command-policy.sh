@@ -62,10 +62,25 @@ command=$(jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
 # inside a rule still stops at one and `git status && rm file` is not read as
 # `git ... rm`. A quoted payload handed to a shell (`bash -c "..."`) is a command,
 # not data, and is unwrapped before the quoted strings are stripped.
+#
+# Git gets one more pass, because its command line is looser than the rules can
+# be: global options sit between `git` and the subcommand (`git -C . reset
+# --hard`), an alias stands in for the subcommand (`git p --force` with
+# `alias.p = push`), and short flags cluster (`git push -fu`). The options are
+# removed, the alias is expanded from the user's git config, and the rules match
+# the flag letter inside a cluster. A rule that reads a push target runs on a
+# second copy of the text in which a quoted word is kept rather than stripped, so
+# `git push origin 'HEAD:main'` names the branch it would land on.
 # ---------------------------------------------------------------------------
 read -r -d '' POLICY <<'AWK' || true
 function deny(re, msg) {
   if (verdict == "" && match(cmd, re)) verdict = msg
+}
+
+# Like deny, against the copy that keeps quoted words. For rules whose argument is
+# never prose: a push refspec is a ref whether or not it is quoted.
+function deny_quoted(re, msg) {
+  if (verdict == "" && match(cmdq, re)) verdict = msg
 }
 
 # The delimiter of a heredoc opened on this line, or "" when the line opens none.
@@ -188,10 +203,122 @@ function normalise_tokens(text,    tok, n, i, w, out, expect, strip_all) {
   return out " "
 }
 
+# Replaces every quoted string with a single placeholder character. The
+# placeholder, not nothing, because the string was a word to the shell and a rule
+# that reads words by position must still see one there: `git -c 'x=y' commit
+# --amend` has to keep `commit` as its subcommand rather than as the value of
+# `-c`. With `keep_words`, a quoted string with no whitespace in it is kept as
+# the word the shell would pass (`'HEAD:main'` is a refspec, `"wip"` is a commit
+# message, and neither is prose); one with whitespace is prose or a script and
+# is replaced like the rest.
+function strip_quotes(text, keep_words,    pos, i, j, c, inner, out) {
+  out = ""; pos = 1
+  while (match(substr(text, pos), quotes)) {
+    i = pos + RSTART - 1
+    c = substr(text, i, 1)
+    j = index(substr(text, i + 1), c)            # distance to the closing quote
+    if (j == 0) break                            # never closed: left as it is
+    inner = substr(text, i + 1, j - 1)
+    out = out substr(text, pos, i - pos)
+    out = out ((keep_words && inner != "" && inner !~ /[ \t]/) ? inner : placeholder)
+    pos = i + j + 1
+  }
+  return out substr(text, pos)
+}
+
+# Records a `-c name=value` handed to git on the command line. Only one setting
+# is a rule: core.hooksPath points the hooks at another directory, which is
+# `--no-verify` for every hook at once. Git reads the key case-insensitively.
+function note_git_config(setting) {
+  if (tolower(setting) ~ /^core\.hookspath(=|$)/) hooks_moved = 1
+}
+
+# Rewrites every `git` invocation into the `git <subcommand> ...` shape the rules
+# expect. Git's global options are dropped (`-C dir`, `-c key=val`, `--git-dir=`,
+# `--no-pager`, ...), noting a `-c` that moves the hooks, and a subcommand that is
+# an alias in the user's git config is replaced by its expansion: `git p --force`
+# is `git push --force` when `alias.p = push`. A `!` alias is a shell command
+# and is spliced in as one, without the `git`. The options that take a separate
+# value are the ones git.c lists; everything else that starts with `-` is a flag.
+function normalise_git(text, keep_words,    tok, n, i, w, out, expansion, head, depth) {
+  n = split(text, tok, " ")
+  out = ""
+  for (i = 1; i <= n; i++) {
+    w = tok[i]
+    if (w == "") continue
+    out = out " " w
+    if (w != "git") continue
+    for (i++; i <= n; i++) {
+      w = tok[i]
+      if (w !~ /^-/) break
+      if (w ~ /^-(C|c|-git-dir|-work-tree|-namespace|-exec-path|-super-prefix|-config-env|-attr-source)$/) {
+        i++
+        if (w == "-c" || w == "--config-env") note_git_config(tok[i])
+      }
+      else if (w ~ /^--config-env=/) note_git_config(substr(w, 14))
+    }
+    if (i > n) break
+    w = tok[i]
+    if (w in aliases) {
+      expansion = aliases[w]
+      # An alias may name another alias (git 2.20+); follow it, with a bound in
+      # case the user's config loops.
+      for (depth = 0; depth < 8 && expansion !~ /^!/; depth++) {
+        split(expansion, head, " ")
+        if (!(head[1] in aliases) || head[1] == w) break
+        w = head[1]
+        expansion = aliases[w] substr(expansion, length(head[1]) + 1)
+      }
+      if (expansion ~ /^!/) {
+        out = substr(out, 1, length(out) - 4)           # a shell alias replaces `git`
+        expansion = substr(expansion, 2)
+      }
+      w = normalise_tokens(strip_quotes(expansion, keep_words))
+      sub(/^ /, "", w); sub(/ $/, "", w)
+    }
+    out = out " " w
+  }
+  return out " "
+}
+
+# The branch a `git push` in the text lands on when it names no refspec: the
+# current one, resolved by the caller into `branch`. `git push`, `git push
+# origin`, `git push origin HEAD` and `git push -u origin @` all push the branch
+# that is checked out, and no rule can see which one that is from the text alone.
+# Approximate by design: the command may cd elsewhere first, and the caller reads
+# the project checkout.
+function bare_push_lands_on(text,    tok, n, i, w, positional, refspec) {
+  n = split(text, tok, " ")
+  for (i = 1; i < n; i++) {
+    if (tok[i] != "git" || tok[i + 1] != "push") continue
+    positional = 0; refspec = ""
+    for (i += 2; i <= n; i++) {
+      w = tok[i]
+      if (w == "" || w ~ /^-/) continue
+      if (w ~ /^[;&|(){}`]+$/) break
+      if (++positional == 2) refspec = w
+    }
+    if (positional <= 1 || refspec ~ /^(HEAD|@)$/) return branch
+  }
+  return ""
+}
+
 BEGIN {
   q  = sprintf("%c", 39)   # '
   dq = sprintf("%c", 34)   # "
   quotes = "[" q dq "]"
+  placeholder = sprintf("%c", 1)
+
+  # `alias.p push` per line, as `git config --get-regexp '^alias\.'` prints them;
+  # a later line wins, which is git's own precedence. Handed over through the
+  # environment because `awk -v` would read backslashes in an alias as escapes.
+  n_alias = split(ENVIRON["COMMAND_POLICY_GIT_ALIASES"], alias_lines, "\n")
+  for (i = 1; i <= n_alias; i++) {
+    if (alias_lines[i] !~ /^alias\.[^ ]+ /) continue
+    name = substr(alias_lines[i], 7, index(alias_lines[i], " ") - 7)
+    aliases[name] = substr(alias_lines[i], index(alias_lines[i], " ") + 1)
+  }
+  branch = ENVIRON["COMMAND_POLICY_GIT_BRANCH"]
 }
 
 # Inside a heredoc. The body is data to the shell, so it stays out of `cmd` -- and
@@ -222,40 +349,62 @@ END {
     if (!body_runs_sql) raw = raw body
   }
   cmd = unwrap_shell_payloads(cmd)
-  gsub(q "[^" q "]*" q, "", cmd)      # single-quoted strings
-  gsub(dq "[^" dq "]*" dq, "", cmd)   # double-quoted strings
-  cmd = normalise_tokens(cmd)
+  cmdq = normalise_git(normalise_tokens(strip_quotes(cmd, 1)), 1)   # quoted words kept
+  cmd  = normalise_git(normalise_tokens(strip_quotes(cmd, 0)), 0)   # every quoted string gone
   rawlc = tolower(raw)
+
+  # The git rules below read `git <sub>` ARGS ` <flag> `: ARGS is any run of
+  # arguments and a flag is matched as a whole word, so a short flag is found
+  # inside a cluster (`-fu` carries `-f`, `-nm` carries `-n`) while a long
+  # option is never mistaken for one (`--signed` is not `-d`: the `-` it would
+  # have to start from has no space before it).
+  ARGS = "( [^;&|]*)? "
+  fcluster = "-[A-Za-z]*f[A-Za-z]* "
+  dcluster = "-[A-Za-z]*d[A-Za-z]* "
+  ncluster = "-[A-Za-z]*n[A-Za-z]* "
 
   # --- Verification bypass ------------------------------------------------
   deny(" git [^;&|]*--no-verify[ =]", "git --no-verify skips the pre-commit and commit-msg hooks")
-  deny(" git commit [^;&|]*-n ",      "git commit -n skips the commit-msg hook")
+  deny(" git commit" ARGS ncluster,   "git commit -n skips the commit-msg hook")
+  if (verdict == "" && hooks_moved) verdict = "git -c core.hooksPath= runs the command with its hooks pointed elsewhere"
+  deny_quoted(" git config" ARGS "[^ ]*core\\.[Hh]ooks[Pp]ath[= ][^- ]", "moving core.hooksPath disables the pre-commit and commit-msg hooks")
 
   # --- Discards uncommitted work ------------------------------------------
   deny(" git reset [^;&|]*--hard ",   "git reset --hard discards uncommitted work")
   deny(" git clean ",                 "git clean permanently removes untracked files")
   deny(" git restore ",               "git restore discards working-tree changes")
-  deny(" git checkout (--|\\.) ",     "git checkout -- discards working-tree changes")
-  deny(" git (checkout|switch) [^;&|]*(-f|--force|--discard-changes) ", "a forced checkout discards working-tree changes")
+  # Paths after `checkout` are overwritten from the index or a tree-ish. A `--`
+  # anywhere introduces paths; a word that can only be a path (`.`, `./lib`,
+  # `../x`, `/abs`) is one without it. `lib/foo.ex` is left alone: it reads the
+  # same as a branch named `feature/x`, and refusing those would refuse the
+  # branch switch this policy is meant to allow.
+  deny(" git checkout" ARGS "(-- |\\.\\.?(/[^ ]*)? |/[^ ]* )", "git checkout <path> discards working-tree changes")
+  deny(" git checkout" ARGS "(-[A-Za-z]*[fB][A-Za-z]* |--force )", "a forced checkout discards working-tree changes or resets a branch")
+  deny(" git switch" ARGS "(-[A-Za-z]*[fC][A-Za-z]* |--force |--discard-changes |--force-create )", "a forced switch discards working-tree changes or resets a branch")
   deny(" git stash (drop|clear) ",    "git stash drop/clear destroys stashed work")
 
   # --- Rewrites history ---------------------------------------------------
   deny(" git rebase ",                "git rebase rewrites history")
   deny(" git commit [^;&|]*--amend ", "git commit --amend rewrites a commit")
   deny(" git (filter-branch|filter-repo) ", "history rewriting is refused")
-  deny(" git reflog expire ",         "expiring the reflog removes the recovery path for rewritten history")
+  deny(" git reflog (expire|delete) ", "expiring or deleting reflog entries removes the recovery path for rewritten history")
   deny(" git gc [^;&|]*--prune ",     "pruning gc can drop unreferenced objects that are still the only copy")
-  deny(" git update-ref -d ",         "deleting a ref directly can orphan commits")
-  deny(" git branch [^;&|]*-D ",      "forced branch deletion can drop unmerged commits")
-  deny(" git branch [^;&|]*--delete [^;&|]*--force ", "forced branch deletion can drop unmerged commits")
-  deny(" git tag [^;&|]*-d ",         "deleting a tag removes a published marker")
+  deny(" git prune ",                 "git prune drops unreferenced objects that may be the only copy")
+  deny(" git update-ref ",            "moving or deleting a ref directly can orphan commits")
+  deny(" git branch" ARGS "(-[A-Za-z]*[DfMC][A-Za-z]* |--force )", "a forced branch delete, move or copy can drop commits")
+  deny(" git tag" ARGS "(-[A-Za-z]*[df][A-Za-z]* |--delete |--force )", "deleting or moving a tag removes a published marker")
 
   # --- Irreversible publishing --------------------------------------------
-  deny(" git push [^;&|]*(--force|--force-with-lease|-f) ", "a force push overwrites published history")
-  deny(" git push [^;&|]*--delete ",  "git push --delete removes a remote branch")
-  deny(" git push [^;&|]* :[^ ]+ ",   "a colon refspec deletes a remote branch")
-  deny(" git push [^;&|]*--mirror ",  "git push --mirror overwrites every remote ref")
-  deny(" git push [^;&|]*(main|master) ", "pushing straight to the default branch bypasses review")
+  # Push arguments are refs and flags, never prose, so these run on the copy that
+  # keeps quoted words: `git push origin 'HEAD:main'` still names main.
+  deny_quoted(" git push" ARGS "(--force(-with-lease|-if-includes)?[ =]|" fcluster ")", "a force push overwrites published history")
+  deny_quoted(" git push" ARGS "(--delete |--prune |" dcluster ")", "git push --delete removes a remote branch")
+  deny_quoted(" git push" ARGS ":[^ ]+ ",  "a colon refspec deletes a remote branch")
+  deny_quoted(" git push" ARGS "\\+[^ ]+ ", "a + refspec is a force push")
+  deny_quoted(" git push" ARGS "--mirror ", "git push --mirror overwrites every remote ref")
+  deny_quoted(" git push" ARGS "([^ ]*[:/])?(main|master) ", "pushing straight to the default branch bypasses review")
+  if (verdict == "" && bare_push_lands_on(cmdq) ~ /^(main|master)$/)
+    verdict = "pushing straight to the default branch bypasses review"
   deny(" gh api [^;&|]*(-X|--method)[ =]DELETE ", "a DELETE through the GitHub API is irreversible")
   deny(" gh release (delete|delete-asset|edit|upload) ", "mutating a published release is irreversible")
 
@@ -294,28 +443,22 @@ END {
 }
 AWK
 
-verdict=$(printf '%s\n' "$command" | awk "$POLICY")
-
-# A bare `git push` names no branch, so the rule above cannot see where it lands.
-# Resolve the branch instead. Approximate by design: the command may cd elsewhere
-# first, and this reads the project checkout.
-if [ -z "$verdict" ] && printf '%s' "$command" | grep -qE '(^|[^[:alnum:]_-])git +push'; then
-  rest=${command#*push}
-  positional=0
-  for token in $rest; do
-    case "$token" in
-      ';'|'&&'|'||'|'|') break ;;
-      -*) ;;
-      *) positional=$((positional + 1)) ;;
-    esac
-  done
-  if [ "$positional" -le 1 ]; then
+# Two things about git only the checkout can answer: which aliases the user has
+# defined (an alias stands in for the subcommand every rule keys on) and which
+# branch a bare `git push` lands on. Read once, from the project checkout, and
+# only when the command mentions git at all. Approximate by design: the command
+# may cd elsewhere first.
+aliases=""
+branch=""
+case "$command" in
+  *git*)
+    aliases=$(git -C "${CLAUDE_PROJECT_DIR:-.}" config --get-regexp '^alias\.' 2>/dev/null || true)
     branch=$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
-    case "$branch" in
-      main|master) verdict="pushing straight to the default branch bypasses review" ;;
-    esac
-  fi
-fi
+    ;;
+esac
+
+verdict=$(printf '%s\n' "$command" |
+  COMMAND_POLICY_GIT_ALIASES="$aliases" COMMAND_POLICY_GIT_BRANCH="$branch" awk "$POLICY")
 
 [ -n "$verdict" ] || exit 0
 

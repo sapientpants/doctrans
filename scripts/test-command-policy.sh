@@ -148,6 +148,65 @@ block|bash -c "r""m -rf build"
 block|bash -c rm" -rf build"
 block|sh -c "rm -rf 'build'"
 block|bash -c "echo start; rm -rf build"
+# Git's global options sit between `git` and the subcommand the rules key on.
+block|git -C . reset --hard
+block|git -C /tmp/x clean -fd
+block|git -C . push --force origin feature
+block|git --git-dir=.git --work-tree=. reset --hard
+block|git --no-pager rebase main
+block|git -c user.name=x commit --amend
+block|git -c "user.name=x y" commit --amend
+block|git -c 'core.hooksPath=/dev/null' commit -m x
+block|git -c core.hooksPath=/dev/null commit -m x
+block|git -c CORE.HooksPath=/dev/null commit -m x
+block|git --config-env=core.hooksPath=HOOKS commit -m x
+block|git config core.hooksPath /dev/null
+block|git config --global core.hooksPath=/dev/null
+# A short flag keeps its meaning inside a cluster.
+block|git push -fu origin feature
+block|git push -uf origin feature
+block|git push -d origin feature
+block|git commit -nm x
+block|git commit -anm x
+block|git branch -fd feature
+block|git branch -Df feature
+block|git tag -df v1.0.0
+block|git checkout -fb feature
+# Synonyms and spellings of the refused operations.
+block|git branch --force --delete feature
+block|git branch --delete --force feature
+block|git branch -f main HEAD~5
+block|git branch --force main HEAD~5
+block|git branch -M main
+block|git branch -C old new
+block|git checkout -B feature origin/main
+block|git switch -C feature
+block|git switch --force-create feature
+block|git tag --delete v1.0.0
+block|git tag -f v1.0.0
+block|git push origin --delete feature
+block|git push --prune origin
+block|git push origin +feature
+block|git push origin +HEAD:feature
+block|git push --force-with-lease=feature:abc origin feature
+block|git push --force-if-includes --force-with-lease origin feature
+block|git reflog delete HEAD@{1}
+block|git prune --expire=now
+block|git update-ref refs/heads/main HEAD~5
+block|git update-ref -d refs/heads/feature
+block|git checkout HEAD -- lib/foo.ex
+block|git checkout main -- .
+block|git checkout ./lib
+block|git checkout ../lib/foo.ex
+block|git checkout /abs/path
+block|git checkout -q -- lib
+# A quoted push target is still the ref it names.
+block|git push origin 'HEAD:main'
+block|git push origin "main"
+block|git push origin HEAD:refs/heads/main
+block|git push origin main:main
+block|git push origin feature:master
+block|git push origin ':feature'
 allow|git status
 allow|git status --short
 allow|git add --all
@@ -192,6 +251,50 @@ allow|bash -c "echo "'"rm -rf build"'
 allow|bash script.sh -c "rm -rf build"
 allow|mix test 2>&1 | tail -5
 allow|git log --format=%s%n%b
+# A long option is never read as the short flag its letters contain.
+allow|git push --signed origin feature
+allow|git push --follow-tags origin feature
+allow|git push --dry-run origin feature
+allow|git push --set-upstream origin feature
+allow|git commit --only -m x lib/a.ex
+allow|git commit --branch -m x
+allow|git commit --no-edit -m x
+allow|git tag --format=%(refname) --list
+allow|git branch --format=%(refname) --list
+allow|git branch -d feature
+allow|git branch -m old new
+allow|git branch -c old new
+allow|git branch -vv
+allow|git tag -a v1.0.0 -m "release"
+allow|git tag -l
+# A branch may look like a path; only a word that can be nothing else is one.
+allow|git checkout feature/x
+allow|git checkout -b feature origin/main
+allow|git checkout -b feature/x --track origin/feature/x
+allow|git checkout -q main
+allow|git switch feature/x
+allow|git switch -c feature/x
+# Global options on a harmless subcommand stay harmless.
+allow|git -C . status
+allow|git -C /tmp/x log --oneline -5
+allow|git -c user.name=x commit -m x
+allow|git -c 'user.name=x y' commit -m x
+allow|git --no-pager diff
+allow|git -c core.pager=cat log -1
+allow|git config user.name x
+allow|git config --get core.hooksPath
+# Push targets that merely contain the default branch's name.
+allow|git push origin feature-main
+allow|git push origin maintenance
+allow|git push origin main-fix
+allow|git push origin HEAD:feature/main-fix
+allow|git push origin origin/main:feature
+# Prose still is not a command.
+allow|git commit -m "git push origin main is refused"
+allow|git commit -m "the policy refuses -c core.hooksPath"
+allow|git log --grep='rebase' --oneline
+allow|grep -rn "rm" lib
+allow|grep 'rm' -r lib
 CASES
 
 echo
@@ -201,6 +304,44 @@ report block "$(shell_policy_in "$scratch/on-main" 'git push origin')" 'push nam
 report allow "$(shell_policy_in "$scratch/on-feature" 'git push')" 'bare push, repo on a feature branch'
 report allow "$(shell_policy_in "$scratch/on-feature" 'git push origin')" 'push naming only a remote, repo on a feature branch'
 report allow "$(shell_policy_in "$scratch/on-main" 'git push origin some-feature')" 'explicit feature target, repo on main'
+report block "$(shell_policy_in "$scratch/on-main" 'git push origin HEAD')" 'push of HEAD, repo on main'
+report block "$(shell_policy_in "$scratch/on-main" 'git push -u origin @')" 'push of @, repo on main'
+report block "$(shell_policy_in "$scratch/on-main" 'git -C . push')" 'bare push behind a global option, repo on main'
+report block "$(shell_policy_in "$scratch/on-main" 'git --no-pager push origin')" 'push naming only a remote behind a global option, repo on main'
+report allow "$(shell_policy_in "$scratch/on-feature" 'git push origin HEAD')" 'push of HEAD, repo on a feature branch'
+
+# A git alias stands in for the subcommand, so it is resolved from the checkout's
+# config before the rules run. These aliases are defined in the scratch repositories
+# only; a developer's own global aliases cannot make a case pass or fail.
+echo
+echo "layer 2: a git alias is the subcommand it expands to"
+for repo in on-main on-feature; do
+  git -C "$scratch/$repo" config alias.p push
+  git -C "$scratch/$repo" config alias.c 'commit -am'
+  git -C "$scratch/$repo" config alias.pf 'push --force'
+  git -C "$scratch/$repo" config alias.pp 'p -u'
+  git -C "$scratch/$repo" config alias.nuke '!rm -rf build'
+  git -C "$scratch/$repo" config alias.lg "log --graph --pretty=format:'%h %s'"
+  git -C "$scratch/$repo" config alias.loop1 loop2
+  git -C "$scratch/$repo" config alias.loop2 loop1
+done
+report block "$(shell_policy_in "$scratch/on-feature" 'git p --force origin feature')" 'git p --force (alias.p = push)'
+report block "$(shell_policy_in "$scratch/on-feature" 'git p -f origin feature')" 'git p -f'
+report block "$(shell_policy_in "$scratch/on-feature" 'git p origin main')" 'git p origin main'
+report block "$(shell_policy_in "$scratch/on-main" 'git p')" 'bare git p, repo on main'
+report block "$(shell_policy_in "$scratch/on-main" 'git p origin')" 'git p origin, repo on main'
+report block "$(shell_policy_in "$scratch/on-feature" 'git c -n -m x')" 'git c -n (alias.c = commit -am)'
+report block "$(shell_policy_in "$scratch/on-feature" 'git c --amend')" 'git c --amend'
+report block "$(shell_policy_in "$scratch/on-feature" 'git -C . c --amend')" 'alias behind a global option'
+report block "$(shell_policy_in "$scratch/on-feature" 'git pf origin feature')" 'git pf (alias.pf = push --force)'
+report block "$(shell_policy_in "$scratch/on-feature" 'git pp origin main')" 'git pp origin main (alias.pp = p -u, nested)'
+report block "$(shell_policy_in "$scratch/on-feature" 'git nuke')" 'git nuke (alias.nuke = !rm -rf build)'
+report block "$(shell_policy_in "$scratch/on-feature" '/usr/bin/git p --force')" 'alias through a path on the command'
+report allow "$(shell_policy_in "$scratch/on-feature" 'git p origin feature')" 'git p origin feature'
+report allow "$(shell_policy_in "$scratch/on-feature" 'git c -m x')" 'git c -m x'
+report allow "$(shell_policy_in "$scratch/on-feature" 'git lg -5')" 'git lg (alias with a quoted format)'
+report allow "$(shell_policy_in "$scratch/on-feature" 'git loop1')" 'an alias cycle resolves without hanging'
+report allow "$(shell_policy_in "$scratch/on-feature" 'git undefined-alias --force')" 'a word that is no alias is left alone'
 
 echo
 echo "layer 2: data must not be mistaken for commands"
