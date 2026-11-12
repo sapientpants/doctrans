@@ -49,7 +49,7 @@ jobs:
     steps:
       # Actions are pinned to a full commit SHA: a mutable major tag like `@v7` can
       # be repointed at any commit by anyone who can push to that repository, and this
-      # job downloads and executes hook code from five external repositories on top
+      # job downloads and executes hook code from six external repositories on top
       # of that. The trailing comment records the human-readable version, which is
       # what Dependabot's `github-actions` ecosystem reads and bumps.
       #
@@ -82,8 +82,13 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Installed from a hashed requirements file rather than `pip install pre-commit`,
+      # for the same reason every `uses:` above names a SHA: pip would otherwise take
+      # whatever version PyPI serves that day, and this is the tool that then clones
+      # and runs six external hook repositories. `--require-hashes` covers the
+      # transitive dependencies too; Dependabot's pip ecosystem keeps the file current.
       - name: Install pre-commit
-        run: pip install pre-commit
+        run: pip install --require-hashes -r .github/requirements-pre-commit.txt
 
       - name: Check test runtimes
         run: |
