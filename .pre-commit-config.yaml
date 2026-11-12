@@ -1,6 +1,19 @@
 # Pre-commit configuration for comprehensive code quality checks
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
+#
+# Every external hook is pinned to a full commit SHA with the tag kept in the
+# `# frozen:` comment, the form `pre-commit autoupdate --freeze` writes. A tag can
+# be force-moved by anyone who can push to the hook's repository, and the next cold
+# cache -- a new machine, `pre-commit clean`, a CI cache miss -- would clone and, for
+# the Python and Node hooks, pip/npm-install and run whatever it then points at, as
+# the developer. `scripts/check_precommit_pins.exs` fails the gate on a bare tag.
+# Bump a hook with `pre-commit autoupdate --freeze` (optionally `--repo <url>`);
+# never run `autoupdate` without `--freeze`, which rewrites every pin back to a
+# tag. Dependabot has no pre-commit ecosystem, so bumps are by hand (or by
+# pre-commit.ci's own autoupdate, if that service is enabled; the gate rejects any
+# pin it leaves unfrozen). A SHA pins the hook's own source, not its transitive
+# pip/npm dependencies.
 
 default_language_version:
   python: python3
@@ -15,7 +28,7 @@ default_install_hook_types:
 repos:
   # Conventional commit message validation (scope required)
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.5.0
+    rev: 33b50eb042bee26eac0ee96ad84aa9c1b4dccdd8  # frozen: v4.5.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
@@ -23,7 +36,7 @@ repos:
 
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
     hooks:
       # Security and safety checks (fast)
       - id: detect-private-key
@@ -62,7 +75,7 @@ repos:
 
   # YAML linting
   - repo: https://github.com/adrienverge/yamllint
-    rev: v1.38.0
+    rev: cba56bcde1fdd01c1deb3f945e69764c291a6530  # frozen: v1.38.0
     hooks:
       - id: yamllint
         name: Lint YAML files
@@ -71,14 +84,14 @@ repos:
 
   # Markdown linting
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.24.0
+    rev: 341e2a331ba578029e66c2e01183e7a6b5ca9ab4  # frozen: v0.24.0
     hooks:
       - id: markdownlint-cli2
         name: Lint Markdown files
 
   # GitHub Actions workflow validation
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.39.0
+    rev: a76b92851fc9eede9f9bc4073eb55202f34eb0df  # frozen: 0.39.0
     hooks:
       - id: check-github-workflows
         name: Validate GitHub Actions workflows
@@ -92,7 +105,7 @@ repos:
   # pin regression is a copy-paste away; Dependabot's github-actions ecosystem
   # keeps the pins from going stale. Policy lives in .github/zizmor.yml.
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
-    rev: v1.31.1
+    rev: c92afdf2c6ca336aaa8f39e2bd8d48f62dbd8e1f  # frozen: v1.31.1
     hooks:
       - id: zizmor
         name: Audit GitHub Actions workflows (zizmor)
@@ -156,6 +169,16 @@ repos:
         language: system
         pass_filenames: false
         files: ^(mise\.toml|Dockerfile(\.dev)?|scripts/check_toolchain_pins\.exs)$
+
+      # Pre-commit pin agreement: every remote `rev:` above is a frozen commit SHA
+      # (see the header) and every workflow `pip install` passes `--require-hashes`,
+      # so the `pre-commit` tool CI runs is the one the hashed requirements file names.
+      - id: check-precommit-pins
+        name: Check pre-commit hook pins are frozen
+        entry: elixir scripts/check_precommit_pins.exs
+        language: system
+        pass_filenames: false
+        files: ^(\.pre-commit-config\.yaml|\.github/.*|scripts/check_precommit_pins\.exs)$
 
       # Command-policy regression suite. scripts/command-policy.sh is the one
       # copy of the rule table every agent runs, and this is the only thing that
@@ -312,7 +335,9 @@ repos:
         pass_filenames: false
         files: ^mix\.lock$
 
-# Configuration for pre-commit.ci (if using the service)
+# Configuration for pre-commit.ci (if using the service). Its weekly autoupdate
+# must keep the `rev:` pins frozen; `check-precommit-pins` fails any PR it opens
+# that carries a bare tag.
 ci:
   autofix_commit_msg: |
     [pre-commit.ci] auto fixes from pre-commit hooks

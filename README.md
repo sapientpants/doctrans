@@ -709,10 +709,11 @@ This project enforces strict code quality:
 This project uses [pre-commit](https://pre-commit.com/) for automated git hooks:
 
 ```bash
-pip install pre-commit
+pip install --require-hashes -r .github/requirements-pre-commit.txt
 pre-commit install
 ```
 
+That is the same hashed pin CI installs from; `pipx` or Homebrew work too if you prefer.
 Hooks run automatically on commit, selected by the changed file types.
 
 The gate is defined once, in [`.pre-commit-config.yaml`](.pre-commit-config.yaml), and that file is

@@ -77,6 +77,17 @@ Its policy lives in `.github/zizmor.yml`. Resolve a tag to a SHA with
 `gh api repos/OWNER/REPO/commits/TAG --jq .sha` and keep the `# vX.Y.Z` comment
 beside the pin, which is what Dependabot rewrites when it bumps it.
 
+The hook repositories in `.pre-commit-config.yaml` are pinned the same way: every
+remote `rev:` is a full commit SHA with the tag kept in a `# frozen: <tag>`
+comment (the tag is whatever the hook publishes, with or without a `v`), and
+`scripts/check_precommit_pins.exs` fails the gate on a bare tag. Bump a hook with
+`pre-commit autoupdate --freeze` (add `--repo <url>` for one), which writes both
+halves; the header of that file explains why and what not to run. The `pre-commit`
+tool itself is installed, locally and in CI, from the hashed
+`.github/requirements-pre-commit.txt`, which Dependabot's pip ecosystem keeps
+current; the same check requires every workflow `pip install` to pass
+`--require-hashes`.
+
 `mix precommit`, the test pre-commit hook, and CI run `mix test --cover` with
 ExCoveralls. CI runs coverage on every pull request and push to `main`, including
 configuration-only changes. Tests run once in CI; its pre-commit invocation skips

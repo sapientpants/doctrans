@@ -43,3 +43,13 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 7
+
+  # Keeps the hashed `pre-commit` pin in `.github/requirements-pre-commit.txt`
+  # current. The hook repositories themselves have no Dependabot ecosystem; see
+  # the header of `.pre-commit-config.yaml` for how those are bumped.
+  - package-ecosystem: "pip"
+    directory: "/.github"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
