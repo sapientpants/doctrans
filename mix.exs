@@ -34,7 +34,10 @@ defmodule Doctrans.MixProject do
       ],
       dialyzer: [
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
-        plt_add_apps: [:mix, :ex_unit],
+        # `:tailwind` is `runtime: false` outside :dev, so under MIX_ENV=test the
+        # PLT would not hold it and `Mix.Tasks.Tailwind.Verify`'s calls would be
+        # reported as unknown functions.
+        plt_add_apps: [:mix, :ex_unit, :tailwind],
         ignore_warnings: ".dialyzer_ignore.exs",
         # Stricter dialyzer flags
         flags: [
@@ -145,7 +148,14 @@ defmodule Doctrans.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test --warnings-as-errors"],
-      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      # `tailwind.verify` hashes the binary the install step put in place against
+      # the digest pinned in `config/tailwind-<version>.sha256sums` (#274); the
+      # esbuild installer verifies its own download.
+      "assets.setup": [
+        "tailwind.install --if-missing",
+        "tailwind.verify",
+        "esbuild.install --if-missing"
+      ],
       "assets.build": ["compile", "tailwind doctrans", "esbuild doctrans"],
       "assets.deploy": [
         "tailwind doctrans --minify",
