@@ -756,7 +756,8 @@ messages must follow this format:
 GitHub Actions runs on pushes to `main` and pull requests targeting `main`:
 
 - Pre-commit hooks (formatting, linting, security checks)
-- Asset toolchain install (`mix assets.setup`) and bundle build (esbuild, Tailwind)
+- Asset toolchain install (`mix assets.setup`, which checks the Tailwind binary against its
+  pinned SHA-256 digest) and bundle build (esbuild, Tailwind)
 - Full test suite with 80% coverage requirement
 - Dialyzer type checking
 - Uncommitted changes detection

@@ -161,7 +161,7 @@ jobs:
           path: |
             _build/esbuild-*
             _build/tailwind-*
-          key: ${{ runner.os }}-assets-esbuild-${{ steps.assets.outputs.esbuild }}-tailwind-${{ steps.assets.outputs.tailwind }}
+          key: ${{ runner.os }}-assets-esbuild-${{ steps.assets.outputs.esbuild }}-tailwind-${{ steps.assets.outputs.tailwind }}-${{ hashFiles('config/tailwind-*.sha256sums') }}
 
       - name: Install dependencies
         run: mix deps.get --check-locked
@@ -180,12 +180,19 @@ jobs:
       #
       # It is also the one step in this job that can reach a third party at all, which is
       # why it was weighed before adding it to a workflow that pins every `uses:` to a
-      # commit SHA. The two halves are not equally protected: esbuild comes from
-      # registry.npmjs.org with its npm signature verified against pinned public keys and a
-      # sha512 integrity check over the tarball, while Tailwind is a plain GitHub release
-      # download over verify_peer TLS with no checksum and no signature. For Tailwind, the
-      # pinned version and the TLS certificate are the whole of the assurance — weaker than
-      # what the SHA pins above give us, and worth knowing rather than assuming.
+      # commit SHA. esbuild comes from registry.npmjs.org with its npm signature verified
+      # against pinned public keys and a sha512 integrity check over the tarball. Tailwind
+      # is a plain GitHub release download over verify_peer TLS with no checksum of its
+      # own, so `assets.setup` installs it through `mix tailwind.verify --install`, which
+      # hashes the binary against the digest pinned in `config/tailwind-<version>.sha256sums`
+      # and deletes it on a mismatch (#274). A binary restored from this cache, or from the
+      # `_build` in the dependencies cache above, is hashed before `tailwind.install` gets
+      # to it, because that task runs the binary to read its version; only when nothing is
+      # on disk is a download made, and the download is hashed in turn. The digest file is
+      # part of the cache key, so re-pinning moves the key rather than trusting an entry
+      # saved under the old one. A mismatch fails the job on every run until the entry ages
+      # out, and that is the intended outcome for a toolchain that no longer matches its
+      # release.
       - name: Install asset toolchain
         run: mix assets.setup
 
@@ -199,7 +206,7 @@ jobs:
           path: |
             _build/esbuild-*
             _build/tailwind-*
-          key: ${{ runner.os }}-assets-esbuild-${{ steps.assets.outputs.esbuild }}-tailwind-${{ steps.assets.outputs.tailwind }}
+          key: ${{ runner.os }}-assets-esbuild-${{ steps.assets.outputs.esbuild }}-tailwind-${{ steps.assets.outputs.tailwind }}-${{ hashFiles('config/tailwind-*.sha256sums') }}
 
       - name: Build Dialyzer PLT
         run: mix dialyzer --plt
