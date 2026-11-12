@@ -70,17 +70,23 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
     end)
   end
 
-  # The job of a run re-queued by an earlier boot, discarded again. Oban keeps
-  # each attempt's error as the formatted exception, stack trace and all.
-  defp discarded_recovered_job(document, error) do
+  # The document's current run's extraction job, discarded after its attempts.
+  # `recovered: true` marks the job of a run an earlier boot already re-queued;
+  # `error` is the last attempt's error as Oban keeps it, the formatted
+  # exception with its stack trace.
+  defp discarded_job(document, opts \\ []) do
+    meta = if Keyword.get(opts, :recovered, false), do: %{recovered: true}, else: %{}
+
+    errors =
+      case Keyword.fetch(opts, :error) do
+        {:ok, error} -> [%{"attempt" => 3, "at" => DateTime.utc_now(), "error" => error}]
+        :error -> []
+      end
+
     %{"document_id" => document.id, "run_id" => document.processing_run_id}
-    |> DocumentExtractionJob.new(meta: %{recovered: true})
+    |> DocumentExtractionJob.new(meta: meta)
     |> Oban.insert!()
-    |> Ecto.Changeset.change(
-      state: "discarded",
-      attempt: 3,
-      errors: [%{"attempt" => 3, "at" => DateTime.utc_now(), "error" => error}]
-    )
+    |> Ecto.Changeset.change(state: "discarded", attempt: 3, errors: errors)
     |> Repo.update!()
   end
 
@@ -90,10 +96,11 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
       Topics.subscribe_document(document.id)
 
       discarded =
-        discarded_recovered_job(
-          document,
-          "** (Oban.TimeoutError) Doctrans.Jobs.DocumentExtractionJob timed out after 3900000ms\n" <>
-            "    (oban 2.24.2) lib/oban/queues/executor.ex:132: Oban.Queues.Executor.start_timeout/1"
+        discarded_job(document,
+          recovered: true,
+          error:
+            "** (Oban.TimeoutError) Doctrans.Jobs.DocumentExtractionJob timed out after 3900000ms\n" <>
+              "    (oban 2.24.2) lib/oban/queues/executor.ex:132: Oban.Queues.Executor.start_timeout/1"
         )
 
       assert {:pages, nil} = StartupRecovery.run_batch()
@@ -116,12 +123,7 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
   test "re-queues once a document whose extraction job was discarded before any recovery" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_fixture(%{status: "extracting"})
-
-      %{"document_id" => document.id, "run_id" => document.processing_run_id}
-      |> DocumentExtractionJob.new()
-      |> Oban.insert!()
-      |> Ecto.Changeset.change(state: "discarded", attempt: 3)
-      |> Repo.update!()
+      discarded_job(document)
 
       assert {:pages, nil} = StartupRecovery.run_batch()
 
@@ -137,14 +139,10 @@ defmodule Doctrans.Processing.StartupRecoveryTest do
   test "judges a document by its latest extraction job, not an older run's" do
     Oban.Testing.with_testing_mode(:manual, fn ->
       document = document_fixture(%{status: "extracting"})
-      _older = discarded_recovered_job(document, "** (RuntimeError) older run")
+      _older = discarded_job(document, recovered: true, error: "** (RuntimeError) older run")
 
       # The run's current job, discarded without ever being recovered.
-      %{"document_id" => document.id, "run_id" => document.processing_run_id}
-      |> DocumentExtractionJob.new()
-      |> Oban.insert!()
-      |> Ecto.Changeset.change(state: "discarded", attempt: 3)
-      |> Repo.update!()
+      discarded_job(document)
 
       assert {:pages, nil} = StartupRecovery.run_batch()
 

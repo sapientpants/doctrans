@@ -53,7 +53,7 @@ defmodule Doctrans.Jobs.DocumentExtractionJob do
     # The budget starts here, before the source is located and converted,
     # rather than when the first page renders: counted from any later point it
     # would outlast the guard above.
-    deadline = System.monotonic_time(:millisecond) + PdfExtraction.job_timeout()
+    deadline = Extraction.budget_from_now()
 
     case Documents.get_document(document_id) do
       nil -> {:cancel, :document_not_found}

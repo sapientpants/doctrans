@@ -70,6 +70,10 @@ defmodule Doctrans.Processing.JobQuery do
   @spec waiting_states() :: [String.t()]
   def waiting_states, do: @waiting
 
+  @doc "Every state a job can be in, settled ones included."
+  @spec all_states() :: [String.t()]
+  def all_states, do: Enum.map(Oban.Job.states(), &Atom.to_string/1)
+
   @doc "Jobs whose args hold a document id matched by `selector`."
   @spec document_jobs_query(selector(), [option()]) :: Ecto.Query.t()
   def document_jobs_query(selector, opts \\ []) do
@@ -80,6 +84,20 @@ defmodule Doctrans.Processing.JobQuery do
   @spec page_jobs_query(selector(), [option()]) :: Ecto.Query.t()
   def page_jobs_query(selector, opts \\ []) do
     opts |> jobs() |> where(^matches(page_id_arg(), selector))
+  end
+
+  @doc """
+  The document's most recent job of `worker`, in any state: one row at most.
+
+  Newest by id, so a reprocess that inserts a job for its run makes the job of
+  the run the document moved on from no longer the latest.
+  """
+  @spec latest_document_job_query(Ecto.UUID.t(), module()) :: Ecto.Query.t()
+  def latest_document_job_query(document_id, worker) do
+    document_id
+    |> document_jobs_query(worker: worker, states: all_states())
+    |> order_by([j], desc: j.id)
+    |> limit(1)
   end
 
   @doc """

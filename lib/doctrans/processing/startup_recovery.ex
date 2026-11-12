@@ -217,7 +217,9 @@ defmodule Doctrans.Processing.StartupRecovery do
     # not re-queued on the strength of a stale row. A job already active for
     # the document is that job's to finish.
     if locked && awaiting_pages?(locked) do
-      case latest_extraction_job(locked) do
+      latest = JobQuery.latest_document_job_query(locked.id, DocumentExtractionJob)
+
+      case Repo.one(latest) do
         %Oban.Job{state: "discarded", meta: %{"recovered" => true}} = job ->
           give_up(locked, job)
 
@@ -267,19 +269,6 @@ defmodule Doctrans.Processing.StartupRecovery do
         [attempts: job.attempt]
     end
   end
-
-  # The document's most recent extraction job in any state. A reprocess inserts
-  # a newer job for its run, so the job of a run the document has moved on from
-  # is never the latest.
-  defp latest_extraction_job(document) do
-    document.id
-    |> JobQuery.document_jobs_query(worker: DocumentExtractionJob, states: all_job_states())
-    |> order_by([j], desc: j.id)
-    |> limit(1)
-    |> Repo.one()
-  end
-
-  defp all_job_states, do: Enum.map(Oban.Job.states(), &Atom.to_string/1)
 
   # `EmbeddingJob` is keyed on the page *and* its revision, so unlike a page-keyed
   # job an active one does not necessarily own the page's current work: a job

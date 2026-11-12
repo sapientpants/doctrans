@@ -253,6 +253,27 @@ defmodule DoctransWeb.ErrorMessages do
         "Extraction ran out of time for this document. Finished pages were kept; reprocess it to continue."
       )
 
+  # --- Extraction runs that ended without a verdict -------------------------
+  #
+  # Written by `Doctrans.Processing.ExtractionCrashHandler` for a job Oban
+  # killed or that crashed, and by `Doctrans.Processing.StartupRecovery` for a
+  # run that was discarded twice over. The `error` binding is the raw exception
+  # or exit reason, kept on the row as the diagnostic; it is not shown.
+  defp lookup({:extraction_job_crashed, _bindings}),
+    do:
+      dgettext(
+        "errors",
+        "Extraction stopped unexpectedly before it could finish. Finished pages were kept; reprocess the document to continue."
+      )
+
+  defp lookup({:extraction_attempts_exhausted, bindings}),
+    do:
+      dgettext(
+        "errors",
+        "Extraction was interrupted on each of its %{attempts} attempts. Finished pages were kept; reprocess the document to continue.",
+        attempts: binding(bindings, :attempts)
+      )
+
   defp lookup({:pdf_too_many_pages, bindings}),
     do:
       dgettext(

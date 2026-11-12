@@ -67,7 +67,13 @@ defmodule Doctrans.Processing.Extraction do
     conclude(document, result)
   end
 
-  defp budget_from_now, do: System.monotonic_time(:millisecond) + PdfExtraction.job_timeout()
+  @doc """
+  The monotonic millisecond at which a render budget armed now runs out: the
+  `:deadline` `run/2` takes, for a caller that arms the budget before the run
+  begins.
+  """
+  @spec budget_from_now() :: integer()
+  def budget_from_now, do: System.monotonic_time(:millisecond) + PdfExtraction.job_timeout()
 
   defp conclude(_document, :ok), do: :ok
 

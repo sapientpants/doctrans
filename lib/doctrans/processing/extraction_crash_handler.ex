@@ -52,7 +52,7 @@ defmodule Doctrans.Processing.ExtractionCrashHandler do
   @doc false
   @spec handle_event([atom()], map(), map(), term()) :: :ok
   def handle_event(@event, _measurements, %{job: %Oban.Job{} = job, error: error}, _config) do
-    if job.worker == Oban.Worker.to_string(DocumentExtractionJob) and not performed?(error),
+    if job.worker == Oban.Worker.to_string(DocumentExtractionJob) and not perform_error?(error),
       do: mark_failed(job, error),
       else: :ok
   end
@@ -60,8 +60,8 @@ defmodule Doctrans.Processing.ExtractionCrashHandler do
   def handle_event(_event, _measurements, _meta, _config), do: :ok
 
   # `perform/1` returned a failure: `Extraction` has already recorded it.
-  defp performed?(%Oban.PerformError{}), do: true
-  defp performed?(_error), do: false
+  defp perform_error?(%Oban.PerformError{}), do: true
+  defp perform_error?(_error), do: false
 
   defp mark_failed(job, error) do
     document_id = Map.get(job.args, Keys.document_id())
