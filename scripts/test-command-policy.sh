@@ -113,15 +113,41 @@ block|git push -f;echo done
 # A path or a backslash on the command word does not rename it.
 block|/bin/rm -rf build
 block|/usr/bin/git push --force
+block|./rm -rf build
+block|../bin/rm -rf build
+block|bin/git reset --hard
+block|~/bin/rm -rf build
+block|$HOME/bin/git push --force
+block|X=1 /bin/rm -rf build
 block|\rm -rf build
 block|\git reset --hard
+# A word that runs its arguments hands the path on to the shell.
+block|sudo /bin/rm -rf build
+block|sudo -u root /bin/rm -rf build
+block|env /bin/rm -rf build
+block|xargs -0 /bin/rm -rf < list
+block|find . -name '*.tmp' -exec /bin/rm -rf {} \;
+block|nohup /usr/bin/git push --force &
 # A quoted payload handed to a shell is a command, not data.
 block|bash -c "rm -rf build"
 block|sh -c 'git push --force'
 block|zsh -lc "cd x;rm -rf y"
+block|dash -c "rm -rf build"
+block|ksh -c "git clean -fd"
 block|/bin/bash -c "git reset --hard"
+block|./bash -c "git reset --hard"
 block|eval "git reset --hard"
 block|true && bash -c 'rm -rf build'
+block|bash -cx "rm -rf build"
+block|bash -ce "rm -rf build"
+block|bash -x -c "git reset --hard"
+block|bash -c -x "rm -rf build"
+block|bash -c -- "rm -rf build"
+block|bash -c $'rm -rf build'
+block|bash -c "r""m -rf build"
+block|bash -c rm" -rf build"
+block|sh -c "rm -rf 'build'"
+block|bash -c "echo start; rm -rf build"
 allow|git status
 allow|git status --short
 allow|git add --all
@@ -148,12 +174,22 @@ allow|rm stale.log
 allow|ls -la
 allow|rm /tmp/stale.log
 allow|ls /usr/local/bin
+allow|cat /tmp/rmdir
+allow|ls /opt/mkfs-tools
+allow|cat /var/log/dropdb
+allow|cp notes.md ~/bin/git-notes
+allow|git --git-dir=/tmp/rm status
 allow|cat /etc/hosts | grep local
 allow|find . -name '*.log' -exec rm {} \;
 allow|echo "(rm -rf build)" >> notes.md
 allow|git commit -m "fix(x): bash -c 'rm -rf build' is refused"
 allow|bash -c "mix test"
 allow|bash -c 'echo "rm -rf build is refused"'
+allow|bash -cx "mix test"
+allow|bash -c $'mix test'
+allow|bash -c "mix "'test'
+allow|bash -c "echo "'"rm -rf build"'
+allow|bash script.sh -c "rm -rf build"
 allow|mix test 2>&1 | tail -5
 allow|git log --format=%s%n%b
 CASES
