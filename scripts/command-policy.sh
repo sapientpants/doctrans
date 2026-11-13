@@ -133,6 +133,15 @@ function names_db_client(text) {
   return index(text, "psql") || index(text, "dropdb") || index(text, "mysql") || index(text, "docker exec")
 }
 
+# Whether the raw text carries a statement that destroys data once a client runs
+# it. SQL reads any run of whitespace between keywords, so `DROP  TABLE` and a
+# tab are the same statement as `DROP TABLE`, and `TRUNCATE documents` needs no
+# `TABLE`. `truncate` is also a coreutils command, which takes an option where
+# the SQL takes a name, so only the form followed by a name is read as SQL.
+function destructive_sql(text) {
+  return match(text, /drop[ \t]+(database|table|schema|owned)[ \t]|truncate[ \t]+[a-z_"]|delete[ \t]+from[ \t]/)
+}
+
 # Removes `len` characters of `text` starting at `start`.
 function cut(text, start, len) {
   return substr(text, 1, start - 1) substr(text, start + len)
@@ -141,8 +150,11 @@ function cut(text, start, len) {
 # Whether a command word hands its arguments on as another command: `sudo
 # /bin/rm` runs rm, `env X=1 git` runs git, and so does a shell whose `-c`
 # payload has been unwrapped (`bash -c "/bin/rm -rf build"`) or an eval.
+# `docker exec db /usr/bin/dropdb` runs dropdb in the container, so docker is
+# one too; a path on an argument to a docker subcommand that runs nothing is
+# stripped for nothing, which no rule reads.
 function runs_its_arguments(word) {
-  return word ~ /^(sudo|doas|command|builtin|exec|env|xargs|nohup|nice|time|timeout|(ba|z|da|k)?sh|eval)$/
+  return word ~ /^(sudo|doas|command|builtin|exec|env|xargs|nohup|nice|time|timeout|(ba|z|da|k)?sh|eval|docker(-compose)?)$/
 }
 
 # Drops the directory from a word that names a command: `/bin/rm`, `./rm`,
@@ -409,6 +421,36 @@ function bare_push_lands_on(text,    tok, n, i, w, positional, refspec) {
   return ""
 }
 
+# The tasks every `mix` in the text runs, as ` task ` words. The first word that
+# is not an option is the task -- except after `do`, where a comma on a word or
+# a `+` between words starts another task (`mix do ecto.drop, ecto.create`,
+# `mix do ecto.create + ecto.drop`). A word after the task is its argument, not a
+# task: `mix help ecto.drop` reads the documentation and drops nothing. Runs on
+# the copy that keeps quoted words, because `mix "ecto.drop"` is `mix ecto.drop`
+# to mix.
+function mix_tasks(text,    tok, n, i, w, out, next_is_task, in_do) {
+  n = split(text, tok, " ")
+  out = ""
+  for (i = 1; i <= n; i++) {
+    if (tok[i] != "mix") continue
+    next_is_task = 1; in_do = 0
+    for (i++; i <= n; i++) {
+      w = tok[i]
+      if (w == "") continue
+      if (w ~ /^[;&|(){}`]+$/) break
+      if (w == "+") { next_is_task = in_do; continue }
+      if (next_is_task && w !~ /^-/) {
+        if (w == "do" && !in_do) { in_do = 1; continue }
+        out = out " " w
+        sub(/,$/, "", out)
+        next_is_task = 0
+      }
+      if (in_do && w ~ /,$/) next_is_task = 1
+    }
+  }
+  return out " "
+}
+
 BEGIN {
   q  = sprintf("%c", 39)   # '
   dq = sprintf("%c", 34)   # "
@@ -529,19 +571,21 @@ END {
   deny(" sudo rm ",                   "deleting as root is refused")
 
   # --- This project's data ------------------------------------------------
-  deny(" mix ecto\\.(drop|reset) ",   "dropping the database destroys local data")
+  # A mix task is read from wherever mix would run it: `mix do ecto.drop,
+  # ecto.create` and `mix "ecto.drop"` drop the database as surely as `mix
+  # ecto.drop`. A rollback drops every table the migrations it undoes created.
+  deny(" ecto\\.(drop|reset) ",       "dropping the database destroys local data", mix_tasks(cmdq))
+  deny(" ecto\\.rollback ",           "rolling back migrations drops the tables they created, with their data", mix_tasks(cmdq))
   deny(" mix deps\\.clean [^;&|]*--all ", "AGENTS.md: deps.clean --all is almost never needed")
   deny(" docker(-| )compose [^;&|]*down [^;&|]*(-v|--volumes) ", "compose down -v deletes the pgdata volume")
-  deny(" docker (volume rm|volume prune|system prune) ", "removing docker volumes destroys the database")
+  deny(" docker (volume (rm|remove|prune)|system prune) ", "removing docker volumes destroys the database")
   deny(" dropdb ",                    "dropping the database destroys local data")
 
   # Destructive SQL reaches the client as a quoted argument or a heredoc body, so
   # it is gone from cmd by now -- match the raw text instead. Requiring a database
   # client in the same command keeps prose that merely says "drop table" from
   # tripping this.
-  if (verdict == "" &&
-      (index(rawlc, "drop database") || index(rawlc, "drop table") || index(rawlc, "truncate table")) &&
-      names_db_client(raw))
+  if (verdict == "" && names_db_client(raw) && destructive_sql(rawlc))
     verdict = "destructive SQL against the database is refused"
 
   # --- Whole-machine ------------------------------------------------------
