@@ -99,8 +99,19 @@ prefix_rule(pattern=["rmdir"], decision="forbidden", justification="Directory de
 # a database is not something worth doing by accident in any repository.
 prefix_rule(pattern=["mix", "ecto.drop"], decision="forbidden", justification="Dropping the database destroys local data.")
 prefix_rule(pattern=["mix", "ecto.reset"], decision="forbidden", justification="Resetting the database destroys local data.")
+prefix_rule(pattern=["mix", "ecto.rollback"], decision="forbidden", justification="Rolling back migrations drops the tables they created, with their data.")
+# `mix do` runs a list of tasks; a prefix rule sees the first, bare or with the
+# comma that separates it from the next. A dangerous task later in the list is
+# left to the hook.
+prefix_rule(pattern=["mix", "do", "ecto.drop"], decision="forbidden", justification="Dropping the database destroys local data.")
+prefix_rule(pattern=["mix", "do", "ecto.drop,"], decision="forbidden", justification="Dropping the database destroys local data.")
+prefix_rule(pattern=["mix", "do", "ecto.reset"], decision="forbidden", justification="Resetting the database destroys local data.")
+prefix_rule(pattern=["mix", "do", "ecto.reset,"], decision="forbidden", justification="Resetting the database destroys local data.")
+prefix_rule(pattern=["mix", "do", "ecto.rollback"], decision="forbidden", justification="Rolling back migrations drops the tables they created, with their data.")
+prefix_rule(pattern=["mix", "do", "ecto.rollback,"], decision="forbidden", justification="Rolling back migrations drops the tables they created, with their data.")
 prefix_rule(pattern=["dropdb"], decision="forbidden", justification="Dropping the database destroys local data.")
 prefix_rule(pattern=["docker", "volume", "rm"], decision="forbidden", justification="Removing a docker volume destroys the database.")
+prefix_rule(pattern=["docker", "volume", "remove"], decision="forbidden", justification="Removing a docker volume destroys the database.")
 prefix_rule(pattern=["docker", "volume", "prune"], decision="forbidden", justification="Removing docker volumes destroys the database.")
 prefix_rule(pattern=["docker", "system", "prune"], decision="forbidden", justification="Removing docker volumes destroys the database.")
 # END DOCTRANS COMMAND POLICY

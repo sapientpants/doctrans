@@ -99,6 +99,27 @@ block|docker compose down -v
 block|docker compose down --volumes
 block|docker volume rm doctrans_pgdata
 block|docker system prune
+# A mix task is read wherever mix would run it (#278).
+block|mix do ecto.drop
+block|mix do ecto.drop, ecto.create
+block|mix do ecto.create, ecto.drop
+block|mix do ecto.create + ecto.drop
+block|mix do ecto.drop --quiet, ecto.create
+block|mix do "ecto.reset"
+block|mix "ecto.drop"
+block|mix ecto.drop --force
+block|MIX_ENV=test mix ecto.drop
+block|bash -c "mix do ecto.drop"
+block|mix ecto.rollback
+block|mix ecto.rollback --all
+block|mix do ecto.rollback --to 0, ecto.migrate
+block|docker volume remove doctrans_pgdata
+block|dropdb doctrans_dev
+block|/usr/bin/dropdb doctrans_dev
+block|sudo -u postgres dropdb doctrans_dev
+block|docker exec db dropdb doctrans_dev
+block|docker exec -it db /usr/bin/dropdb doctrans_dev
+block|docker exec db bash -c "dropdb doctrans_dev"
 block|cd sub && rm -rf .
 block|make build; rm -r dist
 # A separator glued to the next word is still a separator.
@@ -254,8 +275,20 @@ allow|gh run list --limit 5
 allow|mix test
 allow|mix precommit
 allow|mix deps.get
+allow|mix help ecto.drop
+allow|mix help ecto.rollback
+allow|mix ecto.migrate
+allow|mix ecto.migrate --to 0
+allow|mix ecto.dump
+allow|mix do ecto.create, ecto.migrate
+allow|mix do deps.get + compile
+allow|echo "mix ecto.drop is refused" >> notes.md
 allow|docker compose up -d db
 allow|docker compose down
+allow|docker compose rm -sfv db
+allow|docker volume ls
+allow|docker volume inspect doctrans_pgdata
+allow|docker exec db cat /var/log/postgresql.log
 allow|rm stale.log
 allow|ls -la
 allow|rm /tmp/stale.log
@@ -403,6 +436,26 @@ echo
 echo "layer 2: data must not be mistaken for commands"
 report block "$(shell_policy 'psql -c "DROP TABLE documents"')" 'psql -c "DROP TABLE documents"'
 report allow "$(shell_policy 'git commit -m "feat(db): drop table legacy_pages in a migration"')" 'commit message naming DROP TABLE'
+# SQL reads any run of whitespace between keywords, and more than DROP TABLE
+# destroys data (#278).
+report block "$(shell_policy 'psql -c "DROP  TABLE documents"')" 'DROP TABLE with two spaces'
+report block "$(shell_policy $'psql -c "DROP\tTABLE documents"')" 'DROP TABLE with a tab'
+report block "$(shell_policy $'psql -c "DROP\nTABLE documents"')" 'DROP TABLE across a newline'
+report block "$(shell_policy 'psql -c "DROP DATABASE doctrans_dev"')" 'DROP DATABASE'
+report block "$(shell_policy 'psql -c "DROP SCHEMA public CASCADE"')" 'DROP SCHEMA'
+report block "$(shell_policy 'psql -c "DROP OWNED BY doctrans"')" 'DROP OWNED'
+report block "$(shell_policy 'psql -c "TRUNCATE documents"')" 'TRUNCATE without TABLE'
+report block "$(shell_policy 'psql -c "truncate only documents"')" 'TRUNCATE ONLY'
+report block "$(shell_policy 'psql -c "DELETE FROM documents"')" 'DELETE FROM'
+report block "$(shell_policy 'psql -c "delete from documents where id = 1"')" 'a lower-case DELETE FROM with a WHERE'
+report block "$(shell_policy 'mysql -e "DELETE FROM documents"')" 'DELETE FROM through mysql'
+report allow "$(shell_policy 'psql -c "DROP INDEX documents_title_idx"')" 'DROP INDEX loses no data'
+report allow "$(shell_policy 'psql -c "SELECT count(*) FROM documents"')" 'harmless SQL'
+report allow "$(shell_policy "psql -c \"SELECT * FROM documents WHERE title LIKE '%truncate%'\"")" 'a value naming truncate'
+report allow "$(shell_policy 'truncate -s 0 dev.log')" 'the coreutils truncate'
+report allow "$(shell_policy 'docker compose exec db psql -U doctrans -c "\dt"')" 'psql listing tables'
+report allow "$(shell_policy 'git commit -m "fix(db): delete from documents cascades to pages"')" 'commit message naming DELETE FROM'
+report allow "$(shell_policy 'git commit -m "feat(db): drop schema legacy in a migration"')" 'commit message naming DROP SCHEMA'
 report allow "$(shell_policy 'echo "never run rm -rf /" >> notes.md')" 'quoted prose naming rm -rf'
 report allow "$(shell_policy "$(printf 'git commit -F - <<%sEOF%s\nwhy rm -rf and git push --force are refused\nEOF' "'" "'")")" 'heredoc commit message naming the rules'
 
@@ -421,6 +474,8 @@ report block "$(shell_policy $'cat <<EOF\nnever closed\npsql -c "DROP TABLE docu
 report block "$(shell_policy $'cat <<EOF\nrm -rf build\nEOF\nrm -rf build')" 'the command after a heredoc is still inspected'
 report block "$(shell_policy $'psql doctrans_dev <<SQL\nDROP TABLE documents;\nSQL')" 'destructive SQL fed through a heredoc'
 report block "$(shell_policy $'docker exec -i db psql -U doctrans <<-SQL\n\tTRUNCATE TABLE documents;\n\tSQL')" 'destructive SQL fed through a <<- heredoc'
+report block "$(shell_policy $'psql doctrans_dev <<SQL\nDELETE FROM documents;\nSQL')" 'DELETE FROM fed through a heredoc'
+report block "$(shell_policy $'psql doctrans_dev <<SQL\nTRUNCATE\n  documents;\nSQL')" 'a heredoc statement split across lines'
 report allow "$(shell_policy $'cat <<EOF\nrm -rf build\nEOF')" 'heredoc body naming rm -rf'
 report allow "$(shell_policy $'cat <<"EOF" > notes.md\nnever run git reset --hard\nEOF')" 'quoted-delimiter heredoc body naming the rules'
 report allow "$(shell_policy $'psql doctrans_dev <<SQL\nSELECT count(*) FROM documents;\nSQL')" 'harmless SQL fed through a heredoc'
@@ -457,7 +512,13 @@ if command -v codex >/dev/null 2>&1; then
   report block "$(native_policy rm -rf build)" 'rm -rf build'
   report block "$(native_policy rmdir d)" 'rmdir'
   report block "$(native_policy mix ecto.drop)" 'mix ecto.drop'
+  report block "$(native_policy mix do ecto.drop)" 'mix do ecto.drop'
+  report block "$(native_policy mix do ecto.drop, ecto.create)" 'mix do ecto.drop, ecto.create'
+  report block "$(native_policy mix do ecto.reset)" 'mix do ecto.reset'
+  report block "$(native_policy mix ecto.rollback --all)" 'mix ecto.rollback'
+  report block "$(native_policy mix do ecto.rollback, ecto.migrate)" 'mix do ecto.rollback, ecto.migrate'
   report block "$(native_policy docker volume rm v)" 'docker volume rm'
+  report block "$(native_policy docker volume remove v)" 'docker volume remove'
   report block "$(native_policy gh api -X DELETE repos/x/y)" 'gh api -X DELETE'
   report block "$(native_policy git checkout -f main)" 'git checkout -f'
   report block "$(native_policy git checkout -B feature origin/main)" 'git checkout -B'
