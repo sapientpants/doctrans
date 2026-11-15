@@ -6,7 +6,9 @@
 # A prefix rule matches leading tokens only, so it cannot see `git push origin
 # --force` (the flag is not in the prefix), `git -C . reset --hard` (a global
 # option before the subcommand), `git p --force` (an alias), every spelling of a
-# flag cluster (`-fu`, `-uf`, ...) or a command behind `zsh -lc`. That is what the
+# flag cluster (`-fu`, `-uf`, ...), a remote URL handed over as `-c
+# remote.origin.url=...` or as the target of `git push https://...`, or a command
+# behind `zsh -lc`. That is what the
 # second layer is for: the PreToolUse hook running scripts/command-policy.sh, which
 # normalises the git command line and matches the whole of it. These rules are the
 # cheap, always-on half; the common spellings are listed, not every one.
@@ -87,6 +89,26 @@ prefix_rule(pattern=["git", "remote", "set-url"], decision="forbidden", justific
 prefix_rule(pattern=["git", "remote", "add"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
 prefix_rule(pattern=["git", "remote", "remove"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
 prefix_rule(pattern=["git", "remote", "rename"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "remote", "rm"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+# The same URL is a config key. A prefix cannot tell a write from a read, so the
+# bare form refuses `git config remote.origin.url` as well; read it with `git
+# remote get-url origin` or `git config --get`. Only origin is listed: a prefix
+# rule matches whole tokens, and any other remote name, `url.<base>.insteadOf`
+# and a push straight to a URL are left to the hook.
+prefix_rule(pattern=["git", "config", "remote.origin.url"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "remote.origin.pushurl"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "--local", "remote.origin.url"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "--local", "remote.origin.pushurl"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "set", "remote.origin.url"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "set", "remote.origin.pushurl"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "--add", "remote.origin.url"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "--add", "remote.origin.pushurl"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "--replace-all", "remote.origin.url"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "--replace-all", "remote.origin.pushurl"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "--unset", "remote.origin.url"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "--unset", "remote.origin.pushurl"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "unset", "remote.origin.url"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
+prefix_rule(pattern=["git", "config", "unset", "remote.origin.pushurl"], decision="forbidden", justification="Changing the git remote is forbidden by AGENTS.md.")
 
 # Recursive deletion
 prefix_rule(pattern=["rm", "-r"], decision="forbidden", justification="Recursive deletion is refused.")

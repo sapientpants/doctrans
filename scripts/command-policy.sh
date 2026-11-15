@@ -76,6 +76,13 @@ command=$(jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
 # A rule that reads a push target runs on a second copy of the text in which a
 # quoted word is kept rather than stripped, so `git push origin 'HEAD:main'`
 # names the branch it would land on.
+#
+# The remote is one more thing git lets a command decide in several places.
+# `git remote set-url` is the obvious one; the same URL is also a setting
+# (remote.<name>.url, remote.<name>.pushurl, url.<base>.insteadOf) that `git
+# config`, `-c` and the GIT_CONFIG_* variables can write, a line in .git/config,
+# and an argument: `git push https://...` needs no remote at all. Each is read
+# where it is written.
 # ---------------------------------------------------------------------------
 read -r -d '' POLICY <<'AWK' || true
 # Refuses the command with `msg` when `re` matches `text`, which defaults to the
@@ -295,10 +302,19 @@ function define_alias(name, expansion) {
   if (!(name in git_commands)) aliases[name] = expansion
 }
 
+# Whether a configuration key decides where a fetch or a push goes: the URL of
+# a remote, its push URL, or a rewrite applied to every URL that starts with
+# <base>. Git reads the section and the variable case-insensitively.
+function rewires_remote(key) {
+  key = tolower(key)
+  return key ~ /^remote\..+\.(url|pushurl)$/ || key ~ /^url\..+\.(insteadof|pushinsteadof)$/
+}
+
 # Records one configuration setting git would read from the command line or
-# the environment. Two are rules: core.hooksPath points the hooks at another
-# directory, which is `--no-verify` for every hook at once, and alias.<name>
-# defines a subcommand. Git reads the key case-insensitively. With `opaque` the
+# the environment. Three are rules: core.hooksPath points the hooks at another
+# directory, which is `--no-verify` for every hook at once, alias.<name>
+# defines a subcommand, and a remote's URL (see rewires_remote) sends the
+# command somewhere else. Git reads the key case-insensitively. With `opaque` the
 # value is the name of an environment variable (`--config-env`), which this
 # script cannot read: an alias defined that way is refused rather than guessed.
 function note_git_setting(setting, opaque,    key, value) {
@@ -309,6 +325,7 @@ function note_git_setting(setting, opaque,    key, value) {
   }
   key = tolower(key)
   if (key == "core.hookspath") hooks_moved = 1
+  else if (rewires_remote(key)) remote_rewired = 1
   else if (key ~ /^alias\.[^.]+$/) {
     if (opaque) alias_unreadable = substr(key, 7)
     else define_alias(substr(key, 7), value)
@@ -508,6 +525,69 @@ function bare_push_lands_on(text,    tok, n, i, w, positional, refspec) {
   return ""
 }
 
+# Whether a `git config` in the text changes where a remote points: it sets or
+# unsets one of the keys rewires_remote names, or removes or renames a remote's
+# whole section. Reading a key is not a change, and git reads `git config
+# <key>` with no value as a read, so `git config remote.origin.url` and `git
+# config --get remote.origin.url` pass. Both spellings of the command are read:
+# the options (`--unset`, `--remove-section`) and the subcommands git 2.46
+# added (`set`, `unset`, `remove-section`). A redirection is not an argument.
+function config_rewires_remote(text,    tok, n, i, w, words, key, reading, unsetting, on_section, first) {
+  n = split(text, tok, " ")
+  for (i = 1; i < n; i++) {
+    if (tok[i] != "git" || tok[i + 1] != "config") continue
+    words = 0; key = ""; reading = 0; unsetting = 0; on_section = 0; first = 1
+    for (i += 2; i <= n; i++) {
+      w = tok[i]
+      if (w == "") continue
+      if (w ~ /^[;&|(){}`]+$/) break
+      if (w ~ /^[0-9]*[<>]/) { if (w ~ /[<>]$/) i++; continue }
+      if (w ~ /^(-f|--file|--blob|--type|--default|--comment|--value|--url)$/) { i++; continue }
+      if (w ~ /^(--get|--get-all|--get-regexp|--get-urlmatch|--get-color|--get-colorbool|-l|--list)$/) reading = 1
+      else if (w ~ /^--unset(-all)?$/) unsetting = 1
+      else if (w ~ /^--(remove|rename)-section$/) on_section = 1
+      if (w ~ /^-/) continue
+      if (first) {
+        first = 0
+        if (w ~ /^(get|list)$/) reading = 1
+        else if (w == "unset") unsetting = 1
+        else if (w ~ /^(remove|rename)-section$/) on_section = 1
+        if (w ~ /^(get|list|set|unset|remove-section|rename-section|edit)$/) continue
+      }
+      if (++words == 1) key = tolower(w)
+    }
+    if (reading) continue
+    if (on_section && key ~ /^(remote|url)(\.|$)/) return 1
+    if (rewires_remote(key) && (words >= 2 || unsetting)) return 1
+  }
+  return 0
+}
+
+# Whether a `git push` in the text names its repository by URL or by path
+# rather than by remote: `git push https://github.com/x/y.git feature`, `git
+# push git@github.com:x/y.git feature`, `git push ../mirror feature`. The
+# repository is the first argument that is not an option, or the value of
+# `--repo`; a remote's name holds neither a `:` nor a `/` and does not start
+# with a `.`, and every URL and path does one of the three.
+function push_names_a_url(text,    tok, n, i, w) {
+  n = split(text, tok, " ")
+  for (i = 1; i < n; i++) {
+    if (tok[i] != "git" || tok[i + 1] != "push") continue
+    for (i += 2; i <= n; i++) {
+      w = tok[i]
+      if (w == "") continue
+      if (w ~ /^[;&|(){}`]+$/) break
+      if (w ~ /^(-o|--push-option|--receive-pack|--exec)$/) { i++; continue }
+      if (w == "--repo") w = tok[++i]
+      else if (w ~ /^--repo=/) w = substr(w, length("--repo=") + 1)
+      else if (w ~ /^-/) continue
+      if (w ~ /[:\/]|^\./) return 1
+      break
+    }
+  }
+  return 0
+}
+
 # The tasks every `mix` in the text runs, as ` task ` words. The first word that
 # is not an option is the task -- except after `do`, where a comma on a word or
 # a `+` between words starts another task (`mix do ecto.drop, ecto.create`,
@@ -647,7 +727,20 @@ END {
   deny(" gh release (delete|delete-asset|edit|upload) ", "mutating a published release is irreversible")
 
   # --- Remote configuration (AGENTS.md: never change the remote URL) ------
-  deny(" git remote (set-url|add|remove|rename|rm) ", "changing the git remote is forbidden by AGENTS.md")
+  # The URL is read wherever git would take it from: the `remote` subcommand
+  # (behind its own options: `git remote -v add`), a `-c` or GIT_CONFIG_*
+  # setting, `git config`, the config file itself, and the push that names a
+  # URL and so needs no remote. Keys, URLs and paths are never prose, so the
+  # last three read the copy that keeps quoted words.
+  deny(" git remote( -[^ ]+)* (set-url|add|remove|rename|rm) ", "changing the git remote is forbidden by AGENTS.md")
+  if (verdict == "" && remote_rewired)
+    verdict = "a remote URL set through -c or GIT_CONFIG_* changes the git remote for the command, which AGENTS.md forbids"
+  if (verdict == "" && config_rewires_remote(cmdq))
+    verdict = "changing a remote URL through git config is forbidden by AGENTS.md"
+  deny(" (sed|perl)" args "(-[A-Za-z]*i[^ ]*|--in-place[^ ]*) ([^;&|]* )?[^ ;&|]*\\.git/config ", "editing .git/config directly can change the git remote, which AGENTS.md forbids", cmdq)
+  deny("( tee" args "|>>? ?)[^ ;&|]*\\.git/config ", "writing to .git/config directly can change the git remote, which AGENTS.md forbids", cmdq)
+  if (verdict == "" && push_names_a_url(cmdq))
+    verdict = "pushing to a URL or a path is a one-off remote, which AGENTS.md forbids; push to a configured remote by name"
   deny(" git branch [^;&|]*(--set-upstream-to|-u) ", "changing a branch upstream rewires where work is pushed")
 
   # --- Recursive deletion -------------------------------------------------
