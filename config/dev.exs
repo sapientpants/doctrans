@@ -93,11 +93,8 @@ config :doctrans, DoctransWeb.Endpoint,
     ]
   ]
 
-# Enable dev routes for the dashboard. They are served to loopback connections
-# only, on the HTTP render and the socket alike (`DoctransWeb.Plugs.LoopbackOnly`,
-# #281), so a LAN bind exposes the application and not this inspector of the
-# running VM. Under Docker Compose the peer is Docker's gateway, so the
-# dashboard is a native `mix phx.server` tool.
+# Enable dev routes for the dashboard, served to loopback connections only
+# (`DoctransWeb.Plugs.LoopbackOnly`, #281).
 config :doctrans, dev_routes: true
 
 # Include timestamps and metadata in development logs for debugging
