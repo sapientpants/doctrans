@@ -34,19 +34,48 @@ defmodule Doctrans.Validation do
     end
   end
 
+  @max_search_query_chars 500
+  @max_search_query_bytes 4 * @max_search_query_chars
+
+  @doc """
+  The most characters a search query may hold once trimmed.
+  """
+  @spec max_search_query_chars() :: pos_integer()
+  def max_search_query_chars, do: @max_search_query_chars
+
+  @doc """
+  The most bytes a search query may hold once trimmed: four per character, as
+  for `max_chat_question_bytes/0`.
+  """
+  @spec max_search_query_bytes() :: pos_integer()
+  def max_search_query_bytes, do: @max_search_query_bytes
+
   @doc """
   Validates search query parameters.
+
+  Bounded in bytes as well as characters, for the reason
+  `validate_chat_question/1` gives: a grapheme cluster can carry any number of
+  combining marks, and the query is sent whole to `plainto_tsquery`, which
+  Postgres parses once per candidate row, and to the embedding endpoint.
 
   ## Parameters
   - `query` - Search query string
 
   ## Returns
   - `{:ok, sanitized_query}` if valid
-  - `{:error, reason}` if invalid
+  - `{:error, :query_too_short}` for a blank query
+  - `{:error, {:query_too_long, max: characters}}` for one over either bound
+  - `{:error, :invalid_query}` for anything but a string
   """
   @spec validate_search_query(term()) :: {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
-  def validate_search_query(query) when is_binary(query),
-    do: bounded_text(query, [graphemes: 500], :query_too_short, :query_too_long)
+  def validate_search_query(query) when is_binary(query) do
+    bounded_text(
+      query,
+      [bytes: @max_search_query_bytes, graphemes: @max_search_query_chars],
+      :query_too_short,
+      :query_too_long
+    )
+  end
 
   def validate_search_query(_), do: {:error, :invalid_query}
 

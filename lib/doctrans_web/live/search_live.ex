@@ -229,6 +229,7 @@ defmodule DoctransWeb.SearchLive do
               type="text"
               name="q"
               value={@query}
+              maxlength={Validation.max_search_query_chars()}
               placeholder={gettext("Search...")}
               autofocus
               class={[
