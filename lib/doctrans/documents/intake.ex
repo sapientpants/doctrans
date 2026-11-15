@@ -76,7 +76,10 @@ defmodule Doctrans.Documents.Intake do
       {:ok, document_id, client_name, dest_path}
     else
       {:error, reason} ->
-        Logger.warning("Upload rejected for #{client_name}: #{inspect(reason)}")
+        # Inspected, not interpolated: the client name is still raw here, and a CR, LF
+        # or escape sequence in it would forge or rewrite log lines. `inspect/1` also
+        # escapes the DEL and C1 controls the filename sanitiser leaves in.
+        Logger.warning("Upload rejected for #{inspect(client_name)}: #{inspect(reason)}")
         {:error, client_name, reason}
     end
   end
