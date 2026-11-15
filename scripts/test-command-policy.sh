@@ -120,6 +120,23 @@ block|sudo -u postgres dropdb doctrans_dev
 block|docker exec db dropdb doctrans_dev
 block|docker exec -it db /usr/bin/dropdb doctrans_dev
 block|docker exec db bash -c "dropdb doctrans_dev"
+# A docker exec or run hands the word after its container on as a command, and
+# a global option sits between docker and its subcommand (#278).
+block|docker compose exec db /usr/bin/dropdb doctrans_dev
+block|docker compose -f docker-compose.yml exec -u postgres db /usr/bin/dropdb doctrans_dev
+block|docker-compose exec db /usr/bin/dropdb doctrans_dev
+block|docker exec -itu postgres db /usr/bin/dropdb doctrans_dev
+block|docker container exec db /usr/bin/dropdb doctrans_dev
+block|docker run --rm -e PGHOST=db postgres:16 /usr/bin/dropdb doctrans_dev
+block|docker exec db sudo -u postgres /usr/bin/dropdb doctrans_dev
+block|docker exec db bash -c "/usr/bin/dropdb doctrans_dev"
+block|docker exec db /bin/rm -rf /var/lib/postgresql/data
+block|docker exec db /usr/bin/git push --force origin feature
+block|docker exec db ls; rm -rf build
+block|docker --context default volume rm doctrans_pgdata
+block|docker -H unix:///var/run/docker.sock volume remove doctrans_pgdata
+block|docker -D volume prune -f
+block|docker compose -f docker-compose.yml down -v
 block|cd sub && rm -rf .
 block|make build; rm -r dist
 # A separator glued to the next word is still a separator.
@@ -289,6 +306,14 @@ allow|docker compose rm -sfv db
 allow|docker volume ls
 allow|docker volume inspect doctrans_pgdata
 allow|docker exec db cat /var/log/postgresql.log
+# Every other docker argument is data and keeps its path.
+allow|docker exec db cat /srv/rmdir
+allow|docker compose exec db tail -f /var/log/rm -r
+allow|docker cp db:/var/lib/rmdir ./x
+allow|docker logs db | grep /opt/rmdir
+allow|docker run --rm -v ./rmdir:/x img ls
+allow|docker exec db ls; cat /srv/rmdir
+allow|docker exec app grep -r "delete from" src
 allow|rm stale.log
 allow|ls -la
 allow|rm /tmp/stale.log
@@ -456,6 +481,24 @@ report allow "$(shell_policy 'truncate -s 0 dev.log')" 'the coreutils truncate'
 report allow "$(shell_policy 'docker compose exec db psql -U doctrans -c "\dt"')" 'psql listing tables'
 report allow "$(shell_policy 'git commit -m "fix(db): delete from documents cascades to pages"')" 'commit message naming DELETE FROM'
 report allow "$(shell_policy 'git commit -m "feat(db): drop schema legacy in a migration"')" 'commit message naming DROP SCHEMA'
+# A statement that takes columns with it, a client the first list missed, and the
+# command the SQL belongs to: one command between separators, a pipe joining
+# its halves (#278).
+report block "$(shell_policy 'psql -c "DROP EXTENSION vector CASCADE"')" 'DROP EXTENSION CASCADE takes its columns with it'
+report block "$(shell_policy 'psql -c "DROP TYPE embedding CASCADE"')" 'DROP TYPE CASCADE takes its columns with it'
+report block "$(shell_policy 'psql -c "ALTER TABLE documents DROP COLUMN body"')" 'DROP COLUMN'
+report block "$(shell_policy 'sqlite3 x.db "DROP TABLE documents"')" 'DROP TABLE through sqlite3'
+report block "$(shell_policy 'echo "DROP TABLE documents" | psql')" 'SQL piped into psql'
+report block "$(shell_policy 'ls && psql -c "DELETE FROM documents"')" 'destructive SQL after another command'
+report block "$(shell_policy 'psql -c "SELECT 1; DROP TABLE documents"')" 'a semicolon inside the quoted SQL does not split the command'
+report allow "$(shell_policy 'psql -c "DROP EXTENSION IF EXISTS vector"')" 'DROP EXTENSION without CASCADE loses no data'
+report allow "$(shell_policy 'psql -c "DROP TYPE embedding"')" 'DROP TYPE without CASCADE loses no data'
+report allow "$(shell_policy 'psql -c "ALTER TABLE documents DROP CONSTRAINT documents_pkey"')" 'DROP CONSTRAINT loses no data'
+report allow "$(shell_policy 'psql -c "ALTER TABLE documents ALTER COLUMN body DROP NOT NULL"')" 'DROP NOT NULL loses no data'
+report allow "$(shell_policy 'psql -c "\dt"; truncate dev.log')" 'the coreutils truncate after a psql command'
+report allow "$(shell_policy 'psql -c "\dt" || truncate dev.log')" 'the coreutils truncate after a failed psql command'
+report allow "$(shell_policy 'psql -c "\dt" && git commit -m "fix: delete from documents cascades"')" 'a commit message naming DELETE FROM after a psql command'
+report allow "$(shell_policy 'docker exec app sh -c "echo delete from cart"')" 'docker exec alone is not a database client'
 report allow "$(shell_policy 'echo "never run rm -rf /" >> notes.md')" 'quoted prose naming rm -rf'
 report allow "$(shell_policy "$(printf 'git commit -F - <<%sEOF%s\nwhy rm -rf and git push --force are refused\nEOF' "'" "'")")" 'heredoc commit message naming the rules'
 

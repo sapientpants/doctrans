@@ -127,19 +127,51 @@ function heredoc_delim(line,    i, n, c, prev, open_quote, rest, word) {
 }
 
 # Whether the text names a client that would run SQL handed to it. Shared by the
-# SQL rule and the heredoc pass so the two lists cannot drift apart.
+# SQL rule and the heredoc pass so the two lists cannot drift apart. A `docker
+# exec` is not one: it runs nothing without a command word, and when that word
+# is a client it is named here as well, so counting the exec only read `docker
+# exec app sh -c "echo delete from cart"` as SQL.
 function names_db_client(text) {
   text = tolower(text)
-  return index(text, "psql") || index(text, "dropdb") || index(text, "mysql") || index(text, "docker exec")
+  return index(text, "psql") || index(text, "dropdb") || index(text, "mysql") || index(text, "sqlite3")
 }
 
-# Whether the raw text carries a statement that destroys data once a client runs
-# it. SQL reads any run of whitespace between keywords, so `DROP  TABLE` and a
-# tab are the same statement as `DROP TABLE`, and `TRUNCATE documents` needs no
-# `TABLE`. `truncate` is also a coreutils command, which takes an option where
-# the SQL takes a name, so only the form followed by a name is read as SQL.
+# Whether the text carries a statement that destroys data once a client runs
+# it. SQL reads any run of whitespace between keywords, so `DROP  TABLE`, a tab
+# and a line break are the same statement as `DROP TABLE`, and `TRUNCATE
+# documents` needs no `TABLE`. `truncate` is also a coreutils command, which
+# takes an option where the SQL takes a name, so only the form followed by a
+# name is read as SQL. A `DROP INDEX`, a `DROP CONSTRAINT`, and a `DROP TYPE` or
+# `DROP EXTENSION` without `CASCADE` lose no row and are left alone; with
+# `CASCADE` the last two take every column of that type with them.
 function destructive_sql(text) {
-  return match(text, /drop[ \t]+(database|table|schema|owned)[ \t]|truncate[ \t]+[a-z_"]|delete[ \t]+from[ \t]/)
+  text = tolower(text)
+  return match(text, /drop[ \t\n]+(database|table|schema|owned|column)[ \t\n]|drop[ \t\n]+(extension|type)[^;]*[ \t\n]cascade|truncate[ \t\n]+[a-z_"]|delete[ \t\n]+from[ \t\n]/)
+}
+
+# Whether a command in the text hands destructive SQL to a database client. The
+# text is split into commands at `;`, `&`, `&&`, `||` and a line break outside
+# quotes, so `psql -c "\dt"; truncate dev.log` names a client in one command
+# and the coreutils truncate in another. A `|` keeps its two sides together:
+# what the left side prints is what the client on the right side runs.
+function runs_destructive_sql(text,    i, n, c, open_quote, seg) {
+  n = length(text); seg = ""; open_quote = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(text, i, 1)
+    if (open_quote != "") {
+      if (c == open_quote) open_quote = ""
+      else if (c == "\\" && open_quote == dq) { seg = seg c; c = substr(text, ++i, 1) }
+    }
+    else if (c == q || c == dq) open_quote = c
+    else if (c == "\\") { seg = seg c; c = substr(text, ++i, 1) }
+    else if (c == "|" && substr(text, i + 1, 1) == "|") { c = ";"; i++ }
+    if (c == ";" || c == "&" || c == "\n") {
+      if (open_quote == "" && names_db_client(seg) && destructive_sql(seg)) return 1
+      if (open_quote == "") { seg = ""; continue }
+    }
+    seg = seg c
+  }
+  return names_db_client(seg) && destructive_sql(seg)
 }
 
 # Removes `len` characters of `text` starting at `start`.
@@ -150,11 +182,10 @@ function cut(text, start, len) {
 # Whether a command word hands its arguments on as another command: `sudo
 # /bin/rm` runs rm, `env X=1 git` runs git, and so does a shell whose `-c`
 # payload has been unwrapped (`bash -c "/bin/rm -rf build"`) or an eval.
-# `docker exec db /usr/bin/dropdb` runs dropdb in the container, so docker is
-# one too; a path on an argument to a docker subcommand that runs nothing is
-# stripped for nothing, which no rule reads.
+# `docker exec db /usr/bin/dropdb` runs dropdb too, but only through the word
+# after its container, which normalise_docker finds.
 function runs_its_arguments(word) {
-  return word ~ /^(sudo|doas|command|builtin|exec|env|xargs|nohup|nice|time|timeout|(ba|z|da|k)?sh|eval|docker(-compose)?)$/
+  return word ~ /^(sudo|doas|command|builtin|exec|env|xargs|nohup|nice|time|timeout|(ba|z|da|k)?sh|eval)$/
 }
 
 # Drops the directory from a word that names a command: `/bin/rm`, `./rm`,
@@ -392,6 +423,62 @@ function normalise_git(text, keep_words,    tok, n, i, w, out, name, next_name, 
   return out " "
 }
 
+# Whether a docker option in `scope` takes the next word as its value, as the
+# docker client reads it: `-u postgres` does, `-it` does not, and
+# `--user=postgres` carries its own. The tables are the client's own for its
+# global options, for `compose`, and for `exec` (`docker <cmd> --help`). The
+# `run` table is long, so there every long option is read as taking a value
+# except the flags, and a short cluster takes one when its last letter does.
+function docker_option_takes_value(scope, w) {
+  if (index(w, "=")) return 0
+  if (scope == "docker")  return w ~ /^(-c|-H|-l|--config|--context|--host|--log-level|--tlscacert|--tlscert|--tlskey)$/
+  if (scope == "compose") return w ~ /^(-f|-p|--file|--project-name|--profile|--env-file|--project-directory|--ansi|--progress|--parallel)$/
+  if (scope == "exec")    return w ~ /^(-[A-Za-z]*[euw]|--detach-keys|--env|--env-file|--index|--user|--workdir)$/
+  if (scope == "run")     return w ~ /^-[A-Za-z]*[acehlmpuvw]$/ || (w ~ /^--/ && w !~ /^--(build|detach|disable-content-trust|dry-run|help|init|interactive|no-deps|no-healthcheck|no-recreate|no-tty|oom-kill-disable|privileged|publish-all|quiet|quiet-build|quiet-pull|read-only|remove-orphans|rm|service-ports|sig-proxy|tty|use-aliases|use-api-socket)$/)
+  return 0
+}
+
+# Rewrites every `docker` invocation into the shape the rules and the path
+# stripping expect. Docker's global options are dropped, as git's are, so
+# `docker --context default volume rm` is `docker volume rm`. An `exec` or a
+# `run` (`docker exec`, `docker container run`, `docker compose exec`,
+# `docker-compose run`) hands the word after its container or image on as a
+# command, so that word loses its directory the way a command word does and,
+# when it runs its own arguments (`docker exec db sudo /usr/bin/dropdb`), so do
+# they. Every other argument is data and keeps its path: `docker exec db cat
+# /srv/rmdir` reads a file, and `docker cp db:/var/lib/rmdir .` copies one.
+function normalise_docker(text,    tok, n, i, w, out, scope, want, after_value, strip_all) {
+  n = split(text, tok, " ")
+  out = ""
+  for (i = 1; i <= n; i++) {
+    w = tok[i]
+    if (w == "") continue
+    out = out " " w
+    if (w != "docker" && w != "docker-compose") continue
+    scope = (w == "docker") ? "docker" : "compose"
+    want = "subcommand"; strip_all = 0
+    for (i++; i <= n; i++) {
+      w = tok[i]
+      if (w == "") continue
+      if (w ~ /^[;&|(){}`]+$/) { i--; break }
+      if (want == "value")     { want = after_value; if (scope != "docker") out = out " " w; continue }
+      if (want == "arguments") { out = out " " (strip_all ? strip_path(w) : w); continue }
+      if (want == "command")   { w = strip_path(w); strip_all = runs_its_arguments(w); want = "arguments" }
+      else if (w ~ /^-/) {
+        if (docker_option_takes_value(scope, w)) { after_value = want; want = "value" }
+        if (scope == "docker") continue
+      }
+      else if (want == "container") want = "command"
+      else if (scope == "docker" && w == "compose") scope = "compose"
+      else if (scope == "docker" && w == "container") ;
+      else if (w == "exec" || w == "run") { scope = w; want = "container" }
+      else want = "arguments"
+      out = out " " w
+    }
+  }
+  return out " "
+}
+
 # A short-flag cluster carrying one of `letters`, as a rule reads it: `-fu` and
 # `-uf` both carry `f`. The trailing space is the word boundary every rule ends
 # on, which is what keeps `--signed` from reading as `-d`.
@@ -428,7 +515,7 @@ function bare_push_lands_on(text,    tok, n, i, w, positional, refspec) {
 # task: `mix help ecto.drop` reads the documentation and drops nothing. Runs on
 # the copy that keeps quoted words, because `mix "ecto.drop"` is `mix ecto.drop`
 # to mix.
-function mix_tasks(text,    tok, n, i, w, out, next_is_task, in_do) {
+function mix_tasks(text,    tok, n, i, w, task, out, next_is_task, in_do) {
   n = split(text, tok, " ")
   out = ""
   for (i = 1; i <= n; i++) {
@@ -441,8 +528,8 @@ function mix_tasks(text,    tok, n, i, w, out, next_is_task, in_do) {
       if (w == "+") { next_is_task = in_do; continue }
       if (next_is_task && w !~ /^-/) {
         if (w == "do" && !in_do) { in_do = 1; continue }
-        out = out " " w
-        sub(/,$/, "", out)
+        task = w; sub(/,$/, "", task)
+        out = out " " task
         next_is_task = 0
       }
       if (in_do && w ~ /,$/) next_is_task = 1
@@ -473,10 +560,10 @@ BEGIN {
   branch = ENVIRON["COMMAND_POLICY_GIT_BRANCH"]
 }
 
-# Inside a heredoc. The body is data to the shell, so it stays out of `cmd` -- and
-# out of `raw` too, unless the opening line hands it to a database client:
-# `psql <<SQL` runs the body, so the SQL rule has to see it, while a body written
-# to a file or a commit message is prose whatever it says. The body is also kept
+# Inside a heredoc. The body is data to the shell, so it stays out of `cmd` and
+# `raw` -- unless the opening line hands it to a database client: `psql <<SQL`
+# runs the body, so it goes to `sql` for the SQL rule, while a body written to a
+# file or a commit message is prose whatever it says. The body is also kept
 # aside until the terminator arrives. If it never does, this script cannot tell a
 # heredoc the shell closes at end of input from an opener it misread, and only one
 # of those is safe to skip: END hands the lines back to `cmd` and `raw`.
@@ -485,14 +572,14 @@ delim != "" {
   sub(/^[ \t]+/, "", line)          # <<- allows a tab-indented terminator
   if (line == delim) { delim = ""; body = ""; next }
   body = body " " $0
-  if (body_runs_sql) raw = raw " " $0
+  if (body_runs_sql) sql = sql " " $0
   next
 }
 {
   delim = heredoc_delim($0)        # the opening line itself is command
   body_runs_sql = (delim != "" && names_db_client($0))
   cmd = cmd " " $0
-  raw = raw " " $0                 # same lines, quotes intact, for the SQL rule
+  raw = raw "\n" $0                # same lines, quotes intact, for the SQL rule
 }
 
 END {
@@ -502,9 +589,8 @@ END {
   }
   cmd = unwrap_shell_payloads(cmd)
   note_git_settings(cmd)                                            # quotes still intact here
-  cmdq = normalise_git(normalise_tokens(strip_quotes(cmd, 1)), 1)   # quoted words kept
-  cmd  = normalise_git(normalise_tokens(strip_quotes(cmd, 0)), 0)   # every quoted string gone
-  rawlc = tolower(raw)
+  cmdq = normalise_git(normalise_docker(normalise_tokens(strip_quotes(cmd, 1))), 1)   # quoted words kept
+  cmd  = normalise_git(normalise_docker(normalise_tokens(strip_quotes(cmd, 0))), 0)   # every quoted string gone
 
   # The git rules below read `git <sub>` args ` <flag> `: args is any run of
   # arguments and a flag is matched as a whole word, so a short flag is found
@@ -574,18 +660,20 @@ END {
   # A mix task is read from wherever mix would run it: `mix do ecto.drop,
   # ecto.create` and `mix "ecto.drop"` drop the database as surely as `mix
   # ecto.drop`. A rollback drops every table the migrations it undoes created.
-  deny(" ecto\\.(drop|reset) ",       "dropping the database destroys local data", mix_tasks(cmdq))
-  deny(" ecto\\.rollback ",           "rolling back migrations drops the tables they created, with their data", mix_tasks(cmdq))
+  tasks = mix_tasks(cmdq)
+  deny(" ecto\\.(drop|reset) ",       "dropping the database destroys local data", tasks)
+  deny(" ecto\\.rollback ",           "rolling back migrations drops the tables they created, with their data", tasks)
   deny(" mix deps\\.clean [^;&|]*--all ", "AGENTS.md: deps.clean --all is almost never needed")
   deny(" docker(-| )compose [^;&|]*down [^;&|]*(-v|--volumes) ", "compose down -v deletes the pgdata volume")
   deny(" docker (volume (rm|remove|prune)|system prune) ", "removing docker volumes destroys the database")
   deny(" dropdb ",                    "dropping the database destroys local data")
 
   # Destructive SQL reaches the client as a quoted argument or a heredoc body, so
-  # it is gone from cmd by now -- match the raw text instead. Requiring a database
-  # client in the same command keeps prose that merely says "drop table" from
-  # tripping this.
-  if (verdict == "" && names_db_client(raw) && destructive_sql(rawlc))
+  # it is gone from cmd by now -- match the raw text instead. A heredoc body
+  # handed to a client is SQL by construction; on the command lines, requiring a
+  # database client in the same command keeps prose that merely says "drop
+  # table" from tripping this.
+  if (verdict == "" && (destructive_sql(sql) || runs_destructive_sql(raw)))
     verdict = "destructive SQL against the database is refused"
 
   # --- Whole-machine ------------------------------------------------------
