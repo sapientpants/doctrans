@@ -532,6 +532,41 @@ report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push 
 report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push 2>/dev/null')" 'bare push with a redirection, repo on a feature branch'
 report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push >/tmp/push.log 2>&1')" 'bare push with two redirections, repo on a feature branch'
 report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin 2>/dev/null')" 'a redirection is not a refspec, repo on main'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push --set-upstream origin HEAD')" 'push of HEAD with --set-upstream, repo on main'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy "git push origin 'HEAD'")" 'push of a quoted HEAD, repo on main'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git -C . push origin main')" 'push to main behind a global option'
+# HEAD may be any refspec of the list, not just the first.
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin feature HEAD')" 'push of HEAD as a later refspec, repo on main'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin feature @')" 'push of @ as a later refspec, repo on main'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin feature HEAD')" 'push of HEAD as a later refspec, repo on a feature branch'
+# A refspec the policy cannot read stands for the current branch.
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin "$BRANCH"')" 'push of a variable, repo on main'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin $(git branch --show-current)')" 'push of a command substitution, repo on main'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin "$(git branch --show-current)"')" 'push of a quoted command substitution, repo on main'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin "$BRANCH"')" 'push of a variable, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push -u origin "$(git branch --show-current)"')" 'push of a command substitution, repo on a feature branch'
+# Git refuses these as invalid refspecs, so they push nothing.
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin HEAD:feature')" 'HEAD to a named feature branch, repo on main'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin HEAD:HEAD')" 'HEAD:HEAD creates a branch named HEAD, repo on main'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin HEAD:')" 'HEAD with an empty destination, repo on main'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin @:')" '@ with an empty destination, repo on main'
+# Only the destination of a refspec is read for the current branch.
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin "$BRANCH:feature"')" 'a variable source to a named feature branch, repo on main'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin "feature:$BRANCH"')" 'a named source to a variable destination, repo on main'
+# Pushing every branch lands on main whichever is checked out.
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push --all origin')" 'push --all, repo on a feature branch'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin --branches')" 'push --branches, repo on a feature branch'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin :')" 'push of the matching branches, repo on a feature branch'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin 'refs/heads/*'")" 'push of a glob refspec, repo on a feature branch'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin '*:*'")" 'push of a glob pair, repo on a feature branch'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin 'refs/heads/feature/*:refs/heads/m*'")" 'a glob destination that matches main, repo on a feature branch'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin 'refs/heads/*:heads/*'")" 'a short glob destination that matches main, repo on a feature branch'
+# A glob whose destination cannot name the default branch lands elsewhere.
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin 'refs/tags/*:refs/tags/*'")" 'push of a tag glob, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin "refs/tags/v1*"')" 'push of a tag prefix glob, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin 'refs/heads/feature/*:refs/heads/feature/*'")" 'push of a feature namespace glob, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy "git push origin 'refs/tags/*'")" 'push of a tag glob, repo on main'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin --tags')" 'push --tags, repo on a feature branch'
 
 # A git alias stands in for the subcommand, so it is resolved from the checkout's
 # config before the rules run. These aliases are defined in the scratch repositories
