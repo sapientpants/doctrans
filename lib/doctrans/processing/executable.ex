@@ -55,7 +55,9 @@ defmodule Doctrans.Processing.Executable do
     do: is_binary(path) and Path.type(path) == :absolute and executable_file?(path)
 
   # Searches the directories in the current `PATH`, honouring whatever PATH the
-  # process environment holds at call time.
+  # process environment holds at call time. Only absolute directories count, as
+  # for `:candidates`: an empty segment (a leading, trailing or doubled
+  # separator) or a relative one would otherwise resolve against the cwd.
   defp find_on_path(name) do
     separator =
       case :os.type() do
@@ -67,6 +69,6 @@ defmodule Doctrans.Processing.Executable do
     |> System.get_env("")
     |> String.split(separator, trim: false)
     |> Enum.map(fn dir -> Path.join(dir, name) end)
-    |> Enum.find(&executable_file?/1)
+    |> Enum.find(&absolute_executable?/1)
   end
 end
