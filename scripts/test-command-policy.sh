@@ -548,12 +548,24 @@ report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push 
 # Git refuses these as invalid refspecs, so they push nothing.
 report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin HEAD:feature')" 'HEAD to a named feature branch, repo on main'
 report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin HEAD:HEAD')" 'HEAD:HEAD creates a branch named HEAD, repo on main'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin HEAD:')" 'HEAD with an empty destination, repo on main'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin @:')" '@ with an empty destination, repo on main'
+# Only the destination of a refspec is read for the current branch.
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin "$BRANCH:feature"')" 'a variable source to a named feature branch, repo on main'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin "feature:$BRANCH"')" 'a named source to a variable destination, repo on main'
 # Pushing every branch lands on main whichever is checked out.
 report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push --all origin')" 'push --all, repo on a feature branch'
 report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin --branches')" 'push --branches, repo on a feature branch'
 report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin :')" 'push of the matching branches, repo on a feature branch'
 report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin 'refs/heads/*'")" 'push of a glob refspec, repo on a feature branch'
 report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin '*:*'")" 'push of a glob pair, repo on a feature branch'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin 'refs/heads/feature/*:refs/heads/m*'")" 'a glob destination that matches main, repo on a feature branch'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin 'refs/heads/*:heads/*'")" 'a short glob destination that matches main, repo on a feature branch'
+# A glob whose destination cannot name the default branch lands elsewhere.
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin 'refs/tags/*:refs/tags/*'")" 'push of a tag glob, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin "refs/tags/v1*"')" 'push of a tag prefix glob, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy "git push origin 'refs/heads/feature/*:refs/heads/feature/*'")" 'push of a feature namespace glob, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy "git push origin 'refs/tags/*'")" 'push of a tag glob, repo on main'
 report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin --tags')" 'push --tags, repo on a feature branch'
 
 # A git alias stands in for the subcommand, so it is resolved from the checkout's

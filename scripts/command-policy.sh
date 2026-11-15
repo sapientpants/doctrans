@@ -571,35 +571,60 @@ function cluster(letters) {
 #
 #   * It pushes the branch that is checked out, which the caller resolves into
 #     `branch`: `git push` and `git push origin` name no refspec, and `HEAD`,
-#     `@` or a refspec the policy cannot read stands for one -- a variable or a
-#     command substitution (`git push origin "$(git branch --show-current)"`)
-#     reads as `$` or as the placeholder of a quoted string with a space in it,
-#     which no refspec holds. Any refspec of the list counts, not just the first:
-#     `git push origin feature HEAD` pushes the current branch too.
+#     `@` or a destination the policy cannot read stands for one -- a variable
+#     or a command substitution (`git push origin "$(git branch --show-current)"`)
+#     reads as `$` or as the placeholder of a quoted string, which no refspec
+#     holds. Any refspec of the list counts, not just the first: `git push
+#     origin feature HEAD` pushes the current branch too. Only the destination
+#     is read: `git push origin "$BRANCH:feature"` lands on feature.
 #   * It pushes every branch, main among them, whichever is checked out:
 #     `--all`, `--branches`, the `:` that pushes the matching ones, and a glob
-#     (`refs/heads/*`).
+#     whose destination can match the default branch (`refs/heads/*`, `*:*`).
+#     A glob that cannot (`refs/tags/*`, `refs/heads/feature/*`) passes.
 #
 # Approximate by design: the command may cd elsewhere first, and the caller
-# reads the project checkout. Git refuses `HEAD:`, `@:` and an empty refspec as
-# invalid, so they push nothing and are not read as the current branch.
-function push_lands_on_default(text,    tok, n, i, w, positional, current, every) {
+# reads the project checkout. Git refuses `HEAD:` and `@:` as invalid, so they
+# push nothing and are not read as the current branch; an empty quoted refspec
+# is invalid too, but it reads as the same placeholder as one with a space in
+# it, so it is refused with that one.
+function push_lands_on_default(text,    tok, n, i, w, dst, positional, current, pushes_all) {
   n = split(text, tok, " ")
   for (i = git_arguments(tok, n, 1, "push"); i; i = git_arguments(tok, n, i, "push")) {
-    positional = 0; current = 0; every = 0
+    positional = 0; current = 0; pushes_all = 0
     for (; i <= n; i++) {
       w = tok[i]
       if (push_option_takes_value(w)) { i++; continue }
-      if (w ~ /^--(all|branches)$/) every = 1
+      if (w ~ /^--(all|branches)$/) pushes_all = 1
       if (w == "" || w ~ /^-/) continue
       if (w ~ /^[;&|(){}`]+$/) break
       if (++positional == 1) continue                       # the repository
-      if (w ~ /^(HEAD|@)$/ || w ~ /\$/ || w == placeholder) current = 1
-      else if (w == ":" || w ~ /\*/) every = 1
+      if (w == ":") { pushes_all = 1; continue }
+      dst = (index(w, ":") ? substr(w, match(w, /:[^:]*$/) + 1) : w)
+      if (w ~ /^(HEAD|@)$/ || dst ~ /\$/ || w == placeholder) current = 1
+      else if (glob_matches_default(dst)) pushes_all = 1
     }
-    if (every) return 1
-    if ((positional <= 1 || current) && branch ~ /^(main|master)$/) return 1
+    if (pushes_all) return 1
+    if ((positional <= 1 || current) && branch ~ ("^" default_branch "$")) return 1
   }
+  return 0
+}
+
+# Whether a refspec glob can name the default branch, spelled the ways git reads
+# a push destination: `main`, `heads/main` or `refs/heads/main`. Git allows one
+# `*` per side; with more, the part before the first and after the last are
+# matched, which can only match more.
+function glob_matches_default(glob,    names, n, k, name, prefix, suffix, spelling) {
+  if (!index(glob, "*")) return 0
+  prefix = substr(glob, 1, index(glob, "*") - 1)
+  suffix = substr(glob, match(glob, /\*[^*]*$/) + 1)
+  n = split(default_branches, names, " ")
+  for (k = 1; k <= n; k++)
+    for (spelling = 1; spelling <= 3; spelling++) {
+      name = (spelling == 1 ? "" : spelling == 2 ? "heads/" : "refs/heads/") names[k]
+      if (length(name) >= length(prefix) + length(suffix) &&
+          substr(name, 1, length(prefix)) == prefix &&
+          substr(name, length(name) - length(suffix) + 1) == suffix) return 1
+    }
   return 0
 }
 
@@ -716,6 +741,12 @@ BEGIN {
   quotes = "[" q dq "]"
   placeholder = sprintf("%c", 1)
 
+  # The branches a push must not land on, as words and as the regex the rules
+  # build on.
+  default_branches = "main master"
+  default_branch = default_branches; gsub(/ /, "|", default_branch)
+  default_branch = "(" default_branch ")"
+
   # The built-in commands, one per line, as `git --list-cmds=builtins` prints
   # them: an alias may not hide one. Then `alias.p push` per line, as `git config
   # --get-regexp '^alias\.'` prints them; a later line wins, which is git's own
@@ -816,7 +847,7 @@ END {
   deny(" git push" args ":[^ ]+ ",  "a colon refspec deletes a remote branch", cmdq)
   deny(" git push" args "\\+[^ ]+ ", "a + refspec is a force push", cmdq)
   deny(" git push" args "--mirror ", "git push --mirror overwrites every remote ref", cmdq)
-  deny(" git push" args "([^ ]*[:/])?(main|master) ", "pushing straight to the default branch bypasses review", cmdq)
+  deny(" git push" args "([^ ]*[:/])?" default_branch " ", "pushing straight to the default branch bypasses review", cmdq)
   if (verdict == "" && push_lands_on_default(cmdq_args))
     verdict = "pushing straight to the default branch bypasses review"
   deny(" gh api [^;&|]*(-X|--method)[ =]DELETE ", "a DELETE through the GitHub API is irreversible")
