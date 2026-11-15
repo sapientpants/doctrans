@@ -30,14 +30,24 @@ defmodule DoctransWeb.Endpoint do
   # `max_fragmented_message_size`, is not a per-socket option at all, so it
   # lives in the server's `websocket_options` in `config/config.exs`; the two
   # are one bound in two places because that is where each is honoured.
+  #
+  # `:peer_data` is what `DoctransWeb.Live.Hooks.LoopbackOnly` reads (#281).
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options], max_frame_size: 1_000_000],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [
+      connect_info: [:peer_data, session: @session_options],
+      max_frame_size: 1_000_000
+    ],
+    longpoll: [connect_info: [:peer_data, session: @session_options]]
 
   # The first plug, ahead of static serving, so a request for a host this
   # deployment does not answer to is refused before `/uploads` or anything else
   # is served. The socket above is dispatched before any plug, so `/live` relies
   # on `check_origin` instead; see the plug's moduledoc.
+  #
+  # Nothing in this endpoint rewrites `conn.remote_ip` from a forwarded header,
+  # and `DoctransWeb.Plugs.LoopbackOnly` relies on that: a plug that trusts
+  # `x-forwarded-for` (`Plug.RewriteOn`, `RemoteIp`) would let any client claim
+  # to be loopback and reach the dev-only LiveDashboard.
   plug DoctransWeb.Plugs.AllowedHost
 
   # Serve at "/" the static files from "priv/static" directory.

@@ -93,7 +93,8 @@ config :doctrans, DoctransWeb.Endpoint,
     ]
   ]
 
-# Enable dev routes for the dashboard
+# Enable dev routes for the dashboard, served to loopback connections only
+# (`DoctransWeb.Plugs.LoopbackOnly`, #281).
 config :doctrans, dev_routes: true
 
 # Include timestamps and metadata in development logs for debugging

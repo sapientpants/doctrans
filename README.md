@@ -131,6 +131,12 @@ in development mode with source files mounted for hot reload; for a deployment r
 development environment, use `docker-compose.runtime.yml` instead — see
 [Runtime deployment](#runtime-deployment).
 
+The development LiveDashboard at `/dev/dashboard` is served to loopback connections only, on the
+page and its LiveView socket alike, so a LAN bind (`PHX_BIND_IP=0.0.0.0`, or a republished port)
+exposes the application but not a tool that inspects the running VM. Inside the Compose container a
+connection arrives from Docker's gateway rather than from loopback, so this stack answers the
+dashboard with 403; open it from a native `mix phx.server` instead.
+
 The development container is hardened for the one thing it does with untrusted input: it runs
 LibreOffice and poppler on whatever document you upload, with your checkout mounted in. So it runs
 as an unprivileged user with every capability dropped and `no-new-privileges` set, it keeps the

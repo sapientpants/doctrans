@@ -47,6 +47,8 @@ services:
       # is what actually limits reachability to this machine. Without this the
       # endpoint would listen on the container's loopback only, where nothing
       # outside the container — the port publication included — can reach it.
+      # Connections therefore arrive from Docker's gateway, so the loopback-only
+      # `/dev/dashboard` answers 403 here (`DoctransWeb.Plugs.LoopbackOnly`).
       PHX_BIND_IP: "0.0.0.0"
       # The storage root is the named volume below, not `priv/static/uploads`
       # on the bind mount: the uploaded document and the converters' `--outdir`

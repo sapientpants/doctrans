@@ -39,7 +39,15 @@ defmodule DoctransWeb.Router do
 
     # Aliased inside the block rather than at the top of the module: outside a
     # dev build this code does not exist, and the alias would be unused.
+    alias DoctransWeb.Live.Hooks
     alias DoctransWeb.Plugs.DashboardCsp
+    alias DoctransWeb.Plugs.LoopbackOnly
+
+    # Loopback peers only (#281; see the plug). The plug covers the HTTP render
+    # and the `on_mount` hook below the socket, which no plug sees.
+    pipeline :loopback_only do
+      plug LoopbackOnly
+    end
 
     # The widened policy is scoped to the dashboard's own path rather than to
     # `/dev`, so a dev route added later cannot inherit it just by being written
@@ -49,7 +57,7 @@ defmodule DoctransWeb.Router do
     end
 
     scope "/dev/dashboard" do
-      pipe_through [:browser, :dashboard_csp]
+      pipe_through [:loopback_only, :browser, :dashboard_csp]
 
       # The key is read from the plug rather than repeated as a literal: the two
       # have to agree exactly, or LiveDashboard reads an assign nobody set, the
@@ -57,7 +65,8 @@ defmodule DoctransWeb.Router do
       # refuses the script with nothing logged on the server at all.
       live_dashboard "/",
         metrics: DoctransWeb.Telemetry,
-        csp_nonce_assign_key: DashboardCsp.assign_key()
+        csp_nonce_assign_key: DashboardCsp.assign_key(),
+        on_mount: [{Hooks.LoopbackOnly, :default}]
     end
   end
 end

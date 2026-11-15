@@ -4,7 +4,10 @@ This is a web application written using the Phoenix web framework.
 
 - Doctrans is a **local, single-user app** — **do not add authentication/authorization**
   (no auth plugs, login flows, or per-request access checks). Exposure is controlled at the
-  deployment level instead (loopback bind, LAN firewalling).
+  deployment level instead (loopback bind, LAN firewalling). The one carve-out is a check on
+  a connection's network origin that holds a dev-only tool to loopback
+  (`DoctransWeb.Plugs.LoopbackOnly` on the LiveDashboard): it asks where a request comes from,
+  never who is asking, and it is not a model for guarding the application's own routes.
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid**
   `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP
