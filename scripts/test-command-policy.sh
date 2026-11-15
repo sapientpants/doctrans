@@ -272,6 +272,92 @@ block|git push origin HEAD:refs/heads/main
 block|git push origin main:main
 block|git push origin feature:master
 block|git push origin ':feature'
+# The remote is changed wherever git reads its URL from, not only through
+# `git remote` (#279).
+block|git -C . remote set-url origin git@github.com:x/y.git
+block|git remote -v add fork https://github.com/x/y.git
+block|git remote rm origin
+block|git config remote.origin.url https://github.com/x/y.git
+block|git config --local remote.origin.pushurl https://github.com/x/y.git
+block|git config --global url.https://github.com/.insteadOf git@github.com:
+block|git config url."https://github.com/".pushInsteadOf "git@github.com:"
+block|git config set remote.origin.url https://github.com/x/y.git
+block|git config --add remote.origin.url https://github.com/x/y.git
+block|git config --replace-all remote.origin.url https://github.com/x/y.git
+block|git config -f .git/config remote.origin.url https://github.com/x/y.git
+block|git config REMOTE.origin.URL https://github.com/x/y.git
+block|git config 'remote.origin.url' 'https://github.com/x/y.git'
+block|git config --unset remote.origin.url
+block|git config unset remote.origin.pushurl
+block|git config --remove-section remote.origin
+block|git config rename-section remote.origin remote.upstream
+block|git -C . config remote.origin.url https://github.com/x/y.git
+block|git status && git config remote.origin.url https://github.com/x/y.git
+block|git -c remote.origin.url=https://github.com/x/y.git push origin feature
+block|git -c remote.origin.pushurl=https://github.com/x/y.git push origin feature
+block|git -c 'url.https://github.com/.insteadOf=git@github.com:' fetch origin
+block|git --config-env=remote.origin.url=NEW_URL push origin feature
+block|GIT_CONFIG_PARAMETERS="'remote.origin.url=https://github.com/x/y.git'" git push origin feature
+block|GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=https://github.com/x/y.git git push origin feature
+block|git push https://github.com/x/y.git feature
+block|git push git@github.com:x/y.git feature
+block|git push ssh://git@github.com/x/y.git feature
+block|git push -u 'https://github.com/x/y.git' feature
+block|git push "git@github.com:x/y.git" feature
+block|git push -o ci.skip https://github.com/x/y.git feature
+block|git push --repo=https://github.com/x/y.git
+block|git push --repo https://github.com/x/y.git
+block|git push ../mirror feature
+block|git push /tmp/mirror.git feature
+block|git -C . push https://github.com/x/y.git feature
+block|sed -i '' 's#git@github.com:#https://github.com/#' .git/config
+block|sed -i.bak s/a/b/ .git/config
+block|perl -pi -e 's/a/b/' .git/config
+block|echo '[remote "fork"]' >> .git/config
+block|printf x | tee -a .git/config
+block|git config --unset-all remote.origin.url
+block|git config --rename-section remote.origin remote.upstream
+block|gsed -i s/a/b/ .git/config
+block|cp /tmp/config .git/config
+block|cp /tmp/config .git/config 2>/dev/null
+block|mv .git/config /tmp/config
+block|dd if=/tmp/config of=.git/config
+block|git config --edit
+block|git config edit
+# A word that runs its arguments hands them on as they are, so the URL and the
+# file are still whole when the rule reads them -- and the command behind an
+# option, a value or a duration is still found.
+block|command git push https://github.com/x/y.git feature
+block|env git push git@github.com:x/y.git feature
+block|timeout 60 git push https://github.com/x/y.git feature
+block|sudo -n git push https://github.com/x/y.git feature
+block|bash -c "git push https://github.com/x/y.git feature"
+block|command git push ../mirror feature
+block|command sed -i 's/a/b/' .git/config
+block|sudo -n sed -i s/a/b/ .git/config
+block|bash -c "echo x >> .git/config"
+block|bash -c "tee .git/config"
+block|timeout 60 /bin/rm -rf build
+block|timeout -k 5 1m /bin/rm -rf build
+block|sudo -n /bin/rm -rf build
+block|sudo -u git /bin/rm -rf build
+block|sudo > /dev/null /bin/rm -rf build
+block|nice -n 5 /bin/rm -rf build
+block|nohup nice /usr/bin/git push --force
+# A redirection is no argument: it neither hides the one after it nor counts
+# as one.
+block|git push 2>/dev/null https://github.com/x/y.git feature
+block|git push --recurse-submodules check https://github.com/x/y.git feature
+block|git config remote.origin.url https://github.com/x/y.git 2>&1
+block|mix 2>/dev/null ecto.drop
+# A repository the policy cannot read is not a remote it can vouch for, and
+# neither is a configuration file it never opens.
+block|git push $URL feature
+block|git push "$URL" feature
+block|GIT_CONFIG_GLOBAL=/tmp/other.gitconfig git push origin feature
+block|export GIT_CONFIG_SYSTEM=/tmp/other.gitconfig
+block|git -c include.path=/tmp/other.gitconfig push origin feature
+block|git -c includeIf.gitdir:/x/.path=/tmp/other.gitconfig push origin feature
 allow|git status
 allow|git status --short
 allow|git add --all
@@ -368,6 +454,43 @@ allow|git --no-pager diff
 allow|git -c core.pager=cat log -1
 allow|git config user.name x
 allow|git config --get core.hooksPath
+# Reading where the remote points changes nothing.
+allow|git remote -v
+allow|git remote get-url origin
+allow|git remote show origin
+allow|git config remote.origin.url
+allow|git config --get remote.origin.url
+allow|git config get remote.origin.url
+allow|git config --get-regexp '^remote\.'
+allow|git config --list
+allow|git config remote.origin.url > /tmp/url.txt
+allow|git config remote.origin.url && git status
+allow|git config branch.feature.remote origin
+allow|git config remote.origin.prune true
+allow|git -c remote.origin.prune=true fetch origin
+allow|git push -o ci.skip origin feature
+allow|git push --push-option ci.variable=URL=https://x/y origin feature
+allow|git push origin feature/x
+allow|git push origin HEAD:feature/x
+allow|git fetch https://github.com/x/y.git feature
+allow|cat .git/config
+allow|sed -n p .git/config
+allow|grep url .git/config > /tmp/url.txt
+allow|git commit -m "docs: git config remote.origin.url https://x/y is refused"
+allow|git commit -m "docs: git push https://github.com/x/y.git is refused"
+allow|git config remote.origin.url 2>&1
+allow|git config remote.origin.url 2>/dev/null
+allow|git config --get remote.origin.url 2>&1
+allow|git push -u 2>/dev/null origin feature
+allow|git push --recurse-submodules check origin feature
+allow|git push origin feature >/tmp/push.log 2>&1
+allow|git push origin feature 2>&1 | tail -5
+allow|command git push origin feature
+allow|timeout 60 git push origin feature
+allow|sudo -u postgres cat /srv/rmdir
+allow|GIT_CONFIG_GLOBAL=/dev/null git status
+allow|cp .git/config /tmp/config.bak
+allow|git config user.name edit
 allow|git -c alias.st=status st
 allow|git -c alias.st='status -s' st
 allow|git -c alias.qq=push qq origin feature
@@ -406,6 +529,9 @@ report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push -u 
 report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git -C . push')" 'bare push behind a global option, repo on main'
 report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git --no-pager push origin')" 'push naming only a remote behind a global option, repo on main'
 report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin HEAD')" 'push of HEAD, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push 2>/dev/null')" 'bare push with a redirection, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push >/tmp/push.log 2>&1')" 'bare push with two redirections, repo on a feature branch'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin 2>/dev/null')" 'a redirection is not a refspec, repo on main'
 
 # A git alias stands in for the subcommand, so it is resolved from the checkout's
 # config before the rules run. These aliases are defined in the scratch repositories
@@ -552,6 +678,14 @@ if command -v codex >/dev/null 2>&1; then
   report block "$(native_policy git push --force)" 'git push --force'
   report block "$(native_policy git commit --no-verify)" 'git commit --no-verify'
   report block "$(native_policy git remote set-url origin x)" 'git remote set-url'
+  report block "$(native_policy git remote rm origin)" 'git remote rm'
+  report block "$(native_policy git config remote.origin.url https://github.com/x/y.git)" 'git config remote.origin.url'
+  report block "$(native_policy git config --local remote.origin.pushurl https://github.com/x/y.git)" 'git config --local remote.origin.pushurl'
+  report block "$(native_policy git config set remote.origin.url https://github.com/x/y.git)" 'git config set remote.origin.url'
+  report block "$(native_policy git config --unset remote.origin.url)" 'git config --unset remote.origin.url'
+  report block "$(native_policy git config --global remote.origin.url https://github.com/x/y.git)" 'git config --global remote.origin.url'
+  report block "$(native_policy git config --remove-section remote.origin)" 'git config --remove-section remote.origin'
+  report block "$(native_policy git config rename-section remote.origin remote.upstream)" 'git config rename-section remote.origin'
   report block "$(native_policy rm -rf build)" 'rm -rf build'
   report block "$(native_policy rmdir d)" 'rmdir'
   report block "$(native_policy mix ecto.drop)" 'mix ecto.drop'
@@ -586,6 +720,8 @@ if command -v codex >/dev/null 2>&1; then
   report allow "$(native_policy git tag -a v1.0.0 -m release)" 'git tag -a'
   report allow "$(native_policy git gc)" 'git gc'
   report allow "$(native_policy git config user.name x)" 'git config user.name'
+  report allow "$(native_policy git config --get remote.origin.url)" 'git config --get remote.origin.url'
+  report allow "$(native_policy git remote get-url origin)" 'git remote get-url'
   report allow "$(native_policy gh pr merge 1 --squash)" 'gh pr merge'
   report allow "$(native_policy mix test)" 'mix test'
   report allow "$(native_policy rm stale.log)" 'rm stale.log'

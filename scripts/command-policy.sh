@@ -69,13 +69,24 @@ command=$(jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
 # `alias.p = push`), and short flags cluster (`git push -fu`). The options are
 # removed, the alias is expanded from the user's git config, and the rules match
 # the flag letter inside a cluster. Git also takes configuration from the command
-# itself -- `-c key=value`, `--config-env`, the GIT_CONFIG_* variables -- and two
-# settings are rules in their own right: core.hooksPath moves every hook, and
-# alias.<name> defines the subcommand the rules key on. Those are read from the
-# text before the quotes come off, because a value with a space in it is quoted.
+# itself -- `-c key=value`, `--config-env`, the GIT_CONFIG_* variables -- and four
+# settings are rules in their own right: core.hooksPath moves every hook,
+# alias.<name> defines the subcommand the rules key on, a remote's URL sends the
+# command somewhere else, and include.path (like GIT_CONFIG_GLOBAL) names a file
+# of settings this script never reads. Those are read from the text before the
+# quotes come off, because a value with a space in it is quoted.
 # A rule that reads a push target runs on a second copy of the text in which a
 # quoted word is kept rather than stripped, so `git push origin 'HEAD:main'`
-# names the branch it would land on.
+# names the branch it would land on. A rule that reads an argument by its
+# position reads that copy without its redirections: in `git push 2>/dev/null
+# origin feature` the repository is `origin`.
+#
+# The remote is one more thing git lets a command decide in several places.
+# `git remote set-url` is the obvious one; the same URL is also a setting
+# (remote.<name>.url, remote.<name>.pushurl, url.<base>.insteadOf) that `git
+# config`, `-c` and the GIT_CONFIG_* variables can write, a line in .git/config,
+# and an argument: `git push https://...` needs no remote at all. Each is read
+# where it is written.
 # ---------------------------------------------------------------------------
 read -r -d '' POLICY <<'AWK' || true
 # Refuses the command with `msg` when `re` matches `text`, which defaults to the
@@ -234,30 +245,82 @@ function unwrap_shell_payloads(text,    re, pos, i, c, j) {
   return text
 }
 
+# Whether an option of a word that runs its arguments takes the next word as
+# its value, as each command's manual lists them: `sudo -u postgres dropdb`
+# runs dropdb, and `postgres` is not the command. An option missing from a
+# table is read as a flag, so the word after it is taken for the command.
+function wrapper_option_takes_value(wrapper, w) {
+  if (index(w, "=")) return 0
+  if (wrapper ~ /^(sudo|doas)$/) return w ~ /^(-[A-Za-z]*[CDghpRrTtUu]|--(chdir|chroot|close-from|command-timeout|group|host|other-user|prompt|role|type|user))$/
+  if (wrapper == "env")     return w ~ /^(-[A-Za-z]*[CPSu]|--(chdir|split-string|unset))$/
+  if (wrapper == "exec")    return w ~ /^-[A-Za-z]*a$/
+  if (wrapper == "xargs")   return w ~ /^(-[A-Za-z0-9]*[adEIJLnPRSs]|--(arg-file|delimiter|max-args|max-chars|max-lines|max-procs|process-slot-var))$/
+  if (wrapper == "nice")    return w ~ /^(-[A-Za-z]*n|--adjustment)$/
+  if (wrapper == "time")    return w ~ /^(-[A-Za-z]*[fo]|--(format|output))$/
+  if (wrapper == "timeout") return w ~ /^(-[A-Za-z]*[ks]|--(kill-after|signal))$/
+  if (wrapper ~ /sh$/)      return w ~ /^[-+][A-Za-z]*[oO]$/
+  return 0
+}
+
 # Gives every token a space on each side, which is what the rules match on (see
 # the note above the policy). Runs after the quoted strings are gone, so a `;` or
 # `(` inside a commit message is not read as a separator. A command's directory
 # comes off only where the shell resolves a command: at the start, after a
-# separator, after a `VAR=value` prefix, and through a word that runs its
-# arguments (`sudo /bin/rm`, `find -exec /bin/rm`) -- an argument that merely
-# ends in a rule word (`cat /tmp/rmdir`) stays a path.
-function normalise_tokens(text,    tok, n, i, w, out, expect, strip_all) {
+# separator, after a `VAR=value` prefix, and on the command a word that runs its
+# arguments hands them to (`sudo /bin/rm`, `timeout 60 /bin/rm`, `find -exec
+# /bin/rm`, the payload of `bash -c`) -- an argument that merely ends in a rule
+# word (`cat /tmp/rmdir`) stays a path, and so does one a rule has to read
+# whole: the URL in `command git push https://...` and the file in `sudo sed -i
+# ... .git/config`. Between such a word and its command sit its own options,
+# their values, `VAR=value` settings, a redirection and the duration `timeout`
+# takes.
+function normalise_tokens(text,    tok, n, i, w, out, expect, wrapper, is_value) {
   while (match(text, /\\[A-Za-z0-9_\/]/))          # `\rm` is `rm` to the shell
     text = cut(text, RSTART, 1)
   gsub(/[;&|(){}`]+/, " & ", text)                 # `;git` -> ` ; git`, `$(rm` -> `$ ( rm`
   n = split(text, tok, /[ \t]+/)
-  out = ""; expect = 1; strip_all = 0
+  out = ""; expect = 1; wrapper = ""; is_value = 0
   for (i = 1; i <= n; i++) {
     w = tok[i]
     if (w == "") continue
-    if (w ~ /^[;&|(){}`]+$/) { expect = 1; strip_all = 0 }
-    else if (w ~ /^-(exec|execdir|ok|okdir)$/) strip_all = 1
-    else if (expect && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) ;        # `X=1 /bin/rm`: the command is next
+    if (w ~ /^[;&|(){}`]+$/) { expect = 1; wrapper = "" }
+    else if (w ~ /^-(exec|execdir|ok|okdir)$/) expect = 1       # find's command is the next word
+    else if (expect && w ~ /^([A-Za-z_][A-Za-z0-9_]*=|-)/) ;    # `X=1 /bin/rm`, `bash -c -x "rm"`: the command is next
     else if (expect) {
-      w = strip_path(w); expect = 0
-      strip_all = runs_its_arguments(w)
+      w = strip_path(w); expect = 0; is_value = 0
+      wrapper = runs_its_arguments(w) ? w : ""
     }
-    else if (strip_all) w = strip_path(w)
+    else if (wrapper == "") ;                                   # an argument, path and all
+    else if (w ~ /^-/) {
+      if (wrapper ~ /sh$/ && w ~ /^-[A-Za-z]*c/) expect = 1     # the payload of `bash -c` is a command
+      else is_value = wrapper_option_takes_value(wrapper, w)
+    }
+    else if (w ~ /^[0-9]*[<>]/) is_value = (w ~ /[<>]$/)        # `sudo > log rm`: the file is next
+    else if (is_value) is_value = 0
+    else if (w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) ;
+    else if (wrapper == "timeout" && w ~ /^[0-9.]+[smhd]?$/) ;
+    else { w = strip_path(w); wrapper = runs_its_arguments(w) ? w : "" }
+    out = out " " w
+  }
+  return out " "
+}
+
+# The text without its redirections, for the rules that read a command's
+# arguments by position: `2>/dev/null` and `> push.log` are no argument of the
+# command they follow. Runs on normalised text, where `2>&1` has become
+# `2> & 1`; that `&` goes too, since it separates nothing.
+function drop_redirections(text,    tok, n, i, w, out) {
+  n = split(text, tok, " ")
+  out = ""
+  for (i = 1; i <= n; i++) {
+    w = tok[i]
+    if (w == "") continue
+    if (w ~ /^[0-9]*(>>?|<<?<?)$/) {
+      if (tok[i + 1] == "&" && tok[i + 2] ~ /^([0-9]+|-)$/) i += 2
+      else if (tok[i + 1] !~ /^[;&|(){}`]+$/) i++
+      continue
+    }
+    if (w ~ /^[0-9]*[<>]/) continue
     out = out " " w
   }
   return out " "
@@ -295,12 +358,23 @@ function define_alias(name, expansion) {
   if (!(name in git_commands)) aliases[name] = expansion
 }
 
+# Whether a configuration key decides where a fetch or a push goes: the URL of
+# a remote, its push URL, or a rewrite applied to every URL that starts with
+# <base>. Git reads the section and the variable case-insensitively.
+function remote_url_key(key) {
+  key = tolower(key)
+  return key ~ /^remote\..+\.(url|pushurl)$/ || key ~ /^url\..+\.(insteadof|pushinsteadof)$/
+}
+
 # Records one configuration setting git would read from the command line or
-# the environment. Two are rules: core.hooksPath points the hooks at another
-# directory, which is `--no-verify` for every hook at once, and alias.<name>
-# defines a subcommand. Git reads the key case-insensitively. With `opaque` the
-# value is the name of an environment variable (`--config-env`), which this
-# script cannot read: an alias defined that way is refused rather than guessed.
+# the environment. Four are rules: core.hooksPath points the hooks at another
+# directory, which is `--no-verify` for every hook at once, alias.<name>
+# defines a subcommand, a remote's URL (see remote_url_key) sends the command
+# somewhere else, and include.path or includeIf.<condition>.path brings in a
+# file of settings this script never reads. Git reads the key
+# case-insensitively. With `opaque` the value is the name of an environment
+# variable (`--config-env`), which this script cannot read: an alias defined
+# that way is refused rather than guessed.
 function note_git_setting(setting, opaque,    key, value) {
   key = setting; value = ""
   if (index(setting, "=")) {
@@ -309,6 +383,8 @@ function note_git_setting(setting, opaque,    key, value) {
   }
   key = tolower(key)
   if (key == "core.hookspath") hooks_moved = 1
+  else if (remote_url_key(key)) remote_url_set = 1
+  else if (key == "include.path" || key ~ /^includeif\..+\.path$/) config_unread = 1
   else if (key ~ /^alias\.[^.]+$/) {
     if (opaque) alias_unreadable = substr(key, 7)
     else define_alias(substr(key, 7), value)
@@ -347,8 +423,11 @@ function numbered_env(assignment, prefix) {
 # GIT_CONFIG_KEY_n + GIT_CONFIG_VALUE_n variables wherever they are assigned
 # (`X=v git ...`, `export X=v`, `env X=v git ...`). A `-c` is only git's when the
 # command word is git, through any wrapper (`sudo git -c`): `bash -c`, `psql -c`
-# and `grep -c` take their own. Runs on the text before its quotes are stripped,
-# because a value with a space in it is quoted and the strip would hide it.
+# and `grep -c` take their own. GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM replace a
+# whole configuration file with one this script never reads, so they are noted
+# as well, unless the file is /dev/null and holds nothing. Runs on the text
+# before its quotes are stripped, because a value with a space in it is quoted
+# and the strip would hide it.
 function note_git_settings(text,    n, pos, c, w, prev, at_command, wrapped, on_git, keys, values, k, entries, m, j) {
   n = length(text); pos = 1; prev = ""; at_command = 1; wrapped = 0; on_git = 0
   while (pos <= n) {
@@ -367,6 +446,7 @@ function note_git_settings(text,    n, pos, c, w, prev, at_command, wrapped, on_
     }
     else if (w ~ /^GIT_CONFIG_KEY_[0-9]+=/)   keys[numbered_env(w, "GIT_CONFIG_KEY_")] = substr(w, index(w, "=") + 1)
     else if (w ~ /^GIT_CONFIG_VALUE_[0-9]+=/) values[numbered_env(w, "GIT_CONFIG_VALUE_")] = substr(w, index(w, "=") + 1)
+    else if (w ~ /^GIT_CONFIG_(GLOBAL|SYSTEM)=/) { if (w !~ /=(\/dev\/null)?$/) config_unread = 1 }
     else if (at_command && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) ;          # another `VAR=value` prefix
     else if (at_command) { w = strip_path(w); on_git = (w == "git"); wrapped = runs_its_arguments(w); at_command = 0 }
     else if (wrapped && strip_path(w) == "git") { on_git = 1; wrapped = 0 }   # `sudo -u root git`, `bash -c git`
@@ -494,11 +574,11 @@ function cluster(letters) {
 # the project checkout.
 function bare_push_lands_on(text,    tok, n, i, w, positional, refspec) {
   n = split(text, tok, " ")
-  for (i = 1; i < n; i++) {
-    if (tok[i] != "git" || tok[i + 1] != "push") continue
+  for (i = git_arguments(tok, n, 1, "push"); i; i = git_arguments(tok, n, i, "push")) {
     positional = 0; refspec = ""
-    for (i += 2; i <= n; i++) {
+    for (; i <= n; i++) {
       w = tok[i]
+      if (push_option_takes_value(w)) i++
       if (w == "" || w ~ /^-/) continue
       if (w ~ /^[;&|(){}`]+$/) break
       if (++positional == 2) refspec = w
@@ -508,13 +588,90 @@ function bare_push_lands_on(text,    tok, n, i, w, positional, refspec) {
   return ""
 }
 
+# Whether a `git push` option takes the next word as its value, so that word is
+# neither the repository nor a refspec: in `git push --recurse-submodules check
+# origin feature` the repository is `origin`.
+function push_option_takes_value(w) {
+  return w ~ /^(-o|--push-option|--receive-pack|--exec|--repo|--recurse-submodules)$/
+}
+
+# The index in `tok` of the first word after the next `git <subcommand>` at or
+# after `from`, 0 when there is none. The rules that read a git command's
+# arguments by position start there and stop at the next separator.
+function git_arguments(tok, n, from, subcommand,    i) {
+  for (i = from; i < n; i++)
+    if (tok[i] == "git" && tok[i + 1] == subcommand) return i + 2
+  return 0
+}
+
+# Whether a `git config` in the text changes where a remote points: it sets or
+# unsets one of the keys remote_url_key names, or removes or renames a remote's
+# whole section. Reading a key is not a change, and git reads `git config
+# <key>` with no value as a read, so `git config remote.origin.url` and `git
+# config --get remote.origin.url` pass. Both spellings of the command are read:
+# the options (`--unset`, `--remove-section`) and the subcommands git 2.46
+# added (`set`, `unset`, `remove-section`).
+function config_changes_remote(text,    tok, n, i, w, positional, key, reading, unsetting, on_section, at_subcommand) {
+  n = split(text, tok, " ")
+  for (i = git_arguments(tok, n, 1, "config"); i; i = git_arguments(tok, n, i, "config")) {
+    positional = 0; key = ""; reading = 0; unsetting = 0; on_section = 0; at_subcommand = 1
+    for (; i <= n; i++) {
+      w = tok[i]
+      if (w == "") continue
+      if (w ~ /^[;&|(){}`]+$/) break
+      if (w ~ /^(-f|--file|--blob|--type|--default|--comment|--value|--url)$/) { i++; continue }
+      if (w ~ /^(--get|--get-all|--get-regexp|--get-urlmatch|--get-color|--get-colorbool|-l|--list)$/) reading = 1
+      else if (w ~ /^--unset(-all)?$/) unsetting = 1
+      else if (w ~ /^--(remove|rename)-section$/) on_section = 1
+      if (w ~ /^-/) continue
+      if (at_subcommand) {
+        at_subcommand = 0
+        if (w ~ /^(get|list)$/) reading = 1
+        else if (w == "unset") unsetting = 1
+        else if (w ~ /^(remove|rename)-section$/) on_section = 1
+        if (w ~ /^(get|list|set|unset|remove-section|rename-section|edit)$/) continue
+      }
+      if (++positional == 1) key = tolower(w)
+    }
+    if (reading) continue
+    if (on_section && key ~ /^(remote|url)(\.|$)/) return 1
+    if (remote_url_key(key) && (positional >= 2 || unsetting)) return 1
+  }
+  return 0
+}
+
+# Whether a `git push` in the text names its repository by something other
+# than a remote: a URL, a path, or a variable this script cannot read (`git
+# push https://github.com/x/y.git feature`, `git push git@github.com:x/y.git
+# feature`, `git push ../mirror feature`, `git push "$URL" feature`). The
+# repository is the first argument that is not an option, or the value of
+# `--repo`; a remote's name holds no `:`, `/` or `$` and does not start with a
+# `.`, and every URL, path and variable does one of the four.
+function push_names_no_remote(text,    tok, n, i, w) {
+  n = split(text, tok, " ")
+  for (i = git_arguments(tok, n, 1, "push"); i; i = git_arguments(tok, n, i, "push")) {
+    for (; i <= n; i++) {
+      w = tok[i]
+      if (w == "") continue
+      if (w ~ /^[;&|(){}`]+$/) break
+      if (w == "--repo") w = tok[++i]
+      else if (push_option_takes_value(w)) { i++; continue }
+      else if (w ~ /^--repo=/) w = substr(w, length("--repo=") + 1)
+      else if (w ~ /^-/) continue
+      if (w ~ /[:\/$]|^\./) return 1
+      break
+    }
+  }
+  return 0
+}
+
 # The tasks every `mix` in the text runs, as ` task ` words. The first word that
 # is not an option is the task -- except after `do`, where a comma on a word or
 # a `+` between words starts another task (`mix do ecto.drop, ecto.create`,
 # `mix do ecto.create + ecto.drop`). A word after the task is its argument, not a
 # task: `mix help ecto.drop` reads the documentation and drops nothing. Runs on
-# the copy that keeps quoted words, because `mix "ecto.drop"` is `mix ecto.drop`
-# to mix.
+# the copy that keeps quoted words and drops redirections, because `mix
+# "ecto.drop"` and `mix 2>/dev/null ecto.drop` are `mix ecto.drop` to mix.
 function mix_tasks(text,    tok, n, i, w, task, out, next_is_task, in_do) {
   n = split(text, tok, " ")
   out = ""
@@ -591,6 +748,7 @@ END {
   note_git_settings(cmd)                                            # quotes still intact here
   cmdq = normalise_git(normalise_docker(normalise_tokens(strip_quotes(cmd, 1))), 1)   # quoted words kept
   cmd  = normalise_git(normalise_docker(normalise_tokens(strip_quotes(cmd, 0))), 0)   # every quoted string gone
+  cmdq_args = drop_redirections(cmdq)                               # for the rules that read by position
 
   # The git rules below read `git <sub>` args ` <flag> `: args is any run of
   # arguments and a flag is matched as a whole word, so a short flag is found
@@ -606,6 +764,9 @@ END {
   deny(" git config" args "[^ ]*core\\.[Hh]ooks[Pp]ath[= ][^- ]", "moving core.hooksPath disables the pre-commit and commit-msg hooks", cmdq)
   if (verdict == "" && alias_unreadable != "")
     verdict = "an alias defined through --config-env (alias." alias_unreadable ") cannot be read by the policy"
+  if (verdict == "" && config_unread)
+    verdict = "GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM or include.path hands git a configuration file the policy cannot read"
+  deny(" git config(( -[^ ]+)* edit|" args "(-e|--edit)) ", "git config --edit changes the configuration in an editor, where the policy cannot read it")
 
   # --- Discards uncommitted work ------------------------------------------
   deny(" git reset [^;&|]*--hard ",   "git reset --hard discards uncommitted work")
@@ -641,13 +802,30 @@ END {
   deny(" git push" args "\\+[^ ]+ ", "a + refspec is a force push", cmdq)
   deny(" git push" args "--mirror ", "git push --mirror overwrites every remote ref", cmdq)
   deny(" git push" args "([^ ]*[:/])?(main|master) ", "pushing straight to the default branch bypasses review", cmdq)
-  if (verdict == "" && bare_push_lands_on(cmdq) ~ /^(main|master)$/)
+  if (verdict == "" && bare_push_lands_on(cmdq_args) ~ /^(main|master)$/)
     verdict = "pushing straight to the default branch bypasses review"
   deny(" gh api [^;&|]*(-X|--method)[ =]DELETE ", "a DELETE through the GitHub API is irreversible")
   deny(" gh release (delete|delete-asset|edit|upload) ", "mutating a published release is irreversible")
 
   # --- Remote configuration (AGENTS.md: never change the remote URL) ------
-  deny(" git remote (set-url|add|remove|rename|rm) ", "changing the git remote is forbidden by AGENTS.md")
+  # The URL is read wherever git would take it from: the `remote` subcommand
+  # (behind its own options: `git remote -v add`), a `-c` or GIT_CONFIG_*
+  # setting, `git config`, the config file itself, and the push that names a
+  # URL and so needs no remote. Keys, URLs and paths are never prose, so the
+  # last three read the copy that keeps quoted words. The config file is
+  # written by an in-place edit, by a redirection, by `tee` and `dd`, and as
+  # the destination of a copy; `mv` takes it away wherever it stands.
+  deny(" git remote( -[^ ]+)* (set-url|add|remove|rename|rm) ", "changing the git remote is forbidden by AGENTS.md")
+  if (verdict == "" && remote_url_set)
+    verdict = "a remote URL set through -c or GIT_CONFIG_* changes the git remote for the command, which AGENTS.md forbids"
+  if (verdict == "" && config_changes_remote(cmdq_args))
+    verdict = "changing a remote URL through git config is forbidden by AGENTS.md"
+  deny(" (g?sed|perl)" args "(-[A-Za-z]*i[^ ]*|--in-place[^ ]*) ([^;&|]* )?[^ ;&|]*\\.git/config ", "editing .git/config directly can change the git remote, which AGENTS.md forbids", cmdq)
+  deny("( tee" args "|>>? ?| dd" args "of=)[^ ;&|]*\\.git/config ", "writing to .git/config directly can change the git remote, which AGENTS.md forbids", cmdq)
+  deny(" (cp|ln|install|rsync)" args "[^ ;&|]*\\.git/config ($|[;&|])", "replacing .git/config directly can change the git remote, which AGENTS.md forbids", cmdq_args)
+  deny(" mv" args "[^ ;&|]*\\.git/config ", "moving .git/config directly can change the git remote, which AGENTS.md forbids", cmdq_args)
+  if (verdict == "" && push_names_no_remote(cmdq_args))
+    verdict = "pushing to a URL, a path or a variable is a one-off remote, which AGENTS.md forbids; push to a configured remote by name"
   deny(" git branch [^;&|]*(--set-upstream-to|-u) ", "changing a branch upstream rewires where work is pushed")
 
   # --- Recursive deletion -------------------------------------------------
@@ -660,7 +838,7 @@ END {
   # A mix task is read from wherever mix would run it: `mix do ecto.drop,
   # ecto.create` and `mix "ecto.drop"` drop the database as surely as `mix
   # ecto.drop`. A rollback drops every table the migrations it undoes created.
-  tasks = mix_tasks(cmdq)
+  tasks = mix_tasks(cmdq_args)
   deny(" ecto\\.(drop|reset) ",       "dropping the database destroys local data", tasks)
   deny(" ecto\\.rollback ",           "rolling back migrations drops the tables they created, with their data", tasks)
   deny(" mix deps\\.clean [^;&|]*--all ", "AGENTS.md: deps.clean --all is almost never needed")
