@@ -315,6 +315,49 @@ block|sed -i.bak s/a/b/ .git/config
 block|perl -pi -e 's/a/b/' .git/config
 block|echo '[remote "fork"]' >> .git/config
 block|printf x | tee -a .git/config
+block|git config --unset-all remote.origin.url
+block|git config --rename-section remote.origin remote.upstream
+block|gsed -i s/a/b/ .git/config
+block|cp /tmp/config .git/config
+block|cp /tmp/config .git/config 2>/dev/null
+block|mv .git/config /tmp/config
+block|dd if=/tmp/config of=.git/config
+block|git config --edit
+block|git config edit
+# A word that runs its arguments hands them on as they are, so the URL and the
+# file are still whole when the rule reads them -- and the command behind an
+# option, a value or a duration is still found.
+block|command git push https://github.com/x/y.git feature
+block|env git push git@github.com:x/y.git feature
+block|timeout 60 git push https://github.com/x/y.git feature
+block|sudo -n git push https://github.com/x/y.git feature
+block|bash -c "git push https://github.com/x/y.git feature"
+block|command git push ../mirror feature
+block|command sed -i 's/a/b/' .git/config
+block|sudo -n sed -i s/a/b/ .git/config
+block|bash -c "echo x >> .git/config"
+block|bash -c "tee .git/config"
+block|timeout 60 /bin/rm -rf build
+block|timeout -k 5 1m /bin/rm -rf build
+block|sudo -n /bin/rm -rf build
+block|sudo -u git /bin/rm -rf build
+block|sudo > /dev/null /bin/rm -rf build
+block|nice -n 5 /bin/rm -rf build
+block|nohup nice /usr/bin/git push --force
+# A redirection is no argument: it neither hides the one after it nor counts
+# as one.
+block|git push 2>/dev/null https://github.com/x/y.git feature
+block|git push --recurse-submodules check https://github.com/x/y.git feature
+block|git config remote.origin.url https://github.com/x/y.git 2>&1
+block|mix 2>/dev/null ecto.drop
+# A repository the policy cannot read is not a remote it can vouch for, and
+# neither is a configuration file it never opens.
+block|git push $URL feature
+block|git push "$URL" feature
+block|GIT_CONFIG_GLOBAL=/tmp/other.gitconfig git push origin feature
+block|export GIT_CONFIG_SYSTEM=/tmp/other.gitconfig
+block|git -c include.path=/tmp/other.gitconfig push origin feature
+block|git -c includeIf.gitdir:/x/.path=/tmp/other.gitconfig push origin feature
 allow|git status
 allow|git status --short
 allow|git add --all
@@ -435,6 +478,19 @@ allow|sed -n p .git/config
 allow|grep url .git/config > /tmp/url.txt
 allow|git commit -m "docs: git config remote.origin.url https://x/y is refused"
 allow|git commit -m "docs: git push https://github.com/x/y.git is refused"
+allow|git config remote.origin.url 2>&1
+allow|git config remote.origin.url 2>/dev/null
+allow|git config --get remote.origin.url 2>&1
+allow|git push -u 2>/dev/null origin feature
+allow|git push --recurse-submodules check origin feature
+allow|git push origin feature >/tmp/push.log 2>&1
+allow|git push origin feature 2>&1 | tail -5
+allow|command git push origin feature
+allow|timeout 60 git push origin feature
+allow|sudo -u postgres cat /srv/rmdir
+allow|GIT_CONFIG_GLOBAL=/dev/null git status
+allow|cp .git/config /tmp/config.bak
+allow|git config user.name edit
 allow|git -c alias.st=status st
 allow|git -c alias.st='status -s' st
 allow|git -c alias.qq=push qq origin feature
@@ -473,6 +529,9 @@ report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push -u 
 report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git -C . push')" 'bare push behind a global option, repo on main'
 report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git --no-pager push origin')" 'push naming only a remote behind a global option, repo on main'
 report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push origin HEAD')" 'push of HEAD, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push 2>/dev/null')" 'bare push with a redirection, repo on a feature branch'
+report allow "$(CLAUDE_PROJECT_DIR="$scratch/on-feature" shell_policy 'git push >/tmp/push.log 2>&1')" 'bare push with two redirections, repo on a feature branch'
+report block "$(CLAUDE_PROJECT_DIR="$scratch/on-main" shell_policy 'git push origin 2>/dev/null')" 'a redirection is not a refspec, repo on main'
 
 # A git alias stands in for the subcommand, so it is resolved from the checkout's
 # config before the rules run. These aliases are defined in the scratch repositories
@@ -624,6 +683,9 @@ if command -v codex >/dev/null 2>&1; then
   report block "$(native_policy git config --local remote.origin.pushurl https://github.com/x/y.git)" 'git config --local remote.origin.pushurl'
   report block "$(native_policy git config set remote.origin.url https://github.com/x/y.git)" 'git config set remote.origin.url'
   report block "$(native_policy git config --unset remote.origin.url)" 'git config --unset remote.origin.url'
+  report block "$(native_policy git config --global remote.origin.url https://github.com/x/y.git)" 'git config --global remote.origin.url'
+  report block "$(native_policy git config --remove-section remote.origin)" 'git config --remove-section remote.origin'
+  report block "$(native_policy git config rename-section remote.origin remote.upstream)" 'git config rename-section remote.origin'
   report block "$(native_policy rm -rf build)" 'rm -rf build'
   report block "$(native_policy rmdir d)" 'rmdir'
   report block "$(native_policy mix ecto.drop)" 'mix ecto.drop'
