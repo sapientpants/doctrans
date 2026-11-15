@@ -6,7 +6,7 @@ defmodule Doctrans.Documents.IntakeTest do
   alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock}
 
   import Doctrans.Fixtures
-  import ExUnit.CaptureLog
+  import ExUnit.CaptureLog, only: [with_log: 1]
 
   @moduletag :capture_log
 
@@ -66,7 +66,9 @@ defmodule Doctrans.Documents.IntakeTest do
       {result, log} = with_log(fn -> Intake.accept(path, client_name) end)
 
       assert {:error, ^client_name, :file_too_small} = result
-      assert log =~ inspect(client_name)
+      # A readable string, not the byte list `inspect/1` gives a name holding DEL or a
+      # C1 control.
+      assert log =~ ~s(Upload rejected for "evil.pdf)
       # The formatter frames each entry in newlines of its own, so a raw line break is
       # looked for where the name would have put one.
       refute log =~ "\n[error] forged"

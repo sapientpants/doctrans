@@ -466,6 +466,15 @@ defmodule Doctrans.ValidationTest do
       assert Validation.sanitize_filename_string(".\0.") == "_"
       assert Validation.sanitize_filename_string("a.\0.b") == "a_b"
     end
+
+    test "replaces DEL and the C1 controls, and leaves other non-ASCII characters alone" do
+      assert Validation.sanitize_filename_string("a\x7fb\u0085c\u009bd.pdf") == "a_b_c_d.pdf"
+      assert Validation.sanitize_filename_string("résumé 日本.pdf") == "résumé 日本.pdf"
+    end
+
+    test "replaces DEL and the C1 controls in a name that is not valid UTF-8" do
+      assert Validation.sanitize_filename_string(<<0xFF, 0x7F, 0xC2, 0x85>>) == <<0xFF, ?_, ?_>>
+    end
   end
 
   describe "sanitize_filename_string/1 (property)" do

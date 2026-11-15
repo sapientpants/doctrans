@@ -76,10 +76,15 @@ defmodule Doctrans.Documents.Intake do
       {:ok, document_id, client_name, dest_path}
     else
       {:error, reason} ->
-        # Inspected, not interpolated: the client name is still raw here, and a CR, LF
-        # or escape sequence in it would forge or rewrite log lines. `inspect/1` also
-        # escapes the DEL and C1 controls the filename sanitiser leaves in.
-        Logger.warning("Upload rejected for #{inspect(client_name)}: #{inspect(reason)}")
+        # The client name is still raw here, and a CR, LF or escape sequence in it
+        # would forge or rewrite log lines. Sanitized for the log only -- the result
+        # keeps the name the user recognises -- so it logs as a readable string rather
+        # than the byte list `inspect/1` falls back to for a control character.
+        Logger.warning(
+          "Upload rejected for #{inspect(Validation.sanitize_filename_string(client_name))}: " <>
+            inspect(reason)
+        )
+
         {:error, client_name, reason}
     end
   end
@@ -204,13 +209,13 @@ defmodule Doctrans.Documents.Intake do
   end
 
   defp abandon(%Document{} = document, filename, formatted) do
-    Logger.error("Upload of #{filename} failed: #{formatted}")
+    Logger.error("Upload of #{inspect(filename)} failed: #{formatted}")
     _ = safely(fn -> delete_document(document) end, document.id)
     {:error, filename, :upload_start_failed}
   end
 
   defp abandon(document_id, filename, formatted) do
-    Logger.error("Upload of #{filename} failed: #{formatted}")
+    Logger.error("Upload of #{inspect(filename)} failed: #{formatted}")
     _ = safely(fn -> discard_upload(document_id) end, document_id)
     {:error, filename, :upload_start_failed}
   end
@@ -229,7 +234,10 @@ defmodule Doctrans.Documents.Intake do
         {:ok, document}
 
       {:error, reason} ->
-        Logger.error("Failed to create document for #{original_filename}: #{inspect(reason)}")
+        Logger.error(
+          "Failed to create document for #{inspect(original_filename)}: #{inspect(reason)}"
+        )
+
         _ = discard_upload(attrs.id)
         {:error, original_filename, reason}
     end
@@ -241,7 +249,10 @@ defmodule Doctrans.Documents.Intake do
         :ok
 
       {:error, reason} ->
-        Logger.error("Failed to queue #{original_filename} for processing: #{inspect(reason)}")
+        Logger.error(
+          "Failed to queue #{inspect(original_filename)} for processing: #{inspect(reason)}"
+        )
+
         _ = delete_document(document)
         {:error, original_filename, reason}
     end
