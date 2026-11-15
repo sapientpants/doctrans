@@ -6,6 +6,7 @@ defmodule Doctrans.Documents.IntakeTest do
   alias Doctrans.Processing.{DocumentConverterMocks, PdfExtractorMock}
 
   import Doctrans.Fixtures
+  import ExUnit.CaptureLog, only: [with_log: 1]
 
   @moduletag :capture_log
 
@@ -56,6 +57,22 @@ defmodule Doctrans.Documents.IntakeTest do
     test "reports a path that cannot be read" do
       assert {:error, "gone.pdf", :upload_unreadable} =
                Intake.accept("/nonexistent/upload", "gone.pdf")
+    end
+
+    test "logs a rejected client name escaped, so it cannot forge or rewrite log lines" do
+      client_name = "evil.pdf\r\n[error] forged\e[2K\x7f\u0085"
+      path = temp_file("evil.pdf", "%")
+
+      {result, log} = with_log(fn -> Intake.accept(path, client_name) end)
+
+      assert {:error, ^client_name, :file_too_small} = result
+      # A readable string, not the byte list `inspect/1` gives a name holding DEL or a
+      # C1 control.
+      assert log =~ ~s(Upload rejected for "evil.pdf)
+      # The formatter frames each entry in newlines of its own, so a raw line break is
+      # looked for where the name would have put one.
+      refute log =~ "\n[error] forged"
+      refute log =~ ~r/[\r\e\x7f]|\x{85}/u
     end
   end
 

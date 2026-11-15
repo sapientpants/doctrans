@@ -182,6 +182,13 @@ defmodule Doctrans.Validation do
   def validate_file_content(_file_path, _extension),
     do: {:error, :invalid_file_arguments}
 
+  # DEL and the C1 controls (U+0080..U+009F, U+009B among them: an 8-bit CSI some
+  # terminals act on), as their encoded bytes rather than a `/u` regex class: the
+  # filename may not be valid UTF-8, and a Unicode regex raises on that. A C1 control
+  # encodes as 0xC2 and a continuation byte, and 0xC2 only ever leads a character,
+  # so no other character is touched.
+  @high_controls ["\x7f" | Enum.map(0x80..0x9F, &<<&1::utf8>>)]
+
   @doc """
   Sanitizes a filename string by removing dangerous characters.
 
@@ -203,6 +210,7 @@ defmodule Doctrans.Validation do
     |> String.replace("/", "_")
     |> String.replace("\\", "_")
     |> String.replace(~r/[<>:"\/?*|\x01-\x1f]/, "_")
+    |> String.replace(@high_controls, "_")
   end
 
   def sanitize_filename_string(_), do: ""
