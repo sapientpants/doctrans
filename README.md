@@ -203,7 +203,9 @@ mix phx.gen.secret    # or, on a host without Elixir: openssl rand -base64 48
 
 The stack also refuses to start without `POSTGRES_PASSWORD`, the database superuser's password; there
 is no default, because a well-known superuser password is one that any account on the machine could
-log in with. It goes into the application's `DATABASE_URL` as well, so keep it URL-safe:
+log in with. It goes into the application's `DATABASE_URL` as well, so keep it URL-safe: PostgreSQL
+accepts `@`, `:`, `/`, `?`, `#` and `%`, but any of them breaks the URL the application connects
+with. A hex string contains none of them:
 
 ```bash
 openssl rand -hex 24
@@ -242,6 +244,23 @@ only offer the superuser login to every other account and process on the machine
 `docker compose -f docker-compose.runtime.yml exec db psql -U postgres doctrans_prod`, and back it up
 with `pg_dump` the same way (see [Backup and restore](#backup-and-restore)).
 
+A deployment created before this change published the database on `127.0.0.1:5433`, and that port is
+now gone. If a host tool depended on it and nobody else uses the machine, republish it from a file of
+your own, passed as a second `-f` (the runtime file is always named explicitly, so Compose loads no
+`docker-compose.override.yml` beside it):
+
+```yaml
+# docker-compose.runtime.local.yml
+services:
+  db:
+    ports:
+      - "127.0.0.1:5433:5432"
+```
+
+```bash
+docker compose -f docker-compose.runtime.yml -f docker-compose.runtime.local.yml up -d
+```
+
 The development stack is arranged the same way: it sets `PHX_BIND_IP=0.0.0.0` in the container,
 where binding every interface reaches no further than the container itself, and the loopback
 publication outside it is again what limits who can connect. Its database, unlike the runtime one,
@@ -249,7 +268,15 @@ publication outside it is again what limits who can connect. Its database, unlik
 `mix test`, a GUI client — legitimately want it. Loopback keeps LAN peers out but not other local
 accounts: any of them can log in as the superuser, read every document and chat, and run commands in
 the database container. On a machine you share, drop that port with a `docker-compose.override.yml`
-that sets `ports: !reset []` on the `db` service.
+beside `docker-compose.yml`, which Compose loads on its own. The `!reset` tag needs Compose v2.24 or
+later:
+
+```yaml
+# docker-compose.override.yml
+services:
+  db:
+    ports: !reset []
+```
 
 A native `mix phx.server` has no such wrapper around it, so it binds `127.0.0.1` and stays there
 until `PHX_BIND_IP` says otherwise — the database can live on another host without changing that.

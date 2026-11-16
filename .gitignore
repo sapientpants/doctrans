@@ -63,3 +63,8 @@ npm-debug.log
 .env
 .env.local
 .env.gpg
+
+# Per-machine Compose overrides the README describes (#312): local choices
+# about which ports to publish, not shared configuration.
+docker-compose.override.yml
+docker-compose.runtime.local.yml

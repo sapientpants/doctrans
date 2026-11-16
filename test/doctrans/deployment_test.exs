@@ -34,6 +34,8 @@ defmodule Doctrans.DeploymentTest do
 
   @root Path.expand("../..", __DIR__)
   @data_dir "/var/lib/doctrans"
+  # The variables the runtime file has no default for (`${VAR:?...}`).
+  @runtime_required_variables ~w(SECRET_KEY_BASE POSTGRES_PASSWORD)
 
   setup_all do
     %{
@@ -49,10 +51,12 @@ defmodule Doctrans.DeploymentTest do
 
   # Compose resolves all supported YAML spellings into the same model. This
   # command only parses configuration: it needs the CLI, but never a daemon.
-  # Ignore the operator's .env and project overrides while inspecting the files;
-  # `env` sets or (with `nil`) clears variables for an interpolating run.
-  defp compose(path, interpolate? \\ false, env \\ []) do
-    flags = if interpolate?, do: [], else: ["--no-interpolate"]
+  # Ignore the operator's .env and project overrides while inspecting the files.
+  # Pass `interpolate: true` to resolve variables, and `env:` to set some for
+  # that run; the runtime file's required ones start out unset.
+  defp compose(path, opts \\ []) do
+    flags = if opts[:interpolate], do: [], else: ["--no-interpolate"]
+    required = Enum.map(@runtime_required_variables, &{&1, nil})
 
     System.cmd(
       "docker",
@@ -69,14 +73,19 @@ defmodule Doctrans.DeploymentTest do
         "json"
       ] ++ flags,
       env:
-        [
-          {"SECRET_KEY_BASE", nil},
-          {"POSTGRES_PASSWORD", nil},
-          {"COMPOSE_PROJECT_NAME", nil},
-          {"COMPOSE_FILE", nil}
-        ] ++ env,
+        required ++
+          [{"COMPOSE_PROJECT_NAME", nil}, {"COMPOSE_FILE", nil}] ++ Keyword.get(opts, :env, []),
       stderr_to_stdout: true
     )
+  end
+
+  # The runtime file refuses to resolve while `missing` is unset, even when
+  # every other required variable is set.
+  defp assert_requires!(missing) do
+    env = for other <- @runtime_required_variables, other != missing, do: {other, "secret"}
+    {output, status} = compose("docker-compose.runtime.yml", interpolate: true, env: env)
+    assert status != 0
+    assert output =~ missing
   end
 
   defp compose!(path) do
@@ -219,33 +228,40 @@ defmodule Doctrans.DeploymentTest do
     end
 
     test "does not publish the database on the host", %{compose: compose} do
-      # The app reaches it as `db` over the Compose network (#312); a host port,
-      # even on loopback, only offers the superuser login to every local account.
       assert compose["services"]["db"]["ports"] in [nil, []]
     end
 
     test "refuses to resolve without a secret key base" do
-      {output, status} =
-        compose("docker-compose.runtime.yml", true, [{"POSTGRES_PASSWORD", "secret"}])
-
-      assert status != 0
-      assert output =~ "SECRET_KEY_BASE"
+      assert_requires!("SECRET_KEY_BASE")
     end
 
     test "refuses to resolve without a database password" do
-      {output, status} =
-        compose("docker-compose.runtime.yml", true, [{"SECRET_KEY_BASE", "secret"}])
+      assert_requires!("POSTGRES_PASSWORD")
+    end
 
-      assert status != 0
-      assert output =~ "POSTGRES_PASSWORD"
+    test "has no fallback password wherever the password is used", %{compose: compose} do
+      # Compose stops at the first unset `:?` it meets, so the refusal above
+      # holds while any one reference keeps it; this pins every reference.
+      references =
+        for {name, service} <- compose["services"],
+            {_key, value} <- service["environment"] || %{},
+            is_binary(value),
+            [modifier] <-
+              Regex.scan(~r/\$\{POSTGRES_PASSWORD([^}]*)\}/, value, capture: :all_but_first),
+            do: {name, modifier}
+
+      assert references |> Enum.map(&elem(&1, 0)) |> Enum.sort() == ["app", "db"]
+
+      assert Enum.all?(references, fn {_name, modifier} -> modifier =~ ~r/^:\?/ end),
+             inspect(references)
     end
 
     test "gives the database and the app the same password" do
       {output, 0} =
-        compose("docker-compose.runtime.yml", true, [
-          {"SECRET_KEY_BASE", "secret"},
-          {"POSTGRES_PASSWORD", "a1b2c3"}
-        ])
+        compose("docker-compose.runtime.yml",
+          interpolate: true,
+          env: [{"SECRET_KEY_BASE", "secret"}, {"POSTGRES_PASSWORD", "a1b2c3"}]
+        )
 
       services = Jason.decode!(output)["services"]
       assert services["db"]["environment"]["POSTGRES_PASSWORD"] == "a1b2c3"
@@ -400,7 +416,7 @@ defmodule Doctrans.DeploymentTest do
       # Interpolated, unlike the fixture: `user:` is built from
       # `${DOCTRANS_UID:-1000}` and the resolved ids are what matter. Whatever
       # the environment supplies, neither may be root's.
-      {output, 0} = compose("docker-compose.yml", true)
+      {output, 0} = compose("docker-compose.yml", interpolate: true)
       app = Jason.decode!(output)["services"]["app"]
 
       assert [uid, gid] = String.split(app["user"], ":")
