@@ -38,6 +38,12 @@ This is a web application written using the Phoenix web framework.
   `git push` to a feature branch and `gh pr merge` stay allowed. When one of these is genuinely
   needed, **stop and ask** — do not route around the policy with an equivalent command. Add or
   change a rule in that one file, then run `scripts/test-command-policy.sh`.
+- **The policy fails closed and is not the guarded agent's to edit.** If jq or awk is missing
+  or fails, or the tool call cannot be read, the script refuses the command rather than letting
+  it through unchecked — fix the tooling, do not work around it. `.claude/settings.json` denies
+  Claude Code's file-editing tools on `scripts/command-policy.sh`, on `.claude/settings.json`
+  itself and on `.claude/settings.local.json`, and the policy refuses shell writes, moves and
+  deletes of the same files, so a change to any of them is proposed to the user, who applies it.
 - **Codex keeps its own copy** of that policy, because Codex reads hooks and execpolicy rules
   only from `~/.codex`. `scripts/sync-command-policy.sh --check` reports drift and `--install`
   refreshes it; run the check after editing the policy
