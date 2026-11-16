@@ -499,6 +499,28 @@ allow|GIT_CONFIG_PARAMETERS="'user.name=x'" git commit -m x
 allow|git commit -c HEAD~1 -m x
 allow|git gc
 allow|git gc --auto
+# The policy and the settings that wire it in are the user's to change: the
+# shell cannot write them any more than the editing tools can.
+block|sed -i s/a/b/ scripts/command-policy.sh
+block|perl -pi -e 's/a/b/' ./scripts/command-policy.sh
+block|echo 'exit 0' > scripts/command-policy.sh
+block|printf x | tee .claude/settings.json
+block|jq . /tmp/s.json > .claude/settings.json
+block|cp /tmp/policy.sh scripts/command-policy.sh
+block|mv /tmp/s.json .claude/settings.json
+block|mv scripts/command-policy.sh /tmp/policy.sh
+block|rm scripts/command-policy.sh
+block|rm -f .claude/settings.json
+block|echo '{"disableAllHooks": true}' > .claude/settings.local.json
+block|sed -i s/a/b/ "$CLAUDE_PROJECT_DIR"/.claude/settings.local.json
+block|bash -c "echo x >> scripts/command-policy.sh"
+allow|cat scripts/command-policy.sh
+allow|sed -n 1,40p scripts/command-policy.sh
+allow|grep -n deny .claude/settings.json > /tmp/deny.txt
+allow|cp scripts/command-policy.sh /tmp/policy.sh
+allow|jq . .claude/settings.json
+allow|scripts/sync-command-policy.sh --install
+allow|scripts/test-command-policy.sh
 # Another command's `-c` is not git's.
 allow|grep -c core.hooksPath=foo lib
 allow|psql -c 'alias.x=y'
@@ -703,11 +725,8 @@ broken_tool() { # dir tool -- a tool that always fails
 policy_on_path() { # path input [--json] -> block|allow
   local out status
   out=$(printf '%s' "$2" | PATH="$1" "$policy" ${3:+"$3"} 2>/dev/null); status=$?
-  if [ "$status" -eq 2 ] || [[ "$out" == *'"permissionDecision":"deny"'* || "$out" == *'"permissionDecision": "deny"'* ]]; then
-    echo block
-  else
-    echo allow
-  fi
+  [ "$status" -eq 2 ] && { echo block; return; }
+  case "$out" in *'"permissionDecision":"deny"'*|*'"permissionDecision": "deny"'*) echo block ;; *) echo allow ;; esac
 }
 harmless='{"tool_name":"Bash","tool_input":{"command":"git status"}}'
 tools_bin "$scratch/bin-full" bash git jq awk
@@ -730,6 +749,10 @@ report block "$(policy_on_path "$scratch/bin-bad-awk" "$harmless" --json)" 'awk 
 report block "$(policy_on_path "$scratch/bin-full" '{"tool_input": ')" 'malformed JSON on stdin'
 report block "$(policy_on_path "$scratch/bin-full" '')" 'nothing on stdin'
 report block "$(policy_on_path "$scratch/bin-full" '42')" 'JSON that is not a tool call'
+report block "$(policy_on_path "$scratch/bin-full" 'null')" 'a bare null'
+report block "$(policy_on_path "$scratch/bin-full" '[]')" 'an array'
+report block "$(policy_on_path "$scratch/bin-full" "$harmless"'garbage')" 'a tool call with trailing text'
+report block "$(policy_on_path "$scratch/bin-full" "$harmless$harmless")" 'two tool calls in one input'
 
 echo
 if ! command -v node >/dev/null 2>&1; then

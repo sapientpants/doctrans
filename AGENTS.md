@@ -41,8 +41,9 @@ This is a web application written using the Phoenix web framework.
 - **The policy fails closed and is not the guarded agent's to edit.** If jq or awk is missing
   or fails, or the tool call cannot be read, the script refuses the command rather than letting
   it through unchecked — fix the tooling, do not work around it. `.claude/settings.json` denies
-  Claude Code's file-editing tools on `scripts/command-policy.sh` and on `.claude/settings.json`
-  itself, so a change to either is proposed to the user, who applies it.
+  Claude Code's file-editing tools on `scripts/command-policy.sh`, on `.claude/settings.json`
+  itself and on `.claude/settings.local.json`, and the policy refuses shell writes, moves and
+  deletes of the same files, so a change to any of them is proposed to the user, who applies it.
 - **Codex keeps its own copy** of that policy, because Codex reads hooks and execpolicy rules
   only from `~/.codex`. `scripts/sync-command-policy.sh --check` reports drift and `--install`
   refreshes it; run the check after editing the policy

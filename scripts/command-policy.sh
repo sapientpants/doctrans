@@ -29,6 +29,9 @@
 #
 #   (default)  exit 2 with the reason on stderr        -- Claude Code, opencode
 #   --json     a PreToolUse deny decision on stdout    -- Codex
+#
+# Either way it fails closed: a tool call it cannot read, or rules it cannot run,
+# is refused rather than let through unchecked.
 set -uo pipefail
 
 output=exit2
@@ -57,8 +60,9 @@ refuse() { # reason
 # The policy fails closed. A guard that cannot read the command or cannot run
 # its rules has not checked it, and letting it through would make every broken
 # install -- jq missing from PATH, an awk that dies on the script -- a silent
-# allow-all. The adapters keep their own fail-open on spawn error and timeout;
-# this covers everything the script itself can see go wrong.
+# allow-all. The adapters keep their own fail-open on spawn error and timeout,
+# and the git lookups further down stay best-effort (see there); this covers
+# reading the tool call and running the rules.
 cannot_check() { # what went wrong
   refuse "Blocked by the command policy: it could not check the command ($1). Fix the policy's tooling (scripts/command-policy.sh needs jq and awk on PATH) rather than working around it."
 }
@@ -66,10 +70,13 @@ cannot_check() { # what went wrong
 command -v jq >/dev/null 2>&1 || cannot_check "jq is not on PATH"
 command -v awk >/dev/null 2>&1 || cannot_check "awk is not on PATH"
 
-# `input` rather than reading stdin implicitly, so that no input at all is an
-# error like malformed input is: a tool call always arrives as one JSON object.
-command=$(jq -nr 'input | .tool_input.command // empty' 2>/dev/null) ||
-  cannot_check "the tool call on stdin is not JSON jq can read"
+# A tool call always arrives as exactly one JSON object. Slurping stdin makes
+# anything else an error rather than a quiet allow: no input at all, a bare
+# `null`, a scalar or array, and an object with trailing text after it.
+command=$(jq -sr 'if length == 1 and (.[0] | type) == "object"
+                  then .[0].tool_input.command // empty
+                  else error("not one tool call") end' 2>/dev/null) ||
+  cannot_check "the tool call on stdin is not one JSON object"
 [ -n "$command" ] || exit 0
 
 # ---------------------------------------------------------------------------
@@ -905,6 +912,18 @@ END {
     verdict = "pushing to a URL, a path or a variable is a one-off remote, which AGENTS.md forbids; push to a configured remote by name"
   deny(" git branch [^;&|]*(--set-upstream-to|-u) ", "changing a branch upstream rewires where work is pushed")
 
+  # --- The guard itself ---------------------------------------------------
+  # This script and the settings that wire it in are not the guarded agent's to
+  # change. .claude/settings.json denies Claude Code's file-editing tools on
+  # them; these rules close the same door through the shell, written the ways
+  # .git/config is written above. settings.local.json is in the list because a
+  # `disableAllHooks` there switches this hook off without touching either file.
+  guard = "(scripts/command-policy\\.sh|\\.claude/settings(\\.local)?\\.json)"
+  deny(" (g?sed|perl)" args "(-[A-Za-z]*i[^ ]*|--in-place[^ ]*) ([^;&|]* )?[^ ;&|]*" guard " ", "editing the command policy or its settings is the user's call, not the agent's", cmdq)
+  deny("( tee" args "|>>? ?| dd" args "of=)[^ ;&|]*" guard " ", "writing to the command policy or its settings is the user's call, not the agent's", cmdq)
+  deny(" (cp|ln|install|rsync)" args "[^ ;&|]*" guard " ($|[;&|])", "replacing the command policy or its settings is the user's call, not the agent's", cmdq_args)
+  deny(" (mv|rm)" args "[^ ;&|]*" guard " ", "moving or deleting the command policy or its settings is the user's call, not the agent's", cmdq_args)
+
   # --- Recursive deletion -------------------------------------------------
   deny(" rm [^;&|]*(-[A-Za-z]*[rR][A-Za-z]*|--recursive) ", "recursive deletion with rm is refused")
   deny(" rmdir ",                     "rmdir is refused")
@@ -946,6 +965,9 @@ AWK
 # on. Read once, from the project checkout and the user's global config, and
 # only when the command mentions git at all. Approximate by design: the command
 # may cd elsewhere first, and an alias local to another repository is not seen.
+# A failed lookup is not a failure to check, so these do not fail closed:
+# `config --get-regexp` exits 1 when there are no aliases at all, rev-parse
+# fails outside a repository, and with no working git a git command cannot run.
 aliases=""
 branch=""
 commands=""

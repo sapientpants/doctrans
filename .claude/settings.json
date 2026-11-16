@@ -1,8 +1,9 @@
 {
   "permissions": {
     "deny": [
-      "Edit(scripts/command-policy.sh)",
-      "Edit(.claude/settings.json)"
+      "Edit(/scripts/command-policy.sh)",
+      "Edit(/.claude/settings.json)",
+      "Edit(/.claude/settings.local.json)"
     ]
   },
   "hooks": {
