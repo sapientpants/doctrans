@@ -20,6 +20,7 @@ to your device or a trusted network.
 - Document chat (RAG) - ask questions about your translated documents
 - Hybrid search - semantic + keyword search across all pages
 - Reprocess pages with different AI models
+- Markdown export of a whole document
 - Zoom controls for page images
 - Document sorting by date or name
 - Internationalized UI (11 locales: da, de, en, es, fr, it, nl, no, pl, pt, sv)
@@ -390,6 +391,19 @@ or split the page into smaller sections, then reprocess. Ensure the provider
 returns the completion marker. The client does not automatically increase token
 limits or segment pages; existing background job retries may still run.
 Streaming chat uses a separate completion path and is not covered by this validation.
+
+### Exporting a document
+
+The download icon on a document (**Download translated Markdown**) saves the whole document as one `.md`
+file: every page under its own heading, with a note on any page that failed, is not translated yet, or was
+translated as empty.
+
+The page text in an export is the model's output, copied verbatim. The viewer renders that same text
+through a sanitizer and under the app's Content-Security-Policy; the export has neither, and stripping HTML
+out of it would corrupt legitimate Markdown. So an export can contain raw HTML, remote image references and
+`javascript:` links if the inference server produced them. Treat it like any Markdown file from an
+untrusted source: open it in an editor or a renderer that does not execute HTML or load remote images
+unless you trust the inference server that produced it.
 
 ## Configuration
 
