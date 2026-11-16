@@ -201,8 +201,21 @@ invalidates every signed cookie and LiveView session:
 mix phx.gen.secret    # or, on a host without Elixir: openssl rand -base64 48
 ```
 
-Compose reads `.env` from the project directory for variable substitution, so either put the value
-there or export it in the environment you run Compose from. The release image mounts no source, so
+The stack also refuses to start without `POSTGRES_PASSWORD`, the database superuser's password; there
+is no default, because a well-known superuser password is one that any account on the machine could
+log in with. It goes into the application's `DATABASE_URL` as well, so keep it URL-safe:
+
+```bash
+openssl rand -hex 24
+```
+
+PostgreSQL applies it only when it initialises an empty volume. A deployment created before the
+password became required was initialised with `postgres`: either set `POSTGRES_PASSWORD=postgres` to
+keep it, or change it in place first with `docker compose -f docker-compose.runtime.yml exec db psql
+-U postgres -c "ALTER USER postgres PASSWORD '<new>'"` and then set the new value.
+
+Compose reads `.env` from the project directory for variable substitution, so either put both values
+there or export them in the environment you run Compose from. The release image mounts no source, so
 that file is read by Compose rather than by the application's own `.env` loader. Then build and
 start:
 
@@ -222,12 +235,23 @@ which is the one command between you and an unrecoverable library — see
 Both files publish on host loopback only, for the reason stated at the top of this README: Doctrans
 has no authentication, so anything that can reach the port can read every document. The runtime
 container binds every interface *inside itself* and lets the published `127.0.0.1:4000` do the
-limiting (its database is published on 5433, so it does not collide with the development stack's
-5432), which makes republishing that port on another address the one deliberate act that exposes the
-application to a LAN — at your own risk. The development stack is arranged the same way: it sets
-`PHX_BIND_IP=0.0.0.0` in the container, where binding every interface reaches no further than the
-container itself, and the loopback publication outside it is again what limits who can connect. A
-native `mix phx.server` has no such wrapper around it, so it binds `127.0.0.1` and stays there
+limiting, which makes republishing that port on another address the one deliberate act that exposes
+the application to a LAN — at your own risk. The runtime database is not published at all: the
+application reaches it as `db` over the Compose network, and a host port, even on loopback, would
+only offer the superuser login to every other account and process on the machine. Reach it with
+`docker compose -f docker-compose.runtime.yml exec db psql -U postgres doctrans_prod`, and back it up
+with `pg_dump` the same way (see [Backup and restore](#backup-and-restore)).
+
+The development stack is arranged the same way: it sets `PHX_BIND_IP=0.0.0.0` in the container,
+where binding every interface reaches no further than the container itself, and the loopback
+publication outside it is again what limits who can connect. Its database, unlike the runtime one,
+*is* published, on `127.0.0.1:5432` with the fixed password `postgres`, because host tools — a native
+`mix test`, a GUI client — legitimately want it. Loopback keeps LAN peers out but not other local
+accounts: any of them can log in as the superuser, read every document and chat, and run commands in
+the database container. On a machine you share, drop that port with a `docker-compose.override.yml`
+that sets `ports: !reset []` on the `db` service.
+
+A native `mix phx.server` has no such wrapper around it, so it binds `127.0.0.1` and stays there
 until `PHX_BIND_IP` says otherwise — the database can live on another host without changing that.
 
 Set `PHX_HOST` to whatever the browser types. The application answers only to an explicit allowlist

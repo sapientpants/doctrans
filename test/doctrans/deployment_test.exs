@@ -22,7 +22,9 @@ defmodule Doctrans.DeploymentTest do
   baked into a layer because only the plaintext names were listed. The runtime
   deployment runs the same converters for as long as it lives, so it keeps at
   least the development stack's container hardening, plus a read-only root
-  (#311).
+  (#311). Its database is reached over the Compose network only, so it is not
+  published on the host at all, and its superuser password has no default
+  (#312).
 
   The assertions are deliberately semantic and few, so ordinary edits to either
   file — reordering, comments, whitespace — do not break them.
@@ -47,8 +49,9 @@ defmodule Doctrans.DeploymentTest do
 
   # Compose resolves all supported YAML spellings into the same model. This
   # command only parses configuration: it needs the CLI, but never a daemon.
-  # Ignore the operator's .env and project overrides while inspecting the files.
-  defp compose(path, interpolate? \\ false) do
+  # Ignore the operator's .env and project overrides while inspecting the files;
+  # `env` sets or (with `nil`) clears variables for an interpolating run.
+  defp compose(path, interpolate? \\ false, env \\ []) do
     flags = if interpolate?, do: [], else: ["--no-interpolate"]
 
     System.cmd(
@@ -65,7 +68,13 @@ defmodule Doctrans.DeploymentTest do
         "--format",
         "json"
       ] ++ flags,
-      env: [{"SECRET_KEY_BASE", nil}, {"COMPOSE_PROJECT_NAME", nil}, {"COMPOSE_FILE", nil}],
+      env:
+        [
+          {"SECRET_KEY_BASE", nil},
+          {"POSTGRES_PASSWORD", nil},
+          {"COMPOSE_PROJECT_NAME", nil},
+          {"COMPOSE_FILE", nil}
+        ] ++ env,
       stderr_to_stdout: true
     )
   end
@@ -206,13 +215,43 @@ defmodule Doctrans.DeploymentTest do
     end
 
     test "publishes every port on loopback only", %{compose: compose} do
-      assert length(assert_loopback_ports!(compose)) == 2
+      assert length(assert_loopback_ports!(compose)) == 1
+    end
+
+    test "does not publish the database on the host", %{compose: compose} do
+      # The app reaches it as `db` over the Compose network (#312); a host port,
+      # even on loopback, only offers the superuser login to every local account.
+      assert compose["services"]["db"]["ports"] in [nil, []]
     end
 
     test "refuses to resolve without a secret key base" do
-      {output, status} = compose("docker-compose.runtime.yml", true)
+      {output, status} =
+        compose("docker-compose.runtime.yml", true, [{"POSTGRES_PASSWORD", "secret"}])
+
       assert status != 0
       assert output =~ "SECRET_KEY_BASE"
+    end
+
+    test "refuses to resolve without a database password" do
+      {output, status} =
+        compose("docker-compose.runtime.yml", true, [{"SECRET_KEY_BASE", "secret"}])
+
+      assert status != 0
+      assert output =~ "POSTGRES_PASSWORD"
+    end
+
+    test "gives the database and the app the same password" do
+      {output, 0} =
+        compose("docker-compose.runtime.yml", true, [
+          {"SECRET_KEY_BASE", "secret"},
+          {"POSTGRES_PASSWORD", "a1b2c3"}
+        ])
+
+      services = Jason.decode!(output)["services"]
+      assert services["db"]["environment"]["POSTGRES_PASSWORD"] == "a1b2c3"
+
+      assert %URI{userinfo: "postgres:a1b2c3"} =
+               URI.parse(services["app"]["environment"]["DATABASE_URL"])
     end
 
     test "runs migrations before the server, and execs it", %{compose: compose} do

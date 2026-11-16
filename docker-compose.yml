@@ -9,6 +9,10 @@ services:
       - pgdata:/var/lib/postgresql
     # Bind to loopback only: Doctrans is a local, single-user app with no
     # authentication, so the database should not be reachable from the LAN.
+    # Published at all because host tools (a native `mix test`, a GUI client)
+    # want it, unlike the runtime stack's. Loopback does not keep out other
+    # local accounts, which can log in with the fixed password above; on a
+    # shared machine drop it in an override, see the README (#312).
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
