@@ -127,10 +127,12 @@ defmodule Doctrans.Chat.QueryExpander do
 
     queries = if queries == [], do: [original_question], else: queries
 
+    # Every text in the line is sliced: the standalone question and the queries
+    # come from the model's reply, or fall back to the user's question.
     Logger.info(
       "Query plan: #{length(queries)} queries from \"#{String.slice(original_question, 0, 80)}\"" <>
-        "\n  Standalone: #{standalone_q}" <>
-        Enum.map_join(queries, "", fn q -> "\n  Query: #{q}" end)
+        "\n  Standalone: #{String.slice(standalone_q, 0, 200)}" <>
+        Enum.map_join(queries, "", fn q -> "\n  Query: #{String.slice(q, 0, 200)}" end)
     )
 
     {standalone_q, queries}
