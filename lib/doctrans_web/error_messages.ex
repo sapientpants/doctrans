@@ -26,6 +26,10 @@ defmodule DoctransWeb.ErrorMessages do
   defp generic, do: dgettext("errors", "An unexpected error occurred. Please try again.")
 
   # --- Search (`Doctrans.Search`) ---------------------------------------------
+  #
+  # `max` is the character bound, the one the search input enforces as its
+  # `maxlength`. The query's byte bound is only ever met by a query the form
+  # could not have sent, and is reported with the same words.
 
   defp lookup(:query_too_short), do: dgettext("errors", "Query too short")
 

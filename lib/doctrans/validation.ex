@@ -34,24 +34,61 @@ defmodule Doctrans.Validation do
     end
   end
 
+  # The most UTF-8 spends on one code point, so text within a character bound in
+  # any script is within that many characters' worth of bytes. Every byte bound
+  # below is derived from its character bound through this one rate.
+  @bytes_per_char 4
+
+  @max_search_query_chars 500
+  @max_search_query_bytes @bytes_per_char * @max_search_query_chars
+
+  @doc """
+  The most characters a search query may hold once trimmed: the bound the
+  reader is told of, and the `maxlength` of the search input.
+  """
+  @spec max_search_query_chars() :: pos_integer()
+  def max_search_query_chars, do: @max_search_query_chars
+
+  @doc """
+  The most bytes a search query may hold once trimmed, derived from
+  `max_search_query_chars/0` as `max_chat_question_bytes/0` is from its own.
+  Public so `DoctransWeb.SearchLive` can tell a query it may echo back into the
+  search input from one too large to.
+  """
+  @spec max_search_query_bytes() :: pos_integer()
+  def max_search_query_bytes, do: @max_search_query_bytes
+
   @doc """
   Validates search query parameters.
+
+  Bounded in bytes as well as characters, for the reason
+  `validate_chat_question/1` gives: a grapheme cluster can carry any number of
+  combining marks, and the query is sent whole to `plainto_tsquery`, which
+  Postgres parses once per candidate row, and to the embedding endpoint.
 
   ## Parameters
   - `query` - Search query string
 
   ## Returns
   - `{:ok, sanitized_query}` if valid
-  - `{:error, reason}` if invalid
+  - `{:error, :query_too_short}` for a blank query
+  - `{:error, {:query_too_long, max: characters}}` for one over either bound
+  - `{:error, :invalid_query}` for anything but a string
   """
   @spec validate_search_query(term()) :: {:ok, String.t()} | {:error, Doctrans.Errors.reason()}
-  def validate_search_query(query) when is_binary(query),
-    do: bounded_text(query, [graphemes: 500], :query_too_short, :query_too_long)
+  def validate_search_query(query) when is_binary(query) do
+    bounded_text(
+      query,
+      [bytes: @max_search_query_bytes, graphemes: @max_search_query_chars],
+      :query_too_short,
+      :query_too_long
+    )
+  end
 
   def validate_search_query(_), do: {:error, :invalid_query}
 
   @max_chat_question_chars 4_000
-  @max_chat_question_bytes 4 * @max_chat_question_chars
+  @max_chat_question_bytes @bytes_per_char * @max_chat_question_chars
 
   @doc """
   The most characters a chat question may hold once trimmed: the bound the

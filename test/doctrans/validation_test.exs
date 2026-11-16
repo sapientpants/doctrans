@@ -240,9 +240,33 @@ defmodule Doctrans.ValidationTest do
     end
 
     test "returns error for query too long" do
-      long_query = String.duplicate("a", 501)
-      assert {:error, reason} = Validation.validate_search_query(long_query)
-      assert reason == {:query_too_long, [max: 500]}
+      max = Validation.max_search_query_chars()
+      long_query = String.duplicate("a", max + 1)
+
+      assert {:error, {:query_too_long, [max: ^max]}} =
+               Validation.validate_search_query(long_query)
+    end
+
+    test "accepts a query of exactly the character bound, in any script" do
+      max = Validation.max_search_query_chars()
+
+      for char <- ["a", "é", "日", "😀"] do
+        query = String.duplicate(char, max)
+        assert {:ok, ^query} = Validation.validate_search_query(query)
+      end
+    end
+
+    # 500 graphemes can be megabytes: the byte bound refuses it before
+    # `plainto_tsquery` or the embedding endpoint ever sees it (#284).
+    test "counts bytes too, so combining marks cannot hide the size" do
+      chars = Validation.max_search_query_chars()
+      bytes = Validation.max_search_query_bytes()
+      query = String.duplicate("a" <> String.duplicate("\u0301", 10), chars)
+      assert String.length(query) == chars
+      assert byte_size(query) > bytes
+
+      assert {:error, {:query_too_long, [max: ^chars]}} =
+               Validation.validate_search_query(query)
     end
 
     test "accepts query containing HTML/script tags without transformation" do
