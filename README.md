@@ -394,11 +394,12 @@ Streaming chat uses a separate completion path and is not covered by this valida
 
 ### Exporting a document
 
-**Download translated Markdown** on a document saves the whole document as one `.md` file: every page under
-its own heading, with a note on any page that failed or is not translated yet.
+The download icon on a document (**Download translated Markdown**) saves the whole document as one `.md`
+file: every page under its own heading, with a note on any page that failed, is not translated yet, or was
+translated as empty.
 
 The page text in an export is the model's output, copied verbatim. The viewer renders that same text
-through a sanitiser and under the app's Content-Security-Policy; the export has neither, and stripping HTML
+through a sanitizer and under the app's Content-Security-Policy; the export has neither, and stripping HTML
 out of it would corrupt legitimate Markdown. So an export can contain raw HTML, remote image references and
 `javascript:` links if the inference server produced them. Treat it like any Markdown file from an
 untrusted source: open it in an editor or a renderer that does not execute HTML or load remote images
