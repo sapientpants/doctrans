@@ -149,11 +149,18 @@ defmodule DoctransWeb.SearchLive do
     |> put_flash(:error, ErrorMessages.message(:search_failed))
   end
 
+  # The refused query is echoed back into the input so the reader can correct
+  # it, unless it is over the byte bound: a query the form could not have sent,
+  # which would otherwise be rendered back whole as the input's `value`. Either
+  # value still differs from every validated query, which the staleness guard in
+  # `handle_async/3` relies on.
   defp reject_query(socket, query, reason) do
+    echo = if byte_size(query) > Validation.max_search_query_bytes(), do: "", else: query
+
     socket
     |> cancel_async(:search)
     |> clear_search()
-    |> assign(:query, query)
+    |> assign(:query, echo)
     |> assign(:searched, true)
     |> put_flash(:error, ErrorMessages.message(reason))
   end

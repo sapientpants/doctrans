@@ -24,6 +24,21 @@ defmodule DoctransWeb.SearchLiveTest do
       assert has_element?(view, "#flash-error", "Suchanfrage zu lang (maximal 500 Zeichen)")
     end
 
+    test "echoes a refused query back, unless it is over the byte bound", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/search")
+      chars = Doctrans.Validation.max_search_query_chars()
+
+      long = String.duplicate("a", chars + 1)
+      view |> element("#search-form") |> render_submit(%{q: long})
+      assert has_element?(view, "#search-input[value='#{long}']")
+
+      # 500 graphemes of combining marks: within `maxlength`, over the byte bound.
+      heavy = String.duplicate("a" <> String.duplicate("́", 10), chars)
+      view |> element("#search-form") |> render_submit(%{q: heavy})
+      assert has_element?(view, "#flash-error")
+      assert has_element?(view, "#search-input[value='']")
+    end
+
     test "mounts with empty state", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/search")
 

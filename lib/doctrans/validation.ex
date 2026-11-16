@@ -34,18 +34,26 @@ defmodule Doctrans.Validation do
     end
   end
 
+  # The most UTF-8 spends on one code point, so text within a character bound in
+  # any script is within that many characters' worth of bytes. Every byte bound
+  # below is derived from its character bound through this one rate.
+  @bytes_per_char 4
+
   @max_search_query_chars 500
-  @max_search_query_bytes 4 * @max_search_query_chars
+  @max_search_query_bytes @bytes_per_char * @max_search_query_chars
 
   @doc """
-  The most characters a search query may hold once trimmed.
+  The most characters a search query may hold once trimmed: the bound the
+  reader is told of, and the `maxlength` of the search input.
   """
   @spec max_search_query_chars() :: pos_integer()
   def max_search_query_chars, do: @max_search_query_chars
 
   @doc """
-  The most bytes a search query may hold once trimmed: four per character, as
-  for `max_chat_question_bytes/0`.
+  The most bytes a search query may hold once trimmed, derived from
+  `max_search_query_chars/0` as `max_chat_question_bytes/0` is from its own.
+  Public so `DoctransWeb.SearchLive` can tell a query it may echo back into the
+  search input from one too large to.
   """
   @spec max_search_query_bytes() :: pos_integer()
   def max_search_query_bytes, do: @max_search_query_bytes
@@ -80,7 +88,7 @@ defmodule Doctrans.Validation do
   def validate_search_query(_), do: {:error, :invalid_query}
 
   @max_chat_question_chars 4_000
-  @max_chat_question_bytes 4 * @max_chat_question_chars
+  @max_chat_question_bytes @bytes_per_char * @max_chat_question_chars
 
   @doc """
   The most characters a chat question may hold once trimmed: the bound the
