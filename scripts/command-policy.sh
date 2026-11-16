@@ -38,7 +38,38 @@ case "${1:-}" in
   *) printf 'usage: %s [--json]\n' "$0" >&2; exit 64 ;;
 esac
 
-command=$(jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
+# Refuses the tool call with `reason`, in the shape the agent reads. jq builds
+# the decision object so the reason is escaped properly rather than hand-quoted;
+# when jq is the thing that is broken, the reason goes out without the two
+# characters that would need escaping, which is still a refusal.
+refuse() { # reason
+  if [ "$output" = json ]; then
+    # Codex (and Claude Code) read a decision object on stdout.
+    jq -n --arg reason "$1" \
+      '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}' 2>/dev/null ||
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "${1//[\"\\]/}"
+    exit 0
+  fi
+  printf '%s\n' "$1" >&2
+  exit 2
+}
+
+# The policy fails closed. A guard that cannot read the command or cannot run
+# its rules has not checked it, and letting it through would make every broken
+# install -- jq missing from PATH, an awk that dies on the script -- a silent
+# allow-all. The adapters keep their own fail-open on spawn error and timeout;
+# this covers everything the script itself can see go wrong.
+cannot_check() { # what went wrong
+  refuse "Blocked by the command policy: it could not check the command ($1). Fix the policy's tooling (scripts/command-policy.sh needs jq and awk on PATH) rather than working around it."
+}
+
+command -v jq >/dev/null 2>&1 || cannot_check "jq is not on PATH"
+command -v awk >/dev/null 2>&1 || cannot_check "awk is not on PATH"
+
+# `input` rather than reading stdin implicitly, so that no input at all is an
+# error like malformed input is: a tool call always arrives as one JSON object.
+command=$(jq -nr 'input | .tool_input.command // empty' 2>/dev/null) ||
+  cannot_check "the tool call on stdin is not JSON jq can read"
 [ -n "$command" ] || exit 0
 
 # ---------------------------------------------------------------------------
@@ -928,19 +959,9 @@ esac
 
 verdict=$(printf '%s\n' "$command" |
   COMMAND_POLICY_GIT_ALIASES="$aliases" COMMAND_POLICY_GIT_BRANCH="$branch" \
-  COMMAND_POLICY_GIT_COMMANDS="$commands" awk "$POLICY")
+  COMMAND_POLICY_GIT_COMMANDS="$commands" awk "$POLICY") ||
+  cannot_check "awk failed while running the rules"
 
 [ -n "$verdict" ] || exit 0
 
-reason="Blocked by the command policy: ${verdict}. The rule lives in scripts/command-policy.sh. If this operation is genuinely what is wanted, run it yourself -- the policy deliberately does not let the agent decide that its own case is the exception."
-
-if [ "$output" = json ]; then
-  # Codex (and Claude Code) read a decision object on stdout. jq builds it so the
-  # reason is escaped properly rather than hand-quoted.
-  jq -n --arg reason "$reason" \
-    '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
-  exit 0
-fi
-
-printf '%s\n' "$reason" >&2
-exit 2
+refuse "Blocked by the command policy: ${verdict}. The rule lives in scripts/command-policy.sh. If this operation is genuinely what is wanted, run it yourself -- the policy deliberately does not let the agent decide that its own case is the exception."

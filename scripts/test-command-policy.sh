@@ -687,6 +687,50 @@ report allow "$(shell_policy $'cat <<EOF > notes.md\npsql: never drop table by h
 report allow "$(shell_policy $'git commit -F - <<EOF\nfix(db): psql no longer runs drop table\nEOF')" 'heredoc commit message naming psql and DROP TABLE'
 report allow "$(shell_policy 'grep <<<"rm -rf build" notes.md')" 'here-string holding rm -rf'
 
+# The policy fails closed: when it cannot read the tool call or cannot run its
+# rules, the command is refused, not waved through. Each case runs the policy on
+# a PATH that holds only the tools it needs, with jq or awk left out or replaced
+# by one that fails, and on a harmless command, so a block can only come from the
+# failure.
+tools_bin() { # dir tool... -- a PATH directory holding exactly these tools
+  mkdir -p "$1" || return 1
+  local dir=$1 tool; shift
+  for tool in "$@"; do ln -sf "$(command -v "$tool")" "$dir/$tool" || return 1; done
+}
+broken_tool() { # dir tool -- a tool that always fails
+  printf '#!/bin/sh\nexit 3\n' > "$1/$2" && chmod +x "$1/$2"
+}
+policy_on_path() { # path input [--json] -> block|allow
+  local out status
+  out=$(printf '%s' "$2" | PATH="$1" "$policy" ${3:+"$3"} 2>/dev/null); status=$?
+  if [ "$status" -eq 2 ] || [[ "$out" == *'"permissionDecision":"deny"'* || "$out" == *'"permissionDecision": "deny"'* ]]; then
+    echo block
+  else
+    echo allow
+  fi
+}
+harmless='{"tool_name":"Bash","tool_input":{"command":"git status"}}'
+tools_bin "$scratch/bin-full" bash git jq awk
+tools_bin "$scratch/bin-no-jq" bash git awk
+tools_bin "$scratch/bin-no-awk" bash git jq
+tools_bin "$scratch/bin-bad-jq" bash git awk && broken_tool "$scratch/bin-bad-jq" jq
+tools_bin "$scratch/bin-bad-awk" bash git jq && broken_tool "$scratch/bin-bad-awk" awk
+
+echo
+echo "layer 2: a policy that cannot check the command refuses it"
+report allow "$(policy_on_path "$scratch/bin-full" "$harmless")" 'a harmless command with jq and awk present (control)'
+report allow "$(policy_on_path "$scratch/bin-full" '{"tool_name":"Read","tool_input":{}}')" 'a tool call with no command'
+report block "$(policy_on_path "$scratch/bin-no-jq" "$harmless")" 'jq missing from PATH'
+report block "$(policy_on_path "$scratch/bin-no-jq" "$harmless" --json)" 'jq missing from PATH, --json'
+report block "$(policy_on_path "$scratch/bin-no-awk" "$harmless")" 'awk missing from PATH'
+report block "$(policy_on_path "$scratch/bin-bad-jq" "$harmless")" 'jq that fails'
+report block "$(policy_on_path "$scratch/bin-bad-jq" "$harmless" --json)" 'jq that fails, --json'
+report block "$(policy_on_path "$scratch/bin-bad-awk" "$harmless")" 'awk that fails'
+report block "$(policy_on_path "$scratch/bin-bad-awk" "$harmless" --json)" 'awk that fails, --json'
+report block "$(policy_on_path "$scratch/bin-full" '{"tool_input": ')" 'malformed JSON on stdin'
+report block "$(policy_on_path "$scratch/bin-full" '')" 'nothing on stdin'
+report block "$(policy_on_path "$scratch/bin-full" '42')" 'JSON that is not a tool call'
+
 echo
 if ! command -v node >/dev/null 2>&1; then
   echo "layer 3: skipped (node is absent)"
