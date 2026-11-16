@@ -189,7 +189,10 @@ compiled `mix release` in a multi-stage build on a digest-pinned Debian base ima
 non-root user with no source mounted, keeps the database and the storage root
 (`DOCTRANS_DATA_DIR=/var/lib/doctrans`) in named Docker volumes that survive an image rebuild, and
 runs `/app/bin/migrate` before `/app/bin/server` so a restarted deployment is migrated before it
-serves a request.
+serves a request. Since it runs LibreOffice and poppler on every document you upload for as long as
+it lives, it is at least as tight as the development container: every capability dropped,
+`no-new-privileges` set, a private tmpfs `/tmp`, and a **read-only** root filesystem, so the data
+volume and `/tmp` are the only places a converter can write.
 
 A release refuses to start without `SECRET_KEY_BASE`. Generate one and keep it — changing it
 invalidates every signed cookie and LiveView session:

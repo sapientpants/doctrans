@@ -19,7 +19,10 @@ defmodule Doctrans.DeploymentTest do
   execution on the next request, boot, checkout or agent session. Its image
   is built from the whole checkout, so `.dockerignore` must keep every local
   env file out of the build context (#273): the encrypted `.env.gpg` was once
-  baked into a layer because only the plaintext names were listed.
+  baked into a layer because only the plaintext names were listed. The runtime
+  deployment runs the same converters for as long as it lives, so it keeps at
+  least the development stack's container hardening, plus a read-only root
+  (#311).
 
   The assertions are deliberately semantic and few, so ordinary edits to either
   file — reordering, comments, whitespace — do not break them.
@@ -126,6 +129,12 @@ defmodule Doctrans.DeploymentTest do
     end)
   end
 
+  # The paths a service mounts as tmpfs. Compose keeps mount options on the
+  # entry (`/tmp:exec`), so only the path is compared.
+  defp tmpfs_paths(service) do
+    Enum.map(service["tmpfs"] || [], &hd(String.split(&1, ":")))
+  end
+
   defp assert_loopback_ports!(compose) do
     ports = Enum.flat_map(compose["services"], fn {_name, service} -> service["ports"] || [] end)
     assert ports != []
@@ -224,6 +233,36 @@ defmodule Doctrans.DeploymentTest do
         assert %File.Stat{mode: mode} = File.stat!(path)
         assert Bitwise.band(mode, 0o111) != 0, "#{script} is not executable"
       end
+    end
+
+    test "is at least as hardened as the development stack", %{
+      compose: compose,
+      development_compose: development
+    } do
+      # This container runs the converters on untrusted documents for as long
+      # as the deployment lives (#311), so every option that contains them in
+      # the development stack holds here too.
+      app = compose["services"]["app"]
+      dev_app = development["services"]["app"]
+
+      assert app["cap_drop"] == dev_app["cap_drop"]
+      assert MapSet.subset?(MapSet.new(dev_app["security_opt"]), MapSet.new(app["security_opt"]))
+      assert tmpfs_paths(app) == tmpfs_paths(dev_app)
+    end
+
+    test "drops every capability, forbids gaining privileges and mounts root read-only", %{
+      compose: compose
+    } do
+      # Pinned on their own as well, so the two files cannot loosen together.
+      app = compose["services"]["app"]
+      assert app["cap_drop"] == ["ALL"]
+      assert "no-new-privileges:true" in app["security_opt"]
+      assert tmpfs_paths(app) == ["/tmp"]
+
+      # The release writes nothing outside the data volume and /tmp; a
+      # read-only root keeps a compromised converter out of the release and
+      # the image's binaries.
+      assert app["read_only"] == true
     end
 
     test "declares a release runtime stage and an unprivileged user", %{
@@ -351,10 +390,7 @@ defmodule Doctrans.DeploymentTest do
     end
 
     test "gives the converters a private tmpfs /tmp", %{compose: compose} do
-      # Compose keeps mount options on the entry (`/tmp:exec`), so match the
-      # path alone.
-      tmpfs = compose["services"]["app"]["tmpfs"] || []
-      assert Enum.any?(tmpfs, &(hd(String.split(&1, ":")) == "/tmp")), inspect(tmpfs)
+      assert "/tmp" in tmpfs_paths(compose["services"]["app"])
     end
   end
 

@@ -93,6 +93,24 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    # This container runs the converters on untrusted documents for as long as
+    # the deployment lives, so it is at least as tight as the development stack
+    # (#311). The release writes nothing outside the data volume and /tmp: the
+    # root filesystem is read-only, and a converter that is compromised cannot
+    # plant anything in the release, the image's binaries or its home directory.
+    read_only: true
+    # Converters get a private, memory-backed /tmp, which is where LibreOffice's
+    # throwaway per-conversion profile goes. Docker's default `noexec` stays:
+    # unlike the development stack's Tailwind watcher, nothing here maps an
+    # executable out of /tmp.
+    tmpfs:
+      - /tmp
+    # Nothing here needs a capability or a setuid step: the release and the
+    # converters all run as the image's unprivileged `doctrans` user.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 # Named explicitly rather than left to Compose's `<project>_<key>` prefixing, so
 # the two volumes an operator has to back up appear under exactly these names in
