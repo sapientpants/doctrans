@@ -5,7 +5,7 @@ defmodule Doctrans.Chat.RetrievalLogTest do
   # `Doctrans.Chat.RetrievalTest`'s.
   use Doctrans.DataCase, async: false
 
-  import ExUnit.CaptureLog
+  import Doctrans.LogCapture
 
   alias Doctrans.Chat.Retrieval
   alias Doctrans.Documents
@@ -39,20 +39,6 @@ defmodule Doctrans.Chat.RetrievalLogTest do
         end)
 
       assert log =~ "2 queries, 1 succeeded, 1 failed, 1 results returned"
-    end
-  end
-
-  # The suite runs at :warning, so the summary line is only readable with the
-  # level raised for the duration of the capture. A per-process level cannot
-  # raise it: it only narrows what the primary level already lets through.
-  defp capture_info_log(fun) do
-    previous = Logger.level()
-    Logger.configure(level: :info)
-
-    try do
-      capture_log(fun)
-    after
-      Logger.configure(level: previous)
     end
   end
 

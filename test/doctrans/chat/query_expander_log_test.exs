@@ -5,7 +5,7 @@ defmodule Doctrans.Chat.QueryExpanderLogTest do
   # `Doctrans.Chat.QueryExpanderTest`'s.
   use Doctrans.EnvCase, async: false
 
-  import ExUnit.CaptureLog
+  import Doctrans.LogCapture
 
   alias Doctrans.Chat.{ContractProbe, QueryExpander}
 
@@ -27,6 +27,7 @@ defmodule Doctrans.Chat.QueryExpanderLogTest do
 
       log = capture_info_log(fn -> QueryExpander.expand("short question", []) end)
 
+      assert log =~ "Standalone: " <> String.duplicate("s", 200)
       assert log =~ "Query: " <> String.duplicate("y", 200)
       refute log =~ String.duplicate("y", 201)
       refute log =~ String.duplicate("s", 201)
@@ -36,18 +37,5 @@ defmodule Doctrans.Chat.QueryExpanderLogTest do
   defp respond_with(response) do
     probe = start_supervised!({ContractProbe, %{owner: self(), chat_responses: [response]}})
     ContractProbe.install(probe)
-  end
-
-  # The suite runs at :warning, so the plan line is only readable with the
-  # level raised for the duration of the capture.
-  defp capture_info_log(fun) do
-    previous = Logger.level()
-    Logger.configure(level: :info)
-
-    try do
-      capture_log(fun)
-    after
-      Logger.configure(level: previous)
-    end
   end
 end

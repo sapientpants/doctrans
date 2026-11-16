@@ -27,6 +27,7 @@ defmodule Doctrans.Chat.QueryExpander do
   # planner sees a deliberately narrower window than the answer prompt
   # (`Doctrans.Chat.history_exchanges/0`), which keeps the whole history.
   @reformulation_exchanges 2
+  @log_slice_length 200
 
   @doc """
   Plans the retrieval queries for `question`.
@@ -130,13 +131,15 @@ defmodule Doctrans.Chat.QueryExpander do
     # Every text in the line is sliced: the standalone question and the queries
     # come from the model's reply, or fall back to the user's question.
     Logger.info(
-      "Query plan: #{length(queries)} queries from \"#{String.slice(original_question, 0, 80)}\"" <>
-        "\n  Standalone: #{String.slice(standalone_q, 0, 200)}" <>
-        Enum.map_join(queries, "", fn q -> "\n  Query: #{String.slice(q, 0, 200)}" end)
+      "Query plan: #{length(queries)} queries from \"#{log_slice(original_question)}\"" <>
+        "\n  Standalone: #{log_slice(standalone_q)}" <>
+        Enum.map_join(queries, "", fn q -> "\n  Query: #{log_slice(q)}" end)
     )
 
     {standalone_q, queries}
   end
+
+  defp log_slice(text), do: String.slice(text, 0, @log_slice_length)
 
   defp format_history(chat_history) do
     chat_history
