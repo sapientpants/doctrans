@@ -135,6 +135,12 @@ defmodule Doctrans.DeploymentTest do
     Enum.map(service["tmpfs"] || [], &hd(String.split(&1, ":")))
   end
 
+  # Whether every entry of a Compose list option is also in another; an absent
+  # option is an empty list.
+  defp subset?(entries, other_entries) do
+    (entries || []) |> MapSet.new() |> MapSet.subset?(MapSet.new(other_entries || []))
+  end
+
   defp assert_loopback_ports!(compose) do
     ports = Enum.flat_map(compose["services"], fn {_name, service} -> service["ports"] || [] end)
     assert ports != []
@@ -237,32 +243,34 @@ defmodule Doctrans.DeploymentTest do
 
     test "is at least as hardened as the development stack", %{
       compose: compose,
-      development_compose: development
+      development_compose: dev_compose
     } do
-      # This container runs the converters on untrusted documents for as long
-      # as the deployment lives (#311), so every option that contains them in
-      # the development stack holds here too.
-      app = compose["services"]["app"]
-      dev_app = development["services"]["app"]
+      # Catches hardening added to the development stack and never carried
+      # over (#311); the tests below pin the runtime values themselves.
+      runtime_app = compose["services"]["app"]
+      dev_app = dev_compose["services"]["app"]
 
-      assert app["cap_drop"] == dev_app["cap_drop"]
-      assert MapSet.subset?(MapSet.new(dev_app["security_opt"]), MapSet.new(app["security_opt"]))
-      assert tmpfs_paths(app) == tmpfs_paths(dev_app)
+      for key <- ["cap_drop", "security_opt"] do
+        assert subset?(dev_app[key], runtime_app[key]), key
+      end
+
+      assert subset?(tmpfs_paths(dev_app), tmpfs_paths(runtime_app))
     end
 
-    test "drops every capability, forbids gaining privileges and mounts root read-only", %{
-      compose: compose
-    } do
-      # Pinned on their own as well, so the two files cannot loosen together.
+    test "drops every capability and forbids gaining privileges", %{compose: compose} do
       app = compose["services"]["app"]
       assert app["cap_drop"] == ["ALL"]
       assert "no-new-privileges:true" in app["security_opt"]
-      assert tmpfs_paths(app) == ["/tmp"]
+    end
 
-      # The release writes nothing outside the data volume and /tmp; a
-      # read-only root keeps a compromised converter out of the release and
-      # the image's binaries.
-      assert app["read_only"] == true
+    test "gives the converters a private, noexec tmpfs /tmp", %{compose: compose} do
+      # The whole entry, not just the path: an added `:exec` would undo
+      # Docker's default `noexec`.
+      assert compose["services"]["app"]["tmpfs"] == ["/tmp"]
+    end
+
+    test "mounts the root filesystem read-only", %{compose: compose} do
+      assert compose["services"]["app"]["read_only"] == true
     end
 
     test "declares a release runtime stage and an unprivileged user", %{

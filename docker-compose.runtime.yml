@@ -68,6 +68,10 @@ services:
       PHX_BIND_IP: "0.0.0.0"
       # The volume below is mounted here, and the image already owns this path.
       DOCTRANS_DATA_DIR: /var/lib/doctrans
+      # The home directory is on the read-only root, so point caches at /tmp:
+      # otherwise Fontconfig finds no writable cache and LibreOffice rescans
+      # every font on each conversion.
+      XDG_CACHE_HOME: /tmp/cache
     volumes:
       # Documents, page images and converted PDFs. Distinct from anything the
       # development stack uses, and legible in `docker volume ls`.
