@@ -13,6 +13,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
 
   import Doctrans.ProcessProbe
 
+  alias Doctrans.Documents.Formats
   alias Doctrans.Processing.DocumentConverter
   alias Doctrans.TestEnv
 
@@ -212,6 +213,60 @@ defmodule Doctrans.Processing.DocumentConverterTest do
 
       # The throwaway profile must be gone once the conversion finished.
       refute File.exists?(profile_path)
+    end
+
+    test "names the Writer import filter for every convertible extension" do
+      dir = tmp_dir()
+      argv_file = Path.join(dir, "argv.txt")
+
+      fake =
+        make_fake_soffice(dir, """
+        #!/bin/sh
+        { for a in "$@"; do printf '%s\\n' "$a"; done } > #{argv_file}
+        #{fake_soffice_body()}
+        """)
+
+      put_config(soffice_path: fake, timeout: 10_000)
+
+      filters =
+        for extension <- Formats.convertible_extensions(), into: %{} do
+          source = make_source(dir, "book" <> String.upcase(extension))
+          assert {:ok, _} = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
+
+          args = File.read!(argv_file) |> String.split("\n")
+          # The filter has to come before the source: soffice applies it to the
+          # files that follow it.
+          assert [filter] = for("--infilter=" <> filter <- args, do: filter)
+
+          assert Enum.find_index(args, &(&1 == "--infilter=" <> filter)) <
+                   Enum.find_index(args, &(&1 == source))
+
+          {extension, filter}
+        end
+
+      assert filters == %{
+               ".doc" => "MS Word 97",
+               ".docx" => "MS Word 2007 XML",
+               ".odt" => "writer8",
+               ".rtf" => "Rich Text Format"
+             }
+    end
+
+    test "refuses an extension it has no import filter for without running soffice" do
+      dir = tmp_dir()
+      ran = Path.join(dir, "ran")
+      fake = make_fake_soffice(dir, "#!/bin/sh\n: > #{ran}\n")
+      put_config(soffice_path: fake, timeout: 10_000)
+
+      for filename <- ["sheet.ods", "book.pdf", "book"] do
+        source = make_source(dir, filename)
+        extension = Formats.extension(source)
+
+        assert {:error, {:unsupported_format, [format: ^extension]}} =
+                 DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
+      end
+
+      refute File.exists?(ran)
     end
 
     test "times out, kills the hung soffice process, and reports the timeout" do

@@ -15,10 +15,23 @@ defmodule Doctrans.Processing.DocumentConverter do
   require Logger
 
   alias Doctrans.Config.DocumentConversion
+  alias Doctrans.Documents.Formats
   alias Doctrans.Processing.Executable
   alias Doctrans.Processing.Subprocess
 
   @profile_timeout 10_000
+
+  # The Writer import filter for each convertible extension. Without
+  # `--infilter` LibreOffice picks the importer from the file's content, and the
+  # upload check only reads its first bytes -- a ZIP or OLE2 header any office
+  # format shares -- so a spreadsheet named `.docx` would reach Calc. Naming the
+  # filter holds every upload to the Writer importer its extension implies.
+  @import_filters %{
+    ".doc" => "MS Word 97",
+    ".docx" => "MS Word 2007 XML",
+    ".odt" => "writer8",
+    ".rtf" => "Rich Text Format"
+  }
 
   @impl true
   def available? do
@@ -27,17 +40,22 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   @impl true
   def convert_to_pdf(source_path, output_dir) do
-    if File.exists?(source_path) do
-      case resolve_soffice_path() do
-        {:ok, path} ->
-          supervise_conversion(path, source_path, output_dir)
+    cond do
+      not File.exists?(source_path) ->
+        {:error, {:source_file_not_found, [path: source_path]}}
 
-        {:error, _} ->
-          Logger.error("LibreOffice is not installed")
-          {:error, :soffice_not_found}
-      end
-    else
-      {:error, {:source_file_not_found, [path: source_path]}}
+      not Map.has_key?(@import_filters, Formats.extension(source_path)) ->
+        {:error, {:unsupported_format, [format: Formats.extension(source_path)]}}
+
+      true ->
+        case resolve_soffice_path() do
+          {:ok, path} ->
+            supervise_conversion(path, source_path, output_dir)
+
+          {:error, _} ->
+            Logger.error("LibreOffice is not installed")
+            {:error, :soffice_not_found}
+        end
     end
   end
 
@@ -95,6 +113,7 @@ defmodule Doctrans.Processing.DocumentConverter do
     args = [
       "-env:UserInstallation=" <> profile_uri(profile_dir),
       "--headless",
+      "--infilter=" <> Map.fetch!(@import_filters, Formats.extension(source_path)),
       "--convert-to",
       "pdf",
       "--outdir",
