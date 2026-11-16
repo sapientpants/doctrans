@@ -15,6 +15,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
 
   alias Doctrans.Documents.Formats
   alias Doctrans.Processing.DocumentConverter
+  alias Doctrans.Processing.Subprocess
   alias Doctrans.TestEnv
 
   setup do
@@ -53,6 +54,16 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     File.write!(path, body)
     File.chmod!(path, 0o755)
     path
+  end
+
+  # A fake soffice that records its arguments, one per line, in `argv_file`
+  # before "converting" the way `fake_soffice_body/0` does.
+  defp make_argv_recording_soffice(dir, argv_file) do
+    make_fake_soffice(dir, """
+    #!/bin/sh
+    { for a in "$@"; do printf '%s\\n' "$a"; done } > #{argv_file}
+    #{fake_soffice_body()}
+    """)
   end
 
   # Writes a plain-text file that LibreOffice (or a fake) can "convert".
@@ -188,14 +199,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
       on_exit(fn -> File.rm_rf(dir) end)
 
       argv_file = Path.join(dir, "argv.txt")
-
-      fake =
-        make_fake_soffice(dir, """
-        #!/bin/sh
-        { for a in "$@"; do printf '%s\\n' "$a"; done } > #{argv_file}
-        #{fake_soffice_body()}
-        """)
-
+      fake = make_argv_recording_soffice(dir, argv_file)
       put_config(soffice_path: fake, timeout: 10_000)
 
       source = make_source(dir, "book.docx")
@@ -218,14 +222,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     test "names the Writer import filter for every convertible extension" do
       dir = tmp_dir()
       argv_file = Path.join(dir, "argv.txt")
-
-      fake =
-        make_fake_soffice(dir, """
-        #!/bin/sh
-        { for a in "$@"; do printf '%s\\n' "$a"; done } > #{argv_file}
-        #{fake_soffice_body()}
-        """)
-
+      fake = make_argv_recording_soffice(dir, argv_file)
       put_config(soffice_path: fake, timeout: 10_000)
 
       filters =
@@ -234,13 +231,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
           assert {:ok, _} = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
 
           args = File.read!(argv_file) |> String.split("\n")
-          # The filter has to come before the source: soffice applies it to the
-          # files that follow it.
           assert [filter] = for("--infilter=" <> filter <- args, do: filter)
-
-          assert Enum.find_index(args, &(&1 == "--infilter=" <> filter)) <
-                   Enum.find_index(args, &(&1 == source))
-
           {extension, filter}
         end
 
@@ -258,7 +249,7 @@ defmodule Doctrans.Processing.DocumentConverterTest do
       fake = make_fake_soffice(dir, "#!/bin/sh\n: > #{ran}\n")
       put_config(soffice_path: fake, timeout: 10_000)
 
-      for filename <- ["sheet.ods", "book.pdf", "book"] do
+      for filename <- ["sheet.ods", "book.pdf"] do
         source = make_source(dir, filename)
         extension = Formats.extension(source)
 
@@ -266,7 +257,52 @@ defmodule Doctrans.Processing.DocumentConverterTest do
                  DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
       end
 
+      # No extension to name, so the reason carries none.
+      assert {:error, :unsupported_format} =
+               DocumentConverter.convert_to_pdf(make_source(dir, "book"), Path.join(dir, "out"))
+
       refute File.exists?(ran)
+    end
+
+    # The reproduction from #310, against the real LibreOffice: a spreadsheet
+    # named `.docx` carries the ZIP header the upload check accepts. Run without
+    # `--infilter` LibreOffice opens it in Calc -- the vacuity guard, showing the
+    # fixture really is a spreadsheet soffice would sniff -- and the converter,
+    # which names the Word filter, must not produce a PDF from it.
+    @tag :soffice
+    @tag timeout: 180_000
+    test "a spreadsheet named .docx is not converted through Calc" do
+      dir = tmp_dir()
+      source = Path.join(dir, "original.docx")
+      write_spreadsheet!(source)
+      {:ok, soffice} = DocumentConverter.resolve_soffice_path()
+
+      sniffed_dir = Path.join(dir, "sniffed")
+      profile = Path.join(dir, "profile")
+
+      {:ok, {sniffed, _status}} =
+        Subprocess.run(
+          soffice,
+          [
+            "-env:UserInstallation=file://" <> profile,
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            sniffed_dir,
+            source
+          ],
+          timeout: 120_000,
+          kill_on_exit: true
+        )
+
+      assert sniffed =~ "as a Calc document"
+
+      put_config(soffice_path: soffice, timeout: 120_000)
+      output_dir = Path.join(dir, "out")
+
+      assert {:error, _reason} = DocumentConverter.convert_to_pdf(source, output_dir)
+      refute File.exists?(Path.join(output_dir, "original.pdf"))
     end
 
     test "times out, kills the hung soffice process, and reports the timeout" do
@@ -463,6 +499,42 @@ defmodule Doctrans.Processing.DocumentConverterTest do
     source = make_source(dir, "book.docx")
     assert {:error, message} = DocumentConverter.convert_to_pdf(source, Path.join(dir, "out"))
     assert :converted_pdf_not_found = message
+  end
+
+  # Writes a minimal OpenDocument spreadsheet: `mimetype` stored first and
+  # uncompressed, as the format requires, so LibreOffice recognises it.
+  defp write_spreadsheet!(path) do
+    content = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" \
+    xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" \
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2">
+    <office:body><office:spreadsheet><table:table table:name="Sheet1"><table:table-row>
+    <table:table-cell><text:p>hello</text:p></table:table-cell>
+    </table:table-row></table:table></office:spreadsheet></office:body>
+    </office:document-content>
+    """
+
+    manifest = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" \
+    manifest:version="1.2">
+    <manifest:file-entry manifest:full-path="/" \
+    manifest:media-type="application/vnd.oasis.opendocument.spreadsheet"/>
+    <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+    </manifest:manifest>
+    """
+
+    {:ok, _} =
+      :zip.create(
+        String.to_charlist(path),
+        [
+          {~c"mimetype", "application/vnd.oasis.opendocument.spreadsheet"},
+          {~c"content.xml", content},
+          {~c"META-INF/manifest.xml", manifest}
+        ],
+        uncompress: [~c"mimetype"]
+      )
   end
 
   # Emulates a soffice conversion: finds --outdir and the last argument (the

@@ -33,6 +33,7 @@ defmodule Doctrans.Resilience.ErrorClassifierTest do
       assert ErrorClassifier.classify(:document_file_not_found) == :permanent
       assert ErrorClassifier.classify(:page_not_found) == :permanent
       assert ErrorClassifier.classify(:soffice_not_found) == :permanent
+      assert ErrorClassifier.classify(:unsupported_format) == :permanent
       assert ErrorClassifier.classify({:unsupported_format, [format: ".txt"]}) == :permanent
     end
 

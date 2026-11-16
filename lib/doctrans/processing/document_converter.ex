@@ -21,18 +21,6 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   @profile_timeout 10_000
 
-  # The Writer import filter for each convertible extension. Without
-  # `--infilter` LibreOffice picks the importer from the file's content, and the
-  # upload check only reads its first bytes -- a ZIP or OLE2 header any office
-  # format shares -- so a spreadsheet named `.docx` would reach Calc. Naming the
-  # filter holds every upload to the Writer importer its extension implies.
-  @import_filters %{
-    ".doc" => "MS Word 97",
-    ".docx" => "MS Word 2007 XML",
-    ".odt" => "writer8",
-    ".rtf" => "Rich Text Format"
-  }
-
   @impl true
   def available? do
     match?({:ok, _}, resolve_soffice_path())
@@ -40,22 +28,36 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   @impl true
   def convert_to_pdf(source_path, output_dir) do
-    cond do
-      not File.exists?(source_path) ->
-        {:error, {:source_file_not_found, [path: source_path]}}
+    with :ok <- check_source(source_path),
+         {:ok, filter} <- import_filter(source_path) do
+      case resolve_soffice_path() do
+        {:ok, path} ->
+          supervise_conversion(path, filter, source_path, output_dir)
 
-      not Map.has_key?(@import_filters, Formats.extension(source_path)) ->
-        {:error, {:unsupported_format, [format: Formats.extension(source_path)]}}
+        {:error, _} ->
+          Logger.error("LibreOffice is not installed")
+          {:error, :soffice_not_found}
+      end
+    end
+  end
 
-      true ->
-        case resolve_soffice_path() do
-          {:ok, path} ->
-            supervise_conversion(path, source_path, output_dir)
+  defp check_source(source_path) do
+    if File.exists?(source_path),
+      do: :ok,
+      else: {:error, {:source_file_not_found, [path: source_path]}}
+  end
 
-          {:error, _} ->
-            Logger.error("LibreOffice is not installed")
-            {:error, :soffice_not_found}
-        end
+  # An extension with no import filter is refused before soffice starts, since
+  # without one LibreOffice would pick the importer from the content. A path
+  # with no extension gets the bare reason: naming the empty extension reads as
+  # a dangling colon.
+  defp import_filter(source_path) do
+    extension = Formats.extension(source_path)
+
+    case Formats.import_filter(extension) do
+      {:ok, filter} -> {:ok, filter}
+      :error when extension == "" -> {:error, :unsupported_format}
+      :error -> {:error, {:unsupported_format, [format: extension]}}
     end
   end
 
@@ -81,13 +83,15 @@ defmodule Doctrans.Processing.DocumentConverter do
     end
   end
 
-  defp supervise_conversion(path, source_path, output_dir) do
+  defp supervise_conversion(path, filter, source_path, output_dir) do
     timeout = DocumentConversion.timeout()
 
     # The profile is created inside the supervised process so a caller killed
     # mid-conversion still has it removed.
     outcome =
-      Subprocess.supervised(fn -> run_conversion(path, source_path, output_dir, timeout) end)
+      Subprocess.supervised(fn ->
+        run_conversion(path, filter, source_path, output_dir, timeout)
+      end)
 
     classified =
       Subprocess.classify(outcome,
@@ -105,7 +109,7 @@ defmodule Doctrans.Processing.DocumentConverter do
 
   # The output directory comes from the stored upload path; profile_dir is created by mktemp.
   # sobelow_skip ["Traversal.FileModule"]
-  defp run_conversion(soffice_path, source_path, output_dir, timeout) do
+  defp run_conversion(soffice_path, filter, source_path, output_dir, timeout) do
     File.mkdir_p!(output_dir)
 
     profile_dir = create_profile_dir!()
@@ -113,7 +117,7 @@ defmodule Doctrans.Processing.DocumentConverter do
     args = [
       "-env:UserInstallation=" <> profile_uri(profile_dir),
       "--headless",
-      "--infilter=" <> Map.fetch!(@import_filters, Formats.extension(source_path)),
+      "--infilter=" <> filter,
       "--convert-to",
       "pdf",
       "--outdir",
