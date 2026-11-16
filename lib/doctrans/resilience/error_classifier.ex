@@ -75,6 +75,7 @@ defmodule Doctrans.Resilience.ErrorClassifier do
   def classify(:page_not_found), do: :permanent
   def classify(:soffice_not_found), do: :permanent
   def classify(:document_file_not_found), do: :permanent
+  def classify(:unsupported_format), do: :permanent
   def classify({:unsupported_format, _}), do: :permanent
 
   # Extraction failures that cannot come out differently on a retry: the

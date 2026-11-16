@@ -27,7 +27,11 @@ System.at_exit(fn _status -> File.rm_rf(expected_upload_root) end)
 poppler_exclusions =
   if Doctrans.Processing.PdfExtractor.available?(), do: [], else: [:poppler]
 
-ExUnit.start(exclude: poppler_exclusions)
+# Tests tagged `:soffice` drive the real LibreOffice, excluded the same way.
+soffice_exclusions =
+  if Doctrans.Processing.DocumentConverter.available?(), do: [], else: [:soffice]
+
+ExUnit.start(exclude: poppler_exclusions ++ soffice_exclusions)
 Ecto.Adapters.SQL.Sandbox.mode(Doctrans.Repo, :manual)
 
 # The external collaborators are Mox mocks, and `config/test.exs` points every
