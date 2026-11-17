@@ -44,6 +44,17 @@ updates:
     cooldown:
       default-days: 7
 
+  # Keeps the digest-pinned `pgvector/pgvector` image in `docker-compose.yml` and
+  # `docker-compose.runtime.yml` current (#315). The `docker` ecosystem above
+  # reads only Dockerfiles; compose files are their own ecosystem. CI's service
+  # container restates the same reference and is updated by hand to match.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+
   # Keeps the hashed `pre-commit` pin in `.github/requirements-pre-commit.txt`
   # current. The hook repositories themselves have no Dependabot ecosystem; see
   # the header of `.pre-commit-config.yaml` for how those are bumped.

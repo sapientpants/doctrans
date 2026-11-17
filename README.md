@@ -30,7 +30,7 @@ to your device or a trusted network.
 - **Erlang/OTP** and **Elixir** - exact versions are pinned in [`mise.toml`](mise.toml),
   which CI and local tooling both read; run `mise install` to match them
   (`mix.exs` independently requires `~> 1.20`)
-- **PostgreSQL** with pgvector extension (CI uses PostgreSQL 17; Docker Compose uses 18)
+- **PostgreSQL** with pgvector extension (CI and Docker Compose both use PostgreSQL 18)
 - **poppler-utils** - for PDF page extraction (`pdftoppm`)
 - **LibreOffice** (optional) - for DOCX, DOC, ODT, and RTF conversion
 - **OpenAI-compatible inference server** - vision, translation/chat, and embedding models
@@ -660,7 +660,7 @@ docker compose -f docker-compose.runtime.yml exec app /app/bin/verify_restore
 ```
 
 **Development Compose.** PostgreSQL runs in a container and the host needs no client tools of its own
-— the `pgvector/pgvector:pg18` image ships `pg_dump` 18.1. The storage root is the `doctrans_data`
+— the pinned `pgvector/pgvector:0.8.7-pg18` image ships PostgreSQL 18's `pg_dump`. The storage root is the `doctrans_data`
 volume, not a directory in the working tree, so it is copied out of the volume the same way as the
 runtime deployment's below:
 
@@ -716,9 +716,9 @@ or snapshot coordination configured around it. Tarring it while PostgreSQL is ru
 data directory that may refuse to start, or start with data missing. Dump the database instead, or
 stop the container and copy it then.
 
-**Version skew.** CI runs PostgreSQL 17 while Compose runs 18. `pg_restore` will not read an archive
-produced by a newer `pg_dump` than itself, so a dump taken from 18 does not go back into 17 — restore
-into the same major version or a newer one.
+**Version skew.** CI and both Compose files run PostgreSQL 18, but a self-managed server may not.
+`pg_restore` will not read an archive produced by a newer `pg_dump` than itself, so a dump taken from
+18 does not go back into 17 — restore into the same major version or a newer one.
 
 ### Restoring
 
@@ -738,7 +738,7 @@ files shortly after startup, and both treat the database as the authority on wha
   the `processing_run_id` in the restored row. A database snapshot *older* than the file tree
   therefore removes the page images of the run the files actually describe.
 
-The target PostgreSQL must have pgvector available (both Compose files use `pgvector/pgvector:pg18`).
+The target PostgreSQL must have pgvector available (both Compose files use `pgvector/pgvector:0.8.7-pg18`, pinned by digest).
 The dump carries the extension, the `get_fts_config` function and the search-vector trigger, the
 trigger that invalidates page embeddings when content changes, and the HNSW index definitions, which
 PostgreSQL rebuilds during the restore — on a large library that is the slow part, and it needs no
@@ -882,7 +882,7 @@ For Docker: `docker compose up db` starts the database with default credentials.
 ** (Postgrex.Error) ERROR: type "vector" does not exist
 ```
 
-Ensure you're using a PostgreSQL image with pgvector (e.g., `pgvector/pgvector:pg18`)
+Ensure you're using a PostgreSQL image with pgvector (e.g., `pgvector/pgvector:0.8.7-pg18`, the one both Compose files pin)
 or install the extension manually: `CREATE EXTENSION vector;`
 
 ## License

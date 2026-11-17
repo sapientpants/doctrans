@@ -1,6 +1,11 @@
 services:
   db:
-    image: pgvector/pgvector:pg18
+    # Pinned by digest like the Dockerfiles' bases (#315): the tag is mutable,
+    # and this image holds every document's text. The digest is the
+    # multi-architecture index (amd64/arm64); Dependabot's `docker-compose`
+    # ecosystem bumps tag and digest together, and `docker-compose.runtime.yml`
+    # and CI's service container pin the same reference.
+    image: pgvector/pgvector:0.8.7-pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

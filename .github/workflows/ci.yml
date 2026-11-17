@@ -30,7 +30,12 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        # The same digest-pinned reference as both compose files (#315), so the
+        # suite runs against the PostgreSQL major the stacks run. Dependabot's
+        # `github-actions` ecosystem does not bump service images: when it bumps
+        # the compose files, copy the new reference here; `deployment_test.exs`
+        # fails until the three agree.
+        image: pgvector/pgvector:0.8.7-pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

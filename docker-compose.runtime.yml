@@ -23,7 +23,9 @@ name: doctrans-runtime
 
 services:
   db:
-    image: pgvector/pgvector:pg18
+    # Digest-pinned to the same reference as `docker-compose.yml`; see the
+    # comment there (#315).
+    image: pgvector/pgvector:0.8.7-pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782
     environment:
       POSTGRES_USER: postgres
       # Required, with no default (#312): a well-known superuser password is one
