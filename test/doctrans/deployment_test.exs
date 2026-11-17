@@ -24,7 +24,7 @@ defmodule Doctrans.DeploymentTest do
   least the development stack's container hardening, plus a read-only root
   (#311). Its database is reached over the Compose network only, so it is not
   published on the host at all, and its superuser password has no default
-  (#312).
+  (#312). Both stacks and CI run one digest-pinned database image (#315).
 
   The assertions are deliberately semantic and few, so ordinary edits to either
   file — reordering, comments, whitespace — do not break them.
@@ -455,6 +455,25 @@ defmodule Doctrans.DeploymentTest do
     test "gives the converters a private tmpfs /tmp", %{compose: compose} do
       assert "/tmp" in tmpfs_paths(compose["services"]["app"])
     end
+  end
+
+  test "the database image is one digest-pinned reference everywhere", %{
+    runtime_compose: runtime,
+    development_compose: development
+  } do
+    # Dependabot bumps both Compose files, but not CI's service container, which
+    # is copied by hand (#315). A copy that drifts would test against a
+    # different database from the one the stacks run, so all three must agree.
+    [ci_image] = Regex.run(~r/pgvector\/pgvector:\S+/, read(".github/workflows/ci.yml"))
+
+    images = [
+      runtime["services"]["db"]["image"],
+      development["services"]["db"]["image"],
+      ci_image
+    ]
+
+    assert Enum.uniq(images) == [ci_image], inspect(images)
+    assert ci_image =~ ~r/@sha256:[0-9a-f]{64}$/, "#{ci_image} is not pinned by digest"
   end
 
   test "the ignore matcher agrees with Docker on the rules the file already uses", %{
