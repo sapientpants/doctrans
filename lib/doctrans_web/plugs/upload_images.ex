@@ -19,7 +19,7 @@ defmodule DoctransWeb.Plugs.UploadImages do
 
   defp image_path?(["uploads", "documents", document_id, "runs", run_id, "pages", filename]),
     do:
-      Layout.document_dir_name?(document_id) && Layout.document_dir_name?(run_id) &&
+      Layout.document_dir_name?(document_id) && Layout.run_dir_name?(run_id) &&
         page_image?(filename)
 
   defp image_path?(_segments), do: false

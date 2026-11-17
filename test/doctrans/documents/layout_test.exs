@@ -80,6 +80,13 @@ defmodule Doctrans.Documents.LayoutTest do
     refute Layout.document_dir_name?(@document_id <> "\n")
   end
 
+  test "a run directory is named by its id in the same form" do
+    assert Layout.run_dir_name?(@run_id)
+    assert Layout.run_dir_name?(Uniq.UUID.uuid7())
+    refute Layout.run_dir_name?(String.upcase(@run_id))
+    refute Layout.run_dir_name?("abcdefghijklmnop")
+  end
+
   test "paths follow the root when it moves at runtime" do
     TestEnv.put_env(:uploads, upload_dir: "/mnt/moved", max_file_size: 1)
 

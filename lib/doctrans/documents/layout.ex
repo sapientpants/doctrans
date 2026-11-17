@@ -53,13 +53,22 @@ defmodule Doctrans.Documents.Layout do
   of the layout, and cleanup must not treat it as a document that happens to lack
   a row.
 
-  Run directories under `runs_dir/1` are named the same way, by a run id from
-  `Uniq.UUID.uuid7/0`, so the same check answers for them. `Ecto.UUID.cast/1` is
-  no substitute at either level: it also accepts those other spellings and any
-  16-byte binary.
+  `Ecto.UUID.cast/1` is no substitute: it also accepts those other spellings and
+  any 16-byte binary.
   """
   @spec document_dir_name?(String.t()) :: boolean()
   def document_dir_name?(name) when is_binary(name), do: Regex.match?(@document_dir_name, name)
+
+  @doc """
+  Whether an entry name under `runs_dir/1` has the shape of a run id.
+
+  Run directories are named by a run id from `Uniq.UUID.uuid7/0` in the same
+  lowercase, hyphenated form as document directories, so the check is the one
+  `document_dir_name?/1` makes, with the same refusal of `Ecto.UUID.cast/1`'s
+  looser spellings.
+  """
+  @spec run_dir_name?(String.t()) :: boolean()
+  def run_dir_name?(name) when is_binary(name), do: Regex.match?(@document_dir_name, name)
 
   @doc "The directory of one document: its retained upload and its runs."
   @spec document_dir(Ecto.UUID.t()) :: String.t()
