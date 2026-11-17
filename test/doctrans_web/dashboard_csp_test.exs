@@ -94,12 +94,7 @@ defmodule DoctransWeb.DashboardCspTest do
 
       {:ok, _view, html} = live(conn)
 
-      nonces =
-        html
-        |> LazyHTML.from_document()
-        |> LazyHTML.query("[nonce]")
-        |> LazyHTML.attribute("nonce")
-        |> Enum.uniq()
+      nonces = html |> rendered_nonces() |> Enum.uniq()
 
       assert nonces != []
 
@@ -118,25 +113,37 @@ defmodule DoctransWeb.DashboardCspTest do
       # every test above passing while the browser refused the inline `<style>`
       # on the page navigated to.
       #
-      # Entering on Processes and navigating to Home, rather than the reverse:
-      # the nonced `<style>` blocks are the Home page's usage bars, so this is
-      # the direction in which a lost nonce has something to refuse.
-      conn = get(conn, ~p"/dev/dashboard/processes")
+      # Navigating to Home rather than away from it: the nonced `<style>` blocks
+      # are the Home page's usage bars, so this is the direction in which a lost
+      # nonce has something to refuse.
+      #
+      # Entering on Ecto Stats because it renders no LiveComponents (#325). The
+      # test client starts the new page from the old page's HTML, so any
+      # component there counts as destroyed, and the reply to that teardown
+      # drops cids from Home's render tree, which has no components map:
+      # `Diff.drop_cids/2` raises `BadMapError` and takes the test with it. That
+      # reply only lands if the test is still running, so the failure appeared
+      # under load and nowhere else.
+      #
+      # Ecto Stats is component-free only while `ecto_psql_extras` is absent: it
+      # then finds no repos and renders a plain error card, where with the extras
+      # installed it renders `live_nav_bar`, a LiveComponent. The refute turns
+      # that change, or any other that gives the entry page a component, into a
+      # deterministic failure here instead of the flake coming back quietly.
+      conn = get(conn, ~p"/dev/dashboard/ecto_stats")
       assert [policy] = get_resp_header(conn, "content-security-policy")
 
       {:ok, view, _html} = live(conn)
 
+      refute has_element?(view, "[data-phx-component]"),
+             "the entry page renders a LiveComponent, which crashes the test client on redirect"
+
       # `live_redirect/2` rather than a click on the link: it carries the
       # session token signed at the dead render across to the next page, which
       # is what the browser does and what keeps `csp_nonces` in the session.
-      {:ok, _view, html} = live_redirect(view, to: ~p"/dev/dashboard/home")
+      {:ok, _view, home_html} = live_redirect(view, to: ~p"/dev/dashboard/home")
 
-      nonces =
-        html
-        |> LazyHTML.from_document()
-        |> LazyHTML.query("[nonce]")
-        |> LazyHTML.attribute("nonce")
-        |> Enum.uniq()
+      nonces = home_html |> rendered_nonces() |> Enum.uniq()
 
       assert nonces != []
 
@@ -192,12 +199,7 @@ defmodule DoctransWeb.DashboardCspTest do
         assert get_resp_header(conn, "content-security-policy") == [ContentSecurityPolicy.base()],
                "#{path} is not served the base policy"
 
-        nonces =
-          conn
-          |> response(200)
-          |> LazyHTML.from_document()
-          |> LazyHTML.query("[nonce]")
-          |> LazyHTML.attribute("nonce")
+        nonces = conn |> response(200) |> rendered_nonces()
 
         # Absence, not emptiness. These are the application's own HEEx
         # templates, which drop a nil nonce rather than rendering it empty, and
@@ -279,16 +281,19 @@ defmodule DoctransWeb.DashboardCspTest do
   defp fetch_dashboard(conn) do
     conn = get(conn, ~p"/dev/dashboard/home")
 
-    [nonce] =
-      conn
-      |> html_response(200)
-      |> LazyHTML.from_document()
-      |> LazyHTML.query("[nonce]")
-      |> LazyHTML.attribute("nonce")
-      |> Enum.uniq()
-
+    [nonce] = conn |> html_response(200) |> rendered_nonces() |> Enum.uniq()
     [policy] = get_resp_header(conn, "content-security-policy")
 
     {nonce, policy}
+  end
+
+  # Every `nonce` attribute in a full HTML document, `<head>` included -- which
+  # is where the dashboard's script and stylesheet live, and what `has_element?/2`
+  # cannot reach, since it sees only the LiveView's container.
+  defp rendered_nonces(html) do
+    html
+    |> LazyHTML.from_document()
+    |> LazyHTML.query("[nonce]")
+    |> LazyHTML.attribute("nonce")
   end
 end
