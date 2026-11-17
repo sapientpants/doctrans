@@ -74,11 +74,7 @@ defmodule Doctrans.Search.Embedding do
       url: url,
       json: %{model: model, input: text},
       # Embedding POSTs are idempotent; replay them on transient failures
-      retry: :transient,
-      # An embedding request carries the chunk text it is embedding, so a
-      # followed redirect is document egress: see the chat client's
-      # `post_chat_completion/2`.
-      redirect: false
+      retry: :transient
     )
     |> ApiFailure.resolve(:embedding_api, &parse_response/1)
   end

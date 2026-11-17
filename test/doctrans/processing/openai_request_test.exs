@@ -15,7 +15,7 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
   alias Doctrans.Resilience.{CircuitBreaker, FuseProbe}
   alias Doctrans.TestEnv
 
-  import OpenAIBypass, only: [json: 3]
+  import OpenAIBypass, only: [json: 3, redirect_elsewhere: 5]
 
   setup do
     TestEnv.reset_fuses()
@@ -369,6 +369,18 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
                OpenAI.chat([%{role: "user", content: "x"}])
     end
 
+    # A 307 replays the POST body, document text and all, at the Location host.
+    test "does not follow a redirect to another host", %{bypass: bypass, test_pid: test_pid} do
+      redirect_elsewhere(bypass, "POST", "/v1/chat/completions", 307, test_pid)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:http_error, [status: 307]}} =
+                 OpenAI.chat([%{role: "user", content: "x"}])
+      end)
+
+      refute_received :redirect_followed
+    end
+
     test "reports the HTTP status when chat fails", %{bypass: bypass} do
       # stub (not expect): :transient retries POSTs on 5xx, so the route may hit multiple times
       Bypass.stub(bypass, "POST", "/v1/chat/completions", fn conn ->
@@ -679,6 +691,17 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
                OpenAI.chat_stream([%{role: "user", content: "hi"}], fn _ -> :ok end)
     end
 
+    test "does not follow a redirect to another host", %{bypass: bypass, test_pid: test_pid} do
+      redirect_elsewhere(bypass, "POST", "/v1/chat/completions", 308, test_pid)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:http_error, [status: 308]}} =
+                 OpenAI.chat_stream([%{role: "user", content: "hi"}], fn _ -> :ok end)
+      end)
+
+      refute_received :redirect_followed
+    end
+
     test "returns error on transport failure" do
       TestEnv.put_env(:openai,
         base_url: "http://127.0.0.1:1",
@@ -806,29 +829,20 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert {:ok, ["model-a", "model-c"]} = OpenAI.list_models()
     end
 
-    # Every other inference call refuses redirects (#314). A server that points
-    # the model list elsewhere could otherwise make the app GET arbitrary hosts,
-    # loopback and LAN included, each time the models are listed.
+    # A server that points the model list elsewhere could otherwise make the app
+    # GET arbitrary hosts, loopback and LAN included, each time the models are
+    # listed (#314). The refusal is a failing model list like any other, so it
+    # leaves the shared fuse alone too.
     test "does not follow a redirect to another host", %{bypass: bypass, test_pid: test_pid} do
-      elsewhere = Bypass.open()
-      on_exit(fn -> Bypass.down(elsewhere) end)
-
-      Bypass.stub(elsewhere, "GET", "/v1/models", fn conn ->
-        send(test_pid, :redirect_followed)
-        json(conn, 200, %{"data" => [%{"id" => "model-a"}]})
-      end)
-
-      Bypass.expect_once(bypass, "GET", "/v1/models", fn conn ->
-        conn
-        |> Plug.Conn.put_resp_header("location", "http://localhost:#{elsewhere.port}/v1/models")
-        |> Plug.Conn.resp(302, "")
-      end)
+      FuseProbe.watch_failures()
+      redirect_elsewhere(bypass, "GET", "/v1/models", 302, test_pid)
 
       ExUnit.CaptureLog.capture_log(fn ->
         assert {:error, {:http_error, [status: 302]}} = OpenAI.list_models()
       end)
 
       refute_received :redirect_followed
+      refute_received {:circuit_failure, :openai_api}
     end
 
     test "reports a malformed 200 without counting it against the fuse", %{bypass: bypass} do
