@@ -118,13 +118,31 @@ defmodule DoctransWeb.DashboardCspTest do
       # every test above passing while the browser refused the inline `<style>`
       # on the page navigated to.
       #
-      # Entering on Processes and navigating to Home, rather than the reverse:
-      # the nonced `<style>` blocks are the Home page's usage bars, so this is
-      # the direction in which a lost nonce has something to refuse.
-      conn = get(conn, ~p"/dev/dashboard/processes")
+      # Navigating to Home rather than away from it: the nonced `<style>` blocks
+      # are the Home page's usage bars, so this is the direction in which a lost
+      # nonce has something to refuse.
+      #
+      # Entering on Ecto Stats because it renders no LiveComponents (#325). The
+      # test client starts the new page from the old page's HTML, so any
+      # component there counts as destroyed, and the reply to that teardown
+      # drops cids from Home's render tree, which has no components map:
+      # `Diff.drop_cids/2` raises `BadMapError` and takes the test with it. That
+      # reply only lands if the test is still running, so the failure appeared
+      # under load and nowhere else. The refute keeps a future page that gains a
+      # component from bringing the flake back quietly.
+      conn = get(conn, ~p"/dev/dashboard/ecto_stats")
       assert [policy] = get_resp_header(conn, "content-security-policy")
 
-      {:ok, view, _html} = live(conn)
+      {:ok, view, html} = live(conn)
+
+      components =
+        html
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("[data-phx-component]")
+        |> LazyHTML.attribute("data-phx-component")
+
+      assert components == [],
+             "the entry page renders a LiveComponent, which crashes the test client on redirect"
 
       # `live_redirect/2` rather than a click on the link: it carries the
       # session token signed at the dead render across to the next page, which
