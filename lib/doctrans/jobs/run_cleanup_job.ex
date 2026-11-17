@@ -22,14 +22,14 @@ defmodule Doctrans.Jobs.RunCleanupJob do
     |> remove_all()
   end
 
-  # Only fixed generated subdirectories and validated UUID run directories are
-  # listed. The retained original.<extension> is never a cleanup target.
+  # Only fixed generated subdirectories and run directories named as the layout
+  # names them are listed. The retained original.<extension> is never a cleanup target.
   defp stale_paths(document) do
     stale_run_dirs(document) ++ legacy_pages_dir(document) ++ converted_pdf(document)
   end
 
   # `runs` is a fixed subdirectory of the configured document directory, and only
-  # entries that cast as UUIDs are returned.
+  # entries named exactly as the layout names a run directory are returned.
   defp stale_run_dirs(document) do
     runs = Layout.runs_dir(document.id)
 
@@ -42,7 +42,7 @@ defmodule Doctrans.Jobs.RunCleanupJob do
 
     entries
     |> Enum.filter(fn entry ->
-      match?({:ok, _}, Ecto.UUID.cast(entry)) && entry != document.processing_run_id
+      Layout.run_dir_name?(entry) && entry != document.processing_run_id
     end)
     |> Enum.map(&Path.join(runs, &1))
   end

@@ -232,6 +232,40 @@ defmodule DoctransWeb.EndpointTest do
     end
   end
 
+  # `Ecto.UUID.cast/1` accepts a raw 16-byte name and an uppercase spelling,
+  # neither of which the layout writes (#313). Every refused path names a file
+  # that exists, so only the allow-list can refuse it, whatever the file system's
+  # case sensitivity.
+  test "page images are served only under ids spelled as the layout writes them" do
+    id = Uniq.UUID.uuid7()
+    run = Uniq.UUID.uuid7()
+    raw = "abcdefghijklmnop"
+    served = "#{id}/pages/page-1.png"
+
+    refused = [
+      "#{raw}/pages/page-1.png",
+      "#{raw}/runs/#{run}/pages/page-1.png",
+      "#{String.upcase(id)}/pages/page-1.png",
+      "#{id}/runs/#{String.upcase(run)}/pages/page-1.png"
+    ]
+
+    on_exit(fn ->
+      for dir <- [id, raw, String.upcase(id)], do: File.rm_rf!(Layout.document_dir(dir))
+    end)
+
+    for path <- [served | refused] do
+      file = Path.join(Layout.documents_dir(), path)
+      File.mkdir_p!(Path.dirname(file))
+      File.write!(file, "stored bytes")
+    end
+
+    assert get(build_conn(), "/uploads/documents/#{served}").status == 200
+
+    for path <- refused do
+      assert get(build_conn(), "/uploads/documents/#{path}").status == 404
+    end
+  end
+
   # The plug is first in the endpoint, ahead of `Plug.Static` and the upload
   # server, so every GET surface that carries document content without a
   # socket is covered: the dashboard's dead render, the viewer, the Markdown
