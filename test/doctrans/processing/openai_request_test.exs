@@ -806,6 +806,31 @@ defmodule Doctrans.Processing.OpenAIRequestTest do
       assert {:ok, ["model-a", "model-c"]} = OpenAI.list_models()
     end
 
+    # Every other inference call refuses redirects (#314). A server that points
+    # the model list elsewhere could otherwise make the app GET arbitrary hosts,
+    # loopback and LAN included, each time the models are listed.
+    test "does not follow a redirect to another host", %{bypass: bypass, test_pid: test_pid} do
+      elsewhere = Bypass.open()
+      on_exit(fn -> Bypass.down(elsewhere) end)
+
+      Bypass.stub(elsewhere, "GET", "/v1/models", fn conn ->
+        send(test_pid, :redirect_followed)
+        json(conn, 200, %{"data" => [%{"id" => "model-a"}]})
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/v1/models", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("location", "http://localhost:#{elsewhere.port}/v1/models")
+        |> Plug.Conn.resp(302, "")
+      end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:http_error, [status: 302]}} = OpenAI.list_models()
+      end)
+
+      refute_received :redirect_followed
+    end
+
     test "reports a malformed 200 without counting it against the fuse", %{bypass: bypass} do
       FuseProbe.watch_failures()
 

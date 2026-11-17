@@ -259,7 +259,12 @@ defmodule Doctrans.Processing.OpenAI do
     build_base_req()
     |> RequestBounds.get(RequestBounds.new(timeout: @list_models_timeout),
       url: api_url("/v1/models"),
-      retry: :safe_transient
+      retry: :safe_transient,
+      # No document text rides on this GET, but a followed redirect would let
+      # the inference server point the app at any host, loopback and LAN
+      # included, each time the models are listed. Refuse it like every other
+      # call on this endpoint.
+      redirect: false
     )
     |> ApiFailure.resolve(:openai_api, &parse_list_models_response/1, melt: false)
   end
