@@ -30,7 +30,7 @@ to your device or a trusted network.
 - **Erlang/OTP** and **Elixir** - exact versions are pinned in [`mise.toml`](mise.toml),
   which CI and local tooling both read; run `mise install` to match them
   (`mix.exs` independently requires `~> 1.20`)
-- **PostgreSQL** with pgvector extension (CI uses PostgreSQL 17; Docker Compose uses 18)
+- **PostgreSQL** with pgvector extension (CI and Docker Compose both use PostgreSQL 18)
 - **poppler-utils** - for PDF page extraction (`pdftoppm`)
 - **LibreOffice** (optional) - for DOCX, DOC, ODT, and RTF conversion
 - **OpenAI-compatible inference server** - vision, translation/chat, and embedding models
@@ -738,7 +738,7 @@ files shortly after startup, and both treat the database as the authority on wha
   the `processing_run_id` in the restored row. A database snapshot *older* than the file tree
   therefore removes the page images of the run the files actually describe.
 
-The target PostgreSQL must have pgvector available (both Compose files use `pgvector/pgvector:pg18`).
+The target PostgreSQL must have pgvector available (both Compose files use `pgvector/pgvector:0.8.7-pg18`, pinned by digest).
 The dump carries the extension, the `get_fts_config` function and the search-vector trigger, the
 trigger that invalidates page embeddings when content changes, and the HNSW index definitions, which
 PostgreSQL rebuilds during the restore — on a large library that is the slow part, and it needs no
