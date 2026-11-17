@@ -11,8 +11,9 @@
 #
 #   docker compose -f docker-compose.runtime.yml up --build
 #
-# SECRET_KEY_BASE must be set in the environment (or in a `.env` beside this
-# file); everything else has a working default for a local, single-machine run.
+# SECRET_KEY_BASE and POSTGRES_PASSWORD must be set in the environment (or in a
+# `.env` beside this file); everything else has a working default for a local,
+# single-machine run.
 
 # Compose otherwise derives the project name from the directory, which is the
 # same `doctrans` the development stack uses — `up` would then try to reconcile
@@ -25,17 +26,19 @@ services:
     image: pgvector/pgvector:pg18
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Required, with no default (#312): a well-known superuser password is one
+      # any local account can log in with. "Runtime deployment" in the README
+      # covers choosing one and a volume initialised before it was required.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (openssl rand -hex 24)}
       POSTGRES_DB: doctrans_prod
     volumes:
       # A distinct name from the development stack's `pgdata`, so the two never
       # share state and so `docker volume ls` tells an operator taking a backup
       # which volume belongs to which deployment.
       - doctrans_runtime_pgdata:/var/lib/postgresql
-    # Bind to loopback only: Doctrans is a local, single-user app with no
-    # authentication, so the database should not be reachable from the LAN.
-    ports:
-      - "127.0.0.1:5433:5432"
+    # No `ports:` (#312): the app reaches the database over the Compose network
+    # as `db`. Use `docker compose exec db psql` or `pg_dump` instead; the
+    # README's "Runtime deployment" says why.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -51,7 +54,9 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: ecto://postgres:${POSTGRES_PASSWORD:-postgres}@db/doctrans_prod
+      # Required like the db service's copy, with the same message, since Compose
+      # reports whichever unset reference it meets first.
+      DATABASE_URL: ecto://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (openssl rand -hex 24)}@db/doctrans_prod
       # Fail at `compose up` with this message rather than at boot with a stack
       # trace. Generate one with: mix phx.gen.secret
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE; generate one with mix phx.gen.secret}
