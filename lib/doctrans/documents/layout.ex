@@ -52,6 +52,11 @@ defmodule Doctrans.Documents.Layout do
   contents of a storage root that was not dedicated to Doctrans. It is not part
   of the layout, and cleanup must not treat it as a document that happens to lack
   a row.
+
+  Run directories under `runs_dir/1` are named the same way, by a run id from
+  `Uniq.UUID.uuid7/0`, so the same check answers for them. `Ecto.UUID.cast/1` is
+  no substitute at either level: it also accepts those other spellings and any
+  16-byte binary.
   """
   @spec document_dir_name?(String.t()) :: boolean()
   def document_dir_name?(name) when is_binary(name), do: Regex.match?(@document_dir_name, name)

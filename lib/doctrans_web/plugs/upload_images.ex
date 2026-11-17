@@ -2,6 +2,8 @@ defmodule DoctransWeb.Plugs.UploadImages do
   @moduledoc "Serves only generated page PNGs from the shared upload directory."
   @behaviour Plug
 
+  alias Doctrans.Documents.Layout
+
   @impl true
   def init(opts), do: Plug.Static.init(opts)
 
@@ -13,13 +15,14 @@ defmodule DoctransWeb.Plugs.UploadImages do
   end
 
   defp image_path?(["uploads", "documents", document_id, "pages", filename]),
-    do: uuid?(document_id) && page_image?(filename)
+    do: Layout.document_dir_name?(document_id) && page_image?(filename)
 
   defp image_path?(["uploads", "documents", document_id, "runs", run_id, "pages", filename]),
-    do: uuid?(document_id) && uuid?(run_id) && page_image?(filename)
+    do:
+      Layout.document_dir_name?(document_id) && Layout.document_dir_name?(run_id) &&
+        page_image?(filename)
 
   defp image_path?(_segments), do: false
 
-  defp uuid?(value), do: match?({:ok, _}, Ecto.UUID.cast(value))
   defp page_image?(filename), do: Regex.match?(~r/\Apage-[0-9]+\.png\z/, filename)
 end

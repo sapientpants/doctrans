@@ -29,7 +29,7 @@ defmodule Doctrans.Jobs.RunCleanupJob do
   end
 
   # `runs` is a fixed subdirectory of the configured document directory, and only
-  # entries that cast as UUIDs are returned.
+  # entries named exactly as the layout names a run directory are returned.
   defp stale_run_dirs(document) do
     runs = Layout.runs_dir(document.id)
 
@@ -42,7 +42,7 @@ defmodule Doctrans.Jobs.RunCleanupJob do
 
     entries
     |> Enum.filter(fn entry ->
-      match?({:ok, _}, Ecto.UUID.cast(entry)) && entry != document.processing_run_id
+      Layout.document_dir_name?(entry) && entry != document.processing_run_id
     end)
     |> Enum.map(&Path.join(runs, &1))
   end
