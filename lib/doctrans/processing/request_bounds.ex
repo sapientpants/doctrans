@@ -38,6 +38,16 @@ defmodule Doctrans.Processing.RequestBounds do
   way: its `:collect` reducer answers `{:halt, reason}` and the stream ends on
   that chunk, exactly as it does on the byte cap.
 
+  Every request is made with `redirect: false`, whatever the caller passed. An
+  inference server has no cause to redirect, and following one re-targets the
+  call at a host nobody configured: a 307/308 replays a POST body, so a
+  completion or an embedding would carry document text somewhere
+  `Doctrans.Config.Inference` never classified, breaking the privacy claim the
+  UI makes from it; and even the bodiless model-list GET would let the server
+  point the app at any host, loopback and LAN included. The 3xx comes back as
+  the response it is, and `ApiFailure` reports its status. Pinning it here
+  rather than at each call site is what keeps a new call from forgetting it.
+
   One more check runs before any request: a URL without an http(s) scheme or a
   host is answered with `{:error, :invalid_endpoint_url}` instead of being
   handed to Req. Finch would raise on it, and its message quotes the URL whole,
@@ -125,7 +135,8 @@ defmodule Doctrans.Processing.RequestBounds do
         Keyword.merge(options,
           receive_timeout: bounds.attempt_timeout,
           retry: retry_fun(bounds, mode),
-          into: into(bounds, collect)
+          into: into(bounds, collect),
+          redirect: false
         )
       )
       |> unwrap(bounds)

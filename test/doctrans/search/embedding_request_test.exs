@@ -15,7 +15,7 @@ defmodule Doctrans.Search.EmbeddingRequestTest do
   alias Doctrans.Search.Embedding
   alias Doctrans.TestEnv
 
-  import OpenAIBypass, only: [json: 3]
+  import OpenAIBypass, only: [json: 3, redirect_elsewhere: 5]
 
   setup do
     TestEnv.reset_fuses()
@@ -107,6 +107,17 @@ defmodule Doctrans.Search.EmbeddingRequestTest do
       end)
 
       assert {:error, {:http_error, [status: 500]}} = Embedding.generate("text")
+    end
+
+    # A 307 replays the POST body, chunk text and all, at the Location host.
+    test "does not follow a redirect to another host", %{bypass: bypass, test_pid: test_pid} do
+      redirect_elsewhere(bypass, "POST", "/v1/embeddings", 307, test_pid)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:http_error, [status: 307]}} = Embedding.generate("text")
+      end)
+
+      refute_received :redirect_followed
     end
 
     test "returns error for invalid body", %{bypass: bypass} do

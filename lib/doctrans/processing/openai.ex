@@ -103,13 +103,7 @@ defmodule Doctrans.Processing.OpenAI do
         json: request_body,
         # :transient retries all methods (incl. POST) on 408/429/5xx and
         # connection errors; chat-completion POSTs are safe to replay
-        retry: :transient,
-        # Req follows redirects by default, and a 307/308 replays the POST
-        # body at the Location host. That would send document text somewhere
-        # `Doctrans.Config.Inference` never classified, breaking the privacy
-        # claim the UI makes from it. An inference server has no cause to
-        # redirect; if one does, fail loudly rather than silently re-target.
-        redirect: false
+        retry: :transient
       )
     end)
   end
@@ -147,9 +141,6 @@ defmodule Doctrans.Processing.OpenAI do
       url: api_url("/v1/chat/completions"),
       json: build_request_body(opts ++ [messages: messages, stream: true]),
       retry: :transient,
-      # See post_chat_completion/2: a redirect would replay the document
-      # text at an endpoint the privacy copy never accounted for.
-      redirect: false,
       collect: collect_sse(collector)
     )
     |> ApiFailure.resolve(:openai_api, &collected_content(&1, collector))
