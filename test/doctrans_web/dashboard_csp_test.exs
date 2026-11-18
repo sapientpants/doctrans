@@ -56,6 +56,12 @@ defmodule DoctransWeb.DashboardCspTest do
       assert policy =~ "font-src 'self' data:"
     end
 
+    test "keeps the pipeline's headers other than the policy", %{conn: conn} do
+      # The plug replaces only `content-security-policy`; the rest of what the
+      # `:browser` pipeline sends survives into the dashboard's scope.
+      assert get_resp_header(conn, "x-dns-prefetch-control") == ["off"]
+    end
+
     test "nonces the inline script and the stylesheet the page cannot load without", %{
       document: document
     } do
@@ -207,6 +213,16 @@ defmodule DoctransWeb.DashboardCspTest do
         # mean a plug had escaped its scope onto a page served the base policy.
         assert nonces == [],
                "#{path} renders a nonce its policy does not admit"
+      end
+    end
+
+    test "turns DNS prefetch off", %{conn: conn, paths: paths} do
+      # These are the pages that render untrusted Markdown with live links.
+      for path <- paths do
+        conn = get(conn, path)
+
+        assert get_resp_header(conn, "x-dns-prefetch-control") == ["off"],
+               "#{path} leaves DNS prefetch on"
       end
     end
 

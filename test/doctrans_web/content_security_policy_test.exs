@@ -115,8 +115,18 @@ defmodule DoctransWeb.ContentSecurityPolicyTest do
       headers = ContentSecurityPolicy.headers()
 
       assert is_map(headers)
-      assert Map.keys(headers) == ["content-security-policy"]
+
+      assert Enum.sort(Map.keys(headers)) == [
+               "content-security-policy",
+               "x-dns-prefetch-control"
+             ]
+
       assert headers["content-security-policy"] == ContentSecurityPolicy.base()
+    end
+
+    test "turns DNS prefetch off" do
+      # Why the policy alone does not cover this is in `headers/0`'s doc.
+      assert ContentSecurityPolicy.headers()["x-dns-prefetch-control"] == "off"
     end
 
     test "is accepted by put_secure_browser_headers/2 and overrides its default policy" do
