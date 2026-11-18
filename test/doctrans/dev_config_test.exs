@@ -64,6 +64,29 @@ defmodule Doctrans.DevConfigTest do
     assert get_in(endpoint(), [:live_reload, :web_console_logger]) == false
   end
 
+  # The endpoint as development compiles it: `config/config.exs`, which ends by
+  # importing `dev.exs`, so a setting moved into the shared file is caught too.
+  defp compiled_endpoint do
+    Path.expand("../../config/config.exs", __DIR__)
+    |> Config.Reader.read!(env: :dev)
+    |> get_in([:doctrans, DoctransWeb.Endpoint])
+  end
+
+  # The reason is beside the flag in `config/dev.exs` (#333). A request-level
+  # test would pass vacuously, since the test environment never compiles the
+  # debugger in, so the file itself is what is pinned. Asserted `false` in
+  # `dev.exs` rather than absent, so the file states the choice.
+  test "does not compile the error debugger into the endpoint" do
+    assert Keyword.fetch!(endpoint(), :debug_errors) == false
+    assert Keyword.fetch!(compiled_endpoint(), :debug_errors) == false
+  end
+
+  # The other half of #333; `Doctrans.Config.DevSecret` says why.
+  test "carries no literal secret_key_base or LiveView signing salt" do
+    refute Keyword.has_key?(compiled_endpoint(), :secret_key_base)
+    refute Keyword.has_key?(Keyword.get(compiled_endpoint(), :live_view, []), :signing_salt)
+  end
+
   test "DATABASE_HOST still selects the development database host" do
     System.put_env("DATABASE_HOST", "postgres.internal")
 

@@ -3,7 +3,8 @@ defmodule DoctransWeb.Live.Hooks.LoopbackOnlyTest do
 
   # The connected mount arrives over `/live`, which no plug sees. A loopback
   # render followed by a socket from a LAN peer is the shape of a forged
-  # session token, minted with the development secret the repository ships.
+  # session token, minted with a leaked secret (the repository once shipped
+  # the development one, #333).
   test "sends a socket from a LAN peer away from the dashboard", %{conn: conn} do
     # `Phoenix.LiveViewTest` hands the connected mount this private key in
     # place of the request when it is set; the release in use has no public

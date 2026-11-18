@@ -7,7 +7,7 @@
   private: true,
   # `skip: true` honours the `# sobelow_skip` annotations, each of which sits on the
   # function that owns the flagged call with a one-line justification above it. They are
-  # load-bearing: turning `skip` off raises 23 findings, turning it on leaves 0.
+  # load-bearing: turning `skip` off raises 33 findings, turning it on leaves 0.
   skip: true,
   router: "lib/doctrans_web/router.ex",
   # `exit: "low"` means every confidence level fails the build. The known-good sites

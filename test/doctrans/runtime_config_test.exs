@@ -208,6 +208,23 @@ defmodule Doctrans.RuntimeConfigTest do
     assert allowed_hosts(:test) == nil
   end
 
+  # #333. Without SECRET_KEY_BASE the key comes from `Doctrans.Config.DevSecret`,
+  # tested on its own so this file never writes to the developer's
+  # configuration directory.
+  describe "the development secret_key_base" do
+    test "SECRET_KEY_BASE sets it, and the LiveView signing salt with it" do
+      key = String.duplicate("b", 64)
+      System.put_env("SECRET_KEY_BASE", key)
+
+      assert endpoint(:dev, :secret_key_base) == key
+      assert endpoint(:dev, :live_view)[:signing_salt] == key
+    end
+
+    test "is not set for the test environment, which keeps its literal in config/test.exs" do
+      assert endpoint(:test, :secret_key_base) == nil
+    end
+  end
+
   # Runs the configured allowlist through the check Phoenix applies to a
   # websocket handshake, so the assertions are about which browsers connect
   # rather than about the shape of a list. The endpoint only serves as the

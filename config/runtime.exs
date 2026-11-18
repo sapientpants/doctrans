@@ -212,6 +212,19 @@ if config_env() != :test do
     ]
 end
 
+# Development signs with a key nobody else has, never a committed literal
+# (#333; `Doctrans.Config.DevSecret` says why). SECRET_KEY_BASE wins when it is
+# set; otherwise that module keeps a per-machine key outside the checkout. The
+# LiveView signing salt is derived from it, as in production below.
+if config_env() == :dev do
+  secret_key_base =
+    System.get_env("SECRET_KEY_BASE") || Doctrans.Config.DevSecret.secret_key_base()
+
+  config :doctrans, DoctransWeb.Endpoint,
+    secret_key_base: secret_key_base,
+    live_view: [signing_salt: secret_key_base]
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -231,10 +244,9 @@ if config_env() == :prod do
     socket_options: maybe_ipv6
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
-  # A default value is used in config/dev.exs and config/test.exs but you
-  # want to use a different value for prod and you most likely don't want
-  # to check this value into version control, so we use an environment
-  # variable instead.
+  # Only config/test.exs, whose endpoint never serves, carries a literal one;
+  # development resolves its own above, and production takes it from the
+  # environment so it never lives in version control.
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
       raise """

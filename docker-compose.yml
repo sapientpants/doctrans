@@ -93,6 +93,10 @@ services:
       - /opt/doctrans/_build
       # Documents, page images and converted PDFs; see DOCTRANS_DATA_DIR above.
       - data:/var/lib/doctrans
+      # The per-machine `secret_key_base` (`Doctrans.Config.DevSecret`, #333),
+      # under the container user's configuration directory. In the writable
+      # layer it would be regenerated on every recreate, signing out every tab.
+      - devsecret:/home/dev/.config/doctrans
     # Converters get a private, memory-backed /tmp rather than the container's
     # writable layer. `exec` lifts Docker's default `noexec` on it: the
     # standalone Tailwind binary unpacks a native library into /tmp and maps
@@ -121,3 +125,4 @@ volumes:
   # Resolves to `doctrans_data` under Compose's project prefix -- distinct from
   # the runtime stack's `doctrans_runtime_data`.
   data:
+  devsecret:
