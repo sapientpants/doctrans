@@ -208,10 +208,9 @@ defmodule Doctrans.RuntimeConfigTest do
     assert allowed_hosts(:test) == nil
   end
 
-  # `config/dev.exs` used to carry a literal key, published with the repository
-  # (#333). Without SECRET_KEY_BASE the key comes from
-  # `Doctrans.Config.DevSecret`, tested on its own so this file never writes to
-  # the developer's configuration directory.
+  # #333. Without SECRET_KEY_BASE the key comes from `Doctrans.Config.DevSecret`,
+  # tested on its own so this file never writes to the developer's
+  # configuration directory.
   describe "the development secret_key_base" do
     test "SECRET_KEY_BASE sets it, and the LiveView signing salt with it" do
       key = String.duplicate("b", 64)
@@ -221,7 +220,7 @@ defmodule Doctrans.RuntimeConfigTest do
       assert endpoint(:dev, :live_view)[:signing_salt] == key
     end
 
-    test "the test environment keeps the key from config/test.exs" do
+    test "is not set for the test environment, which keeps its literal in config/test.exs" do
       assert endpoint(:test, :secret_key_base) == nil
     end
   end

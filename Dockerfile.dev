@@ -68,6 +68,11 @@ WORKDIR /app
 RUN mix local.hex --force && \
     mix local.rebar --force
 
+# Where `Doctrans.Config.DevSecret` keeps the development key, prepared as the
+# user and private, for the same reason as the storage root above: the named
+# volume `docker-compose.yml` mounts here is seeded with this ownership and mode.
+RUN mkdir -p -m 700 /home/dev/.config/doctrans
+
 # Set development environment
 ENV MIX_ENV=dev
 

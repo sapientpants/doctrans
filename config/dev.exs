@@ -33,9 +33,8 @@ config :doctrans, Doctrans.Repo,
 # renders Phoenix's ordinary error page instead; the stacktrace is in the
 # terminal.
 #
-# `secret_key_base` and the LiveView signing salt are not set here either.
-# `config/runtime.exs` resolves them per machine, because a literal in this
-# file is published with the repository.
+# `secret_key_base` and the LiveView signing salt are not set here either:
+# `config/runtime.exs` resolves them per machine (see `Doctrans.Config.DevSecret`).
 #
 # `check_origin` is deliberately not set here. It used to be `false`, which
 # admits any Origin on the LiveView socket; `config/runtime.exs` now configures

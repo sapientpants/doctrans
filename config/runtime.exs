@@ -212,14 +212,10 @@ if config_env() != :test do
     ]
 end
 
-# Development signs with a key nobody else has. `config/dev.exs` used to carry a
-# literal one, and the repository is public: anyone could mint a LiveView
-# session token or cookie with it, and while `debug_errors` was on, sign a
-# `Plug.Debugger` action that the endpoint applied as an MFA before any of its
-# plugs ran (#333). Both quickstarts run this environment. SECRET_KEY_BASE wins
-# when it is set; otherwise `Doctrans.Config.DevSecret` keeps a per-machine key
-# outside the checkout, so no literal can ever be committed again. The LiveView
-# signing salt is derived the same way, as in production below.
+# Development signs with a key nobody else has, never a committed literal
+# (#333; `Doctrans.Config.DevSecret` says why). SECRET_KEY_BASE wins when it is
+# set; otherwise that module keeps a per-machine key outside the checkout. The
+# LiveView signing salt is derived from it, as in production below.
 if config_env() == :dev do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") || Doctrans.Config.DevSecret.secret_key_base()

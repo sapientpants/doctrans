@@ -4,20 +4,25 @@ defmodule Doctrans.Config.DevSecret do
   the checkout.
 
   Development used to carry a literal key in `config/dev.exs`. The repository is
-  public, so anyone could sign with it: a LiveView session token, a cookie, and,
-  while `debug_errors` was on, a `Plug.Debugger` action that applies whatever
-  MFA it is handed (#333). A rotated literal would be public again the moment it
-  was committed, so `config/runtime.exs` takes `SECRET_KEY_BASE` from the
-  environment when it is set and otherwise asks this module, which reads the key
-  from a file in the user's configuration directory, writing a fresh random one
-  there on first use.
+  public, so anyone could sign with it: a LiveView session token, a cookie, and
+  the `Plug.Debugger` action `config/dev.exs` explains (#333). A rotated literal
+  would be public again the moment it was committed, so `config/runtime.exs`
+  takes `SECRET_KEY_BASE` from the environment when it is set and otherwise asks
+  this module, which reads the key from a file in the user's configuration
+  directory, writing a fresh random one there on first use.
 
-  The file is created with mode 0600 inside a 0700 directory, and with
-  `:exclusive`, so two boots racing to create it agree on one key. A file that
-  holds anything other than a key of the length Phoenix requires is refused by
-  name rather than quietly replaced: replacing it would sign out every open tab
-  without saying why, and an unreadable key is a problem the operator should see.
+  The key is written whole under a private name in a 0700 directory, with mode
+  0600, and then hard-linked into place. A link never replaces an existing file,
+  so the key file appears complete or not at all, and of two boots racing to
+  create it the one that links second reads the other's key. A file that holds
+  anything other than a key of the length Phoenix requires is refused by name
+  rather than quietly replaced: replacing it would sign out every open tab
+  without saying why, and an unreadable key is a problem the operator should
+  see. An existing file readable by anyone but its owner is narrowed to the
+  owner.
   """
+
+  import Bitwise, only: [&&&: 2]
 
   # Phoenix refuses a `secret_key_base` shorter than 64 bytes; 48 random bytes
   # encode to exactly 64 characters of Base64.
@@ -40,9 +45,16 @@ defmodule Doctrans.Config.DevSecret do
   # sobelow_skip ["Traversal.FileModule"]
   def secret_key_base(path \\ default_path()) do
     case File.read(path) do
-      {:ok, contents} -> validate!(String.trim(contents), path)
-      {:error, :enoent} -> generate!(path)
-      {:error, reason} -> raise File.Error, reason: reason, action: "read", path: path
+      {:ok, contents} ->
+        key = validate!(String.trim(contents), path)
+        owner_only!(path)
+        key
+
+      {:error, :enoent} ->
+        generate!(path)
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "read", path: path
     end
   end
 
@@ -54,21 +66,42 @@ defmodule Doctrans.Config.DevSecret do
     File.chmod!(dir, 0o700)
 
     key = @random_bytes |> :crypto.strong_rand_bytes() |> Base.encode64()
+    staging = "#{path}.#{6 |> :crypto.strong_rand_bytes() |> Base.url_encode64()}.tmp"
 
+    try do
+      write_private!(staging, key)
+
+      case File.ln(staging, path) do
+        :ok -> key
+        # Another boot linked its key first; use that one.
+        {:error, :eexist} -> secret_key_base(path)
+        {:error, reason} -> raise File.Error, reason: reason, action: "link", path: path
+      end
+    after
+      File.rm(staging)
+    end
+  end
+
+  # The same path as `secret_key_base/1`, never an upload or request value.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp write_private!(path, contents) do
     case File.open(path, [:write, :exclusive]) do
       {:ok, device} ->
         File.chmod!(path, 0o600)
-        :ok = IO.binwrite(device, key)
+        :ok = IO.binwrite(device, contents)
         :ok = File.close(device)
-        key
-
-      # Another boot created it between the read and the open; use its key.
-      {:error, :eexist} ->
-        secret_key_base(path)
 
       {:error, reason} ->
         raise File.Error, reason: reason, action: "create", path: path
     end
+  end
+
+  # Clears the group and other bits and keeps the owner's, so a key a developer
+  # made read-only stays read-only. The same path as `secret_key_base/1`.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp owner_only!(path) do
+    %File.Stat{mode: mode} = File.stat!(path)
+    if (mode &&& 0o077) != 0, do: File.chmod!(path, mode &&& 0o700)
   end
 
   defp validate!(key, path) do

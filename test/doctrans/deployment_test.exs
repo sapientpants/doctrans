@@ -381,6 +381,19 @@ defmodule Doctrans.DeploymentTest do
              end)
     end
 
+    test "keeps the development signing key in a named volume", %{
+      compose: compose,
+      dev_dockerfile: dockerfile
+    } do
+      # `Doctrans.Config.DevSecret` writes it under the user's configuration
+      # directory; in the container's writable layer it would be regenerated on
+      # every recreate. The image prepares the directory so the volume is
+      # seeded writable by the unprivileged user.
+      dir = "/home/dev/.config/doctrans"
+      assert mount?(compose["services"]["app"], type: "volume", target: dir)
+      assert dockerfile =~ ~r/^RUN mkdir -p -m 700 #{Regex.escape(dir)}$/m
+    end
+
     test "mounts the checkout read-only, except where the watchers build", %{compose: compose} do
       # A write into the checkout is a step towards execution: `lib/` on the
       # next request, `config/` and `mix.exs` on the next boot, `.git/hooks` on
