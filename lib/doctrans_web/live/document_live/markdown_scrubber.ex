@@ -70,6 +70,15 @@ defmodule DoctransWeb.DocumentLive.MarkdownScrubber do
   The attribute itself is left as written; only the decision uses the cleaned
   form.
 
+  An external `href` stays live, so following it is one click by design. What
+  keeps it from being a zero-click beacon is not this module: Firefox resolves
+  the host of every anchor in an `http://` document without a click, and CSP
+  does not govern that, so the `:browser` pipeline turns it off with
+  `x-dns-prefetch-control: off` (`DoctransWeb.ContentSecurityPolicy.headers/0`).
+  Rendering external targets as plain text instead would close that path
+  without leaning on any browser's heuristics, at the cost of every link the
+  content carries; it has not been done.
+
   ## Images
 
   `BasicHTML` allows `<img src>` for `http` and `https`. The page's CSP

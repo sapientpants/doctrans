@@ -125,10 +125,7 @@ defmodule DoctransWeb.ContentSecurityPolicyTest do
     end
 
     test "turns DNS prefetch off" do
-      # CSP does not reach DNS prefetch, and Firefox resolves the host of every
-      # anchor bound into an `http://` document without a click. Rendered
-      # Markdown keeps external links live, so this header is what stops a link
-      # in model output from reporting the page view to the link's name server.
+      # Why the policy alone does not cover this is in `headers/0`'s doc.
       assert ContentSecurityPolicy.headers()["x-dns-prefetch-control"] == "off"
     end
 

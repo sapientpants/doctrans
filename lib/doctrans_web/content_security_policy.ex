@@ -1,9 +1,11 @@
 defmodule DoctransWeb.ContentSecurityPolicy do
   @moduledoc """
-  The single place the application's Content-Security-Policy is written.
+  The single place the application's Content-Security-Policy is written, and
+  the security headers the `:browser` pipeline sends alongside it.
 
-  `headers/0` is what the `:browser` pipeline serves to every route, and it is
-  the policy: `'self'` for every executable source, no `'unsafe-inline'`, and no
+  `headers/0` is what the `:browser` pipeline serves to every route: the policy,
+  plus the one header the policy cannot stand in for (see `headers/0`). The
+  policy is `'self'` for every executable source, no `'unsafe-inline'`, and no
   nonce. `dashboard/1` is the one exception, and it exists only because
   LiveDashboard's markup is not ours to change: its layout emits an inline
   `<script>`, its usage cards emit inline `<style>` blocks, and its stylesheet
@@ -14,6 +16,8 @@ defmodule DoctransWeb.ContentSecurityPolicy do
   ever be the base plus what the dashboard demonstrably needs. The dashboard
   policy is applied by `DoctransWeb.Plugs.DashboardCsp`, inside the dev-only
   `/dev/dashboard` scope, so every other route is served `headers/0` unchanged.
+  That plug replaces only `content-security-policy`; the dashboard keeps the
+  rest of `headers/0`.
 
   The router calls `headers/0` in a `plug` option, which Phoenix evaluates at
   compile time, so this is a compile-time dependency of the router: keep this
@@ -60,6 +64,7 @@ defmodule DoctransWeb.ContentSecurityPolicy do
   `'unsafe-inline'` -- so this is called per request, by the plug that heads the
   policy carrying it.
   """
+  @spec nonce() :: String.t()
   def nonce, do: 18 |> :crypto.strong_rand_bytes() |> Base.encode64()
 
   @doc """
@@ -73,6 +78,7 @@ defmodule DoctransWeb.ContentSecurityPolicy do
   whoever runs the name server for its host. `put_secure_browser_headers/2`
   sends none by default, so it is named here, next to the policy it backs up.
   """
+  @spec headers() :: %{String.t() => String.t()}
   def headers do
     %{"content-security-policy" => base(), "x-dns-prefetch-control" => "off"}
   end
@@ -84,6 +90,7 @@ defmodule DoctransWeb.ContentSecurityPolicy do
   pipeline carried before this module existed, and so they can assert that the
   routes outside the dashboard's scope are still served exactly it.
   """
+  @spec base() :: String.t()
   def base, do: render(@directives)
 
   @doc """
@@ -102,6 +109,7 @@ defmodule DoctransWeb.ContentSecurityPolicy do
   application mounts uses one; `live_layered_graph/1` on a custom page would,
   and would need `style-src-attr` rather than another source here.
   """
+  @spec dashboard(String.t()) :: String.t()
   def dashboard(nonce) when is_binary(nonce), do: widen(@dashboard_additions, nonce)
 
   defp widen(additions, nonce) do

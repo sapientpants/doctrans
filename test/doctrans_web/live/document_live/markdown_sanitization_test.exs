@@ -124,6 +124,27 @@ defmodule DoctransWeb.DocumentLive.MarkdownSanitizationTest do
     end
   end
 
+  describe "an external link on the page" do
+    test "is served under a header that turns DNS prefetch off", %{conn: conn} do
+      # The scrubber keeps an external `href` live, and Firefox resolves its host
+      # as soon as the anchor is in an `http://` document. The header is what
+      # stops that, so it is asserted on the same response that carries the
+      # anchor, not on a page with no link to prefetch.
+      document = payload_document()
+
+      conn = get(conn, ~p"/documents/#{document.id}")
+
+      external =
+        conn
+        |> html_response(200)
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("#translated-panel .markdown a[data-external]")
+
+      refute Enum.empty?(external), "the dead render carries no external link"
+      assert get_resp_header(conn, "x-dns-prefetch-control") == ["off"]
+    end
+  end
+
   # The whole bar one rendered surface has to clear.
   defp assert_sanitized(view, selector) do
     content = subtree(view, selector)
