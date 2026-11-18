@@ -64,6 +64,23 @@ defmodule Doctrans.DevConfigTest do
     assert get_in(endpoint(), [:live_reload, :web_console_logger]) == false
   end
 
+  # With `debug_errors` on, `Plug.Debugger` is compiled into the endpoint and
+  # applies any MFA POSTed to `/__plug__/debugger/action` under a valid
+  # signature, ahead of every plug (#333). A request-level test would pass
+  # vacuously, since the test environment never compiles the debugger in, so
+  # the file itself is what is pinned. Asserted `false` rather than absent, so
+  # the file states the choice.
+  test "does not compile the error debugger into the endpoint" do
+    assert Keyword.fetch!(endpoint(), :debug_errors) == false
+  end
+
+  # The other half of #333: a literal key in a public repository signs for
+  # anyone who reads it. `config/runtime.exs` resolves both per machine.
+  test "carries no literal secret_key_base or LiveView signing salt" do
+    refute Keyword.has_key?(endpoint(), :secret_key_base)
+    refute Keyword.has_key?(Keyword.get(endpoint(), :live_view, []), :signing_salt)
+  end
+
   test "DATABASE_HOST still selects the development database host" do
     System.put_env("DATABASE_HOST", "postgres.internal")
 

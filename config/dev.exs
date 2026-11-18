@@ -22,8 +22,20 @@ config :doctrans, Doctrans.Repo,
 # the *app*, and deriving one from the other meant that changing where Postgres
 # lives silently published an unauthenticated app on every interface.
 
-# For development, we disable any cache and enable
-# debugging and code reloading.
+# For development, we disable any cache and enable code reloading.
+#
+# `debug_errors` stays off (#333). When it is on, `Phoenix.Endpoint` compiles
+# `Plug.Debugger` into the endpoint, and the debugger answers
+# `POST /__plug__/debugger/action` ahead of every plug: it verifies a signed
+# term against `secret_key_base` and applies the MFA inside. No host check, no
+# session and no CSRF token stand in front of it, so the signature is the only
+# gate, and a page in the browser can deliver the POST as a plain form. An error
+# renders Phoenix's ordinary error page instead; the stacktrace is in the
+# terminal.
+#
+# `secret_key_base` and the LiveView signing salt are not set here either.
+# `config/runtime.exs` resolves them per machine, because a literal in this
+# file is published with the repository.
 #
 # `check_origin` is deliberately not set here. It used to be `false`, which
 # admits any Origin on the LiveView socket; `config/runtime.exs` now configures
@@ -35,9 +47,7 @@ config :doctrans, Doctrans.Repo,
 # to bundle .js and .css sources.
 config :doctrans, DoctransWeb.Endpoint,
   code_reloader: true,
-  debug_errors: true,
-  secret_key_base: "GYS0LjJXZ97Vk+1tcnCCkwCPuhjrtN19jjj+BykXjcyKpvk6d+jnv3uqJ8bXZ02v",
-  live_view: [signing_salt: "LkQv8tR2wXz0mB5nY6uP3fA7dJ1cE9gH"],
+  debug_errors: false,
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:doctrans, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:doctrans, ~w(--watch)]}

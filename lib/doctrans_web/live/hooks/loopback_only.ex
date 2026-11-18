@@ -5,9 +5,11 @@ defmodule DoctransWeb.Live.Hooks.LoopbackOnly do
 
   The plug guards the HTTP render, but a connected mount arrives over `/live`,
   which no plug sees. A LiveView session token is normally only obtainable from
-  that render, except that the development `secret_key_base` is committed to a
-  public repository, so anyone can mint one and mount over the socket directly,
-  and the origin allowlist does not stop a client that is not a browser. This
+  that render, but the render is not the only way to get one: the development
+  `secret_key_base` was once committed to a public repository (#333), and any
+  key that leaks lets its holder mint a token and mount over the socket
+  directly, where the origin allowlist does not stop a client that is not a
+  browser. The guard therefore does not rest on the key staying secret. This
   hook checks the socket's own TCP peer (`:peer_data`, which the endpoint's
   socket lists in its `connect_info`) and sends anything that is not loopback
   to the application's index.
