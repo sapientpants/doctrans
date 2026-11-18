@@ -64,8 +64,18 @@ defmodule DoctransWeb.ContentSecurityPolicy do
 
   @doc """
   The response headers for `Plug.Conn.put_secure_browser_headers/2`.
+
+  The policy, plus `x-dns-prefetch-control: off`. CSP does not govern DNS
+  prefetch, and Firefox resolves the host of every `<a href>` bound into an
+  `http://` document without a click -- which is how the app is served unless a
+  TLS proxy sits in front. Rendered Markdown keeps external links live, so
+  without this a link in OCR output or a chat answer is a zero-click beacon to
+  whoever runs the name server for its host. `put_secure_browser_headers/2`
+  sends none by default, so it is named here, next to the policy it backs up.
   """
-  def headers, do: %{"content-security-policy" => base()}
+  def headers do
+    %{"content-security-policy" => base(), "x-dns-prefetch-control" => "off"}
+  end
 
   @doc """
   The policy every route but the dashboard is served.

@@ -54,6 +54,10 @@ defmodule DoctransWeb.DashboardCspTest do
       # URI, and without this the icons come back as empty boxes -- the one
       # relaxation whose absence breaks nothing loudly enough to notice.
       assert policy =~ "font-src 'self' data:"
+
+      # The plug replaces only the policy; the rest of what the `:browser`
+      # pipeline sends survives into the dashboard's scope.
+      assert get_resp_header(conn, "x-dns-prefetch-control") == ["off"]
     end
 
     test "nonces the inline script and the stylesheet the page cannot load without", %{
@@ -198,6 +202,10 @@ defmodule DoctransWeb.DashboardCspTest do
 
         assert get_resp_header(conn, "content-security-policy") == [ContentSecurityPolicy.base()],
                "#{path} is not served the base policy"
+
+        # These are the pages that render untrusted Markdown with live links.
+        assert get_resp_header(conn, "x-dns-prefetch-control") == ["off"],
+               "#{path} leaves DNS prefetch on"
 
         nonces = conn |> response(200) |> rendered_nonces()
 
